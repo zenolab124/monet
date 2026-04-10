@@ -1,0 +1,31 @@
+{
+  "name": "cc-space-tauri",
+  "version": "1.0.0",
+  "description": "CC Space — Claude Code session viewer",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.18.2",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "@unocss/preset-icons": "^66.6.8",
+    "@unocss/preset-wind4": "^66.6.8",
+    "@unocss/transformer-directives": "^66.6.8",
+    "@unocss/transformer-variant-group": "^66.6.8",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "typescript": "^6.0.2",
+    "unocss": "^66.6.8",
+    "vite": "^8.0.8",
+    "vue": "^3.5.32",
+    "vue-tsc": "^3.2.6"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
+  }
+}
