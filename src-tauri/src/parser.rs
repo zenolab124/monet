@@ -2,32 +2,63 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::models::*;
 
-/// 完整解析 JSONL 文件，返回所有会话记录
-pub fn parse_all(path: &Path) -> Vec<SessionRecord> {
+/// 轻量结构体：仅提取 assistant 消息的 usage，跳过 content 反序列化
+#[derive(Deserialize)]
+struct UsageExtractor {
+    #[serde(rename = "type")]
+    record_type: Option<String>,
+    message: Option<UsageMessage>,
+}
+
+#[derive(Deserialize)]
+struct UsageMessage {
+    usage: Option<TokenUsage>,
+}
+
+/// 只解析 user/assistant 消息记录，跳过 file-history-snapshot 等大型记录
+/// 避免 Value 中间层，直接反序列化到目标类型
+pub fn parse_messages(path: &Path) -> Vec<SessionRecord> {
     let file = match File::open(path) {
         Ok(f) => f,
         Err(_) => return vec![],
     };
-    let reader = BufReader::new(file);
-    reader
-        .lines()
-        .filter_map(|line| {
-            let line = line.ok()?;
-            if line.trim().is_empty() {
-                return None;
-            }
-            let value: Value = serde_json::from_str(&line).ok()?;
-            SessionRecord::from_json(&value)
-        })
-        .collect()
+    let reader = BufReader::with_capacity(64 * 1024, file);
+    let mut results = Vec::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) if !l.trim().is_empty() => l,
+            _ => continue,
+        };
+
+        // 快速字符串检测，跳过非消息类型（避免解析巨大的 snapshot 等）
+        if line.contains("\"file-history-snapshot\"")
+            || line.contains("\"queue-operation\"")
+            || line.contains("\"ai-title\"")
+        {
+            continue;
+        }
+
+        // 直接反序列化到目标类型，不经过 Value 中间层
+        let value: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(record) = SessionRecord::from_json_owned(value) {
+            results.push(record);
+        }
+    }
+
+    results
 }
 
 /// 懒解析：提取摘要信息，不加载完整对话
-/// 读取前 max_lines 行 + 文件尾部搜索 ai-title
+/// 前 max_lines 行完整解析提取元数据，后续行用轻量结构体仅提取 token usage
 pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     let metadata = fs::metadata(path).ok()?;
     let file_size = metadata.len();
@@ -41,7 +72,7 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     let session_id = path.file_stem()?.to_str()?.to_string();
 
     let file = File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let reader = BufReader::with_capacity(64 * 1024, file);
 
     let mut title: Option<String> = None;
     let mut first_user_message: Option<String> = None;
@@ -58,74 +89,108 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
             Some(l) if !l.trim().is_empty() => l,
             _ => continue,
         };
-        let value: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
 
-        let record_type = value.get("type").and_then(|t| t.as_str());
+        if i < max_lines {
+            // 前 max_lines 行：完整解析提取所有元数据
+            let value: Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
 
-        match record_type {
-            Some("user") => {
-                message_count += 1;
-                // 提取首条用户消息
-                if first_user_message.is_none() {
-                    first_user_message = extract_first_text(&value);
-                }
-                // 提取元数据（从最早的记录）
-                if earliest_timestamp.is_none() {
-                    earliest_timestamp =
-                        value.get("timestamp").and_then(|t| t.as_str()).map(String::from);
-                }
-                if git_branch.is_none() {
-                    git_branch = value
-                        .get("gitBranch")
-                        .and_then(|b| b.as_str())
-                        .map(String::from);
-                }
-                if cwd.is_none() {
-                    cwd = value.get("cwd").and_then(|c| c.as_str()).map(String::from);
-                }
-                if version.is_none() {
-                    version = value
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .map(String::from);
-                }
-            }
-            Some("assistant") => {
-                message_count += 1;
-                if let Some(msg) = value.get("message") {
-                    if model.is_none() {
-                        model = msg.get("model").and_then(|m| m.as_str()).map(String::from);
+            let record_type = value.get("type").and_then(|t| t.as_str());
+
+            match record_type {
+                Some("user") => {
+                    message_count += 1;
+                    if first_user_message.is_none() {
+                        first_user_message = extract_first_text(&value);
                     }
-                    if let Some(usage) = msg.get("usage") {
-                        let u: TokenUsage =
-                            serde_json::from_value(usage.clone()).unwrap_or_default();
-                        total_tokens.accumulate(&u);
+                    if earliest_timestamp.is_none() {
+                        earliest_timestamp =
+                            value.get("timestamp").and_then(|t| t.as_str()).map(String::from);
+                    }
+                    if git_branch.is_none() {
+                        git_branch = value
+                            .get("gitBranch")
+                            .and_then(|b| b.as_str())
+                            .map(String::from);
+                    }
+                    if cwd.is_none() {
+                        cwd = value.get("cwd").and_then(|c| c.as_str()).map(String::from);
+                    }
+                    if version.is_none() {
+                        version = value
+                            .get("version")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
                     }
                 }
-                if earliest_timestamp.is_none() {
-                    earliest_timestamp =
-                        value.get("timestamp").and_then(|t| t.as_str()).map(String::from);
+                Some("assistant") => {
+                    message_count += 1;
+                    if let Some(msg) = value.get("message") {
+                        if model.is_none() {
+                            model = msg.get("model").and_then(|m| m.as_str()).map(String::from);
+                        }
+                        if let Some(usage) = msg.get("usage") {
+                            let u: TokenUsage =
+                                serde_json::from_value(usage.clone()).unwrap_or_default();
+                            total_tokens.accumulate(&u);
+                        }
+                    }
+                    if earliest_timestamp.is_none() {
+                        earliest_timestamp =
+                            value.get("timestamp").and_then(|t| t.as_str()).map(String::from);
+                    }
                 }
+                Some("ai-title") => {
+                    title = value
+                        .get("aiTitle")
+                        .and_then(|t| t.as_str())
+                        .map(String::from);
+                }
+                _ => {}
             }
-            Some("ai-title") => {
-                title = value
-                    .get("aiTitle")
-                    .and_then(|t| t.as_str())
-                    .map(String::from);
+        } else {
+            // 后续行：轻量路径，只提取 token 和计数
+            // 快速字符串检测，跳过不相关行
+            if line.contains("\"file-history-snapshot\"") || line.contains("\"queue-operation\"") {
+                continue;
             }
-            _ => {}
-        }
 
-        // 前 max_lines 行之后只继续查找 token 累加和 ai-title
-        if i >= max_lines
-            && title.is_some()
-            && first_user_message.is_some()
-            && model.is_some()
-        {
-            // 已有足够信息但仍需累加 token，继续扫描
+            if line.contains("\"ai-title\"") {
+                // 用轻量解析提取标题
+                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                    if value.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
+                        title = value
+                            .get("aiTitle")
+                            .and_then(|t| t.as_str())
+                            .map(String::from);
+                    }
+                }
+                continue;
+            }
+
+            if line.contains("\"user\"") && !line.contains("\"assistant\"") {
+                message_count += 1;
+                continue;
+            }
+
+            if line.contains("\"assistant\"") {
+                message_count += 1;
+                // 用轻量结构体只提取 usage，跳过 content 反序列化
+                if line.contains("\"usage\"") {
+                    if let Ok(ext) = serde_json::from_str::<UsageExtractor>(&line) {
+                        if ext.record_type.as_deref() == Some("assistant") {
+                            if let Some(msg) = ext.message {
+                                if let Some(u) = msg.usage {
+                                    total_tokens.accumulate(&u);
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
         }
     }
 

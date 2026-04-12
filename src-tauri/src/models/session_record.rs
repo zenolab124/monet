@@ -122,30 +122,23 @@ pub struct FileHistorySnapshotRecord {
 
 /// 手动反序列化 SessionRecord，因为 JSONL 中的 type 字段值与 Rust 枚举变体不一致
 impl SessionRecord {
-    pub fn from_json(value: &Value) -> Option<Self> {
-        let record_type = value.get("type")?.as_str()?;
-        match record_type {
-            "user" => {
-                let record: UserRecord = serde_json::from_value(value.clone()).ok()?;
-                Some(SessionRecord::User(record))
-            }
-            "assistant" => {
-                let record: AssistantRecord = serde_json::from_value(value.clone()).ok()?;
-                Some(SessionRecord::Assistant(record))
-            }
-            "ai-title" => {
-                let record: AiTitleRecord = serde_json::from_value(value.clone()).ok()?;
-                Some(SessionRecord::AiTitle(record))
-            }
-            "queue-operation" => {
-                let record: QueueOperationRecord = serde_json::from_value(value.clone()).ok()?;
-                Some(SessionRecord::QueueOperation(record))
-            }
-            "file-history-snapshot" => {
-                let record: FileHistorySnapshotRecord =
-                    serde_json::from_value(value.clone()).ok()?;
-                Some(SessionRecord::FileHistorySnapshot(record))
-            }
+    /// 取所有权版本，避免 Value::clone 开销
+    pub fn from_json_owned(value: Value) -> Option<Self> {
+        let record_type = value.get("type")?.as_str()?.to_string();
+        match record_type.as_str() {
+            "user" => serde_json::from_value(value).ok().map(SessionRecord::User),
+            "assistant" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::Assistant),
+            "ai-title" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::AiTitle),
+            "queue-operation" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::QueueOperation),
+            "file-history-snapshot" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::FileHistorySnapshot),
             other => Some(SessionRecord::Unknown {
                 raw_type: other.to_string(),
             }),

@@ -1,8 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
+
+use crate::cache;
 use crate::models::*;
-use crate::parser;
 
 /// Claude 项目数据根目录
 fn projects_root() -> Option<PathBuf> {
@@ -10,13 +12,15 @@ fn projects_root() -> Option<PathBuf> {
 }
 
 /// 扫描所有项目，返回按最近活跃排序的项目列表
+/// 使用 rayon 并行解析 + 内存缓存，大幅降低重复加载开销
 pub fn discover_all() -> Vec<Project> {
     let root = match projects_root() {
         Some(r) if r.is_dir() => r,
         _ => return vec![],
     };
 
-    let mut projects: Vec<Project> = fs::read_dir(&root)
+    // 收集所有项目目录
+    let entries: Vec<(PathBuf, String)> = fs::read_dir(&root)
         .ok()
         .into_iter()
         .flatten()
@@ -26,13 +30,19 @@ pub fn discover_all() -> Vec<Project> {
                 return None;
             }
             let dir_name = entry.file_name().to_str()?.to_string();
-            discover_project(&entry.path(), &dir_name)
+            Some((entry.path(), dir_name))
         })
+        .collect();
+
+    // 并行解析所有项目
+    let mut projects: Vec<Project> = entries
+        .par_iter()
+        .filter_map(|(path, name)| discover_project(path, name))
         .filter(|p| !p.sessions.is_empty())
         .collect();
 
     // 按最近活跃排序（降序）
-    projects.sort_by(|a, b| {
+    projects.sort_unstable_by(|a, b| {
         b.last_active
             .unwrap_or(0.0)
             .partial_cmp(&a.last_active.unwrap_or(0.0))
@@ -42,15 +52,14 @@ pub fn discover_all() -> Vec<Project> {
     projects
 }
 
-/// 扫描单个项目目录
+/// 扫描单个项目目录，使用缓存避免重复解析
 fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
-    let mut sessions: Vec<SessionSummary> = fs::read_dir(dir)
+    // 收集 .jsonl 文件路径
+    let session_paths: Vec<PathBuf> = fs::read_dir(dir)
         .ok()?
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-
-            // 只处理 .jsonl 文件，排除 agent-*.jsonl
             if path.extension()?.to_str()? != "jsonl" {
                 return None;
             }
@@ -58,17 +67,21 @@ fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
             if file_name.starts_with("agent-") {
                 return None;
             }
-            // 排除子目录中的文件（只要直接子文件）
             if !entry.file_type().ok()?.is_file() {
                 return None;
             }
-
-            parser::parse_summary(&path, 50)
+            Some(path)
         })
         .collect();
 
+    // 并行解析会话（通过缓存层，未变化的文件直接返回）
+    let mut sessions: Vec<SessionSummary> = session_paths
+        .par_iter()
+        .filter_map(|path| cache::get_summary(path))
+        .collect();
+
     // 按 last_modified 降序排序
-    sessions.sort_by(|a, b| {
+    sessions.sort_unstable_by(|a, b| {
         b.last_modified
             .partial_cmp(&a.last_modified)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -76,7 +89,7 @@ fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
 
     let session_count = sessions.len();
     let last_active = sessions.first().map(|s| s.last_modified);
-    let display_path = decode_path(dir_name);
+    let display_path = cache::get_decoded_path(dir_name, decode_path);
 
     Some(Project {
         id: dir_name.to_string(),

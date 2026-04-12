@@ -30,7 +30,7 @@ function projectName(displayPath: string) {
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
+  <div class="h-full flex flex-col" @contextmenu.prevent>
     <!-- 标题 -->
     <div class="px-3 py-2 text-xs font-semibold text-default3 tracking-wide">
       项目
@@ -53,7 +53,7 @@ function projectName(displayPath: string) {
     </div>
 
     <!-- 项目列表 -->
-    <div v-else class="flex-1 overflow-y-auto min-h-0">
+    <div v-else class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain">
       <button
         v-for="project in projects"
         :key="project.id"

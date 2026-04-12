@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+mod cache;
 mod commands;
 mod discovery;
 mod models;

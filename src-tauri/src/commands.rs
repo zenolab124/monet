@@ -12,11 +12,11 @@ pub fn get_projects() -> Vec<Project> {
     discovery::discover_all()
 }
 
-/// 获取会话完整对话记录
+/// 获取会话消息记录（仅 user/assistant，跳过 snapshot 等大型记录）
 #[tauri::command]
 pub fn get_session_records(project_id: String, session_id: String) -> Vec<SessionRecord> {
     let path = session_path(&project_id, &session_id);
-    parser::parse_all(&path)
+    parser::parse_messages(&path)
 }
 
 /// 获取单个会话的摘要信息

@@ -38,7 +38,7 @@ function clearSearch() {
 <template>
   <!-- macOS 红绿灯在左上角约 78px 宽，预留空间 -->
   <div
-    class="h-11 shrink-0 flex items-center gap-3 pr-3 border-b border-divider bg-nav"
+    class="h-11 shrink-0 flex items-center gap-3 pr-3 border-b border-divider"
     data-tauri-drag-region
   >
     <!-- 红绿灯占位 -->
@@ -68,11 +68,12 @@ function clearSearch() {
 
     <!-- 外观切换 -->
     <button
-      class="p-1.5 rounded-md hover:bg-hover transition-colors"
+      class="p-1.5 rounded-md hover:bg-hover transition-colors flex items-center gap-1.5"
       :title="themeLabel[mode]"
       @click="cycleTheme"
     >
-      <span :class="[themeIcon[mode], 'w-4 h-4 text-default3']" />
+      <span :class="[themeIcon[mode], 'w-4 h-4 text-default']" />
+      <span class="text-xs text-default3">{{ themeLabel[mode] }}</span>
     </button>
   </div>
 </template>

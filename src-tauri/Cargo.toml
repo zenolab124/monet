@@ -24,6 +24,7 @@ dirs = "6"
 log = "0.4"
 regex = "1"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
-tauri = { version = "2.10.3", features = ["tray-icon", "image-png"] }
+rayon = "1.10"
+tauri = { version = "2.10.3", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"

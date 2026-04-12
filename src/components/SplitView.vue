@@ -12,8 +12,13 @@ const { activePaneId, updateRatio, setActivePane } = useSplitLayout()
 const containerRef = ref<HTMLElement>()
 const dragging = ref(false)
 
+const { root: rootNode } = useSplitLayout()
+
+/** 只在多面板时才高亮激活面板 */
 const isActive = computed(() =>
-  props.node.type === 'pane' && activePaneId.value === props.node.id,
+  props.node.type === 'pane'
+  && rootNode.value.type === 'split'
+  && activePaneId.value === props.node.id,
 )
 
 function onMouseDown(e: MouseEvent) {

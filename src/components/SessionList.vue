@@ -63,34 +63,41 @@ function splitDown(session: SessionSummary) {
   splitPane(activePaneId.value, 'vertical', session.id)
 }
 
-// 右键菜单
-const contextMenu = ref<{ x: number; y: number; session: SessionSummary } | null>(null)
-
-function onContextMenu(e: MouseEvent, session: SessionSummary) {
-  e.preventDefault()
-  contextMenu.value = { x: e.clientX, y: e.clientY, session }
-  window.addEventListener('click', closeContext, { once: true })
-}
-function closeContext() {
-  contextMenu.value = null
-}
-
+// 原生右键菜单
 import { invoke } from '@tauri-apps/api/core'
+import { Menu } from '@tauri-apps/api/menu'
 
-async function contextResume(session: SessionSummary) {
-  if (!session.cwd) return
-  await invoke('resume_in_terminal', { cwd: session.cwd, sessionId: session.id })
-  closeContext()
-}
-async function contextDelete(session: SessionSummary) {
-  // 找到所属 project
-  const { projects } = useProjects()
-  const project = projects.value.find(p => p.sessions.some(s => s.id === session.id))
-  if (!project) return
-  await invoke('delete_session', { projectId: project.id, sessionId: session.id })
-  if (selectedSessionId.value === session.id) selectSession(null)
-  loadProjects()
-  closeContext()
+async function onContextMenu(e: MouseEvent, session: SessionSummary) {
+  e.preventDefault()
+
+  const items: Array<{ text: string; action: () => void }> = []
+
+  if (session.cwd) {
+    items.push({
+      text: '在终端恢复',
+      action: () => invoke('resume_in_terminal', { cwd: session.cwd!, sessionId: session.id }),
+    })
+  }
+
+  items.push({
+    text: '删除会话',
+    action: async () => {
+      const { projects } = useProjects()
+      const project = projects.value.find(p => p.sessions.some(s => s.id === session.id))
+      if (!project) return
+      await invoke('delete_session', { projectId: project.id, sessionId: session.id })
+      if (selectedSessionId.value === session.id) selectSession(null)
+      loadProjects()
+    },
+  })
+
+  const menu = await Menu.new({
+    items: items.map(item => ({
+      text: item.text,
+      action: item.action,
+    })),
+  })
+  await menu.popup()
 }
 </script>
 
@@ -208,7 +215,7 @@ async function contextDelete(session: SessionSummary) {
     </div>
 
     <!-- 会话列表 -->
-    <div class="flex-1 overflow-y-auto min-h-0">
+    <div class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain">
       <div v-if="sortedSessions.length === 0" class="px-3 py-8 text-center">
         <p class="text-default3 text-xs">没有找到会话</p>
         <p class="text-default4 text-xs mt-1">尝试调整筛选条件</p>
@@ -255,27 +262,6 @@ async function contextDelete(session: SessionSummary) {
       </div>
     </div>
 
-    <!-- 右键菜单 -->
-    <Teleport to="body">
-      <div
-        v-if="contextMenu"
-        class="fixed z-50 bg-cardbg border border-divider rounded-md shadow-lg py-1 min-w-36"
-        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
-      >
-        <button
-          v-if="contextMenu.session.cwd"
-          class="w-full text-left px-3 py-1.5 text-xs hover:bg-hover text-default3 flex items-center gap-2"
-          @click="contextResume(contextMenu.session)"
-        >
-          <span class="i-carbon-terminal w-3.5 h-3.5" /> 在终端恢复
-        </button>
-        <button
-          class="w-full text-left px-3 py-1.5 text-xs hover:bg-hover text-red-400 flex items-center gap-2"
-          @click="contextDelete(contextMenu.session)"
-        >
-          <span class="i-carbon-trash-can w-3.5 h-3.5" /> 删除会话
-        </button>
-      </div>
-    </Teleport>
   </div>
 </template>
+

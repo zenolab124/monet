@@ -29,10 +29,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="h-screen w-screen flex flex-col bg-bg text-default">
+  <div class="h-screen w-screen flex flex-col text-default app-bg" @contextmenu.prevent>
     <Toolbar />
     <div class="flex-1 flex min-h-0">
-      <aside class="w-56 shrink-0 border-r border-divider bg-nav">
+      <aside class="w-56 shrink-0 border-r border-divider">
         <ProjectSidebar />
       </aside>
       <section class="w-72 shrink-0 border-r border-divider">
@@ -44,3 +44,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </div>
   </div>
 </template>
+
+<style>
+.app-bg {
+  background-image: var(--bg-gradient);
+}
+.dark .app-bg {
+  background-image: linear-gradient(to right, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.3) 15%, rgba(0,0,0,0.45) 35%, rgba(0,0,0,0.55) 100%);
+  background-color: transparent;
+}
+</style>

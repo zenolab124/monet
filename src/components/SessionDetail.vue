@@ -40,6 +40,14 @@ const {
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
+const textareaRef = ref<HTMLTextAreaElement>()
+
+function autoResize() {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+}
 
 // --- 会话 ID 来源 ---
 
@@ -117,6 +125,7 @@ async function handleSend() {
   const cs = currentSession.value
   if (!cs.summary.cwd) return
   inputText.value = ''
+  if (textareaRef.value) textareaRef.value.style.height = 'auto'
   await sendMessage(cs.summary.id, cs.summary.cwd, text)
 }
 
@@ -244,11 +253,11 @@ watch(
     </div>
 
     <!-- 对话消息流 -->
-    <div v-else ref="scrollContainer" class="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-4">
+    <div v-else ref="scrollContainer" class="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain">
       <div
-        v-for="msg in messages"
-        :key="msg.uuid || Math.random()"
-        class="flex gap-3"
+        v-for="(msg, i) in messages"
+        :key="msg.uuid || `msg-${i}`"
+        class="flex gap-3 msg-block"
       >
         <div
           class="w-0.5 shrink-0 rounded-full"
@@ -305,15 +314,17 @@ watch(
     <div v-if="currentSession.summary.cwd" class="px-4 py-3 border-t border-divider shrink-0">
       <div class="flex items-end gap-2">
         <textarea
+          ref="textareaRef"
           v-model="inputText"
           :disabled="streaming"
-          placeholder="输入消息…"
+          placeholder="输入消息… (Shift+Enter 换行)"
           rows="1"
           class="flex-1 px-3 py-2 text-sm rounded-md bg-input border border-divider
                  text-default placeholder-default4 resize-none
                  focus:outline-none focus:border-blue-500/50 transition-colors
                  disabled:opacity-50"
           @keydown="onInputKeydown"
+          @input="autoResize"
         />
         <button
           v-if="streaming"
@@ -335,3 +346,10 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+.msg-block {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+</style>
