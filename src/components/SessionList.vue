@@ -134,6 +134,14 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       >
         {{ label }}
       </button>
+      <span class="flex-1" />
+      <button
+        class="p-1 rounded text-default4 hover:text-default3 hover:bg-hover transition-colors"
+        title="刷新列表"
+        @click="loadProjects"
+      >
+        <span class="i-carbon-renew w-3.5 h-3.5" />
+      </button>
     </div>
 
     <!-- 筛选栏 -->

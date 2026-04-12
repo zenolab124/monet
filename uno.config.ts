@@ -19,7 +19,7 @@ export default defineConfig({
     transformerDirectives(),
     transformerVariantGroup(),
   ],
-  safelist: ['i-carbon-sun', 'i-carbon-moon', 'i-carbon-screen'],
+  safelist: ['i-carbon-sun', 'i-carbon-moon', 'i-carbon-screen', 'i-carbon-renew'],
   shortcuts,
   rules,
   theme,

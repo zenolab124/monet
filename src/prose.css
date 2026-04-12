@@ -1,0 +1,152 @@
+/*
+ * prose-msg: markdown 渲染输出的排版样式
+ * 紧凑桌面风格，适配深浅主题
+ */
+
+/* 容器 */
+.prose-msg {
+  line-height: 1.6;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* 段落间距 */
+.prose-msg p {
+  margin: 0.4em 0;
+}
+.prose-msg > div > :first-child {
+  margin-top: 0;
+}
+.prose-msg > div > :last-child {
+  margin-bottom: 0;
+}
+
+/* 标题 */
+.prose-msg h1,
+.prose-msg h2,
+.prose-msg h3,
+.prose-msg h4 {
+  font-weight: 600;
+  margin: 0.8em 0 0.3em;
+  line-height: 1.3;
+}
+.prose-msg h1 { font-size: 1.25em; }
+.prose-msg h2 { font-size: 1.125em; }
+.prose-msg h3 { font-size: 1em; }
+.prose-msg h4 { font-size: 0.875em; }
+
+/* 行内代码 */
+.prose-msg code:not(pre code) {
+  background: var(--c-default4, rgba(127, 127, 127, 0.12));
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+}
+
+/* 代码块容器 */
+.prose-msg pre {
+  margin: 0.5em 0;
+  padding: 0.75em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.8125em;
+  line-height: 1.5;
+  font-family: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+}
+.prose-msg pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+/* shiki 双主题：亮色显示 light，暗色显示 dark */
+.prose-msg pre.shiki {
+  background-color: var(--shiki-light-bg, #f6f8fa) !important;
+  color: var(--shiki-light, inherit);
+}
+.prose-msg pre.shiki span {
+  color: var(--shiki-light, inherit);
+}
+.dark .prose-msg pre.shiki {
+  background-color: var(--shiki-dark-bg, #161b22) !important;
+  color: var(--shiki-dark, inherit);
+}
+.dark .prose-msg pre.shiki span {
+  color: var(--shiki-dark, inherit);
+}
+
+/* 无 shiki 时的降级代码块样式 */
+.prose-msg pre:not(.shiki) {
+  background: var(--c-default4, rgba(127, 127, 127, 0.08));
+  color: inherit;
+}
+
+/* 引用块 */
+.prose-msg blockquote {
+  margin: 0.5em 0;
+  padding: 0.25em 0 0.25em 0.75em;
+  border-left: 3px solid var(--c-default4, rgba(127, 127, 127, 0.3));
+  color: var(--c-default3, #6b7280);
+}
+
+/* 列表 */
+.prose-msg ul,
+.prose-msg ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+.prose-msg ul { list-style-type: disc; }
+.prose-msg ol { list-style-type: decimal; }
+.prose-msg li {
+  margin: 0.15em 0;
+}
+.prose-msg li > p {
+  margin: 0.15em 0;
+}
+
+/* 分割线 */
+.prose-msg hr {
+  margin: 0.8em 0;
+  border: none;
+  border-top: 1px solid var(--c-default4, rgba(127, 127, 127, 0.2));
+}
+
+/* 表格 */
+.prose-msg table {
+  width: 100%;
+  margin: 0.5em 0;
+  border-collapse: collapse;
+  font-size: 0.875em;
+}
+.prose-msg th,
+.prose-msg td {
+  padding: 0.35em 0.65em;
+  border: 1px solid var(--c-default4, rgba(127, 127, 127, 0.2));
+  text-align: left;
+}
+.prose-msg th {
+  font-weight: 600;
+  background: var(--c-default4, rgba(127, 127, 127, 0.06));
+}
+
+/* 链接 */
+.prose-msg a {
+  color: var(--c-primary, #3b82f6);
+  text-decoration: none;
+}
+.prose-msg a:hover {
+  text-decoration: underline;
+}
+
+/* 加粗/斜体 */
+.prose-msg strong { font-weight: 600; }
+.prose-msg em { font-style: italic; }
+
+/* 图片 */
+.prose-msg img {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 0.5em 0;
+}

@@ -40,14 +40,23 @@ async function sendMessage(sessionId: string, cwd: string, message: string) {
     switch (payload.kind) {
       case 'assistant_message':
         if (payload.message_id && payload.content) {
-          // 合并或替换同 messageId 的 turn
           const existing = streamingTurns.value.find(t => t.messageId === payload.message_id)
           if (existing) {
-            existing.content = payload.content
+            // 同一 message 的后续事件：追加新块
+            // 检查最后一个块是否同类型（text 块可能在增长）
+            for (const block of payload.content) {
+              const last = existing.content[existing.content.length - 1]
+              if (last && last.type === 'text' && block.type === 'text') {
+                // text 块合并（流式增长场景）
+                ;(last as any).text = (block as any).text
+              } else {
+                existing.content.push(block)
+              }
+            }
           } else {
             streamingTurns.value.push({
               messageId: payload.message_id,
-              content: payload.content,
+              content: [...payload.content],
             })
           }
         }
@@ -86,6 +95,7 @@ async function stopStreaming() {
 function cleanup() {
   streaming.value = false
   pendingUserMessage.value = null
+  streamingTurns.value = []
   unlistenEvent?.()
   unlistenDone?.()
   unlistenEvent = null

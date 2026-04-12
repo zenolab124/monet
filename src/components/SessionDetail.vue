@@ -102,21 +102,64 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
 
 const messages = computed(() =>
   records.value.filter(
-    (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' }> =>
-      r.type === 'user' || r.type === 'assistant',
+    (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' }> => {
+      if (r.type === 'assistant') return true
+      if (r.type !== 'user') return false
+      // 过滤掉纯工具结果的 user 消息（API 回传的 tool_result）
+      const content = r.message?.content
+      if (!content || typeof content === 'string') return true
+      return content.some((b: ContentBlock) => b.type !== 'tool_result')
+    },
   ),
 )
 
+/** 解析私有标签，转为特殊渲染块 */
+const TAG_RE = /<(system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)[^>]*>([\s\S]*?)<\/\1>/g
+const DISCARD_TAGS_RE = /<\/?(?:antml:thinking|antml:function_calls|antml:invoke|antml:parameter)[^>]*>/g
+
+function parsePrivateTags(text: string): ContentBlock[] {
+  const results: ContentBlock[] = []
+  let lastIndex = 0
+
+  // 先清理需要丢弃的标签（antml 内部标记）
+  const cleaned = text.replace(DISCARD_TAGS_RE, '')
+
+  for (const match of cleaned.matchAll(TAG_RE)) {
+    const before = cleaned.slice(lastIndex, match.index).trim()
+    if (before) results.push({ type: 'text', text: before })
+
+    const [, tag, content] = match
+    results.push({ type: tag, text: content.trim() } as any)
+
+    lastIndex = match.index! + match[0].length
+  }
+
+  const after = cleaned.slice(lastIndex).trim()
+  if (after) results.push({ type: 'text', text: after })
+
+  return results
+}
+
 function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistant' }>): ContentBlock[] {
   if (!record.message) return []
+  let blocks: ContentBlock[]
   if (record.type === 'user') {
     const content = record.message.content
     if (typeof content === 'string') {
-      return [{ type: 'text', text: content }]
+      blocks = [{ type: 'text', text: content }]
+    } else {
+      blocks = content
     }
-    return content
+  } else {
+    blocks = record.message.content
   }
-  return record.message.content
+  // 展开含私有标签的 text 块
+  return blocks.flatMap(b => {
+    if (b.type === 'text' && /<(?:system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)/.test((b as any).text)) {
+      return parsePrivateTags((b as any).text)
+    }
+    return [b]
+  })
 }
 
 async function handleSend() {
@@ -126,6 +169,7 @@ async function handleSend() {
   if (!cs.summary.cwd) return
   inputText.value = ''
   if (textareaRef.value) textareaRef.value.style.height = 'auto'
+  scrollToBottom(true)
   await sendMessage(cs.summary.id, cs.summary.cwd, text)
 }
 
@@ -147,6 +191,30 @@ function onClose() {
   if (props.paneId) closePane(props.paneId)
 }
 
+/** 用户是否在底部附近（60px 阈值） */
+function isNearBottom(): boolean {
+  const el = scrollContainer.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60
+}
+
+/** 滚到底部，force=true 时无条件滚动 */
+function scrollToBottom(force = false) {
+  if (!force && !isNearBottom()) return
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = scrollContainer.value
+        if (!el) return
+        el.scrollTo({ top: el.scrollHeight, behavior: force ? 'instant' : 'smooth' })
+      })
+    })
+  })
+}
+
+// 加载记录后强制滚到底部
+watch(records, () => scrollToBottom(true))
+
 // 流式结束后重新加载
 watch(streaming, (val, oldVal) => {
   if (!val && oldVal) {
@@ -154,15 +222,10 @@ watch(streaming, (val, oldVal) => {
   }
 })
 
+// 流式内容更新时，仅在用户停留底部时跟随
 watch(
-  () => streamingTurns.value.length,
-  () => {
-    nextTick(() => {
-      if (scrollContainer.value) {
-        scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
-      }
-    })
-  },
+  () => streamingTurns.value.reduce((n, t) => n + t.content.length, 0),
+  () => scrollToBottom(),
 )
 
 watch(
@@ -216,12 +279,20 @@ watch(
               <span class="i-carbon-close w-3.5 h-3.5" />
             </button>
           </template>
-          <ActionBar
-            :session-id="currentSession.summary.id"
-            :project-id="currentSession.projectId"
-            :cwd="currentSession.summary.cwd"
-            @deleted="onDeleted"
-          />
+          <button
+              class="px-2 py-1 text-xs rounded-md text-default3 hover:text-default hover:bg-hover transition-colors flex items-center gap-1"
+              title="刷新会话"
+              @click="reloadRecords"
+            >
+              <span class="i-carbon-renew w-3.5 h-3.5" />
+              刷新
+            </button>
+            <ActionBar
+              :session-id="currentSession.summary.id"
+              :project-id="currentSession.projectId"
+              :cwd="currentSession.summary.cwd"
+              @deleted="onDeleted"
+            />
         </div>
       </div>
       <div class="text-xs text-default4 mt-1 flex items-center gap-2 flex-wrap">
@@ -349,7 +420,6 @@ watch(
 
 <style scoped>
 .msg-block {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 80px;
+  contain: layout style;
 }
 </style>
