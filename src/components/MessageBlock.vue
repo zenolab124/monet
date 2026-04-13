@@ -14,6 +14,7 @@ const toolInputExpanded = ref(false)
 const toolResultExpanded = ref(false)
 const textExpanded = ref(false)
 const sysReminderExpanded = ref(false)
+const skillPromptExpanded = ref(false)
 
 /** 从 ide_opened_file 文本中提取文件路径 */
 const ideFileName = computed(() => {
@@ -140,6 +141,21 @@ function toolResultText(content: string | ContentBlock[]): string {
     <div class="text-xs text-orange-400 flex items-center gap-1.5">
       <span class="i-carbon-image w-3.5 h-3.5" />
       图片（{{ b.source.media_type }}，{{ b.source.data_length }} bytes）
+    </div>
+  </div>
+
+  <!-- Skill 调用 -->
+  <div v-else-if="block.type === 'skill_prompt'" class="mt-1">
+    <button
+      class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+      @click="skillPromptExpanded = !skillPromptExpanded"
+    >
+      <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': skillPromptExpanded }" />
+      <span class="i-carbon-play-filled-alt w-3 h-3" />
+      调用技能：{{ b.name }}
+    </button>
+    <div v-if="skillPromptExpanded" class="mt-1 pl-3 border-l-2 border-blue-500/20 text-xs text-default4 whitespace-pre-wrap max-h-64 overflow-y-auto">
+      {{ b.text }}
     </div>
   </div>
 

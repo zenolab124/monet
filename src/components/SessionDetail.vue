@@ -153,10 +153,20 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
   } else {
     blocks = record.message.content
   }
-  // 展开含私有标签的 text 块
+  // 展开含私有标签的 text 块，检测 skill prompt
   return blocks.flatMap(b => {
-    if (b.type === 'text' && /<(?:system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)/.test((b as any).text)) {
-      return parsePrivateTags((b as any).text)
+    if (b.type !== 'text') return [b]
+    const text = (b as any).text as string
+    // Skill prompt 检测
+    const skillMatch = text.match(/^Base directory for this skill:\s*(\S+)/)
+    if (skillMatch) {
+      const skillPath = skillMatch[1]
+      const skillName = skillPath.split('/').pop() || skillPath
+      return [{ type: 'skill_prompt', text: text, name: skillName } as any]
+    }
+    // 私有标签解析
+    if (/<(?:system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)/.test(text)) {
+      return parsePrivateTags(text)
     }
     return [b]
   })
