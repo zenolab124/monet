@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useSplitLayout, type SplitNode } from '@/composables/useSplitLayout'
 import SessionDetail from './SessionDetail.vue'
 
@@ -7,19 +7,10 @@ const props = defineProps<{
   node: SplitNode
 }>()
 
-const { activePaneId, updateRatio, setActivePane } = useSplitLayout()
+const { updateRatio, setActivePane } = useSplitLayout()
 
 const containerRef = ref<HTMLElement>()
 const dragging = ref(false)
-
-const { root: rootNode } = useSplitLayout()
-
-/** 只在多面板时才高亮激活面板 */
-const isActive = computed(() =>
-  props.node.type === 'pane'
-  && rootNode.value.type === 'split'
-  && activePaneId.value === props.node.id,
-)
 
 function onMouseDown(e: MouseEvent) {
   if (props.node.type !== 'split') return
@@ -58,7 +49,6 @@ function onMouseDown(e: MouseEvent) {
   <div
     v-if="node.type === 'pane'"
     class="h-full relative"
-    :class="{ 'ring-1 ring-blue-500/40 ring-inset': isActive }"
     @mousedown="setActivePane(node.id)"
   >
     <SessionDetail :pane-id="node.id" />
@@ -81,22 +71,19 @@ function onMouseDown(e: MouseEvent) {
       <SplitView :node="node.first" />
     </div>
 
-    <!-- 分割线 -->
+    <!-- 分割线：视觉 1px，交互区域 8px -->
     <div
-      class="shrink-0 relative group"
+      class="shrink-0 relative"
       :class="node.axis === 'horizontal'
-        ? 'w-1 cursor-col-resize hover:bg-blue-500/20'
-        : 'h-1 cursor-row-resize hover:bg-blue-500/20'"
-      @mousedown="onMouseDown"
+        ? 'w-0 border-l border-divider'
+        : 'h-0 border-t border-divider'"
     >
       <div
-        class="absolute bg-blue-500/40 transition-opacity"
-        :class="[
-          dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-          node.axis === 'horizontal'
-            ? 'left-0 top-1/2 -translate-y-1/2 w-full h-8 rounded-full'
-            : 'top-0 left-1/2 -translate-x-1/2 h-full w-8 rounded-full',
-        ]"
+        class="absolute z-10"
+        :class="node.axis === 'horizontal'
+          ? 'top-0 bottom-0 -left-4px w-9px cursor-col-resize'
+          : 'left-0 right-0 -top-4px h-9px cursor-row-resize'"
+        @mousedown="onMouseDown"
       />
     </div>
 
