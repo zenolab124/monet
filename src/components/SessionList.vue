@@ -57,10 +57,7 @@ function pickModel(model: string) {
 
 // 分屏操作
 function splitRight(session: SessionSummary) {
-  splitPane(activePaneId.value, 'horizontal', session.id)
-}
-function splitDown(session: SessionSummary) {
-  splitPane(activePaneId.value, 'vertical', session.id)
+  splitPane(activePaneId.value, session.id)
 }
 
 // 原生右键菜单
@@ -103,23 +100,26 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- 统计卡片 -->
-    <div class="px-3 py-2 grid grid-cols-4 gap-2">
-      <div class="text-center">
-        <div class="text-sm font-semibold text-default">{{ sessionStats.sessionCount }}</div>
-        <div class="text-xs text-default4">会话</div>
+    <!-- 统计卡片：横向铺开，数字与标签水平排列，避免窄宽度下换行 -->
+    <div class="px-3 py-2 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-default truncate">{{ sessionStats.sessionCount }}</span>
+        <span class="text-xs text-default4 shrink-0">会话</span>
       </div>
-      <div class="text-center">
-        <div class="text-sm font-semibold text-default">{{ formatTokens(sessionStats.totalTokens) }}</div>
-        <div class="text-xs text-default4">Token</div>
+      <span class="w-px h-3 bg-divider shrink-0" />
+      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-default truncate">{{ formatTokens(sessionStats.totalTokens) }}</span>
+        <span class="text-xs text-default4 shrink-0">Token</span>
       </div>
-      <div class="text-center">
-        <div class="text-sm font-semibold text-default">{{ formatBytes(sessionStats.totalSize) }}</div>
-        <div class="text-xs text-default4">磁盘</div>
+      <span class="w-px h-3 bg-divider shrink-0" />
+      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-default truncate">{{ formatBytes(sessionStats.totalSize) }}</span>
+        <span class="text-xs text-default4 shrink-0">磁盘</span>
       </div>
-      <div class="text-center">
-        <div class="text-sm font-semibold text-default">{{ sessionStats.activeDays }}</div>
-        <div class="text-xs text-default4">活跃</div>
+      <span class="w-px h-3 bg-divider shrink-0" />
+      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-default truncate">{{ sessionStats.activeDays }}</span>
+        <span class="text-xs text-default4 shrink-0">活跃</span>
       </div>
     </div>
 
@@ -258,13 +258,6 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
             @click.stop="splitRight(session)"
           >
             <span class="i-carbon-split-screen w-3 h-3" />
-          </button>
-          <button
-            class="p-1 rounded text-default4 hover:text-default3 hover:bg-active transition-colors"
-            title="下方分屏"
-            @click.stop="splitDown(session)"
-          >
-            <span class="i-carbon-row w-3 h-3" />
           </button>
         </div>
       </div>

@@ -23,7 +23,7 @@ const props = defineProps<{
 
 const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
-const { root, splitPane, closePane, setPaneSession } = useSplitLayout()
+const { state, activePaneId, splitPane, closePane, setPaneSession } = useSplitLayout()
 
 // 每个面板独立的 detail 实例
 const detail = createSessionDetail()
@@ -51,18 +51,10 @@ function autoResize() {
 
 // --- 会话 ID 来源 ---
 
-/** 分屏模式下从 pane state 取 sessionId */
+/** 分屏模式下从扁平 panes 数组取 sessionId */
 function findPaneSessionId(): string | null {
   if (!props.paneId) return null
-  return findInNode(root.value, props.paneId)
-}
-
-function findInNode(node: any, paneId: string): string | null {
-  if (node.type === 'pane') return node.id === paneId ? node.sessionId : null
-  if (node.type === 'split') {
-    return findInNode(node.first, paneId) || findInNode(node.second, paneId)
-  }
-  return null
+  return state.value.panes.find(p => p.id === props.paneId)?.sessionId ?? null
 }
 
 /** 当前面板的有效 sessionId */
@@ -71,9 +63,9 @@ const effectiveSessionId = computed(() => {
   return selectedSessionId.value
 })
 
-// 全局选中变化时同步到活跃面板
+// 全局选中变化时只同步到当前活跃面板，避免所有 pane 都被改写
 watch(selectedSessionId, (sid) => {
-  if (props.paneId && sid) {
+  if (props.paneId && sid && activePaneId.value === props.paneId) {
     setPaneSession(props.paneId, sid)
   }
 })
@@ -192,10 +184,7 @@ function onInputKeydown(e: KeyboardEvent) {
 
 // 分屏操作
 function onSplitRight() {
-  if (props.paneId) splitPane(props.paneId, 'horizontal')
-}
-function onSplitDown() {
-  if (props.paneId) splitPane(props.paneId, 'vertical')
+  if (props.paneId) splitPane(props.paneId, null)
 }
 function onClose() {
   if (props.paneId) closePane(props.paneId)
@@ -273,13 +262,6 @@ watch(
               @click="onSplitRight"
             >
               <span class="i-carbon-split-screen w-3.5 h-3.5" />
-            </button>
-            <button
-              class="p-1 rounded text-default4 hover:text-default3 hover:bg-hover transition-colors"
-              title="下方分屏"
-              @click="onSplitDown"
-            >
-              <span class="i-carbon-row w-3.5 h-3.5" />
             </button>
             <button
               class="p-1 rounded text-default4 hover:text-red-400 hover:bg-red-500/10 transition-colors"

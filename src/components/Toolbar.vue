@@ -2,9 +2,11 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useSessions } from '@/composables/useSessions'
 import { useTheme } from '@/composables/useTheme'
+import { useUiState } from '@/composables/useUiState'
 
 const { searchQuery } = useSessions()
 const { mode, cycleTheme, themeLabel, themeIcon } = useTheme()
+const { sidebarsCollapsed, toggleSidebars } = useUiState()
 
 const inputRef = ref<HTMLInputElement>()
 const localQuery = ref(searchQuery.value)
@@ -43,6 +45,20 @@ function clearSearch() {
   >
     <!-- 红绿灯占位 -->
     <div class="w-[78px] shrink-0" data-tauri-drag-region />
+
+    <!-- 侧栏显隐切换 -->
+    <button
+      class="p-1.5 rounded-md hover:bg-hover transition-colors shrink-0"
+      :title="sidebarsCollapsed ? '显示侧栏' : '隐藏侧栏'"
+      @click="toggleSidebars"
+    >
+      <span
+        :class="[
+          sidebarsCollapsed ? 'i-carbon-side-panel-open' : 'i-carbon-side-panel-close',
+          'w-4 h-4 text-default block',
+        ]"
+      />
+    </button>
 
     <!-- 搜索框 -->
     <div class="relative flex-1 max-w-xs">

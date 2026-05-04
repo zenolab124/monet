@@ -1,23 +1,18 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
-export type SplitAxis = 'horizontal' | 'vertical'
-
+/** 单个面板（叶节点） */
 export interface PaneState {
   type: 'pane'
   id: string
   sessionId: string | null
 }
 
-export interface SplitContainer {
-  type: 'split'
-  id: string
-  axis: SplitAxis
-  ratio: number
-  first: SplitNode
-  second: SplitNode
+/** 扁平 N 面板布局：所有 pane 横向平铺 */
+export interface SplitState {
+  panes: PaneState[]
+  /** 各 pane 占整体宽度的比例，长度与 panes 一致，元素之和 = 1 */
+  sizes: number[]
 }
-
-export type SplitNode = PaneState | SplitContainer
 
 const STORAGE_KEY = 'cc-space-layout'
 
@@ -30,50 +25,66 @@ function createPane(sessionId: string | null = null): PaneState {
   return { type: 'pane', id: genId(), sessionId }
 }
 
-// 初始布局：单面板
-const root = ref<SplitNode>(loadLayout() || createPane())
-const activePaneId = ref<string>(findFirstPaneId(root.value))
+/** 等分 sizes：所有元素都为 1/n */
+function equalSizes(n: number): number[] {
+  return Array(n).fill(1 / n)
+}
 
-/** 在指定面板旁边分屏 */
-function splitPane(paneId: string, axis: SplitAxis, sessionId: string | null = null) {
-  root.value = transformNode(root.value, paneId, (node) => {
-    const newPane = createPane(sessionId)
-    const container: SplitContainer = {
-      type: 'split',
-      id: genId(),
-      axis,
-      ratio: 0.5,
-      first: node,
-      second: newPane,
-    }
-    activePaneId.value = newPane.id
-    return container
-  })
+function createInitialState(): SplitState {
+  return { panes: [createPane()], sizes: [1] }
+}
+
+// 初始布局：单面板（或从 localStorage 恢复）
+const state = ref<SplitState>(loadLayout() || createInitialState())
+const activePaneId = ref<string>(state.value.panes[0].id)
+
+/** 在指定面板的右侧分屏；新 pane 自动获焦，所有 pane 重新等分 */
+function splitPane(paneId: string, sessionId: string | null = null) {
+  const idx = state.value.panes.findIndex(p => p.id === paneId)
+  if (idx < 0) return
+  const newPane = createPane(sessionId)
+  const panes = [...state.value.panes]
+  panes.splice(idx + 1, 0, newPane)
+  state.value = { panes, sizes: equalSizes(panes.length) }
+  activePaneId.value = newPane.id
   saveLayout()
 }
 
-/** 关闭面板（保留至少一个） */
+/** 关闭面板（保留至少一个）；剩余 pane 重新等分 */
 function closePane(paneId: string) {
-  const paneCount = countPanes(root.value)
-  if (paneCount <= 1) return
-
-  root.value = removeNode(root.value, paneId) || createPane()
-  // 如果关闭的是活跃面板，切到第一个
+  if (state.value.panes.length <= 1) return
+  const idx = state.value.panes.findIndex(p => p.id === paneId)
+  if (idx < 0) return
+  const panes = state.value.panes.filter(p => p.id !== paneId)
+  state.value = { panes, sizes: equalSizes(panes.length) }
   if (activePaneId.value === paneId) {
-    activePaneId.value = findFirstPaneId(root.value)
+    activePaneId.value = panes[0].id
   }
   saveLayout()
 }
 
-/** 更新分割比例 */
-function updateRatio(splitId: string, ratio: number) {
-  updateNodeRatio(root.value, splitId, Math.max(0.15, Math.min(0.85, ratio)))
+/**
+ * 拖动第 index 条分隔线（位于 panes[index] 与 panes[index+1] 之间）。
+ * leftRatio 是 panes[index] 的目标新比例（占整体），仅在 combined 区间内重分配，
+ * 其他 sizes 完全不动。clamp 防止把任一 pane 压没。
+ */
+function updateSize(index: number, leftRatio: number) {
+  const sizes = state.value.sizes
+  if (index < 0 || index >= sizes.length - 1) return
+  const combined = sizes[index] + sizes[index + 1]
+  const minLeft = 0.1 * combined
+  const maxLeft = 0.9 * combined
+  const clamped = Math.max(minLeft, Math.min(maxLeft, leftRatio))
+  const next = [...sizes]
+  next[index] = clamped
+  next[index + 1] = combined - clamped
+  state.value = { ...state.value, sizes: next }
   saveLayout()
 }
 
 /** 设置面板的会话 */
 function setPaneSession(paneId: string, sessionId: string | null) {
-  const pane = findPane(root.value, paneId)
+  const pane = state.value.panes.find(p => p.id === paneId)
   if (pane) {
     pane.sessionId = sessionId
     saveLayout()
@@ -85,73 +96,30 @@ function setActivePane(paneId: string) {
   activePaneId.value = paneId
 }
 
-// --- 树操作工具 ---
-
-function transformNode(
-  node: SplitNode,
-  targetId: string,
-  transform: (node: PaneState) => SplitNode,
-): SplitNode {
-  if (node.type === 'pane') {
-    return node.id === targetId ? transform(node) : node
-  }
-  return {
-    ...node,
-    first: transformNode(node.first, targetId, transform),
-    second: transformNode(node.second, targetId, transform),
-  }
-}
-
-function removeNode(node: SplitNode, targetId: string): SplitNode | null {
-  if (node.type === 'pane') {
-    return node.id === targetId ? null : node
-  }
-  const first = removeNode(node.first, targetId)
-  const second = removeNode(node.second, targetId)
-  if (!first) return second
-  if (!second) return first
-  return { ...node, first, second }
-}
-
-function findPane(node: SplitNode, paneId: string): PaneState | null {
-  if (node.type === 'pane') return node.id === paneId ? node : null
-  return findPane(node.first, paneId) || findPane(node.second, paneId)
-}
-
-function findFirstPaneId(node: SplitNode): string {
-  if (node.type === 'pane') return node.id
-  return findFirstPaneId(node.first)
-}
-
-function countPanes(node: SplitNode): number {
-  if (node.type === 'pane') return 1
-  return countPanes(node.first) + countPanes(node.second)
-}
-
-function updateNodeRatio(node: SplitNode, splitId: string, ratio: number) {
-  if (node.type === 'split') {
-    if (node.id === splitId) {
-      node.ratio = ratio
-      return
-    }
-    updateNodeRatio(node.first, splitId, ratio)
-    updateNodeRatio(node.second, splitId, ratio)
-  }
-}
-
 // --- 持久化 ---
 
 function saveLayout() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(root.value))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.value))
   } catch (_) {}
 }
 
-function loadLayout(): SplitNode | null {
+function loadLayout(): SplitState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    return JSON.parse(raw)
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const { panes, sizes } = parsed as Partial<SplitState>
+    // 基本结构校验：panes/sizes 长度一致、至少 1 个、sizes 之和接近 1
+    if (!Array.isArray(panes) || !Array.isArray(sizes)) return null
+    if (panes.length < 1 || sizes.length !== panes.length) return null
+    for (const p of panes) {
+      if (!p || p.type !== 'pane' || typeof p.id !== 'string') return null
+    }
+    const sum = sizes.reduce((a, b) => a + (typeof b === 'number' ? b : NaN), 0)
+    if (!Number.isFinite(sum) || Math.abs(sum - 1) > 0.01) return null
+    return { panes: panes as PaneState[], sizes: sizes as number[] }
   } catch (_) {
     return null
   }
@@ -159,11 +127,11 @@ function loadLayout(): SplitNode | null {
 
 export function useSplitLayout() {
   return {
-    root,
+    state,
     activePaneId,
     splitPane,
     closePane,
-    updateRatio,
+    updateSize,
     setPaneSession,
     setActivePane,
   }
