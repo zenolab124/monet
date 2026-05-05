@@ -7,9 +7,10 @@ import SplitView from '@/components/SplitView.vue'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { useUiState } from '@/composables/useUiState'
+import { initPermissionListener } from '@/composables/usePermissionRequests'
 
 const { loadProjects } = useProjects()
-const { selectSession } = useSessions()
+const { selectedSessionId, selectSession } = useSessions()
 const { sidebarsCollapsed } = useUiState()
 
 // 侧栏宽度（与原 w-56 / w-72 等价：224px / 288px）
@@ -28,7 +29,11 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
+  // FR-003 权限请求事件监听:整个 app 生命周期注册一次
+  await initPermissionListener(() => selectedSessionId.value)
+})
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 

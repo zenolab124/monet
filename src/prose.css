@@ -150,3 +150,28 @@
   border-radius: 6px;
   margin: 0.5em 0;
 }
+
+/*
+ * FR-002 块到达淡入动画
+ * 仅在流式新块挂载时播放(SessionDetail.vue 的 streamingTurns 区使用 <TransitionGroup name="block-fade" appear>)
+ * 历史会话整批渲染区不包 Transition,直接显示无动画
+ */
+.block-fade-enter-active {
+  transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1),
+              transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.block-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.block-fade-enter-to {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 系统"减少动态效果"开启时禁用动画(PRD NFR-002) */
+@media (prefers-reduced-motion: reduce) {
+  .block-fade-enter-active {
+    transition: none !important;
+  }
+}

@@ -5,6 +5,7 @@ mod commands;
 mod discovery;
 mod models;
 mod parser;
+mod permission;
 mod streaming;
 mod tray;
 mod watcher;
@@ -41,6 +42,7 @@ pub fn run() {
             commands::resume_in_vscode,
             commands::start_streaming,
             commands::stop_streaming,
+            commands::respond_permission,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

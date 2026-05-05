@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::discovery;
 use crate::models::*;
 use crate::parser;
+use crate::permission::PermissionService;
 use crate::streaming;
 
 /// 获取所有项目（含会话摘要）
@@ -77,14 +78,44 @@ pub fn start_streaming(
     session_id: String,
     cwd: String,
     message: String,
+    model: Option<String>,
+    effort: Option<String>,
 ) {
-    streaming::start_streaming(&app, &session_id, &cwd, &message);
+    streaming::start_streaming(
+        &app,
+        &session_id,
+        &cwd,
+        &message,
+        model.as_deref(),
+        effort.as_deref(),
+    );
 }
 
 /// 停止流式会话
 #[tauri::command]
 pub fn stop_streaming() {
     streaming::stop_streaming();
+}
+
+/// 前端响应权限请求
+///
+/// `allow=true` 时透传给 claude CLI `{"behavior":"allow"}`
+/// `allow=false` 时返回 `{"behavior":"deny","message":...}`，message 缺省为「用户拒绝」
+#[tauri::command]
+pub fn respond_permission(
+    request_id: String,
+    allow: bool,
+    message: Option<String>,
+) -> Result<(), String> {
+    let ok = PermissionService::respond(&request_id, allow, message);
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "未找到 pending 权限请求，可能已超时或已被处理：{}",
+            request_id
+        ))
+    }
 }
 
 fn session_path(project_id: &str, session_id: &str) -> PathBuf {

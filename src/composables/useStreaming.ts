@@ -2,6 +2,12 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ContentBlock } from '@/types'
+import type { EffortLevel } from './useSessionSettings'
+
+export interface SendOptions {
+  model?: string
+  effort?: EffortLevel
+}
 
 export interface StreamingTurn {
   messageId: string
@@ -25,8 +31,13 @@ interface StreamEventPayload {
   message?: string
 }
 
-/** 发送消息并开始流式接收 */
-async function sendMessage(sessionId: string, cwd: string, message: string) {
+/** 发送消息并开始流式接收。opts 可选,缺省时不向 CLI 附加 --model / --effort */
+async function sendMessage(
+  sessionId: string,
+  cwd: string,
+  message: string,
+  opts: SendOptions = {},
+) {
   if (streaming.value) return
 
   streaming.value = true
@@ -42,16 +53,22 @@ async function sendMessage(sessionId: string, cwd: string, message: string) {
         if (payload.message_id && payload.content) {
           const existing = streamingTurns.value.find(t => t.messageId === payload.message_id)
           if (existing) {
-            // 同一 message 的后续事件：追加新块
-            // 检查最后一个块是否同类型（text 块可能在增长）
-            for (const block of payload.content) {
-              const last = existing.content[existing.content.length - 1]
-              if (last && last.type === 'text' && block.type === 'text') {
-                // text 块合并（流式增长场景）
-                ;(last as any).text = (block as any).text
+            // claude CLI 在 --print 模式下,stream-json 每个 progress 事件都重发完整 content 快照(非 delta)。
+            // 按 index 对齐 merge:同 index 同 type → Object.assign 原对象(保留组件实例,
+            // BlockThinking 等组件的展开 state 不丢);type 变了或新增 → 直接赋值/追加。
+            const newContent = payload.content
+            for (let i = 0; i < newContent.length; i++) {
+              const incoming = newContent[i]
+              const current = existing.content[i] as ContentBlock | undefined
+              if (current && current.type === incoming.type) {
+                Object.assign(current as Record<string, unknown>, incoming)
               } else {
-                existing.content.push(block)
+                ;(existing.content as ContentBlock[])[i] = incoming
               }
+            }
+            // 截断:新快照短于旧数组时移除末尾(理论上不会,防御性)
+            if (existing.content.length > newContent.length) {
+              existing.content.length = newContent.length
             }
           } else {
             streamingTurns.value.push({
@@ -75,11 +92,24 @@ async function sendMessage(sessionId: string, cwd: string, message: string) {
   })
 
   try {
-    await invoke('start_streaming', { sessionId, cwd, message })
+    await invoke('start_streaming', {
+      sessionId,
+      cwd,
+      message,
+      model: opts.model ?? null,
+      effort: opts.effort ?? null,
+    })
   } catch (e) {
     streamError.value = String(e)
     cleanup()
   }
+}
+
+/** 清空当前的流式渲染区(不影响磁盘 jsonl)。供 /clear 命令使用 */
+function clearStreamingTurns() {
+  streamingTurns.value = []
+  pendingUserMessage.value = null
+  streamError.value = null
 }
 
 /** 中断流式 */
@@ -95,7 +125,8 @@ async function stopStreaming() {
 function cleanup() {
   streaming.value = false
   pendingUserMessage.value = null
-  streamingTurns.value = []
+  // 不清 streamingTurns:让 SessionDetail 在 reload 完成后再清,避免渲染断片
+  // (流式结束 → cleanup 立即清 → reload 异步等 jsonl flush 完成 → 中间窗口期详情页空白)
   unlistenEvent?.()
   unlistenDone?.()
   unlistenEvent = null
@@ -110,5 +141,6 @@ export function useStreaming() {
     streamError,
     sendMessage,
     stopStreaming,
+    clearStreamingTurns,
   }
 }

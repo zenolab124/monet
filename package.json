@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:full": "pnpm mcp:build && pnpm dev",
     "build": "vue-tsc --noEmit && vite build",
+    "build:full": "pnpm mcp:build:release && pnpm build",
+    "mcp:build": "cargo build --bin cc-space-mcp --manifest-path src-tauri/Cargo.toml",
+    "mcp:build:release": "cargo build --release --bin cc-space-mcp --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri"
   },

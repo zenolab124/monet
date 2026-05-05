@@ -1,0 +1,333 @@
+//! 权限请求服务
+//!
+//! 在主进程内启动一个 Unix socket server，作为 cc-space-mcp 子进程与前端的桥梁。
+//! 主流程：
+//! 1. `PermissionService::start` 绑定 `/tmp/cc-space-perm-<pid>-<rand>.sock`
+//! 2. 接受连接（每条连接对应 cc-space-mcp 转发的一次权限请求）
+//! 3. emit Tauri Event `permission-request` 给前端
+//! 4. 前端通过 `respond_permission` Tauri Command 回写决策（allow/deny）
+//! 5. service 把决策写回 socket，cc-space-mcp 据此返回 claude CLI
+
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde::Serialize;
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter};
+
+/// 单次权限请求的超时（PRD 规定 60s 自动 deny）
+const REQUEST_TIMEOUT_SECS: u64 = 60;
+
+/// 等待轮询步长（避免 busy-loop）
+const POLL_INTERVAL_MS: u64 = 50;
+
+/// 一次 pending 请求的状态
+struct PendingRequest {
+    /// 收到响应后写到这里
+    decision: Mutex<Option<Decision>>,
+    /// 创建时刻（用于超时判定）
+    created_at: Instant,
+}
+
+/// 用户决策
+#[derive(Debug, Clone)]
+enum Decision {
+    Allow,
+    Deny(String),
+}
+
+/// 权限服务
+pub struct PermissionService {
+    /// socket 文件路径（销毁时清理）
+    socket_path: PathBuf,
+    /// 关闭信号
+    stop_flag: Arc<std::sync::atomic::AtomicBool>,
+    /// 共享的 pending 请求表
+    pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
+}
+
+/// 全局单实例（streaming 启动时创建，停止时销毁）
+static GLOBAL_SERVICE: Mutex<Option<Arc<PermissionService>>> = Mutex::new(None);
+
+/// requestId 自增
+static REQ_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// 推送给前端的事件
+#[derive(Debug, Clone, Serialize)]
+struct PermissionRequestPayload {
+    #[serde(rename = "requestId")]
+    request_id: String,
+    #[serde(rename = "toolName")]
+    tool_name: String,
+    input: Value,
+    /// Unix 毫秒
+    timestamp: u128,
+}
+
+impl PermissionService {
+    /// 启动服务，返回 socket 路径（用于注入 cc-space-mcp 子进程的环境变量）
+    pub fn start(app: AppHandle) -> Result<Arc<Self>, String> {
+        // 先停掉旧的（防止前一次没清理）
+        Self::stop_global();
+
+        let socket_path = make_socket_path();
+        // 防止残留文件
+        let _ = std::fs::remove_file(&socket_path);
+
+        let listener = UnixListener::bind(&socket_path)
+            .map_err(|e| format!("绑定权限 socket 失败 ({:?}): {}", socket_path, e))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| format!("设置 socket 非阻塞失败：{}", e))?;
+
+        let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        let service = Arc::new(PermissionService {
+            socket_path: socket_path.clone(),
+            stop_flag: stop_flag.clone(),
+            pending: pending.clone(),
+        });
+
+        // accept loop 单独线程
+        {
+            let pending = pending.clone();
+            let stop_flag = stop_flag.clone();
+            thread::spawn(move || {
+                accept_loop(listener, app, pending, stop_flag);
+            });
+        }
+
+        *GLOBAL_SERVICE.lock().unwrap() = Some(service.clone());
+        Ok(service)
+    }
+
+    pub fn socket_path(&self) -> &std::path::Path {
+        &self.socket_path
+    }
+
+    /// 提交一个用户决策。返回是否找到对应的 pending 请求
+    pub fn respond(request_id: &str, allow: bool, message: Option<String>) -> bool {
+        let Some(service) = GLOBAL_SERVICE.lock().unwrap().clone() else {
+            return false;
+        };
+        let pending = service.pending.lock().unwrap();
+        if let Some(req) = pending.get(request_id) {
+            let mut slot = req.decision.lock().unwrap();
+            if slot.is_none() {
+                *slot = Some(if allow {
+                    Decision::Allow
+                } else {
+                    Decision::Deny(message.unwrap_or_else(|| "用户拒绝".to_string()))
+                });
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 停掉全局服务（关闭 socket、清理 pending、所有 pending 请求按 deny 回收）
+    pub fn stop_global() {
+        if let Some(service) = GLOBAL_SERVICE.lock().unwrap().take() {
+            service
+                .stop_flag
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            // 让所有未决请求拿到 deny，避免子进程死等
+            let pending = service.pending.lock().unwrap();
+            for req in pending.values() {
+                let mut slot = req.decision.lock().unwrap();
+                if slot.is_none() {
+                    *slot = Some(Decision::Deny("流式中断，自动拒绝".to_string()));
+                }
+            }
+            drop(pending);
+            // 删 socket 文件
+            let _ = std::fs::remove_file(&service.socket_path);
+        }
+    }
+}
+
+impl Drop for PermissionService {
+    fn drop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&self.socket_path);
+    }
+}
+
+/// 生成一个进程内不冲突的 socket 路径
+fn make_socket_path() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    PathBuf::from(format!("/tmp/cc-space-perm-{}-{}.sock", pid, nanos))
+}
+
+/// accept loop：每条连接 spawn 一个处理线程
+fn accept_loop(
+    listener: UnixListener,
+    app: AppHandle,
+    pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
+    stop_flag: Arc<std::sync::atomic::AtomicBool>,
+) {
+    while !stop_flag.load(Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let app = app.clone();
+                let pending = pending.clone();
+                let stop_flag = stop_flag.clone();
+                thread::spawn(move || {
+                    if let Err(e) = handle_connection(stream, app, pending, stop_flag) {
+                        log::warn!("权限 socket 处理失败：{}", e);
+                    }
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+            }
+            Err(e) => {
+                log::warn!("权限 socket accept 失败：{}", e);
+                thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+            }
+        }
+    }
+}
+
+/// 处理单次连接：读一行请求 → emit event → 等用户响应 → 写回一行决策
+fn handle_connection(
+    stream: UnixStream,
+    app: AppHandle,
+    pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
+    stop_flag: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    stream
+        .set_nonblocking(false)
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+    let mut req_line = String::new();
+    reader
+        .read_line(&mut req_line)
+        .map_err(|e| format!("读权限请求失败：{}", e))?;
+    let req: Value = serde_json::from_str(req_line.trim())
+        .map_err(|e| format!("解析权限请求 JSON 失败：{}", e))?;
+
+    let tool_name = req
+        .get("toolName")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let input = req.get("input").cloned().unwrap_or_else(|| json!({}));
+
+    let request_id = format!("perm-{}", REQ_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let pending_req = Arc::new(PendingRequest {
+        decision: Mutex::new(None),
+        created_at: Instant::now(),
+    });
+
+    pending
+        .lock()
+        .unwrap()
+        .insert(request_id.clone(), pending_req.clone());
+
+    // emit 给前端
+    let payload = PermissionRequestPayload {
+        request_id: request_id.clone(),
+        tool_name,
+        input,
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+    };
+    let _ = app.emit("permission-request", &payload);
+
+    // 等用户响应或超时
+    let decision = wait_decision(&pending_req, &stop_flag);
+
+    // 移除 pending
+    pending.lock().unwrap().remove(&request_id);
+
+    // 超时：emit permission-timeout 让前端可见
+    let final_decision = match decision {
+        Some(d) => d,
+        None => {
+            let _ = app.emit("permission-timeout", json!({ "requestId": request_id }));
+            Decision::Deny("超时拒绝".to_string())
+        }
+    };
+
+    // 写回响应
+    let resp = match final_decision {
+        Decision::Allow => json!({ "behavior": "allow" }),
+        Decision::Deny(msg) => json!({ "behavior": "deny", "message": msg }),
+    };
+    let mut out = stream;
+    let line = serde_json::to_string(&resp).map_err(|e| e.to_string())?;
+    out.write_all(line.as_bytes())
+        .map_err(|e| format!("写响应失败：{}", e))?;
+    out.write_all(b"\n").map_err(|e| e.to_string())?;
+    out.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 阻塞等待决策（轮询），命中三种条件之一返回：用户响应 / 超时 / 服务停止
+fn wait_decision(
+    req: &PendingRequest,
+    stop_flag: &Arc<std::sync::atomic::AtomicBool>,
+) -> Option<Decision> {
+    let timeout = Duration::from_secs(REQUEST_TIMEOUT_SECS);
+    loop {
+        {
+            let slot = req.decision.lock().unwrap();
+            if let Some(d) = slot.as_ref() {
+                return Some(d.clone());
+            }
+        }
+        if stop_flag.load(Ordering::Relaxed) {
+            // 服务停止时按拒绝处理
+            return Some(Decision::Deny("流式中断，自动拒绝".to_string()));
+        }
+        if req.created_at.elapsed() >= timeout {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+    }
+}
+
+// ----- 单元测试 -----
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_socket_path_unique() {
+        let a = make_socket_path();
+        std::thread::sleep(Duration::from_millis(2));
+        let b = make_socket_path();
+        assert_ne!(a, b);
+        assert!(a.to_string_lossy().starts_with("/tmp/cc-space-perm-"));
+    }
+
+    #[test]
+    fn parse_permission_request_ok() {
+        let line = r#"{"toolName":"Bash","input":{"command":"ls"}}"#;
+        let v: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(v.get("toolName").unwrap().as_str().unwrap(), "Bash");
+        assert_eq!(
+            v.get("input").unwrap().get("command").unwrap().as_str().unwrap(),
+            "ls"
+        );
+    }
+}

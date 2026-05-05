@@ -1,12 +1,14 @@
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::models::ContentBlock;
+use crate::permission::PermissionService;
 
 /// 活跃的 streaming 进程句柄
 static ACTIVE_PROCESS: Mutex<Option<Arc<Mutex<Child>>>> = Mutex::new(None);
@@ -83,9 +85,61 @@ fn enhanced_path() -> String {
 }
 
 /// 启动流式会话
-pub fn start_streaming(app: &AppHandle, session_id: &str, cwd: &str, message: &str) {
+pub fn start_streaming(
+    app: &AppHandle,
+    session_id: &str,
+    cwd: &str,
+    message: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) {
     // 先终止已有进程
     stop_streaming();
+
+    // 1. 启动权限服务（失败立即上报错误，不静默降级）
+    let permission_service = match PermissionService::start(app.clone()) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = app.emit(
+                "stream-event",
+                StreamEvent::Error {
+                    message: format!("权限服务启动失败：{}", e),
+                },
+            );
+            return;
+        }
+    };
+    let socket_path = permission_service.socket_path().to_path_buf();
+
+    // 2. 定位 cc-space-mcp 二进制
+    let mcp_binary = match find_mcp_binary() {
+        Some(p) => p,
+        None => {
+            PermissionService::stop_global();
+            let _ = app.emit(
+                "stream-event",
+                StreamEvent::Error {
+                    message: "未找到 cc-space-mcp 二进制，无法启动权限服务".to_string(),
+                },
+            );
+            return;
+        }
+    };
+
+    // 3. 构建 MCP 配置 JSON（claude CLI 接受 JSON 字符串或文件路径）
+    let mcp_config = json!({
+        "mcpServers": {
+            "cc-space": {
+                "type": "stdio",
+                "command": mcp_binary.to_string_lossy().into_owned(),
+                "args": [],
+                "env": {
+                    "CC_SPACE_PERMISSION_SOCK": socket_path.to_string_lossy().into_owned()
+                }
+            }
+        }
+    })
+    .to_string();
 
     let (executable, prefix_args) = find_claude();
     let mut args = prefix_args;
@@ -96,8 +150,22 @@ pub fn start_streaming(app: &AppHandle, session_id: &str, cwd: &str, message: &s
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
-        message.to_string(),
+        "--mcp-config".to_string(),
+        mcp_config,
+        "--permission-prompt-tool".to_string(),
+        "mcp__cc-space__approve_tool_use".to_string(),
     ]);
+    // thinking 摘要由全局 settings.json 的 env.CLAUDE_CODE_EXTRA_BODY 注入到 API body,
+    // 解决 vscode 插件 / cc-space / 终端三端一致问题(claude-code issue #49902 workaround)
+    if let Some(m) = model.filter(|s| !s.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = effort.filter(|s| !s.is_empty()) {
+        args.push("--effort".to_string());
+        args.push(e.to_string());
+    }
+    args.push(message.to_string());
 
     let child = match Command::new(&executable)
         .args(&args)
@@ -109,9 +177,13 @@ pub fn start_streaming(app: &AppHandle, session_id: &str, cwd: &str, message: &s
     {
         Ok(c) => c,
         Err(e) => {
-            let _ = app.emit("stream-event", StreamEvent::Error {
-                message: format!("启动 claude 失败: {}", e),
-            });
+            PermissionService::stop_global();
+            let _ = app.emit(
+                "stream-event",
+                StreamEvent::Error {
+                    message: format!("启动 claude 失败: {}", e),
+                },
+            );
             return;
         }
     };
@@ -122,6 +194,8 @@ pub fn start_streaming(app: &AppHandle, session_id: &str, cwd: &str, message: &s
     let handle = app.clone();
     std::thread::spawn(move || {
         read_stream(child, &handle);
+        // 子进程退出后回收权限服务
+        PermissionService::stop_global();
     });
 }
 
@@ -132,6 +206,37 @@ pub fn stop_streaming() {
             let _ = child.kill();
         }
     }
+    // 一并清理权限服务（pending 请求统一按 deny 收尾）
+    PermissionService::stop_global();
+}
+
+/// 定位 cc-space-mcp 二进制
+///
+/// 顺序：
+/// 1. 环境变量 `CC_SPACE_MCP_BIN`（手动覆盖）
+/// 2. 与当前进程同目录（生产打包后 sidecar 就在主程序旁）
+/// 3. cargo target 目录（开发模式：current_exe 直接就是 target/{debug,release}/app）
+fn find_mcp_binary() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("CC_SPACE_MCP_BIN") {
+        let path = PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("cc-space-mcp");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+            // dev: tauri 启动时 current_exe 在 target/debug，二进制名为 cc_space_mcp
+            let candidate2 = dir.join("cc_space_mcp");
+            if candidate2.is_file() {
+                return Some(candidate2);
+            }
+        }
+    }
+    None
 }
 
 /// 读取进程 stdout，解析并 emit 事件
