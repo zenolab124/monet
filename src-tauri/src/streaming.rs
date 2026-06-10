@@ -17,10 +17,32 @@ static ACTIVE_PROCESS: Mutex<Option<Arc<Mutex<Child>>>> = Mutex::new(None);
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
-    /// 助手消息内容更新
+    /// 助手消息内容更新（终态快照，作为字符级 delta 的兜底校正）
     AssistantMessage {
         message_id: String,
         content: Vec<ContentBlock>,
+    },
+    /// 字符级增量到达——content_block_start：某个 index 上出现新块
+    BlockStart {
+        message_id: String,
+        index: usize,
+        content_block: ContentBlock,
+    },
+    /// 字符级增量到达——content_block_delta：某个 index 上的块字段增长
+    /// delta 原样透传给前端，由前端按 delta.type 派发：
+    /// - text_delta { type, text }
+    /// - input_json_delta { type, partial_json }
+    /// - thinking_delta { type, thinking }
+    /// - signature_delta { type, signature }
+    BlockDelta {
+        message_id: String,
+        index: usize,
+        delta: Value,
+    },
+    /// 字符级增量到达——content_block_stop：某个 index 上的块结束
+    BlockStop {
+        message_id: String,
+        index: usize,
     },
     /// 流式完成
     Result {
@@ -150,6 +172,7 @@ pub fn start_streaming(
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
         "--mcp-config".to_string(),
         mcp_config,
         "--permission-prompt-tool".to_string(),
@@ -251,6 +274,9 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
 
     let reader = BufReader::new(stdout);
     let mut buffered_result: Option<StreamEvent> = None;
+    // partial messages 模式下，content_block_* 不携带 message_id，
+    // 由 message_start 注入、后续 block 事件复用，直到下一个 message_start 覆盖
+    let mut current_message_id: Option<String> = None;
 
     for line in reader.lines() {
         let line = match line {
@@ -263,7 +289,7 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
             Err(_) => continue,
         };
 
-        if let Some(event) = decode_stream_event(&value) {
+        if let Some(event) = decode_stream_event(&value, &mut current_message_id) {
             match &event {
                 StreamEvent::Result { .. } => {
                     // result 事件暂存，等进程退出后再发送
@@ -318,10 +344,66 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
 }
 
 /// 解析单行 stream-json 为 StreamEvent
-fn decode_stream_event(value: &Value) -> Option<StreamEvent> {
+///
+/// `current_message_id` 由 `stream_event/message_start` 写入，后续 content_block_* 事件读取——
+/// CLI 的 partial messages envelope 是 Anthropic Messages API 原生 SSE 的透传，
+/// 单个 block 事件本身不带 message_id，需要靠跨行状态拼接。
+fn decode_stream_event(
+    value: &Value,
+    current_message_id: &mut Option<String>,
+) -> Option<StreamEvent> {
     let event_type = value.get("type")?.as_str()?;
 
     match event_type {
+        "stream_event" => {
+            // CLI envelope: { type: "stream_event", event: <Anthropic SSE event> }
+            let inner = value.get("event")?;
+            let inner_type = inner.get("type")?.as_str()?;
+            match inner_type {
+                "message_start" => {
+                    // 仅更新跨行状态,不 emit:让 content_block_start 自带建 turn 能力
+                    let id = inner
+                        .get("message")?
+                        .get("id")?
+                        .as_str()?
+                        .to_string();
+                    *current_message_id = Some(id);
+                    None
+                }
+                "content_block_start" => {
+                    let mid = current_message_id.as_ref()?.clone();
+                    let index = inner.get("index")?.as_u64()? as usize;
+                    let cb_value = inner.get("content_block")?.clone();
+                    let content_block: ContentBlock =
+                        serde_json::from_value(cb_value).ok()?;
+                    Some(StreamEvent::BlockStart {
+                        message_id: mid,
+                        index,
+                        content_block,
+                    })
+                }
+                "content_block_delta" => {
+                    let mid = current_message_id.as_ref()?.clone();
+                    let index = inner.get("index")?.as_u64()? as usize;
+                    let delta = inner.get("delta")?.clone();
+                    Some(StreamEvent::BlockDelta {
+                        message_id: mid,
+                        index,
+                        delta,
+                    })
+                }
+                "content_block_stop" => {
+                    let mid = current_message_id.as_ref()?.clone();
+                    let index = inner.get("index")?.as_u64()? as usize;
+                    Some(StreamEvent::BlockStop {
+                        message_id: mid,
+                        index,
+                    })
+                }
+                // message_delta / message_stop 忽略,终结由 result 事件兜底
+                _ => None,
+            }
+        }
         "assistant" => {
             let msg = value.get("message")?;
             let message_id = msg

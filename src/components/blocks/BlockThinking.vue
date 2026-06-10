@@ -9,12 +9,14 @@ const props = defineProps<{
 const expanded = ref(false)
 
 /**
- * Anthropic 的 redacted thinking:thinking 字段为空,仅在邻近字段携带 signature(加密签名)。
- * 此时无法展开明文,只展示"已思考(加密)"标识。
- *
- * 兼容老会话:thinking 非空时按字数渲染、可展开看明文。
+ * 三态判断:
+ * - 有明文 → 可折叠展示
+ * - 无明文但有 signature → redacted(已加密)
+ * - 都没有 → 流式中尚未拿到 delta,显示"思考中..."
  */
 const hasPlainText = computed(() => props.block.thinking.length > 0)
+const isRedacted = computed(() => !hasPlainText.value && !!props.block.signature)
+const isThinking = computed(() => !hasPlainText.value && !props.block.signature)
 </script>
 
 <template>
@@ -33,8 +35,14 @@ const hasPlainText = computed(() => props.block.thinking.length > 0)
       </div>
     </template>
 
+    <!-- 流式中,signature/明文都尚未到达 -->
+    <div v-else-if="isThinking" class="text-xs text-default4 flex items-center gap-1">
+      <span class="i-carbon-thinking w-3 h-3 shrink-0 animate-pulse" />
+      思考中...
+    </div>
+
     <!-- redacted:仅显示标识,不可展开(无明文可展) -->
-    <div v-else class="text-xs text-default4 flex items-center gap-1">
+    <div v-else-if="isRedacted" class="text-xs text-default4 flex items-center gap-1">
       <span class="i-carbon-locked w-3 h-3 shrink-0" />
       已思考(内容加密,Anthropic 未暴露明文)
     </div>

@@ -10,6 +10,10 @@ pub enum ContentBlock {
     },
     Thinking {
         thinking: String,
+        /// Anthropic redacted thinking 的加密签名,thinking 为空但 signature 存在时表示"已加密"。
+        /// 流式期间需借此与"思考中"(尚未拿到 delta)区分。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
     ToolUse {
         id: String,

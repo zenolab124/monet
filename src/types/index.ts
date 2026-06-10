@@ -50,7 +50,7 @@ export interface AssistantMessage {
 // serde(tag = "type", rename_all = "snake_case") — 与 Rust 序列化对齐
 export type ContentBlock =
   | { type: 'text'; text: string }
-  | { type: 'thinking'; thinking: string }
+  | { type: 'thinking'; thinking: string; signature?: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[]; is_error: boolean }
   | { type: 'image'; source: { source_type: string; media_type: string; data_prefix: string; data_length: number } }

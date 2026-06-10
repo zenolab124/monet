@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { createSessionDetail } from '@/composables/useSessionDetail'
-import { useStreaming } from '@/composables/useStreaming'
+import { useStreaming, streamingTick } from '@/composables/useStreaming'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { useSessionSettings } from '@/composables/useSessionSettings'
 import {
@@ -403,7 +404,9 @@ function scrollToBottom(force = false) {
       requestAnimationFrame(() => {
         const el = scrollContainer.value
         if (!el) return
-        el.scrollTo({ top: el.scrollHeight, behavior: force ? 'instant' : 'smooth' })
+        // 全程 instant:smooth 在字符级流式高频调用下会被浏览器取消重启动画,
+        // 反而出现"弹跳"。逐帧 instant 移动小距离,60fps 下肉眼是连续平滑的。
+        el.scrollTo({ top: el.scrollHeight, behavior: 'instant' })
       })
     })
   })
@@ -413,24 +416,48 @@ watch(records, () => scrollToBottom(true))
 
 watch(streaming, async (val, oldVal) => {
   if (!val && oldVal) {
-    // 流式结束 → reload jsonl(下次切回会话/重启时要从持久化记录读);
-    // 但 claude CLI 可能还在 flush,首次 reload 可能拿不到新消息,延迟重试一次
-    const beforeLen = records.value.length
-    await reloadRecords()
-    if (records.value.length === beforeLen) {
-      await new Promise(r => setTimeout(r, 400))
-      await reloadRecords()
+    const cs = currentSession.value
+    if (!cs) {
+      clearStreamingTurns()
+      return
     }
-    // 不清 streamingTurns:让它持续渲染本次回复,避免"历史区/流式区"渲染切换造成闪烁。
-    // messages computed 已经按 messageId 过滤掉重复,不会双显示。
-    // streamingTurns 在切会话 / 新一轮 sendMessage 时自然清空。
+    // 等 jsonl flush 稳定(经验值 300ms),避免触发"首次 reload 没拿到 → 重试一次"的双重排
+    await new Promise(r => setTimeout(r, 300))
+    let newRecords: SessionRecord[] | null = null
+    try {
+      newRecords = await invoke<SessionRecord[]>('get_session_records', {
+        projectId: cs.projectId,
+        sessionId: cs.summary.id,
+      })
+    } catch {
+      // ignore:走兜底分支
+    }
+    if (!newRecords || newRecords.length === records.value.length) {
+      // 没拿到 / jsonl 还没写完,再等一次
+      await new Promise(r => setTimeout(r, 400))
+      try {
+        newRecords = await invoke<SessionRecord[]>('get_session_records', {
+          projectId: cs.projectId,
+          sessionId: cs.summary.id,
+        })
+      } catch {
+        // ignore
+      }
+    }
+    // 关键:reload 后只更新 records + 清 pendingUserMessage,
+    // **不**调 clearStreamingTurns——保留流式累积的 streamingTurns 引用,
+    // 让那些 BlockText/BlockThinking 组件实例继续挂载,markdown-it+shiki 不重渲染。
+    // streamingMessageIds 继续屏蔽历史区中相同 messageId 的 assistant record(无双显示)。
+    // streamingTurns 会在下次 sendMessage(重置为 [])或会话切换(clearStreamingTurns)时清掉。
+    if (newRecords) records.value = newRecords
+    pendingUserMessage.value = null
   }
 })
 
-watch(
-  () => streamingTurns.value.reduce((n, t) => n + t.content.length, 0),
-  () => scrollToBottom(),
-)
+// 滚动跟随的 watcher:旧版按 content.length 总和触发,字符级流式下 text 字段 mutate 而数组长度
+// 不变,导致永不触发。改为 watch streamingTick(useStreaming 内每 RAF 递增一次,统一覆盖 block_start/
+// delta/stop/assistant_message 各种 mutation),滚动跟随节流也自然按帧。
+watch(streamingTick, () => scrollToBottom())
 
 watch(
   () => currentSession.value,
@@ -510,16 +537,21 @@ watch(
                 ({{ shortModel(msg.message.model) }})
               </span>
             </div>
-            <MessageBlock
-              v-for="(block, i) in contentBlocks(msg)"
-              :key="i"
-              :block="block"
-            />
+            <!-- 历史区也用 TransitionGroup 包裹(不加 appear,不触发首次淡入动画):
+                 让 DOM 结构跟流式区一致(都有 TransitionGroup 生成的 div 层),
+                 流式结束切换时 Vue 无需重排父容器 layout,避免末尾闪烁。 -->
+            <TransitionGroup name="block-fade" tag="div">
+              <MessageBlock
+                v-for="(block, i) in contentBlocks(msg)"
+                :key="i"
+                :block="block"
+              />
+            </TransitionGroup>
           </div>
         </div>
       </template>
 
-      <div v-if="pendingUserMessage" class="flex gap-3">
+      <div v-if="pendingUserMessage" class="flex gap-3 msg-block">
         <div class="w-0.5 shrink-0 rounded-full bg-blue-500/60" />
         <div class="min-w-0 flex-1">
           <div class="text-xs font-medium mb-1 text-blue-400">你</div>
@@ -527,14 +559,15 @@ watch(
         </div>
       </div>
 
-      <div v-for="turn in streamingTurns" :key="turn.messageId" class="flex gap-3">
+      <div v-for="turn in streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
         <div class="w-0.5 shrink-0 rounded-full bg-purple-500/60" />
         <div class="min-w-0 flex-1">
           <div class="text-xs font-medium mb-1 text-purple-400">Claude</div>
+          <!-- key 命名跟历史区对齐(纯索引),减少结束切换时 Vue diff 的额外 keyed-list 比对 -->
           <TransitionGroup name="block-fade" tag="div" appear>
             <MessageBlock
               v-for="(block, i) in turn.content"
-              :key="`${turn.messageId}-${i}`"
+              :key="i"
               :block="block"
             />
           </TransitionGroup>
