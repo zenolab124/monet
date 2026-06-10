@@ -35,15 +35,15 @@ function statusIcon(status: string): string {
 }
 
 function statusClasses(status: string): string {
-  if (status === 'completed') return 'text-default4 line-through opacity-60'
-  if (status === 'in_progress') return 'text-blue-400 font-medium'
-  return 'text-default3'
+  if (status === 'completed') return 'text-muted-foreground line-through opacity-60'
+  if (status === 'in_progress') return 'text-foreground font-medium'
+  return 'text-muted-foreground'
 }
 
 function iconClasses(status: string): string {
-  if (status === 'completed') return 'text-green-400'
-  if (status === 'in_progress') return 'text-blue-400'
-  return 'text-default4'
+  if (status === 'completed') return 'text-primary'
+  if (status === 'in_progress') return 'text-foreground'
+  return 'text-muted-foreground'
 }
 </script>
 
@@ -57,6 +57,6 @@ function iconClasses(status: string): string {
         </span>
       </li>
     </ul>
-    <div v-if="todos.length === 0" class="text-default4">（无待办项）</div>
+    <div v-if="todos.length === 0" class="text-muted-foreground">（无待办项）</div>
   </div>
 </template>

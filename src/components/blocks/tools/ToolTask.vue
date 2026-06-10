@@ -35,17 +35,17 @@ const promptPreview = computed(() => {
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-green-500/5 border border-green-500/20 px-3 py-2 text-xs">
+  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
     <div class="flex items-center gap-1.5 flex-wrap">
       <span class="i-carbon-task w-3.5 h-3.5 shrink-0" />
-      <span class="text-green-400 font-medium">{{ name }}</span>
-      <span v-if="subagentType" class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-mono">{{ subagentType }}</span>
-      <span v-if="description" class="text-default2">{{ description }}</span>
+      <span class="text-foreground font-medium">{{ name }}</span>
+      <span v-if="subagentType" class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono">{{ subagentType }}</span>
+      <span v-if="description" class="text-foreground">{{ description }}</span>
     </div>
-    <div v-if="prompt" class="mt-1 text-default3 whitespace-pre-wrap break-words">{{ promptPreview }}</div>
+    <div v-if="prompt" class="mt-1 text-muted-foreground whitespace-pre-wrap break-words">{{ promptPreview }}</div>
     <button
       v-if="isLong"
-      class="mt-1 text-default4 hover:text-default3"
+      class="mt-1 text-muted-foreground hover:text-foreground"
       @click="expanded = !expanded"
     >
       {{ expanded ? '收起' : '展开' }}

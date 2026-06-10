@@ -16,12 +16,12 @@ defineProps<{
 </script>
 
 <template>
-  <div class="mt-2 rounded-md border border-divider bg-input/40 px-3 py-2">
+  <div class="mt-2 rounded-md border border-border bg-popover/40 px-3 py-2">
     <!-- 头部 -->
-    <div class="flex items-center gap-1.5 text-xs font-medium text-default3">
+    <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
       <span class="i-carbon-help w-3.5 h-3.5 shrink-0" />
       <span>斜杠命令</span>
-      <span class="text-default4 font-normal">（共 {{ commands.length }} 条）</span>
+      <span class="text-muted-foreground font-normal">（共 {{ commands.length }} 条）</span>
     </div>
 
     <!-- 命令列表 -->
@@ -34,21 +34,21 @@ defineProps<{
         <span class="font-mono text-primary shrink-0">/{{ cmd.name }}</span>
         <span
           v-if="cmd.hasArg && cmd.argHint"
-          class="font-mono text-default4 shrink-0"
+          class="font-mono text-muted-foreground shrink-0"
         >
           {{ cmd.argHint }}
         </span>
-        <span class="text-default3 break-words">{{ cmd.hint }}</span>
+        <span class="text-muted-foreground break-words">{{ cmd.hint }}</span>
         <span
           v-if="cmd.category === 'pass'"
-          class="ml-auto px-1.5 py-0.5 rounded text-2xs text-default4 border border-divider shrink-0"
+          class="ml-auto px-1.5 py-0.5 rounded text-2xs text-muted-foreground border border-border shrink-0"
           title="影响下次发送（透传给 CLI）"
         >
           透传
         </span>
         <span
           v-else
-          class="ml-auto px-1.5 py-0.5 rounded text-2xs text-default4 border border-divider shrink-0"
+          class="ml-auto px-1.5 py-0.5 rounded text-2xs text-muted-foreground border border-border shrink-0"
           title="前端原生处理"
         >
           原生
@@ -57,7 +57,7 @@ defineProps<{
     </ul>
 
     <!-- 底部说明 -->
-    <div class="mt-2 pt-2 border-t border-divider text-2xs text-default4">
+    <div class="mt-2 pt-2 border-t border-border text-2xs text-muted-foreground">
       其它斜杠输入（如 <span class="font-mono">/init</span>、<span class="font-mono">/compact</span>）按普通文本发送给 CLI 处理。
     </div>
   </div>

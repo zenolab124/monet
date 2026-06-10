@@ -125,23 +125,23 @@ function onEffortChange(level: EffortLevel) {
 </script>
 
 <template>
-  <div ref="containerRef" class="px-4 py-3 border-b border-divider shrink-0">
+  <div ref="containerRef" class="px-4 py-3 border-b border-border shrink-0">
     <!-- 上排:标题 + 操作按钮 -->
     <div class="flex items-start justify-between gap-2">
-      <h2 class="text-base font-semibold text-default truncate flex-1">
+      <h2 class="text-base font-semibold text-foreground truncate flex-1">
         {{ title }}
       </h2>
       <div class="flex items-center gap-1 shrink-0">
         <template v-if="showSplit">
           <button
-            class="p-1 rounded text-default4 hover:text-default3 hover:bg-hover transition-colors"
+            class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="右侧分屏"
             @click="emit('split-right')"
           >
             <span class="i-carbon-split-screen w-3.5 h-3.5" />
           </button>
           <button
-            class="p-1 rounded text-default4 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            class="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             title="关闭面板"
             @click="emit('close')"
           >
@@ -149,7 +149,7 @@ function onEffortChange(level: EffortLevel) {
           </button>
         </template>
         <button
-          class="px-2 py-1 text-xs rounded-md text-default3 hover:text-default hover:bg-hover transition-colors flex items-center gap-1"
+          class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
           title="刷新会话"
           @click="emit('reload')"
         >
@@ -191,8 +191,8 @@ function onEffortChange(level: EffortLevel) {
       <div v-if="hasOverflow" ref="overflowRef" class="relative inline-flex">
         <button
           type="button"
-          class="px-2 py-1 text-xs rounded-md text-default3 hover:text-default hover:bg-hover
-                 transition-colors flex items-center gap-1 border border-divider"
+          class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
+                 transition-colors flex items-center gap-1 border border-border"
           title="更多控件"
           :aria-expanded="overflowOpen"
           @click="toggleOverflow"
@@ -201,8 +201,8 @@ function onEffortChange(level: EffortLevel) {
         </button>
         <div
           v-if="overflowOpen"
-          class="absolute top-full right-0 mt-1 z-50 p-2 rounded-md border border-divider
-                 shadow-lg bg-input flex flex-col gap-2 min-w-56"
+          class="absolute top-full right-0 mt-1 z-50 p-2 rounded-md border border-border
+                 shadow-paper-lifted bg-popover flex flex-col gap-2 min-w-56"
         >
           <ContextProgress
             v-if="!showProgress"
@@ -218,10 +218,10 @@ function onEffortChange(level: EffortLevel) {
       </div>
 
       <!-- 元数据(右侧) -->
-      <div class="text-xs text-default4 flex items-center gap-2 flex-wrap ml-auto">
+      <div class="text-xs text-muted-foreground flex items-center gap-2 flex-wrap ml-auto">
         <span>ID: {{ shortIdValue }}</span>
         <span v-if="gitBranch">
-          · 分支: <span class="text-purple-400">{{ gitBranch }}</span>
+          · 分支: <span>{{ gitBranch }}</span>
         </span>
         <span v-if="modelString && !effectiveModel">
           · 模型: {{ shortModel(modelString) }}

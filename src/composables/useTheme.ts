@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { getCurrentWindow, Effect, EffectState } from '@tauri-apps/api/window'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -20,20 +20,10 @@ function applyTheme() {
   const isDark = mode.value === 'dark' || (mode.value === 'system' && prefersDark.matches)
   document.documentElement.classList.toggle('dark', isDark)
 
+  // 同步原生窗口 chrome（标题栏红绿灯区）的亮暗，窗体本身为不透明纸底
   const win = getCurrentWindow()
   const tauriTheme = mode.value === 'system' ? null : mode.value === 'dark' ? 'dark' as const : 'light' as const
   win.setTheme(tauriTheme).catch(() => {})
-
-  // 暗色：启用系统毛玻璃；亮色：关闭毛玻璃用纯色
-  if (isDark) {
-    win.setEffects({ effects: [Effect.UnderWindowBackground], state: EffectState.Active }).catch(() => {})
-    document.documentElement.style.background = 'transparent'
-    document.body.style.background = 'transparent'
-  } else {
-    win.clearEffects().catch(() => {})
-    document.documentElement.style.background = ''
-    document.body.style.background = ''
-  }
 }
 
 // 监听 mode 变化

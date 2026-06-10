@@ -116,36 +116,36 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div
-    class="permission-card rounded-md border bg-input shadow-lg"
-    :class="isDanger ? 'border-red-500/40 ring-1 ring-red-500/20' : 'border-divider'"
+    class="permission-card rounded-md border bg-popover shadow-paper-lifted"
+    :class="isDanger ? 'border-accent/60 ring-1 ring-accent/25' : 'border-border'"
     role="alertdialog"
     :aria-label="isDanger ? '高风险权限请求' : '权限请求'"
   >
     <!-- 头部 -->
-    <div class="flex items-center gap-2 px-3 py-2 border-b border-divider">
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-border">
       <span
         v-if="isDanger"
-        class="i-carbon-warning-alt w-4 h-4 text-red-400 shrink-0"
+        class="i-carbon-warning-alt w-4 h-4 text-accent shrink-0"
         aria-hidden="true"
       />
-      <span v-else class="i-carbon-locked w-4 h-4 text-default3 shrink-0" aria-hidden="true" />
+      <span v-else class="i-carbon-locked w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
 
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="text-xs text-default4">权限请求</span>
-          <span class="text-sm font-medium text-default truncate" :title="request.toolName">
+          <span class="text-xs text-muted-foreground">权限请求</span>
+          <span class="text-sm font-medium text-foreground truncate" :title="request.toolName">
             {{ request.toolName }}
           </span>
           <span
             v-if="isDanger"
-            class="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 text-2xs font-medium shrink-0"
+            class="px-1.5 py-0.5 rounded border border-accent/50 text-accent text-2xs font-medium shrink-0"
           >
             高风险操作
           </span>
         </div>
         <div
           v-if="isDanger && request.danger"
-          class="text-2xs text-red-400/90 mt-0.5 truncate"
+          class="text-2xs text-accent/90 mt-0.5 truncate"
           :title="request.danger.reason"
         >
           {{ request.danger.reason }}
@@ -153,16 +153,16 @@ function onKeydown(e: KeyboardEvent) {
       </div>
 
       <!-- 倒计时 -->
-      <div class="text-2xs text-default4 font-mono shrink-0 tabular-nums" aria-live="polite">
+      <div class="text-2xs text-muted-foreground font-mono shrink-0 tabular-nums" aria-live="polite">
         剩余 {{ remainingSec }}s
       </div>
     </div>
 
     <!-- 倒计时进度条(发条) -->
-    <div class="h-0.5 bg-default4/10">
+    <div class="h-0.5 bg-muted">
       <div
         class="h-full transition-all"
-        :class="isDanger ? 'bg-red-500/60' : 'bg-primary/60'"
+        :class="isDanger ? 'bg-accent/60' : 'bg-primary/60'"
         :style="{ width: `${remainingPct}%` }"
       />
     </div>
@@ -178,7 +178,7 @@ function onKeydown(e: KeyboardEvent) {
     </div>
 
     <!-- 底部按钮组 -->
-    <div class="flex items-center gap-2 px-3 py-2 border-t border-divider">
+    <div class="flex items-center gap-2 px-3 py-2 border-t border-border">
       <button
         ref="allowOnceBtn"
         type="button"
@@ -241,36 +241,37 @@ function onKeydown(e: KeyboardEvent) {
     color 120ms ease,
     box-shadow 120ms ease;
   cursor: pointer;
-  border: 0;
+  border: 1px solid transparent;
   outline: none;
 }
 
 .btn:focus-visible {
-  box-shadow: 0 0 0 2px var(--c-primary, #4f7cff);
+  box-shadow: 0 0 0 2px var(--ring);
 }
 
+/* 三档决策按钮，对齐 messages.html 的 perm-btn 三态 */
 .btn-primary {
-  background-color: rgb(from var(--c-primary, #4f7cff) r g b / 0.15);
-  color: var(--c-primary, #4f7cff);
+  background-color: var(--primary);
+  color: var(--primary-foreground);
 }
 .btn-primary:hover {
-  background-color: rgb(from var(--c-primary, #4f7cff) r g b / 0.25);
+  box-shadow: var(--shadow-paper);
 }
 
 .btn-warn {
-  background-color: rgb(251 146 60 / 0.15);
-  color: rgb(251 146 60);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 .btn-warn:hover {
-  background-color: rgb(251 146 60 / 0.25);
+  background-color: var(--secondary);
 }
 
 .btn-ghost {
-  background-color: rgb(from var(--c-default4, #777) r g b / 0.1);
-  color: var(--c-default3, #999);
+  border-color: var(--border);
+  color: var(--muted-foreground);
 }
 .btn-ghost:hover {
-  background-color: rgb(from var(--c-default4, #777) r g b / 0.2);
+  background-color: var(--muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -25,20 +25,20 @@ const preview = computed(() => fullText.value.slice(0, 80))
   <div class="mt-1">
     <button
       class="text-xs flex items-center gap-1"
-      :class="block.is_error ? 'text-red-400' : 'text-default4 hover:text-default3'"
+      :class="block.is_error ? 'text-destructive' : 'text-muted-foreground hover:text-foreground'"
       @click="expanded = !expanded"
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
       → 结果
-      <span v-if="block.is_error" class="text-red-400">（错误）</span>
-      <span v-if="!expanded" class="text-default4 font-normal truncate max-w-48">
+      <span v-if="block.is_error" class="text-destructive">（错误）</span>
+      <span v-if="!expanded" class="text-muted-foreground font-normal truncate max-w-48">
         {{ preview }}{{ fullText.length > 80 ? '…' : '' }}
       </span>
     </button>
     <div
       v-if="expanded"
       class="mt-1 pl-3 border-l-2 text-xs whitespace-pre-wrap"
-      :class="block.is_error ? 'border-red-500/30 text-red-300' : 'border-default4/30 text-default3'"
+      :class="block.is_error ? 'border-destructive/30 text-destructive' : 'border-border text-muted-foreground'"
     >
       {{ fullText }}
     </div>

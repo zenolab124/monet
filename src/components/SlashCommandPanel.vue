@@ -127,7 +127,7 @@ const positionStyle = computed(() => {
 <template>
   <div
     v-if="visible"
-    class="slash-panel rounded-md border border-divider bg-input shadow-lg overflow-hidden"
+    class="slash-panel rounded-md border border-border bg-popover shadow-paper-lifted overflow-hidden"
     :class="position ? 'fixed z-50' : 'absolute z-50'"
     :style="positionStyle"
     role="listbox"
@@ -136,7 +136,7 @@ const positionStyle = computed(() => {
     <!-- 空状态 -->
     <div
       v-if="filtered.length === 0"
-      class="px-3 py-2 text-xs text-default4"
+      class="px-3 py-2 text-xs text-muted-foreground"
     >
       无匹配，Enter 发送原文
     </div>
@@ -149,25 +149,25 @@ const positionStyle = computed(() => {
         role="option"
         :aria-selected="i === activeIndex"
         class="px-3 py-1.5 cursor-pointer flex items-baseline gap-2 transition-colors"
-        :class="i === activeIndex ? 'bg-primary/10' : 'hover:bg-hover'"
+        :class="i === activeIndex ? 'bg-primary/10' : 'hover:bg-muted'"
         @mouseenter="activeIndex = i"
         @click="selectAt(i)"
       >
         <span class="text-sm font-mono text-primary shrink-0">/{{ cmd.name }}</span>
         <span
           v-if="cmd.hasArg && cmd.argHint"
-          class="text-xs text-default4 font-mono shrink-0"
+          class="text-xs text-muted-foreground font-mono shrink-0"
         >
           {{ cmd.argHint }}
         </span>
-        <span class="text-xs text-default3 truncate">{{ cmd.hint }}</span>
+        <span class="text-xs text-muted-foreground truncate">{{ cmd.hint }}</span>
       </li>
     </ul>
 
     <!-- 底部提示 -->
     <div
       v-if="filtered.length > 0"
-      class="px-3 py-1 border-t border-divider text-2xs text-default4 flex items-center gap-3"
+      class="px-3 py-1 border-t border-border text-2xs text-muted-foreground flex items-center gap-3"
     >
       <span><kbd class="kbd">↑↓</kbd> 移动</span>
       <span><kbd class="kbd">Enter</kbd> 选择</span>
@@ -188,12 +188,12 @@ const positionStyle = computed(() => {
 }
 
 .kbd {
-  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   padding: 0 4px;
-  border: 1px solid var(--c-default4, rgba(127, 127, 127, 0.3));
+  border: 1px solid var(--border);
   border-radius: 3px;
   background: transparent;
-  color: var(--c-default3, inherit);
+  color: var(--muted-foreground);
 }
 </style>

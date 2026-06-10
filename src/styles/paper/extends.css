@@ -1,0 +1,35 @@
+/*
+ * Paper 主题项目扩展层 —— CC Space 专属 token 与应用基础样式
+ *
+ * paper.css 是上游真理源（style-lab 复制而来，更新 = 重新复制覆盖），本文件独立存在不随覆盖丢失。
+ * 扩展 token 与全局基础样式只放这里，不修改 paper.css 本体。
+ */
+
+:root {
+  /* Claude 品牌陶土橙（Claude 身份色，与用户的 primary 墨绿相对） */
+  --claude: oklch(0.71 0.12 40);
+
+  /* 系统等宽栈：代码 / 路径 / 命令行（零 webfont） */
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco,
+    Consolas, monospace;
+}
+
+.dark {
+  --claude: oklch(0.75 0.115 42);
+}
+
+/* === 应用基础样式（组件层只消费 token，全局只在此定义一次）=== */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}

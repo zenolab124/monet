@@ -39,7 +39,7 @@ const emit = defineEmits<{
       :mime="img.mime"
       @remove="emit('remove', img.id)"
     />
-    <span class="text-2xs text-default4 ml-1">
+    <span class="text-2xs text-muted-foreground ml-1">
       {{ images.length }} / {{ MAX_IMAGES_PER_MESSAGE }}
     </span>
   </div>

@@ -488,7 +488,7 @@ watch(
 <template>
   <!-- 空态 -->
   <div v-if="!currentSession" class="h-full flex items-center justify-center">
-    <p class="text-default4 text-sm">从左侧选择会话</p>
+    <p class="text-muted-foreground text-sm">从左侧选择会话</p>
   </div>
 
   <div v-else class="h-full flex flex-col">
@@ -516,17 +516,17 @@ watch(
 
     <!-- 加载态 -->
     <div v-if="loading" class="flex-1 flex items-center justify-center">
-      <p class="text-default4 text-sm">加载对话中...</p>
+      <p class="text-muted-foreground text-sm">加载对话中...</p>
     </div>
 
     <!-- 错误态 -->
     <div v-else-if="error" class="flex-1 flex items-center justify-center">
-      <p class="text-red-400 text-sm">{{ error }}</p>
+      <p class="text-destructive text-sm">{{ error }}</p>
     </div>
 
     <!-- 无记录 -->
     <div v-else-if="messages.length === 0 && !streaming && !showHelpCard" class="flex-1 flex items-center justify-center">
-      <p class="text-default4 text-sm">无对话记录</p>
+      <p class="text-muted-foreground text-sm">无对话记录</p>
     </div>
 
     <!-- 对话消息流 -->
@@ -538,14 +538,14 @@ watch(
           <div v-else class="flex gap-3 msg-block">
             <div
               class="w-0.5 shrink-0 rounded-full"
-              :class="msg.type === 'user' ? 'bg-blue-500/60' : 'bg-purple-500/60'"
+              :class="msg.type === 'user' ? 'bg-primary/60' : 'bg-claude/60'"
             />
             <div class="min-w-0 flex-1">
               <div class="text-xs font-medium mb-1"
-                :class="msg.type === 'user' ? 'text-blue-400' : 'text-purple-400'"
+                :class="msg.type === 'user' ? 'text-primary' : 'text-claude'"
               >
                 {{ msg.type === 'user' ? '你' : 'Claude' }}
-                <span v-if="msg.type === 'assistant' && msg.message?.model" class="text-default4 font-normal">
+                <span v-if="msg.type === 'assistant' && msg.message?.model" class="text-muted-foreground font-normal">
                   ({{ shortModel(msg.message.model) }})
                 </span>
               </div>
@@ -565,17 +565,17 @@ watch(
       </template>
 
       <div v-if="pendingUserMessage" class="flex gap-3 msg-block">
-        <div class="w-0.5 shrink-0 rounded-full bg-blue-500/60" />
+        <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
         <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium mb-1 text-blue-400">你</div>
+          <div class="text-xs font-medium mb-1 text-primary">你</div>
           <div class="whitespace-pre-wrap break-words text-sm">{{ pendingUserMessage }}</div>
         </div>
       </div>
 
       <div v-for="turn in streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
-        <div class="w-0.5 shrink-0 rounded-full bg-purple-500/60" />
+        <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
         <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium mb-1 text-purple-400">Claude</div>
+          <div class="text-xs font-medium mb-1 text-claude">Claude</div>
           <!-- key 命名跟历史区对齐(纯索引),减少结束切换时 Vue diff 的额外 keyed-list 比对 -->
           <TransitionGroup name="block-fade" tag="div" appear>
             <MessageBlock
@@ -588,11 +588,11 @@ watch(
       </div>
 
       <div v-if="streaming && streamingTurns.length === 0" class="flex gap-3">
-        <div class="w-0.5 shrink-0 rounded-full bg-purple-500/60" />
-        <div class="text-xs text-default4">思考中...</div>
+        <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
+        <div class="text-xs text-muted-foreground">思考中...</div>
       </div>
 
-      <div v-if="streamError" class="px-3 py-2 rounded-md bg-red-500/10 text-red-400 text-xs">
+      <div v-if="streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">
         {{ streamError }}
       </div>
 
@@ -613,8 +613,8 @@ watch(
     </div>
 
     <!-- 输入栏 + 斜杠命令面板 -->
-    <div v-if="currentSession.summary.cwd" class="px-4 py-3 border-t border-divider shrink-0 relative">
-      <div v-if="slashError" class="mb-1 text-xs text-red-400">
+    <div v-if="currentSession.summary.cwd" class="px-4 py-3 border-t border-border shrink-0 relative">
+      <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
       </div>
 
@@ -633,9 +633,9 @@ watch(
           :disabled="streaming"
           placeholder="输入消息… (Shift+Enter 换行,/ 触发命令补全)"
           rows="1"
-          class="flex-1 px-3 py-2 text-sm rounded-md bg-input border border-divider
-                 text-default placeholder-default4 resize-none
-                 focus:outline-none focus:border-blue-500/50 transition-colors
+          class="flex-1 px-3 py-2 text-sm rounded-md bg-popover border border-border
+                 text-foreground placeholder-muted-foreground resize-none
+                 focus:outline-none focus:border-ring transition-colors
                  disabled:opacity-50"
           @keydown="onInputKeydown"
           @input="onInputChange"
@@ -645,7 +645,7 @@ watch(
         />
         <button
           v-if="streaming"
-          class="px-3 py-2 text-xs rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors shrink-0"
+          class="px-3 py-2 text-xs rounded-md bg-accent text-accent-foreground hover:shadow-paper transition-shadow shrink-0"
           @click="onStopStreaming"
         >
           停止
@@ -653,7 +653,7 @@ watch(
         <button
           v-else
           :disabled="!inputText.trim()"
-          class="px-3 py-2 text-xs rounded-md bg-primary/15 text-primary hover:bg-primary/25 transition-colors shrink-0
+          class="px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0
                  disabled:opacity-30 disabled:cursor-not-allowed"
           @click="handleSend"
         >

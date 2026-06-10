@@ -30,7 +30,7 @@ const tooltip = computed(() => {
 
 <template>
   <div
-    class="relative w-16 h-16 rounded-[4px] overflow-hidden border border-divider bg-input
+    class="relative w-16 h-16 rounded-[4px] overflow-hidden border border-border bg-popover
            group flex-shrink-0"
     :title="tooltip"
   >
@@ -44,7 +44,7 @@ const tooltip = computed(() => {
     <button
       type="button"
       class="absolute top-0.5 right-0.5 w-4 h-4 rounded-full
-             bg-black/60 text-white text-2xs leading-none
+             bg-foreground/80 text-card text-2xs leading-none
              flex items-center justify-center
              opacity-0 group-hover:opacity-100 focus:opacity-100
              transition-opacity"

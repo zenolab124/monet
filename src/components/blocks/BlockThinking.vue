@@ -24,25 +24,25 @@ const isThinking = computed(() => !hasPlainText.value && !props.block.signature)
     <!-- 有明文:可折叠,显示字数 -->
     <template v-if="hasPlainText">
       <button
-        class="text-xs text-default4 hover:text-default3 flex items-center gap-1"
+        class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
         @click="expanded = !expanded"
       >
         <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
         思考过程（{{ block.thinking.length }} 字）
       </button>
-      <div v-if="expanded" class="mt-1 pl-3 border-l-2 border-default4/30 text-xs text-default3 whitespace-pre-wrap">
+      <div v-if="expanded" class="mt-1 pl-3 border-l-2 border-border text-xs text-muted-foreground whitespace-pre-wrap">
         {{ block.thinking }}
       </div>
     </template>
 
     <!-- 流式中,signature/明文都尚未到达 -->
-    <div v-else-if="isThinking" class="text-xs text-default4 flex items-center gap-1">
+    <div v-else-if="isThinking" class="text-xs text-muted-foreground flex items-center gap-1">
       <span class="i-carbon-thinking w-3 h-3 shrink-0 animate-pulse" />
       思考中...
     </div>
 
     <!-- redacted:仅显示标识,不可展开(无明文可展) -->
-    <div v-else-if="isRedacted" class="text-xs text-default4 flex items-center gap-1">
+    <div v-else-if="isRedacted" class="text-xs text-muted-foreground flex items-center gap-1">
       <span class="i-carbon-locked w-3 h-3 shrink-0" />
       已思考(内容加密,Anthropic 未暴露明文)
     </div>

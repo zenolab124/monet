@@ -27,22 +27,22 @@ const expanded = ref(false)
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-green-500/5 border border-green-500/20 px-3 py-2 text-xs">
+  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
     <button
       class="flex items-center gap-1.5 w-full text-left flex-wrap"
       @click="expanded = !expanded"
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform shrink-0" :class="{ 'rotate-90': expanded }" />
       <span class="i-carbon-plug w-3.5 h-3.5 shrink-0" />
-      <span class="text-green-400 font-medium">mcp</span>
+      <span class="text-foreground font-medium">mcp</span>
       <template v-if="parsed">
-        <span class="text-default4">·</span>
-        <code class="px-1.5 py-0.5 rounded bg-default4/15 text-default3 font-mono">{{ parsed.server }}</code>
-        <span class="text-default4">·</span>
-        <code class="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 font-mono">{{ parsed.tool }}</code>
+        <span class="text-muted-foreground">·</span>
+        <code class="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">{{ parsed.server }}</code>
+        <span class="text-muted-foreground">·</span>
+        <code class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono">{{ parsed.tool }}</code>
       </template>
-      <code v-else class="px-1.5 py-0.5 rounded bg-default4/15 text-default3 font-mono">{{ name }}</code>
+      <code v-else class="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">{{ name }}</code>
     </button>
-    <pre v-if="expanded" class="mt-2 rounded bg-default4/10 px-2 py-1 text-default3 whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ inputJson }}</pre>
+    <pre v-if="expanded" class="mt-2 rounded bg-muted px-2 py-1 text-muted-foreground whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ inputJson }}</pre>
   </div>
 </template>

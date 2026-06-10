@@ -11,7 +11,7 @@ const expanded = ref(false)
 <template>
   <div class="mt-1">
     <button
-      class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+      class="text-xs text-primary hover:text-primary/80 flex items-center gap-1"
       @click="expanded = !expanded"
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
@@ -20,7 +20,7 @@ const expanded = ref(false)
     </button>
     <div
       v-if="expanded"
-      class="mt-1 pl-3 border-l-2 border-blue-500/20 text-xs text-default4 whitespace-pre-wrap max-h-64 overflow-y-auto"
+      class="mt-1 pl-3 border-l-2 border-border text-xs text-muted-foreground whitespace-pre-wrap max-h-64 overflow-y-auto"
     >
       {{ block.text }}
     </div>

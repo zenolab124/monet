@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import 'virtual:uno.css'
-import '../../../cc-lab/style-lab/src/style/index.css'
+import './styles/paper/paper.css'
+import './styles/paper/extends.css'
 import './prose.css'
 import App from './App.vue'
 

@@ -48,7 +48,7 @@ async function deleteSession() {
     <!-- 在终端恢复 -->
     <button
       v-if="cwd"
-      class="px-2 py-1 text-xs rounded-md text-default3 hover:text-default hover:bg-hover transition-colors flex items-center gap-1"
+      class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
       title="在终端恢复"
       @click="resumeInTerminal"
     >
@@ -59,7 +59,7 @@ async function deleteSession() {
     <!-- 在 VSCode 恢复 -->
     <button
       v-if="cwd"
-      class="px-2 py-1 text-xs rounded-md text-default3 hover:text-default hover:bg-hover transition-colors flex items-center gap-1"
+      class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
       title="在 VSCode 恢复"
       @click="resumeInVscode"
     >
@@ -70,7 +70,7 @@ async function deleteSession() {
     <!-- 删除 -->
     <template v-if="!confirmingDelete">
       <button
-        class="px-2 py-1 text-xs rounded-md text-default4 hover:text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1"
+        class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1"
         title="删除会话"
         @click="confirmingDelete = true"
       >
@@ -78,15 +78,15 @@ async function deleteSession() {
       </button>
     </template>
     <template v-else>
-      <span class="text-xs text-default4">确认删除？</span>
+      <span class="text-xs text-muted-foreground">确认删除？</span>
       <button
-        class="px-2 py-0.5 text-xs rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+        class="px-2 py-0.5 text-xs rounded-md bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors"
         @click="deleteSession"
       >
         删除
       </button>
       <button
-        class="px-2 py-0.5 text-xs rounded-md text-default4 hover:text-default3 transition-colors"
+        class="px-2 py-0.5 text-xs rounded-md text-muted-foreground hover:text-foreground transition-colors"
         @click="confirmingDelete = false"
       >
         取消

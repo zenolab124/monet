@@ -108,8 +108,8 @@ onUnmounted(() => {
     <button
       ref="buttonRef"
       type="button"
-      class="px-2 py-1 text-xs rounded-md text-default3 hover:text-default hover:bg-hover
-             transition-colors flex items-center gap-1 border border-divider"
+      class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
+             transition-colors flex items-center gap-1 border border-border"
       :title="`努力等级:${currentLabel}`"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
@@ -117,14 +117,14 @@ onUnmounted(() => {
     >
       <span class="i-carbon-meter w-3.5 h-3.5" />
       <span class="truncate">{{ currentLabel }}</span>
-      <span class="i-carbon-chevron-down w-3 h-3 text-default4" />
+      <span class="i-carbon-chevron-down w-3 h-3 text-muted-foreground" />
     </button>
 
     <ul
       v-if="open"
       role="listbox"
-      class="absolute top-full left-0 mt-1 z-50 min-w-28 py-1 rounded-md border border-divider
-             shadow-lg bg-input"
+      class="absolute top-full left-0 mt-1 z-50 min-w-28 py-1 rounded-md border border-border
+             shadow-paper-lifted bg-popover"
     >
       <li
         v-for="(o, i) in OPTIONS"
@@ -134,7 +134,7 @@ onUnmounted(() => {
         tabindex="-1"
         :aria-selected="i === currentIndex"
         class="px-2 py-1 text-xs flex items-center gap-2 cursor-pointer
-               text-default3 hover:bg-hover hover:text-default focus:bg-hover focus:text-default focus:outline-none"
+               text-muted-foreground hover:bg-muted hover:text-foreground focus:bg-muted focus:text-foreground focus:outline-none"
         @click="selectAt(i)"
         @mouseenter="focusedIndex = i"
       >

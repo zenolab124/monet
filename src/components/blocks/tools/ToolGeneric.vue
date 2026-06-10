@@ -88,39 +88,39 @@ function renderMd(text: string) {
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-green-500/5 border border-green-500/20 px-3 py-2 text-xs space-y-1.5">
+  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs space-y-1.5">
     <div class="flex items-center gap-1.5">
       <span class="i-carbon-tool-kit w-3.5 h-3.5 shrink-0" />
-      <span class="text-green-400 font-medium">{{ name }}</span>
+      <span class="text-foreground font-medium">{{ name }}</span>
     </div>
 
     <template v-for="f in matchedFields" :key="f.key">
       <!-- 文件路径 -->
       <div v-if="f.kind === 'path'" class="flex items-center gap-1.5">
-        <span class="text-default4 shrink-0">{{ f.key }}:</span>
-        <span class="font-mono text-default3 truncate" :title="f.value">{{ f.value }}</span>
+        <span class="text-muted-foreground shrink-0">{{ f.key }}:</span>
+        <span class="font-mono text-muted-foreground truncate" :title="f.value">{{ f.value }}</span>
       </div>
 
       <!-- 命令 -->
       <pre
         v-else-if="f.kind === 'command'"
-        class="rounded bg-default4/10 px-2 py-1 text-default2 whitespace-pre-wrap break-all font-mono"
+        class="rounded bg-muted px-2 py-1 text-foreground whitespace-pre-wrap break-all font-mono"
       >$ {{ f.value }}</pre>
 
       <!-- 查询 -->
       <div v-else-if="f.kind === 'query'" class="flex items-center gap-1.5 flex-wrap">
-        <span class="text-default4 shrink-0">{{ f.key }}:</span>
-        <code class="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 font-mono">{{ f.value }}</code>
+        <span class="text-muted-foreground shrink-0">{{ f.key }}:</span>
+        <code class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono">{{ f.value }}</code>
       </div>
 
       <!-- URL -->
       <div v-else-if="f.kind === 'url'" class="flex items-center gap-1.5">
-        <span class="text-default4 shrink-0">{{ f.key }}:</span>
+        <span class="text-muted-foreground shrink-0">{{ f.key }}:</span>
         <a
           :href="f.value"
           target="_blank"
           rel="noopener noreferrer"
-          class="font-mono text-blue-400 hover:text-blue-300 truncate underline-offset-2 hover:underline"
+          class="font-mono text-primary hover:text-primary/80 truncate underline-offset-2 hover:underline"
           :title="f.value"
         >{{ f.value }}</a>
       </div>
@@ -130,11 +130,11 @@ function renderMd(text: string) {
 
       <!-- 长文本可折叠 -->
       <div v-else-if="f.kind === 'longtext'">
-        <div class="text-default4">{{ f.key }}:</div>
-        <pre class="mt-1 rounded bg-default4/10 px-2 py-1 text-default3 whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ displayLongText(f.key, f.value) }}</pre>
+        <div class="text-muted-foreground">{{ f.key }}:</div>
+        <pre class="mt-1 rounded bg-muted px-2 py-1 text-muted-foreground whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ displayLongText(f.key, f.value) }}</pre>
         <button
           v-if="isLongText(f.value)"
-          class="mt-1 text-default4 hover:text-default3"
+          class="mt-1 text-muted-foreground hover:text-foreground"
           @click="toggleLongText(f.key)"
         >
           {{ longTextExpanded[f.key] ? '收起' : `…展开全部（${Math.round(f.value.length / 1024)}KB）` }}
@@ -145,13 +145,13 @@ function renderMd(text: string) {
     <!-- 其它字段 JSON 折叠 -->
     <div v-if="otherFields">
       <button
-        class="flex items-center gap-1 text-default4 hover:text-default3"
+        class="flex items-center gap-1 text-muted-foreground hover:text-foreground"
         @click="otherExpanded = !otherExpanded"
       >
         <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': otherExpanded }" />
         其它字段
       </button>
-      <pre v-if="otherExpanded" class="mt-1 rounded bg-default4/10 px-2 py-1 text-default3 whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ otherJson }}</pre>
+      <pre v-if="otherExpanded" class="mt-1 rounded bg-muted px-2 py-1 text-muted-foreground whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ otherJson }}</pre>
     </div>
   </div>
 </template>

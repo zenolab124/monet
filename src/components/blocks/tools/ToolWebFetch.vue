@@ -26,19 +26,19 @@ const promptPreview = computed(() => {
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-green-500/5 border border-green-500/20 px-3 py-2 text-xs">
+  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
     <div class="flex items-center gap-1.5 flex-wrap">
       <span class="i-carbon-cloud w-3.5 h-3.5 shrink-0" />
-      <span class="text-green-400 font-medium">WebFetch</span>
+      <span class="text-foreground font-medium">WebFetch</span>
       <a
         v-if="url"
         :href="url"
         target="_blank"
         rel="noopener noreferrer"
-        class="font-mono text-blue-400 hover:text-blue-300 truncate underline-offset-2 hover:underline"
+        class="font-mono text-primary hover:text-primary/80 truncate underline-offset-2 hover:underline"
         :title="url"
       >{{ url }}</a>
     </div>
-    <div v-if="promptPreview" class="mt-1 text-default3">{{ promptPreview }}</div>
+    <div v-if="promptPreview" class="mt-1 text-muted-foreground">{{ promptPreview }}</div>
   </div>
 </template>

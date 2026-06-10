@@ -29,17 +29,17 @@ const level = computed<0 | 1 | 2>(() => {
 
 const barColorClass = computed(() => {
   switch (level.value) {
-    case 2: return 'bg-red-400'
-    case 1: return 'bg-orange-400'
+    case 2: return 'bg-destructive'
+    case 1: return 'bg-accent'
     default: return 'bg-primary'
   }
 })
 
 const textColorClass = computed(() => {
   switch (level.value) {
-    case 2: return 'text-red-400'
-    case 1: return 'text-orange-400'
-    default: return 'text-default3'
+    case 2: return 'text-destructive'
+    case 1: return 'text-accent'
+    default: return 'text-muted-foreground'
   }
 })
 
@@ -50,7 +50,7 @@ const capacityText = computed(() => formatTokens(props.capacity))
 <template>
   <div class="inline-flex items-center gap-2 min-w-32" :title="`已用 ${usedText} / 总容量 ${capacityText} (${percent}%)`">
     <!-- 进度条 -->
-    <div class="relative w-20 h-1.5 rounded-full overflow-hidden bg-hover shrink-0">
+    <div class="relative w-20 h-1.5 rounded-full overflow-hidden bg-muted shrink-0">
       <div
         class="absolute inset-y-0 left-0 rounded-full transition-all duration-200"
         :class="barColorClass"
@@ -60,10 +60,10 @@ const capacityText = computed(() => formatTokens(props.capacity))
     <!-- 文本 -->
     <span class="text-xs whitespace-nowrap" :class="textColorClass">
       {{ usedText }} / {{ capacityText }}
-      <span class="text-default4">({{ percent }}%)</span>
+      <span class="text-muted-foreground">({{ percent }}%)</span>
     </span>
     <!-- 上下文将满提示 -->
-    <span v-if="level === 2" class="text-xs text-red-400 flex items-center gap-1">
+    <span v-if="level === 2" class="text-xs text-destructive flex items-center gap-1">
       <span class="i-carbon-warning-alt w-3 h-3" />
       上下文将满
     </span>

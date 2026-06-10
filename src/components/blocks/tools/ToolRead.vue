@@ -31,12 +31,12 @@ const lineRange = computed(() => {
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-green-500/5 border border-green-500/20 px-3 py-2 text-xs">
+  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
     <div class="flex items-center gap-1.5">
       <span class="i-carbon-document w-3.5 h-3.5 shrink-0" />
-      <span class="text-green-400 font-medium">Read</span>
-      <span v-if="filePath" class="font-mono text-default3 truncate" :title="filePath">{{ filePath }}</span>
-      <span v-if="lineRange" class="font-mono text-default4 ml-1">{{ lineRange }}</span>
+      <span class="text-foreground font-medium">Read</span>
+      <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ filePath }}</span>
+      <span v-if="lineRange" class="font-mono text-muted-foreground ml-1">{{ lineRange }}</span>
     </div>
   </div>
 </template>

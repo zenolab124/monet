@@ -35,24 +35,26 @@
 .prose-msg h3 { font-size: 1em; }
 .prose-msg h4 { font-size: 0.875em; }
 
-/* 行内代码 */
+/* 行内代码：衬纸方签（对齐 messages.html 的 code.inline） */
 .prose-msg code:not(pre code) {
-  background: var(--c-default4, rgba(127, 127, 127, 0.12));
-  padding: 0.15em 0.35em;
-  border-radius: 4px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  padding: 0 0.35em;
+  border-radius: 3px;
   font-size: 0.875em;
-  font-family: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* 代码块容器 */
 .prose-msg pre {
   margin: 0.5em 0;
   padding: 0.75em 1em;
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   overflow-x: auto;
   font-size: 0.8125em;
   line-height: 1.5;
-  font-family: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 .prose-msg pre code {
   background: none;
@@ -79,7 +81,7 @@
 
 /* 无 shiki 时的降级代码块样式 */
 .prose-msg pre:not(.shiki) {
-  background: var(--c-default4, rgba(127, 127, 127, 0.08));
+  background: var(--background);
   color: inherit;
 }
 
@@ -87,8 +89,8 @@
 .prose-msg blockquote {
   margin: 0.5em 0;
   padding: 0.25em 0 0.25em 0.75em;
-  border-left: 3px solid var(--c-default4, rgba(127, 127, 127, 0.3));
-  color: var(--c-default3, #6b7280);
+  border-left: 3px solid var(--border);
+  color: var(--muted-foreground);
 }
 
 /* 列表 */
@@ -110,7 +112,7 @@
 .prose-msg hr {
   margin: 0.8em 0;
   border: none;
-  border-top: 1px solid var(--c-default4, rgba(127, 127, 127, 0.2));
+  border-top: 1px solid var(--border);
 }
 
 /* 表格 */
@@ -123,21 +125,19 @@
 .prose-msg th,
 .prose-msg td {
   padding: 0.35em 0.65em;
-  border: 1px solid var(--c-default4, rgba(127, 127, 127, 0.2));
+  border: 1px solid var(--border);
   text-align: left;
 }
 .prose-msg th {
   font-weight: 600;
-  background: var(--c-default4, rgba(127, 127, 127, 0.06));
+  background: var(--secondary);
 }
 
-/* 链接 */
+/* 链接（对齐 messages.html：常显下划线） */
 .prose-msg a {
-  color: var(--c-primary, #3b82f6);
-  text-decoration: none;
-}
-.prose-msg a:hover {
+  color: var(--primary);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* 加粗/斜体 */

@@ -103,23 +103,23 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
     <!-- 统计卡片：横向铺开，数字与标签水平排列，避免窄宽度下换行 -->
     <div class="px-3 py-2 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-default truncate">{{ sessionStats.sessionCount }}</span>
-        <span class="text-xs text-default4 shrink-0">会话</span>
+        <span class="text-sm font-semibold text-foreground truncate">{{ sessionStats.sessionCount }}</span>
+        <span class="text-xs text-muted-foreground shrink-0">会话</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-default truncate">{{ formatTokens(sessionStats.totalTokens) }}</span>
-        <span class="text-xs text-default4 shrink-0">Token</span>
+        <span class="text-sm font-semibold text-foreground truncate">{{ formatTokens(sessionStats.totalTokens) }}</span>
+        <span class="text-xs text-muted-foreground shrink-0">Token</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-default truncate">{{ formatBytes(sessionStats.totalSize) }}</span>
-        <span class="text-xs text-default4 shrink-0">磁盘</span>
+        <span class="text-sm font-semibold text-foreground truncate">{{ formatBytes(sessionStats.totalSize) }}</span>
+        <span class="text-xs text-muted-foreground shrink-0">磁盘</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-default truncate">{{ sessionStats.activeDays }}</span>
-        <span class="text-xs text-default4 shrink-0">活跃</span>
+        <span class="text-sm font-semibold text-foreground truncate">{{ sessionStats.activeDays }}</span>
+        <span class="text-xs text-muted-foreground shrink-0">活跃</span>
       </div>
     </div>
 
@@ -129,14 +129,14 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
         v-for="(label, key) in sortLabels"
         :key="key"
         class="px-2 py-0.5 text-xs rounded transition-colors"
-        :class="sortOrder === key ? 'bg-active text-default' : 'text-default3 hover:text-default'"
+        :class="sortOrder === key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
         @click="sortOrder = key as SortOrder"
       >
         {{ label }}
       </button>
       <span class="flex-1" />
       <button
-        class="p-1 rounded text-default4 hover:text-default3 hover:bg-hover transition-colors"
+        class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="刷新列表"
         @click="loadProjects"
       >
@@ -151,38 +151,38 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
         v-for="(label, key) in timeLabels"
         :key="key"
         class="px-2 py-0.5 text-xs rounded transition-colors"
-        :class="selectedTimeRange === key ? 'bg-blue-500/15 text-blue-400' : 'text-default4 hover:text-default3'"
+        :class="selectedTimeRange === key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
         @click="selectedTimeRange = key as TimeRange"
       >
         {{ label }}
       </button>
 
-      <span class="text-divider">|</span>
+      <span class="text-border">|</span>
 
       <!-- 分支下拉 -->
       <div class="relative">
         <button
           v-if="selectedBranch"
-          class="px-2 py-0.5 text-xs rounded bg-purple-500/15 text-purple-400 flex items-center gap-1"
+          class="px-2 py-0.5 text-xs rounded bg-secondary text-foreground flex items-center gap-1"
           @click="selectedBranch = null"
         >
           {{ selectedBranch }} ×
         </button>
         <button
           v-else
-          class="px-2 py-0.5 text-xs rounded text-default4 hover:text-default3 flex items-center gap-0.5"
+          class="px-2 py-0.5 text-xs rounded text-muted-foreground hover:text-foreground flex items-center gap-0.5"
           @click.stop="showBranchDropdown = !showBranchDropdown; showModelDropdown = false"
         >
           分支 <span class="i-carbon-chevron-down w-3 h-3" />
         </button>
         <div
           v-if="showBranchDropdown && filterOptions.branches.length"
-          class="absolute top-full left-0 mt-1 z-10 bg-cardbg border border-divider rounded-md shadow-lg py-1 min-w-32 max-h-48 overflow-y-auto"
+          class="absolute top-full left-0 mt-1 z-10 bg-card border border-border rounded-md shadow-paper-lifted py-1 min-w-32 max-h-48 overflow-y-auto"
         >
           <button
             v-for="branch in filterOptions.branches"
             :key="branch"
-            class="w-full text-left px-3 py-1 text-xs hover:bg-hover text-default3 truncate"
+            class="w-full text-left px-3 py-1 text-xs hover:bg-muted text-muted-foreground truncate"
             @click="pickBranch(branch)"
           >
             {{ branch }}
@@ -194,26 +194,26 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       <div class="relative">
         <button
           v-if="selectedModel"
-          class="px-2 py-0.5 text-xs rounded bg-green-500/15 text-green-400 flex items-center gap-1"
+          class="px-2 py-0.5 text-xs rounded bg-secondary text-foreground flex items-center gap-1"
           @click="selectedModel = null"
         >
           {{ shortModel(selectedModel) }} ×
         </button>
         <button
           v-else
-          class="px-2 py-0.5 text-xs rounded text-default4 hover:text-default3 flex items-center gap-0.5"
+          class="px-2 py-0.5 text-xs rounded text-muted-foreground hover:text-foreground flex items-center gap-0.5"
           @click.stop="showModelDropdown = !showModelDropdown; showBranchDropdown = false"
         >
           模型 <span class="i-carbon-chevron-down w-3 h-3" />
         </button>
         <div
           v-if="showModelDropdown && filterOptions.models.length"
-          class="absolute top-full left-0 mt-1 z-10 bg-cardbg border border-divider rounded-md shadow-lg py-1 min-w-32 max-h-48 overflow-y-auto"
+          class="absolute top-full left-0 mt-1 z-10 bg-card border border-border rounded-md shadow-paper-lifted py-1 min-w-32 max-h-48 overflow-y-auto"
         >
           <button
             v-for="model in filterOptions.models"
             :key="model"
-            class="w-full text-left px-3 py-1 text-xs hover:bg-hover text-default3 truncate"
+            class="w-full text-left px-3 py-1 text-xs hover:bg-muted text-muted-foreground truncate"
             @click="pickModel(model)"
           >
             {{ shortModel(model) }}
@@ -223,37 +223,37 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
     </div>
 
     <!-- 会话列表 -->
-    <div class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain">
+    <div class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain p-2 flex flex-col gap-1">
       <div v-if="sortedSessions.length === 0" class="px-3 py-8 text-center">
-        <p class="text-default3 text-xs">没有找到会话</p>
-        <p class="text-default4 text-xs mt-1">尝试调整筛选条件</p>
+        <p class="text-muted-foreground text-xs">没有找到会话</p>
+        <p class="text-muted-foreground text-xs mt-1">尝试调整筛选条件</p>
       </div>
 
       <div
         v-for="session in sortedSessions"
         :key="session.id"
-        class="w-full text-left px-3 py-2 border-b border-divider/50 transition-colors hover:bg-hover cursor-pointer group relative"
-        :class="{ 'bg-active': selectedSessionId === session.id }"
+        class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors hover:bg-muted cursor-pointer group relative shrink-0"
+        :class="{ 'bg-card border-border shadow-paper': selectedSessionId === session.id }"
         @click="selectSession(session.id)"
         @contextmenu="onContextMenu($event, session)"
       >
-        <div class="text-sm text-default truncate pr-12">
+        <div class="text-sm text-foreground truncate pr-12">
           {{ displayTitle(session) }}
         </div>
-        <div class="text-xs text-default4 mt-0.5 flex items-center gap-1.5 truncate">
-          <span v-if="session.git_branch" class="text-purple-400">{{ session.git_branch }}</span>
+        <div class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate">
+          <span v-if="session.git_branch">{{ session.git_branch }}</span>
           <span v-if="session.git_branch">·</span>
           <span>{{ relativeTime(session.last_modified) }}</span>
           <span>·</span>
           <span>{{ formatTokens(tokenTotal(session.total_tokens)) }}</span>
           <span v-if="session.model">·</span>
-          <span v-if="session.model" class="text-default3">{{ shortModel(session.model) }}</span>
+          <span v-if="session.model" class="text-muted-foreground">{{ shortModel(session.model) }}</span>
         </div>
 
         <!-- 悬停分屏按钮 -->
         <div class="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5">
           <button
-            class="p-1 rounded text-default4 hover:text-default3 hover:bg-active transition-colors"
+            class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="右侧分屏"
             @click.stop="splitRight(session)"
           >

@@ -50,7 +50,6 @@ pub fn run() {
 
 /// 开发时把窗口移到扩展显示器居中
 fn move_to_secondary_monitor(app: &tauri::App) {
-    use tauri::WebviewWindowBuilder;
 
     let Some(window) = app.get_webview_window("main") else {
         return;

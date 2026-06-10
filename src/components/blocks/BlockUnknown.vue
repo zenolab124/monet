@@ -20,13 +20,13 @@ const json = computed(() => {
 <template>
   <div class="mt-1">
     <button
-      class="text-xs text-default4 hover:text-default3 flex items-center gap-1"
+      class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
       @click="expanded = !expanded"
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
       <span class="i-carbon-help w-3 h-3" />
-      未知块类型：<span class="font-mono text-default3">{{ block.type }}</span>
+      未知块类型：<span class="font-mono text-muted-foreground">{{ block.type }}</span>
     </button>
-    <pre v-if="expanded" class="mt-1 pl-3 border-l-2 border-default4/20 text-xs text-default4 whitespace-pre-wrap break-all max-h-64 overflow-y-auto">{{ json }}</pre>
+    <pre v-if="expanded" class="mt-1 pl-3 border-l-2 border-default4/20 text-xs text-muted-foreground whitespace-pre-wrap break-all max-h-64 overflow-y-auto">{{ json }}</pre>
   </div>
 </template>
