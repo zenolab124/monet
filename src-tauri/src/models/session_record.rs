@@ -9,6 +9,7 @@ use super::{ContentBlock, TokenUsage};
 pub enum SessionRecord {
     User(UserRecord),
     Assistant(AssistantRecord),
+    System(SystemRecord),
     AiTitle(AiTitleRecord),
     QueueOperation(QueueOperationRecord),
     FileHistorySnapshot(FileHistorySnapshotRecord),
@@ -95,6 +96,22 @@ pub struct AssistantMessage {
     pub usage: Option<TokenUsage>,
 }
 
+/// system 类型记录：api_error（API 报错/重试）、compact_boundary（上下文压缩）等子类型
+/// 字段取各 subtype 的并集，全部可缺省；error/compactMetadata 保持 Value 灵活透传
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemRecord {
+    pub subtype: Option<String>,
+    pub content: Option<String>,
+    pub level: Option<String>,
+    pub timestamp: Option<String>,
+    pub uuid: Option<String>,
+    pub error: Option<Value>,
+    pub compact_metadata: Option<Value>,
+    pub retry_attempt: Option<u32>,
+    pub max_retries: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiTitleRecord {
     #[serde(rename = "sessionId")]
@@ -130,6 +147,9 @@ impl SessionRecord {
             "assistant" => serde_json::from_value(value)
                 .ok()
                 .map(SessionRecord::Assistant),
+            "system" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::System),
             "ai-title" => serde_json::from_value(value)
                 .ok()
                 .map(SessionRecord::AiTitle),

@@ -75,6 +75,7 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     let reader = BufReader::with_capacity(64 * 1024, file);
 
     let mut title: Option<String> = None;
+    let mut custom_title: Option<String> = None;
     let mut first_user_message: Option<String> = None;
     let mut model: Option<String> = None;
     let mut git_branch: Option<String> = None;
@@ -148,6 +149,12 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
                         .and_then(|t| t.as_str())
                         .map(String::from);
                 }
+                Some("custom-title") => {
+                    custom_title = value
+                        .get("customTitle")
+                        .and_then(|t| t.as_str())
+                        .map(String::from);
+                }
                 _ => {}
             }
         } else {
@@ -163,6 +170,18 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
                     if value.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
                         title = value
                             .get("aiTitle")
+                            .and_then(|t| t.as_str())
+                            .map(String::from);
+                    }
+                }
+                continue;
+            }
+
+            if line.contains("\"custom-title\"") {
+                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                    if value.get("type").and_then(|t| t.as_str()) == Some("custom-title") {
+                        custom_title = value
+                            .get("customTitle")
                             .and_then(|t| t.as_str())
                             .map(String::from);
                     }
@@ -195,9 +214,12 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     }
 
     // 如果前面没找到 ai-title，在文件尾部搜索
-    if title.is_none() {
+    if title.is_none() && custom_title.is_none() {
         title = search_tail_for_title(path, 4096);
     }
+
+    // 用户手动标题（/title 命令写入的 custom-title）优先于 AI 生成标题
+    let title = custom_title.or(title);
 
     Some(SessionSummary {
         id: session_id,

@@ -16,6 +16,7 @@ import {
 import { displayTitle, shortId, shortModel } from '@/types'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
+import SystemEventRow from './SystemEventRow.vue'
 import SessionTopBar from './topbar/SessionTopBar.vue'
 import SlashCommandPanel from './SlashCommandPanel.vue'
 import SlashHelpCard from './SlashHelpCard.vue'
@@ -188,22 +189,34 @@ const streamingMessageIds = computed(() =>
   new Set(streamingTurns.value.map(t => t.messageId)),
 )
 
-const messages = computed(() =>
-  records.value.filter(
-    (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' }> => {
+/** 进入消息流的 system 子类型（其余 system 记录为噪音，不渲染） */
+const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
+
+const messages = computed(() => {
+  const visible = records.value.filter(
+    (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' | 'system' }> => {
       if (r.type === 'assistant') {
         // 当前流式区还在显示这条消息时,历史区跳过(避免双显示)
         const msgId = r.message?.id
         if (msgId && streamingMessageIds.value.has(msgId)) return false
         return true
       }
+      if (r.type === 'system') {
+        return !!r.subtype && VISIBLE_SYSTEM_SUBTYPES.has(r.subtype)
+      }
       if (r.type !== 'user') return false
       const content = r.message?.content
       if (!content || typeof content === 'string') return true
       return content.some((b: ContentBlock) => b.type !== 'tool_result')
     },
-  ),
-)
+  )
+  // 连续 api_error（同一请求的多次重试）折叠为最后一条,末条 retryAttempt 自带累计次数
+  return visible.filter((r, i) => {
+    if (r.type !== 'system' || r.subtype !== 'api_error') return true
+    const next = visible[i + 1]
+    return !(next?.type === 'system' && next.subtype === 'api_error')
+  })
+})
 
 /** 解析私有标签,转为特殊渲染块 */
 const TAG_RE = /<(system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)[^>]*>([\s\S]*?)<\/\1>/g
@@ -519,36 +532,36 @@ watch(
     <!-- 对话消息流 -->
     <div v-else ref="scrollContainer" class="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain">
       <template v-if="!hideHistory">
-        <div
-          v-for="(msg, i) in messages"
-          :key="msg.uuid || `msg-${i}`"
-          class="flex gap-3 msg-block"
-        >
-          <div
-            class="w-0.5 shrink-0 rounded-full"
-            :class="msg.type === 'user' ? 'bg-blue-500/60' : 'bg-purple-500/60'"
-          />
-          <div class="min-w-0 flex-1">
-            <div class="text-xs font-medium mb-1"
-              :class="msg.type === 'user' ? 'text-blue-400' : 'text-purple-400'"
-            >
-              {{ msg.type === 'user' ? '你' : 'Claude' }}
-              <span v-if="msg.type === 'assistant' && msg.message?.model" class="text-default4 font-normal">
-                ({{ shortModel(msg.message.model) }})
-              </span>
+        <template v-for="(msg, i) in messages" :key="msg.uuid || `msg-${i}`">
+          <!-- system 事件行：无气泡形态,独立渲染 -->
+          <SystemEventRow v-if="msg.type === 'system'" :record="msg" />
+          <div v-else class="flex gap-3 msg-block">
+            <div
+              class="w-0.5 shrink-0 rounded-full"
+              :class="msg.type === 'user' ? 'bg-blue-500/60' : 'bg-purple-500/60'"
+            />
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-medium mb-1"
+                :class="msg.type === 'user' ? 'text-blue-400' : 'text-purple-400'"
+              >
+                {{ msg.type === 'user' ? '你' : 'Claude' }}
+                <span v-if="msg.type === 'assistant' && msg.message?.model" class="text-default4 font-normal">
+                  ({{ shortModel(msg.message.model) }})
+                </span>
+              </div>
+              <!-- 历史区也用 TransitionGroup 包裹(不加 appear,不触发首次淡入动画):
+                   让 DOM 结构跟流式区一致(都有 TransitionGroup 生成的 div 层),
+                   流式结束切换时 Vue 无需重排父容器 layout,避免末尾闪烁。 -->
+              <TransitionGroup name="block-fade" tag="div">
+                <MessageBlock
+                  v-for="(block, i) in contentBlocks(msg)"
+                  :key="i"
+                  :block="block"
+                />
+              </TransitionGroup>
             </div>
-            <!-- 历史区也用 TransitionGroup 包裹(不加 appear,不触发首次淡入动画):
-                 让 DOM 结构跟流式区一致(都有 TransitionGroup 生成的 div 层),
-                 流式结束切换时 Vue 无需重排父容器 layout,避免末尾闪烁。 -->
-            <TransitionGroup name="block-fade" tag="div">
-              <MessageBlock
-                v-for="(block, i) in contentBlocks(msg)"
-                :key="i"
-                :block="block"
-              />
-            </TransitionGroup>
           </div>
-        </div>
+        </template>
       </template>
 
       <div v-if="pendingUserMessage" class="flex gap-3 msg-block">

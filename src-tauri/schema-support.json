@@ -1,0 +1,35 @@
+{
+  "$comment": "CC Space 对 Claude Code 数据格式的支持声明（单一事实源）。schema-probe 读取本文件与本地 JSONL 真实数据做三态 diff（已支持/已忽略/未知）。新增类型支持或决策忽略时必须同步更新本文件——ignored 每条必须写明理由。",
+  "recordTypes": {
+    "supported": ["user", "assistant", "ai-title", "custom-title", "system"],
+    "ignored": {
+      "last-prompt": "CLI 内部缓存的上次输入提示，无用户可见内容，解析层有意跳过",
+      "attachment": "harness 注入给模型的系统上下文增量（output_style/todo_reminder/skill_listing/deferred_tools_delta 等子类型），非用户内容；将来若做「显示系统注入」开关再启用",
+      "queue-operation": "流式期间消息排队的 enqueue/dequeue 痕迹，排队消息最终会以 user 记录落盘，无需重复渲染",
+      "file-history-snapshot": "checkpoint 文件备份索引（多为空快照），做 rewind 集成时再启用",
+      "permission-mode": "会话权限模式的内部状态记录",
+      "bridge-session": "claude.ai 桥接会话的内部关联 ID"
+    }
+  },
+  "blockTypes": {
+    "supported": ["text", "thinking", "tool_use", "tool_result", "image", "document"],
+    "ignored": {}
+  },
+  "tools": {
+    "dedicated": [
+      "Read", "Edit", "Write", "NotebookEdit",
+      "Bash", "Grep", "Glob",
+      "WebFetch", "WebSearch",
+      "TodoWrite", "Task", "Agent", "ExitPlanMode", "EnterPlanMode",
+      "AskUserQuestion", "Skill"
+    ],
+    "genericOk": {
+      "StructuredOutput": "input 为 schema 决定的任意 JSON，Generic 的 JSON 树展示即为正确形态",
+      "ToolSearch": "input 仅 query/max_results 两字段，Generic 足够",
+      "Monitor": "until 循环等待命令，低频，Generic 足够",
+      "ScheduleWakeup": "自调度唤醒参数，低频，Generic 足够",
+      "SendUserFile": "发送文件参数，低频，Generic 足够"
+    },
+    "mcpPrefix": "mcp__"
+  }
+}

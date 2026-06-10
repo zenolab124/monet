@@ -29,6 +29,13 @@ pub enum ContentBlock {
     Image {
         source: ImageSource,
     },
+    /// PDF 等文档附件。source.data 的完整 base64 不在字段中声明，
+    /// serde 反序列化时直接丢弃——防止大 payload 落进 Unknown(Value) 穿透 IPC
+    Document {
+        source: DocumentSource,
+        #[serde(default)]
+        title: Option<String>,
+    },
     #[serde(untagged)]
     Unknown(Value),
 }
@@ -39,6 +46,14 @@ pub enum ContentBlock {
 pub enum ToolResultContent {
     Text(String),
     Blocks(Vec<ContentBlock>),
+}
+
+/// document 块的来源描述，刻意不声明 data 字段（base64 原文不进内存/IPC）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub media_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

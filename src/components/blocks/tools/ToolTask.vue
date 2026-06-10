@@ -38,7 +38,7 @@ const promptPreview = computed(() => {
   <div class="mt-2 rounded-md bg-green-500/5 border border-green-500/20 px-3 py-2 text-xs">
     <div class="flex items-center gap-1.5 flex-wrap">
       <span class="i-carbon-task w-3.5 h-3.5 shrink-0" />
-      <span class="text-green-400 font-medium">Task</span>
+      <span class="text-green-400 font-medium">{{ name }}</span>
       <span v-if="subagentType" class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-mono">{{ subagentType }}</span>
       <span v-if="description" class="text-default2">{{ description }}</span>
     </div>

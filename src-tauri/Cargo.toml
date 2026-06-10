@@ -20,6 +20,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "cc-space-mcp"
 path = "src/bin/cc_space_mcp.rs"
 
+# Claude Code 数据格式差距探测器（dev 工具），读 schema-support.json 声明做三态 diff
+[[bin]]
+name = "schema-probe"
+path = "src/bin/schema_probe.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 

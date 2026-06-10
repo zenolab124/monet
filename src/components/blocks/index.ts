@@ -5,6 +5,7 @@ import BlockThinking from './BlockThinking.vue'
 import BlockToolUse from './BlockToolUse.vue'
 import BlockToolResult from './BlockToolResult.vue'
 import BlockImage from './BlockImage.vue'
+import BlockDocument from './BlockDocument.vue'
 import BlockSkillPrompt from './BlockSkillPrompt.vue'
 import BlockIdeOpenedFile from './BlockIdeOpenedFile.vue'
 import BlockSystemReminder from './BlockSystemReminder.vue'
@@ -17,6 +18,7 @@ export {
   BlockToolUse,
   BlockToolResult,
   BlockImage,
+  BlockDocument,
   BlockSkillPrompt,
   BlockIdeOpenedFile,
   BlockSystemReminder,
@@ -31,6 +33,7 @@ const BLOCK_MAP: Record<string, Component> = {
   tool_use: BlockToolUse,
   tool_result: BlockToolResult,
   image: BlockImage,
+  document: BlockDocument,
   skill_prompt: BlockSkillPrompt,
   ide_opened_file: BlockIdeOpenedFile,
   'system-reminder': BlockSystemReminder,

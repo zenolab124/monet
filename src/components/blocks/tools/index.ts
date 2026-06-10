@@ -11,6 +11,8 @@ import ToolWebSearch from './ToolWebSearch.vue'
 import ToolTodoWrite from './ToolTodoWrite.vue'
 import ToolTask from './ToolTask.vue'
 import ToolExitPlanMode from './ToolExitPlanMode.vue'
+import ToolEnterPlanMode from './ToolEnterPlanMode.vue'
+import ToolAskUserQuestion from './ToolAskUserQuestion.vue'
 import ToolSkill from './ToolSkill.vue'
 import ToolMcp from './ToolMcp.vue'
 import ToolGeneric from './ToolGeneric.vue'
@@ -20,8 +22,11 @@ export const TOOL_MAP: Record<string, Component> = {
   Bash: ToolBash,
   Grep: ToolGrep, Glob: ToolGlob,
   WebFetch: ToolWebFetch, WebSearch: ToolWebSearch,
-  TodoWrite: ToolTodoWrite, Task: ToolTask,
-  ExitPlanMode: ToolExitPlanMode, Skill: ToolSkill,
+  TodoWrite: ToolTodoWrite,
+  // Agent 是 Task 的新名（claude CLI 改名），共用同一组件，标题显示实际 name
+  Task: ToolTask, Agent: ToolTask,
+  ExitPlanMode: ToolExitPlanMode, EnterPlanMode: ToolEnterPlanMode,
+  AskUserQuestion: ToolAskUserQuestion, Skill: ToolSkill,
 }
 
 export { ToolMcp, ToolGeneric }
