@@ -125,6 +125,13 @@ pub fn start_streaming(
     // 同会话旧进程先终止（重发场景）；其他会话的并行流式不受影响
     stop_streaming(session_id);
 
+    // cwd 缺失时 spawn 报 ENOENT,与 claude 二进制缺失同文案无法区分——前置校验给出指向性报错
+    // (场景:项目源目录已删除/改名,或路径解码歧义)
+    if !std::path::Path::new(cwd).is_dir() {
+        emit_error(app, session_id, format!("工作目录不存在: {}", cwd));
+        return;
+    }
+
     // 1. 启动该会话的权限服务（失败立即上报错误，不静默降级）
     let permission_service = match PermissionService::start(app.clone(), session_id) {
         Ok(s) => s,
@@ -196,8 +203,15 @@ pub fn start_streaming(
         args.push(m.to_string());
     }
     if let Some(e) = effort.filter(|s| !s.is_empty()) {
-        args.push("--effort".to_string());
-        args.push(e.to_string());
+        if e == "ultracode" {
+            // ultracode 是会话级设置而非 effort 档位(CLI 不支持在 settings.json 持久化,
+            // session-only),经 --settings 注入;自带 xhigh + 对实质任务自动编排多智能体 workflow
+            args.push("--settings".to_string());
+            args.push(r#"{"ultracode": true}"#.to_string());
+        } else {
+            args.push("--effort".to_string());
+            args.push(e.to_string());
+        }
     }
     args.push(message.to_string());
 

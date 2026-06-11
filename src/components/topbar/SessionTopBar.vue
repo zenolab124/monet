@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
 import { inferModel, getContextWindow } from '@/utils/modelContext'
-import type { EffortLevel } from '@/composables/useSessionSettings'
+import type { EffortSetting } from '@/composables/useSessionSettings'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import ModelDropdown from './ModelDropdown.vue'
@@ -34,13 +34,13 @@ const props = defineProps<{
   lastModified: number
   /** 用户已选择的模型 ID(来自 useSessionSettings,可能为 null) */
   selectedModelId: string | null
-  /** 用户已选择的努力等级 */
-  selectedEffort: EffortLevel
+  /** 用户已选择的努力等级(null = 跟随 CLI,'ultracode' = 超档) */
+  selectedEffort: EffortSetting
 }>()
 
 const emit = defineEmits<{
   (e: 'modelChange', modelId: string): void
-  (e: 'effortChange', effort: EffortLevel): void
+  (e: 'effortChange', effort: EffortSetting): void
   (e: 'reload'): void
   (e: 'deleted'): void
 }>()
@@ -57,7 +57,8 @@ const effectiveModelStr = computed(() => props.selectedModelId ?? props.modelStr
 const effectiveModel = computed(() => inferModel(effectiveModelStr.value))
 
 /** 上下文容量:按 jsonl 里真实跑过的模型字符串(含 [1m] 后缀)推断 */
-const capacity = computed(() => getContextWindow(props.modelString))
+// 容量:真实跑过的模型优先;新会话尚无记录时用已选模型推断(否则选了 1M 档仍显示 200K 误导)
+const capacity = computed(() => getContextWindow(props.modelString ?? props.selectedModelId))
 
 // --- 窄列折叠 ---
 //
@@ -163,7 +164,7 @@ async function onDelete() {
 function onModelChange(id: string) {
   emit('modelChange', id)
 }
-function onEffortChange(level: EffortLevel) {
+function onEffortChange(level: EffortSetting) {
   emit('effortChange', level)
 }
 </script>

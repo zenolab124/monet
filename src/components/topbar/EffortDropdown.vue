@@ -1,27 +1,35 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import type { EffortLevel } from '@/composables/useSessionSettings'
+import type { EffortLevel, EffortSetting } from '@/composables/useSessionSettings'
 
 const props = defineProps<{
-  current: EffortLevel
+  /** null = 本会话未设置(按应用默认行为发送);'ultracode' = 超档(经 --settings 注入) */
+  current: EffortSetting
 }>()
 
 const emit = defineEmits<{
-  (e: 'select', effort: EffortLevel): void
+  (e: 'select', effort: EffortSetting): void
 }>()
 
 interface EffortOption {
-  value: EffortLevel
+  value: NonNullable<EffortSetting>
   label: string
 }
 
-/** 五档(UI 标签 → CLI 值),按 PRD FR-006 L327 */
+const EFFORT_LABELS: Record<EffortLevel, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'xHigh',
+  max: 'Max',
+}
+
+/** 五档(按 PRD FR-006 L327) + Ultracode 超档。「跟随 CLI/默认值」归设置层,不在会话选项中 */
 const OPTIONS: EffortOption[] = [
-  { value: 'low', label: '轻量' },
-  { value: 'medium', label: '标准' },
-  { value: 'high', label: '加强' },
-  { value: 'xhigh', label: '高强度' },
-  { value: 'max', label: '最高' },
+  ...(Object.entries(EFFORT_LABELS) as [EffortLevel, string][]).map(
+    ([value, label]) => ({ value, label }),
+  ),
+  { value: 'ultracode' as const, label: 'Ultracode' },
 ]
 
 const open = ref(false)
@@ -30,15 +38,16 @@ const buttonRef = ref<HTMLButtonElement>()
 const focusedIndex = ref(0)
 
 const currentIndex = computed(() => OPTIONS.findIndex(o => o.value === props.current))
+/** 未设置的会话显示「默认」:具体取值由应用默认决定,不在此处解释 */
 const currentLabel = computed(() => {
   const o = OPTIONS.find(o => o.value === props.current)
-  return o ? o.label : '标准'
+  return o ? o.label : '默认'
 })
 
 function toggle() {
   open.value = !open.value
   if (open.value) {
-    focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value : 1 // 默认聚焦"标准"
+    focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value : 0
     nextTick(() => focusListItem(focusedIndex.value))
   }
 }

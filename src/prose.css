@@ -43,6 +43,11 @@
   border-radius: 3px;
   font-size: 0.875em;
   font-family: var(--font-mono);
+  /* 整体盒子参与断行:放不下整签挪下一行,不在 -/. 处断开(半截方签像两个 token);
+     超过整行宽才允许盒内任意断,长 hash 不撑爆容器 */
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* 代码块容器 */

@@ -54,22 +54,26 @@ async function onAddClick() {
 </script>
 
 <template>
-  <aside class="w-64 shrink-0 border-r border-border overflow-y-auto p-2.5 flex flex-col gap-2">
+  <aside class="w-64 shrink-0 border-r border-border p-2.5 flex flex-col gap-2 min-h-0">
     <div v-if="hint" class="px-0.5 text-[10.5px] text-muted-foreground shrink-0">{{ hint }}</div>
 
-    <MonitorCard
-      v-for="sid in activeTab.sessionIds"
-      :key="sid"
-      :session-id="sid"
-      :expanded="expandedSet.has(sid)"
-    />
+    <!-- 卡片滚动区:卡片不压缩(shrink-0),超出即滚;＋格固定在滚动区外永远可见 -->
+    <div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
+      <MonitorCard
+        v-for="sid in activeTab.sessionIds"
+        :key="sid"
+        class="shrink-0"
+        :session-id="sid"
+        :expanded="expandedSet.has(sid)"
+      />
 
-    <!-- 空态(FR-001) -->
-    <div
-      v-if="activeTab.sessionIds.length === 0"
-      class="px-2 py-6 text-center text-xs text-muted-foreground leading-relaxed"
-    >
-      从档案馆打开会话，<br />或点击下方 ＋ 新建
+      <!-- 空态(FR-001) -->
+      <div
+        v-if="activeTab.sessionIds.length === 0"
+        class="px-2 py-6 text-center text-xs text-muted-foreground leading-relaxed"
+      >
+        从档案馆打开会话，<br />或点击下方 ＋ 新建
+      </div>
     </div>
 
     <!-- ＋ 格 -->

@@ -131,8 +131,14 @@ fn decode_path(encoded: &str) -> String {
         let mut best_len = 1;
         for j in (i + 1..=parts.len().min(i + 5)).rev() {
             let candidate: String = parts[i..j].join("-");
-            let test_path = format!("{}{}", resolved, candidate);
-            if Path::new(&test_path).exists() && j < parts.len() {
+            // resolved 仅根 "/" 自带分隔符,后续段必须补 '/',否则候选路径粘连、exists 恒假
+            let test_path = if resolved.ends_with('/') {
+                format!("{}{}", resolved, candidate)
+            } else {
+                format!("{}/{}", resolved, candidate)
+            };
+            // 合并可延伸到最后一个 part:尾目录名含 - 是最常见场景(如 cc-space-tauri)
+            if Path::new(&test_path).exists() {
                 best_len = j - i;
                 break;
             }

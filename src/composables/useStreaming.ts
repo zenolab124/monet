@@ -2,11 +2,12 @@ import { reactive, computed, ref, type Ref, type ComputedRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ContentBlock } from '@/types'
-import type { EffortLevel } from './useSessionSettings'
+import type { EffortSetting } from './useSessionSettings'
 
 export interface SendOptions {
   model?: string
-  effort?: EffortLevel
+  /** null/缺省 = 跟随 CLI(不附加 --effort);'ultracode' 经 --settings 注入 */
+  effort?: EffortSetting
 }
 
 export interface StreamingTurn {

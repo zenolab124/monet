@@ -138,7 +138,7 @@ function onModelChange(modelId: string) {
   setModel(modelId)
 }
 
-function onEffortChange(effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max') {
+function onEffortChange(effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultracode' | null) {
   setEffort(effort)
 }
 

@@ -57,7 +57,7 @@ const currentIndex = computed(() => {
 function toggle() {
   open.value = !open.value
   if (open.value) {
-    // 默认聚焦到当前项;若当前项无效(老会话),按 PRD 默认聚焦 sonnet(index 0)
+    // 默认聚焦到当前项;若当前项无效(老会话),聚焦清单首项
     focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value : 0
     nextTick(() => focusListItem(focusedIndex.value))
   }
@@ -157,6 +157,7 @@ onUnmounted(() => {
         :aria-selected="i === currentIndex"
         class="px-2 py-1 text-xs flex items-center gap-2 cursor-pointer
                text-muted-foreground hover:bg-muted hover:text-foreground focus:bg-muted focus:text-foreground focus:outline-none"
+        :class="{ 'mt-1 pt-1.5 border-t border-border': i > 0 && !!m.legacy !== !!items[i - 1].legacy }"
         @click="selectAt(i)"
         @mouseenter="focusedIndex = i"
       >

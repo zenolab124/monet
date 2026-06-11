@@ -7,16 +7,24 @@ import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+/**
+ * 努力设置值:五档 effort | ultracode(超档:xhigh + 自动多智能体 workflow,
+ * 经 --settings 注入而非 --effort) | null(本会话未设置,按应用默认行为)
+ */
+export type EffortSetting = EffortLevel | 'ultracode' | null
+
 export interface SessionSettings {
   /** null 表示未设置(回退使用 session 自带 model 字段) */
   modelId: string | null
-  /** 默认 medium */
-  effort: EffortLevel
+  effort: EffortSetting
 }
 
+// effort 为 null = 本会话未设置 → 按应用默认行为发送。应用默认当前实现为「不传
+// --effort,由 CLI 自行决定」;将来由设置页配置(可选值含跟随 CLI/具体档位,见
+// docs/settings-backlog.md),「跟随 CLI/默认值」不出现在会话级选项中
 export const DEFAULT_SETTINGS: SessionSettings = {
   modelId: null,
-  effort: 'medium',
+  effort: null,
 }
 
 const KEY_PREFIX = 'cc-space:session-settings:'
@@ -26,15 +34,17 @@ function storageKey(sid: string): string {
 }
 
 const VALID_EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
+/** 可持久化的设置值(含 ultracode);null 不在列表内,序列化天然支持 */
+const VALID_STORED: NonNullable<EffortSetting>[] = [...VALID_EFFORTS, 'ultracode']
 
 function loadFromStorage(sid: string): SessionSettings {
   try {
     const raw = localStorage.getItem(storageKey(sid))
     if (!raw) return { ...DEFAULT_SETTINGS }
     const parsed = JSON.parse(raw) as Partial<SessionSettings>
-    const effort: EffortLevel = parsed.effort && VALID_EFFORTS.includes(parsed.effort)
+    const effort: EffortSetting = parsed.effort && VALID_STORED.includes(parsed.effort)
       ? parsed.effort
-      : DEFAULT_SETTINGS.effort
+      : null
     const modelId = typeof parsed.modelId === 'string' && parsed.modelId.length > 0
       ? parsed.modelId
       : null
@@ -63,8 +73,8 @@ export interface UseSessionSettingsReturn {
   settings: ComputedRef<SessionSettings>
   /** 设置模型 ID(null 表示清除) */
   setModel: (modelId: string | null) => void
-  /** 设置努力等级 */
-  setEffort: (effort: EffortLevel) => void
+  /** 设置努力等级(null 表示跟随 CLI,'ultracode' 为超档) */
+  setEffort: (effort: EffortSetting) => void
   /** 重置为默认并清除 localStorage */
   reset: () => void
 }
@@ -104,7 +114,7 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
     internal.value = { ...internal.value, modelId }
   }
 
-  function setEffort(effort: EffortLevel) {
+  function setEffort(effort: EffortSetting) {
     internal.value = { ...internal.value, effort }
   }
 
