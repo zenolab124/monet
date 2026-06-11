@@ -63,6 +63,8 @@ function splitRight(session: SessionSummary) {
 // 原生右键菜单
 import { invoke } from '@tauri-apps/api/core'
 import { Menu } from '@tauri-apps/api/menu'
+import { useWorkbench } from '@/composables/useWorkbench'
+import { useConfirm } from '@/composables/useConfirm'
 
 async function onContextMenu(e: MouseEvent, session: SessionSummary) {
   e.preventDefault()
@@ -82,6 +84,18 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       const { projects } = useProjects()
       const project = projects.value.find(p => p.sessions.some(s => s.id === session.id))
       if (!project) return
+      // 会话在工作台中:先确认(注明归属)再自动移出(FR-009)
+      const { findSession, removeSession } = useWorkbench()
+      const home = findSession(session.id)
+      if (home) {
+        const { confirm } = useConfirm()
+        const ok = await confirm(
+          `该会话在「${home.tab.name}」工作台中,删除将一并移出`,
+          '删除',
+        )
+        if (!ok) return
+        removeSession(session.id)
+      }
       await invoke('delete_session', { projectId: project.id, sessionId: session.id })
       if (selectedSessionId.value === session.id) selectSession(null)
       loadProjects()

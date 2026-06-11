@@ -1,10 +1,11 @@
 //! 权限请求服务
 //!
-//! 在主进程内启动一个 Unix socket server，作为 cc-space-mcp 子进程与前端的桥梁。
+//! 在主进程内启动 Unix socket server，作为 cc-space-mcp 子进程与前端的桥梁。
+//! v2.1.0 起按会话隔离：每个流式会话一个 PermissionService 实例（工作台多列并行）。
 //! 主流程：
-//! 1. `PermissionService::start` 绑定 `/tmp/cc-space-perm-<pid>-<rand>.sock`
+//! 1. `PermissionService::start(app, session_id)` 绑定 `/tmp/cc-space-perm-<pid>-<rand>.sock`
 //! 2. 接受连接（每条连接对应 cc-space-mcp 转发的一次权限请求）
-//! 3. emit Tauri Event `permission-request` 给前端
+//! 3. emit Tauri Event `permission-request` 给前端（payload 带 sessionId）
 //! 4. 前端通过 `respond_permission` Tauri Command 回写决策（allow/deny）
 //! 5. service 把决策写回 socket，cc-space-mcp 据此返回 claude CLI
 
@@ -42,7 +43,7 @@ enum Decision {
     Deny(String),
 }
 
-/// 权限服务
+/// 权限服务（每个流式会话一个实例，会话归属由 SERVICES 的 key 承载）
 pub struct PermissionService {
     /// socket 文件路径（销毁时清理）
     socket_path: PathBuf,
@@ -52,10 +53,10 @@ pub struct PermissionService {
     pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
 }
 
-/// 全局单实例（streaming 启动时创建，停止时销毁）
-static GLOBAL_SERVICE: Mutex<Option<Arc<PermissionService>>> = Mutex::new(None);
+/// 会话 → 服务实例表
+static SERVICES: Mutex<Option<HashMap<String, Arc<PermissionService>>>> = Mutex::new(None);
 
-/// requestId 自增
+/// requestId 自增（全进程唯一，respond 时跨实例查找无歧义）
 static REQ_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// 推送给前端的事件
@@ -63,6 +64,8 @@ static REQ_COUNTER: AtomicU64 = AtomicU64::new(1);
 struct PermissionRequestPayload {
     #[serde(rename = "requestId")]
     request_id: String,
+    #[serde(rename = "sessionId")]
+    session_id: String,
     #[serde(rename = "toolName")]
     tool_name: String,
     input: Value,
@@ -71,10 +74,10 @@ struct PermissionRequestPayload {
 }
 
 impl PermissionService {
-    /// 启动服务，返回 socket 路径（用于注入 cc-space-mcp 子进程的环境变量）
-    pub fn start(app: AppHandle) -> Result<Arc<Self>, String> {
-        // 先停掉旧的（防止前一次没清理）
-        Self::stop_global();
+    /// 启动指定会话的权限服务，返回实例（socket 路径注入 cc-space-mcp 子进程环境变量）
+    pub fn start(app: AppHandle, session_id: &str) -> Result<Arc<Self>, String> {
+        // 同会话旧实例先停（同会话重发场景）
+        Self::stop_for(session_id);
 
         let socket_path = make_socket_path();
         // 防止残留文件
@@ -100,12 +103,16 @@ impl PermissionService {
         {
             let pending = pending.clone();
             let stop_flag = stop_flag.clone();
+            let sid = session_id.to_string();
             thread::spawn(move || {
-                accept_loop(listener, app, pending, stop_flag);
+                accept_loop(listener, app, sid, pending, stop_flag);
             });
         }
 
-        *GLOBAL_SERVICE.lock().unwrap() = Some(service.clone());
+        let mut services = SERVICES.lock().unwrap();
+        services
+            .get_or_insert_with(HashMap::new)
+            .insert(session_id.to_string(), service.clone());
         Ok(service)
     }
 
@@ -113,44 +120,55 @@ impl PermissionService {
         &self.socket_path
     }
 
-    /// 提交一个用户决策。返回是否找到对应的 pending 请求
+    /// 提交一个用户决策（requestId 全进程唯一，跨实例查找）。返回是否找到对应的 pending 请求
     pub fn respond(request_id: &str, allow: bool, message: Option<String>) -> bool {
-        let Some(service) = GLOBAL_SERVICE.lock().unwrap().clone() else {
-            return false;
-        };
-        let pending = service.pending.lock().unwrap();
-        if let Some(req) = pending.get(request_id) {
-            let mut slot = req.decision.lock().unwrap();
-            if slot.is_none() {
-                *slot = Some(if allow {
-                    Decision::Allow
-                } else {
-                    Decision::Deny(message.unwrap_or_else(|| "用户拒绝".to_string()))
-                });
-                return true;
+        let services: Vec<Arc<PermissionService>> = SERVICES
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default();
+        for service in services {
+            let pending = service.pending.lock().unwrap();
+            if let Some(req) = pending.get(request_id) {
+                let mut slot = req.decision.lock().unwrap();
+                if slot.is_none() {
+                    *slot = Some(if allow {
+                        Decision::Allow
+                    } else {
+                        Decision::Deny(message.unwrap_or_else(|| "用户拒绝".to_string()))
+                    });
+                    return true;
+                }
             }
         }
         false
     }
 
-    /// 停掉全局服务（关闭 socket、清理 pending、所有 pending 请求按 deny 回收）
-    pub fn stop_global() {
-        if let Some(service) = GLOBAL_SERVICE.lock().unwrap().take() {
-            service
-                .stop_flag
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            // 让所有未决请求拿到 deny，避免子进程死等
-            let pending = service.pending.lock().unwrap();
-            for req in pending.values() {
-                let mut slot = req.decision.lock().unwrap();
-                if slot.is_none() {
-                    *slot = Some(Decision::Deny("流式中断，自动拒绝".to_string()));
-                }
-            }
-            drop(pending);
-            // 删 socket 文件
-            let _ = std::fs::remove_file(&service.socket_path);
+    /// 停掉指定会话的服务（关闭 socket、pending 请求统一按 deny 收尾）
+    pub fn stop_for(session_id: &str) {
+        let service = SERVICES
+            .lock()
+            .unwrap()
+            .as_mut()
+            .and_then(|m| m.remove(session_id));
+        if let Some(service) = service {
+            service.shutdown();
         }
+    }
+
+    /// 内部：置停止位 + deny 全部 pending + 清 socket 文件
+    fn shutdown(&self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        let pending = self.pending.lock().unwrap();
+        for req in pending.values() {
+            let mut slot = req.decision.lock().unwrap();
+            if slot.is_none() {
+                *slot = Some(Decision::Deny("流式中断，自动拒绝".to_string()));
+            }
+        }
+        drop(pending);
+        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
@@ -175,6 +193,7 @@ fn make_socket_path() -> PathBuf {
 fn accept_loop(
     listener: UnixListener,
     app: AppHandle,
+    session_id: String,
     pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
 ) {
@@ -184,8 +203,9 @@ fn accept_loop(
                 let app = app.clone();
                 let pending = pending.clone();
                 let stop_flag = stop_flag.clone();
+                let sid = session_id.clone();
                 thread::spawn(move || {
-                    if let Err(e) = handle_connection(stream, app, pending, stop_flag) {
+                    if let Err(e) = handle_connection(stream, app, sid, pending, stop_flag) {
                         log::warn!("权限 socket 处理失败：{}", e);
                     }
                 });
@@ -205,6 +225,7 @@ fn accept_loop(
 fn handle_connection(
     stream: UnixStream,
     app: AppHandle,
+    session_id: String,
     pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
@@ -243,6 +264,7 @@ fn handle_connection(
     // emit 给前端
     let payload = PermissionRequestPayload {
         request_id: request_id.clone(),
+        session_id,
         tool_name,
         input,
         timestamp: SystemTime::now()

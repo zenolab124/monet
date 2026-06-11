@@ -14,6 +14,7 @@ mod watcher;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -39,6 +40,7 @@ pub fn run() {
             commands::get_session_summary,
             commands::delete_session,
             commands::resume_in_terminal,
+            commands::new_session_in_terminal,
             commands::resume_in_vscode,
             commands::start_streaming,
             commands::stop_streaming,

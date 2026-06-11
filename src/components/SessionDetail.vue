@@ -4,9 +4,16 @@ import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { createSessionDetail } from '@/composables/useSessionDetail'
-import { useStreaming, streamingTick } from '@/composables/useStreaming'
+import {
+  useStreaming,
+  useSessionStream,
+  streamingTick,
+  finishedDirty,
+} from '@/composables/useStreaming'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { useSessionSettings } from '@/composables/useSessionSettings'
+import { useWorkbench } from '@/composables/useWorkbench'
+import { useNotifications } from '@/composables/useNotifications'
 import {
   SLASH_COMMANDS,
   shouldTriggerPanel,
@@ -21,33 +28,58 @@ import SessionTopBar from './topbar/SessionTopBar.vue'
 import SlashCommandPanel from './SlashCommandPanel.vue'
 import SlashHelpCard from './SlashHelpCard.vue'
 import PermissionCard from './PermissionCard.vue'
-import { usePermissionRequests } from '@/composables/usePermissionRequests'
+import {
+  usePermissionRequests,
+  currentForSession,
+} from '@/composables/usePermissionRequests'
 
+/**
+ * 会话详情。三种宿主形态(v2.1.0 FR-004/009):
+ * - mode='archive'(默认):档案馆只读——无输入区/权限交互,底部常驻只读条;流式中会话可只读跟看
+ * - mode='workbench':工作台右区列——完整交互(输入/斜杠/权限卡)
+ * - paneId:档案馆分屏面板定位会话(只读)
+ */
 const props = defineProps<{
   paneId?: string
+  /** 直接指定会话(工作台列);优先于 paneId 与全局选中 */
+  sessionId?: string | null
+  mode?: 'archive' | 'workbench'
 }>()
+
+/** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
+const interactive = computed(() => props.mode === 'workbench')
 
 const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
 const { state, activePaneId, splitPane, closePane, setPaneSession } = useSplitLayout()
+const { findSession, removeSession } = useWorkbench()
+const { goToSession } = useNotifications()
 
-// 每个面板独立的 detail 实例
+// 每个实例独立的 detail 数据
 const detail = createSessionDetail()
 const { records, loading, error, loadRecords, reloadRecords, clearRecords } = detail
 
-const {
-  streaming,
-  streamingTurns,
-  pendingUserMessage,
-  streamError,
-  sendMessage,
-  stopStreaming,
-  clearStreamingTurns,
-} = useStreaming()
+const { sendMessage, stopStreaming, clearStreamingTurns } = useStreaming()
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
+
+// --- 会话 ID 来源 ---
+
+function findPaneSessionId(): string | null {
+  if (!props.paneId) return null
+  return state.value.panes.find(p => p.id === props.paneId)?.sessionId ?? null
+}
+
+const effectiveSessionId = computed(() => {
+  if (props.sessionId !== undefined) return props.sessionId
+  if (props.paneId) return findPaneSessionId()
+  return selectedSessionId.value
+})
+
+// per-session 流式状态(v2.1.0:多会话并行,各列独立)
+const stream = useSessionStream(effectiveSessionId)
 
 // --- 斜杠命令(FR-004)状态 ---
 
@@ -85,46 +117,37 @@ function onInputChange() {
   if (slashError.value) slashError.value = null
 }
 
-// --- 会话 ID 来源 ---
-
-function findPaneSessionId(): string | null {
-  if (!props.paneId) return null
-  return state.value.panes.find(p => p.id === props.paneId)?.sessionId ?? null
-}
-
-const effectiveSessionId = computed(() => {
-  if (props.paneId) return findPaneSessionId()
-  return selectedSessionId.value
-})
-
-// 全局选中变化时只同步到当前活跃面板
+// 全局选中变化时只同步到当前活跃面板(分屏模式)
 watch(selectedSessionId, (sid) => {
   if (props.paneId && sid && activePaneId.value === props.paneId) {
     setPaneSession(props.paneId, sid)
   }
 })
 
-// 会话切换时复位 /clear 与 /help 的视图标志,并清流式区(避免上一会话残留)
+// 会话切换时复位 /clear 与 /help 的视图标志
+// (流式区已按会话隔离,无需也不应清流式数据——切回时继续展示)
 watch(effectiveSessionId, () => {
   hideHistory.value = false
   showHelpCard.value = false
-  clearStreamingTurns()
 })
 
-// --- 权限请求(FR-003) ---
-const { current: permissionRequest, respondCurrent, denyAllPending } = usePermissionRequests()
+// --- 权限请求(仅工作台列交互;档案馆只读不渲染) ---
+const permissionRequest = currentForSession(effectiveSessionId)
+const { respondRequest, denyAllForSession } = usePermissionRequests()
 
 async function onPermissionDecide(decision: 'allow_once' | 'allow_session' | 'deny') {
-  const sid = currentSession.value?.summary.id ?? null
-  await respondCurrent(decision, sid)
+  const req = permissionRequest.value
+  if (req) await respondRequest(req.requestId, decision)
 }
 
 async function onStopStreaming() {
-  await denyAllPending()
-  await stopStreaming()
+  const sid = effectiveSessionId.value
+  if (!sid) return
+  await denyAllForSession(sid)
+  await stopStreaming(sid)
 }
 
-// --- 会话级设置(FR-006):模型 / 努力等级 ---
+// --- 会话级设置(模型 / 努力等级) ---
 const { settings, setModel, setEffort } = useSessionSettings(effectiveSessionId)
 
 function onModelChange(modelId: string) {
@@ -138,9 +161,14 @@ function onEffortChange(effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max') {
 // --- 会话数据 ---
 
 function onDeleted() {
+  const sid = effectiveSessionId.value
+  // 在工作台中的会话被删除:一并移出工作台(FR-009)
+  if (sid && findSession(sid)) {
+    removeSession(sid)
+  }
   if (props.paneId) {
     setPaneSession(props.paneId, null)
-  } else {
+  } else if (!props.sessionId) {
     selectSession(null)
   }
   clearRecords()
@@ -156,6 +184,19 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
   }
   return null
 })
+
+// --- 只读条(FR-009,仅档案馆) ---
+
+const workbenchHome = computed(() => {
+  const sid = effectiveSessionId.value
+  if (!sid) return null
+  return findSession(sid)?.tab ?? null
+})
+
+function onOpenInWorkbench() {
+  const sid = effectiveSessionId.value
+  if (sid) goToSession(sid)
+}
 
 /** 最近一条 assistant 记录(用于推断真实模型与上下文占用) */
 const lastAssistantRecord = computed(() => {
@@ -186,7 +227,7 @@ const lastAssistantContextSize = computed<number>(() => {
 
 /** 流式区当前渲染的 message id 集合(用于历史区过滤,避免与流式区重复显示) */
 const streamingMessageIds = computed(() =>
-  new Set(streamingTurns.value.map(t => t.messageId)),
+  new Set(stream.value.streamingTurns.map(t => t.messageId)),
 )
 
 /** 进入消息流的 system 子类型（其余 system 记录为噪音，不渲染） */
@@ -294,22 +335,30 @@ function onSlashClose() {
 }
 
 function clearCurrentPaneView() {
-  clearStreamingTurns()
+  const sid = effectiveSessionId.value
+  if (sid) clearStreamingTurns(sid)
   hideHistory.value = true
   showHelpCard.value = false
 }
 
 function handleNewSession() {
-  // /new:在右侧开新 pane(无 sessionId),首次发消息时由 CLI 创建 sid
+  // /new:仅档案馆分屏语义(开新 pane);工作台列绑定固定会话,引导用左列入口
+  if (props.mode === 'workbench') {
+    slashError.value = '工作台中请使用左列「＋」新建'
+    return
+  }
   if (props.paneId) {
     splitPane(props.paneId, null)
   } else {
-    // 非分屏模式:清当前选中,等价于"开新会话"入口
     selectSession(null)
   }
 }
 
 function handleChangeDirectory(arg: string) {
+  if (props.mode === 'workbench') {
+    slashError.value = '工作台列已绑定会话,请从档案馆打开其他会话'
+    return
+  }
   // 严格匹配 display_path(已解码的项目路径)
   const target = projects.value.find(p => p.display_path === arg)
   if (!target) {
@@ -395,7 +444,7 @@ function onInputKeydown(e: KeyboardEvent) {
   }
 }
 
-// 顶栏事件转发
+// 顶栏事件转发(档案馆分屏)
 function onSplitRight() {
   if (props.paneId) splitPane(props.paneId, null)
 }
@@ -427,20 +476,19 @@ function scrollToBottom(force = false) {
 
 watch(records, () => scrollToBottom(true))
 
-watch(streaming, async (val, oldVal) => {
+// 本会话流式结束 → 等 jsonl 落账后 reload(只在本实例正在展示该会话时发生)
+watch(() => stream.value.streaming, async (val, oldVal) => {
   if (!val && oldVal) {
     const cs = currentSession.value
-    if (!cs) {
-      clearStreamingTurns()
-      return
-    }
+    if (!cs) return
+    const sid = cs.summary.id
     // 等 jsonl flush 稳定(经验值 300ms),避免触发"首次 reload 没拿到 → 重试一次"的双重排
     await new Promise(r => setTimeout(r, 300))
     let newRecords: SessionRecord[] | null = null
     try {
       newRecords = await invoke<SessionRecord[]>('get_session_records', {
         projectId: cs.projectId,
-        sessionId: cs.summary.id,
+        sessionId: sid,
       })
     } catch {
       // ignore:走兜底分支
@@ -451,32 +499,35 @@ watch(streaming, async (val, oldVal) => {
       try {
         newRecords = await invoke<SessionRecord[]>('get_session_records', {
           projectId: cs.projectId,
-          sessionId: cs.summary.id,
+          sessionId: sid,
         })
       } catch {
         // ignore
       }
     }
     // 关键:reload 后只更新 records + 清 pendingUserMessage,
-    // **不**调 clearStreamingTurns——保留流式累积的 streamingTurns 引用,
-    // 让那些 BlockText/BlockThinking 组件实例继续挂载,markdown-it+shiki 不重渲染。
+    // **不**清 streamingTurns——保留流式累积的组件实例,markdown-it+shiki 不重渲染。
     // streamingMessageIds 继续屏蔽历史区中相同 messageId 的 assistant record(无双显示)。
-    // streamingTurns 会在下次 sendMessage(重置为 [])或会话切换(clearStreamingTurns)时清掉。
+    if (effectiveSessionId.value !== sid) return
     if (newRecords) records.value = newRecords
-    pendingUserMessage.value = null
+    stream.value.pendingUserMessage = null
+    finishedDirty.delete(sid)
   }
 })
 
-// 滚动跟随的 watcher:旧版按 content.length 总和触发,字符级流式下 text 字段 mutate 而数组长度
-// 不变,导致永不触发。改为 watch streamingTick(useStreaming 内每 RAF 递增一次,统一覆盖 block_start/
-// delta/stop/assistant_message 各种 mutation),滚动跟随节流也自然按帧。
-watch(streamingTick, () => scrollToBottom())
+// 滚动跟随:watch streamingTick(打字机每帧递增,统一覆盖各种 mutation),仅本会话流式中才滚
+watch(streamingTick, () => {
+  if (stream.value.streaming) scrollToBottom()
+})
 
 watch(
   () => currentSession.value,
   (cs) => {
     if (cs) {
-      loadRecords(cs.projectId, cs.summary.id)
+      // 后台结束的流式(本实例未挂载期间)留下脏标记 → 强制刷新拿落账记录
+      const force = finishedDirty.has(cs.summary.id)
+      if (force) finishedDirty.delete(cs.summary.id)
+      loadRecords(cs.projectId, cs.summary.id, force)
     } else {
       clearRecords()
     }
@@ -488,11 +539,11 @@ watch(
 <template>
   <!-- 空态 -->
   <div v-if="!currentSession" class="h-full flex items-center justify-center">
-    <p class="text-muted-foreground text-sm">从左侧选择会话</p>
+    <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? '会话不存在或已删除' : '从左侧选择会话' }}</p>
   </div>
 
   <div v-else class="h-full flex flex-col">
-    <!-- 会话顶栏(FR-006) -->
+    <!-- 会话顶栏 -->
     <SessionTopBar
       :title="displayTitle(currentSession.summary)"
       :session-id="currentSession.summary.id"
@@ -505,7 +556,7 @@ watch(
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
-      :show-split="!!paneId"
+      :show-split="!!paneId && mode !== 'workbench'"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @split-right="onSplitRight"
@@ -525,7 +576,7 @@ watch(
     </div>
 
     <!-- 无记录 -->
-    <div v-else-if="messages.length === 0 && !streaming && !showHelpCard" class="flex-1 flex items-center justify-center">
+    <div v-else-if="messages.length === 0 && !stream.streaming && !showHelpCard" class="flex-1 flex items-center justify-center">
       <p class="text-muted-foreground text-sm">无对话记录</p>
     </div>
 
@@ -564,15 +615,15 @@ watch(
         </template>
       </template>
 
-      <div v-if="pendingUserMessage" class="flex gap-3 msg-block">
+      <div v-if="stream.pendingUserMessage" class="flex gap-3 msg-block">
         <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
         <div class="min-w-0 flex-1">
           <div class="text-xs font-medium mb-1 text-primary">你</div>
-          <div class="whitespace-pre-wrap break-words text-sm">{{ pendingUserMessage }}</div>
+          <div class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
         </div>
       </div>
 
-      <div v-for="turn in streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
+      <div v-for="turn in stream.streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
         <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
         <div class="min-w-0 flex-1">
           <div class="text-xs font-medium mb-1 text-claude">Claude</div>
@@ -587,22 +638,22 @@ watch(
         </div>
       </div>
 
-      <div v-if="streaming && streamingTurns.length === 0" class="flex gap-3">
+      <div v-if="stream.streaming && stream.streamingTurns.length === 0" class="flex gap-3">
         <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
         <div class="text-xs text-muted-foreground">思考中...</div>
       </div>
 
-      <div v-if="streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">
-        {{ streamError }}
+      <div v-if="stream.streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">
+        {{ stream.streamError }}
       </div>
 
       <!-- /help 本地帮助卡片 -->
       <SlashHelpCard v-if="showHelpCard" :commands="SLASH_COMMANDS" />
     </div>
 
-    <!-- 权限请求卡片(FR-003,固定在输入栏上方) -->
+    <!-- 工作台列:权限请求卡片(固定在输入栏上方) -->
     <div
-      v-if="permissionRequest"
+      v-if="interactive && permissionRequest"
       class="px-4 pb-2 shrink-0 flex justify-center"
     >
       <PermissionCard
@@ -612,8 +663,8 @@ watch(
       />
     </div>
 
-    <!-- 输入栏 + 斜杠命令面板 -->
-    <div v-if="currentSession.summary.cwd" class="px-4 py-3 border-t border-border shrink-0 relative">
+    <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染,事件绑定随之移除) -->
+    <div v-if="interactive && currentSession.summary.cwd" class="px-4 py-3 border-t border-border shrink-0 relative">
       <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
       </div>
@@ -630,7 +681,7 @@ watch(
         <textarea
           ref="textareaRef"
           v-model="inputText"
-          :disabled="streaming"
+          :disabled="stream.streaming"
           placeholder="输入消息… (Shift+Enter 换行,/ 触发命令补全)"
           rows="1"
           class="flex-1 px-3 py-2 text-sm rounded-md bg-popover border border-border
@@ -644,7 +695,7 @@ watch(
           @select="syncCursor"
         />
         <button
-          v-if="streaming"
+          v-if="stream.streaming"
           class="px-3 py-2 text-xs rounded-md bg-accent text-accent-foreground hover:shadow-paper transition-shadow shrink-0"
           @click="onStopStreaming"
         >
@@ -660,6 +711,22 @@ watch(
           发送
         </button>
       </div>
+    </div>
+
+    <!-- 档案馆:常驻只读条(FR-009) -->
+    <div
+      v-if="!interactive"
+      class="px-4 py-2 border-t border-border shrink-0 flex items-center gap-2 text-xs text-muted-foreground"
+    >
+      <span class="i-carbon-document w-3.5 h-3.5 shrink-0" />
+      <span v-if="workbenchHome" class="truncate">正在「{{ workbenchHome.name }}」工作台运行</span>
+      <span v-else class="truncate">只读预览</span>
+      <button
+        class="ml-auto shrink-0 px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow"
+        @click="onOpenInWorkbench"
+      >
+        {{ workbenchHome ? '前往' : '在工作台打开' }}
+      </button>
     </div>
   </div>
 </template>

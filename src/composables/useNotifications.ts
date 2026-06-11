@@ -1,0 +1,310 @@
+import { ref, computed, watch } from 'vue'
+import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification'
+import { displayTitle } from '@/types'
+import { useProjects } from './useProjects'
+import { useWorkbench } from './useWorkbench'
+import { useUiState } from './useUiState'
+import { onStreamFinished, getStream, useStreaming } from './useStreaming'
+import {
+  usePermissionRequests,
+  onPermissionTimeout,
+  type PermissionRequest,
+} from './usePermissionRequests'
+
+/**
+ * 应用内通知层(FR-006/007/008/010)
+ *
+ * - 持久型 toast:权限请求(从权限队列直接派生——与左列决策条/列内权限卡同源,任一处处理同步消失)、
+ *   出错停住(errorEvents 集合:工作台内流式错误 + 外部会话 api_error 兜底)
+ * - 瞬态型 toast:5 秒自动消失(任务完成/软上限收起/超时自动拒绝/状态重置)
+ * - 角标计数 = 等权限会话数 + 未处理错误数(与 toast 同源)
+ * - 系统通知:应用非前台时同步发送,权限被拒静默降级
+ */
+
+// ---- 瞬态 toast ----
+
+export interface TransientToast {
+  id: number
+  title: string
+  sub?: string
+}
+
+const transients = ref<TransientToast[]>([])
+let transientSeq = 0
+const TRANSIENT_MS = 5000
+
+function notifyTransient(title: string, sub?: string) {
+  const id = ++transientSeq
+  transients.value.push({ id, title, sub })
+  window.setTimeout(() => {
+    transients.value = transients.value.filter(t => t.id !== id)
+  }, TRANSIENT_MS)
+}
+
+// ---- 错误事件(持久型来源之二) ----
+
+export interface SessionErrorEvent {
+  sessionId: string
+  /** 错误摘要(等宽副行) */
+  sub: string
+  /** stream=工作台内流式错误(可重试);external=外部会话兜底(FR-010,仅「去会话」) */
+  source: 'stream' | 'external'
+  updatedAt: number
+}
+
+/** sessionId → 错误事件;同一会话去重为一条,新事件更新内容 */
+const errorEvents = ref<Map<string, SessionErrorEvent>>(new Map())
+
+function upsertErrorEvent(sessionId: string, sub: string, source: 'stream' | 'external') {
+  const next = new Map(errorEvents.value)
+  next.set(sessionId, { sessionId, sub: sub.slice(0, 120), source, updatedAt: Date.now() })
+  errorEvents.value = next
+}
+
+/** 确认/解除某会话的错误事件(重试成功、去会话、手动 dismiss、会话退出工作台) */
+function dismissError(sessionId: string) {
+  if (!errorEvents.value.has(sessionId)) return
+  const next = new Map(errorEvents.value)
+  next.delete(sessionId)
+  errorEvents.value = next
+}
+
+// ---- 持久型 toast 派生(同源同步的关键:不复制状态,直接 computed) ----
+
+export type PersistentToast =
+  | {
+      kind: 'permission'
+      key: string
+      sessionId: string
+      title: string
+      sub: string
+      request: PermissionRequest
+      at: number
+    }
+  | {
+      kind: 'error'
+      key: string
+      sessionId: string
+      title: string
+      sub: string
+      source: 'stream' | 'external'
+      canRetry: boolean
+      at: number
+    }
+
+function sessionTitle(sessionId: string): string {
+  const { projects } = useProjects()
+  for (const p of projects.value) {
+    const s = p.sessions.find(s => s.id === sessionId)
+    if (s) return displayTitle(s)
+  }
+  return sessionId.slice(0, 8)
+}
+
+/** 查会话 cwd(去会话→展开列需要;重试需要) */
+function sessionCwd(sessionId: string): string | null {
+  const { projects } = useProjects()
+  for (const p of projects.value) {
+    const s = p.sessions.find(s => s.id === sessionId)
+    if (s) return s.cwd
+  }
+  return null
+}
+
+function permissionSub(req: PermissionRequest): string {
+  const input = req.input
+  for (const k of ['file_path', 'command', 'url', 'pattern']) {
+    const v = input[k]
+    if (typeof v === 'string' && v) {
+      const s = v.split('\n')[0]
+      return `${req.toolName} · ${s.length > 48 ? s.slice(0, 48) + '…' : s}`
+    }
+  }
+  return req.toolName
+}
+
+const { queue } = usePermissionRequests()
+
+const persistentToasts = computed<PersistentToast[]>(() => {
+  const list: PersistentToast[] = []
+  // 权限:同一会话仅保留一条(队首),后续请求依次顶上(去重更新)
+  const seen = new Set<string>()
+  for (const req of queue.value) {
+    if (seen.has(req.sessionId)) continue
+    seen.add(req.sessionId)
+    list.push({
+      kind: 'permission',
+      key: `perm:${req.sessionId}`,
+      sessionId: req.sessionId,
+      title: sessionTitle(req.sessionId),
+      sub: permissionSub(req),
+      request: req,
+      at: req.timestamp,
+    })
+  }
+  for (const ev of errorEvents.value.values()) {
+    list.push({
+      kind: 'error',
+      key: `err:${ev.sessionId}`,
+      sessionId: ev.sessionId,
+      title: sessionTitle(ev.sessionId),
+      sub: ev.sub,
+      source: ev.source,
+      canRetry: ev.source === 'stream' && !!getStream(ev.sessionId).lastSent,
+      at: ev.updatedAt,
+    })
+  }
+  return list.sort((a, b) => a.at - b.at)
+})
+
+/** ActivityBar 角标(FR-007):未处理持久型事件数,瞬态不计入 */
+const badgeCount = computed(() => persistentToasts.value.length)
+
+/** 同屏持久型上限 3 条,超出折叠;点击汇总条展开全部 */
+const toastsExpanded = ref(false)
+
+// ---- 系统通知(FR-008) ----
+
+let notifPermissionAsked = false
+
+/**
+ * 应用窗口非前台或最小化时发系统通知;前台抑制。
+ * 首次需要发送时才请求授权;权限被拒/发送失败静默降级,不影响应用内 toast。
+ */
+async function maybeNotifySystem(title: string, body: string) {
+  try {
+    const win = getCurrentWindow()
+    const [focused, minimized] = await Promise.all([
+      win.isFocused(),
+      win.isMinimized(),
+    ])
+    if (focused && !minimized) return
+    let granted = await isPermissionGranted()
+    if (!granted && !notifPermissionAsked) {
+      notifPermissionAsked = true
+      granted = (await requestPermission()) === 'granted'
+    }
+    if (granted) {
+      sendNotification({ title, body })
+    }
+  } catch (_) {
+    // 静默降级:通知层自身失败不弹错误、不阻断应用内 toast
+  }
+}
+
+// ---- 「去会话」(FR-006/008/010 共用跳转闭环) ----
+
+function goToSession(sessionId: string) {
+  const { openSession, findSession, expandSession, setActiveTab } = useWorkbench()
+  const { switchSection } = useUiState()
+  const found = findSession(sessionId)
+  let collapsed: string | null = null
+  if (found) {
+    setActiveTab(found.tab.id)
+    collapsed = expandSession(found.tab.id, sessionId).collapsedSessionId
+  } else {
+    collapsed = openSession(sessionId).collapsedSessionId
+  }
+  if (collapsed) {
+    notifyTransient(`已收起:${sessionTitle(collapsed)}`)
+  }
+  switchSection('workbench')
+  // 错误事件已被注意:同步解除其 toast(左列卡状态仍如实反映)
+  dismissError(sessionId)
+}
+
+// ---- 初始化:挂接各事件源(App 启动调用一次) ----
+
+let initialized = false
+
+export async function initNotificationLayer(): Promise<void> {
+  if (initialized) return
+  initialized = true
+
+  const { isSessionVisibleInWorkbench, findSession } = useWorkbench()
+
+  // 1. 流结束:错误→持久型;完成→不可见时瞬态;非前台同步系统通知
+  onStreamFinished((sessionId, hasError) => {
+    const title = sessionTitle(sessionId)
+    if (hasError) {
+      const err = getStream(sessionId).streamError ?? '流式出错'
+      upsertErrorEvent(sessionId, err, 'stream')
+      void maybeNotifySystem('出错停住', `${title} · ${err.slice(0, 60)}`)
+    } else {
+      const { activeSection } = useUiState()
+      const visible =
+        activeSection.value === 'workbench' && isSessionVisibleInWorkbench(sessionId)
+      if (!visible) {
+        notifyTransient(`任务完成:${title}`)
+      }
+      void maybeNotifySystem('任务完成', title)
+    }
+  })
+
+  // 2. 权限请求入队(watch 队列新增):非前台系统通知
+  const knownRequests = new Set<string>()
+  watch(
+    () => queue.value.map(r => r.requestId),
+    (ids) => {
+      for (const req of queue.value) {
+        if (!knownRequests.has(req.requestId)) {
+          knownRequests.add(req.requestId)
+          void maybeNotifySystem('权限请求', `${sessionTitle(req.sessionId)} · ${permissionSub(req)}`)
+        }
+      }
+      // 收缩集合防泄漏
+      const live = new Set(ids)
+      for (const id of knownRequests) {
+        if (!live.has(id)) knownRequests.delete(id)
+      }
+    },
+  )
+
+  // 3. 权限超时:持久型已被移除,补瞬态「已自动拒绝」
+  onPermissionTimeout((req) => {
+    notifyTransient(`权限已自动拒绝:${sessionTitle(req.sessionId)}`, permissionSub(req))
+  })
+
+  // 4. 外部会话出错兜底(FR-010):不属于任何工作台的会话 jsonl 新增 api_error
+  await listen<{ sessionId: string; projectId: string; content: string }>(
+    'session-api-error',
+    (e) => {
+      const { sessionId, content } = e.payload
+      // 工作台内会话的出错由流式链路处理,不走本通道(链路互斥,防重复通知)
+      if (findSession(sessionId)) return
+      upsertErrorEvent(sessionId, content || 'API 错误', 'external')
+      void maybeNotifySystem('出错停住', `${sessionTitle(sessionId)} · ${(content || '').slice(0, 60)}`)
+    },
+  )
+}
+
+// ---- 操作:toast 上的按钮 ----
+
+/** 错误 toast「重试」:重发最近一次消息,成功后解除错误事件 */
+async function retryFromToast(sessionId: string): Promise<void> {
+  const { retrySession } = useStreaming()
+  const ok = await retrySession(sessionId)
+  if (ok) dismissError(sessionId)
+}
+
+export function useNotifications() {
+  return {
+    transients,
+    persistentToasts,
+    badgeCount,
+    toastsExpanded,
+    notifyTransient,
+    upsertErrorEvent,
+    dismissError,
+    goToSession,
+    retryFromToast,
+    sessionTitle,
+    sessionCwd,
+  }
+}

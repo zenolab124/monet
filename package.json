@@ -1,6 +1,6 @@
 {
   "name": "cc-space-tauri",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "CC Space — Claude Code session viewer",
   "type": "module",
   "scripts": {
@@ -34,6 +34,7 @@
   "dependencies": {
     "@shikijs/markdown-it": "^4.0.2",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "markdown-it": "^14.1.1",
     "shiki": "^4.0.2"
   }

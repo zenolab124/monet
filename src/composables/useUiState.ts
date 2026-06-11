@@ -4,8 +4,8 @@ import { ref, watch } from 'vue'
 
 const STORAGE_KEY = 'cc-space-ui'
 
-/** ActivityBar 区域（v2.0.0 仅会话/首页两个可用，其余域 v2.1.0+ 点亮） */
-export type AppSection = 'sessions' | 'home'
+/** ActivityBar 区域（v2.1.0 点亮工作台；sessions 语义为档案馆） */
+export type AppSection = 'workbench' | 'sessions' | 'home'
 
 interface UiState {
   sidebarsCollapsed: boolean
@@ -17,9 +17,12 @@ function loadState(): UiState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
+      const validSections: AppSection[] = ['workbench', 'sessions', 'home']
       return {
         sidebarsCollapsed: !!parsed.sidebarsCollapsed,
-        activeSection: parsed.activeSection === 'home' ? 'home' : 'sessions',
+        activeSection: validSections.includes(parsed.activeSection)
+          ? parsed.activeSection
+          : 'sessions',
       }
     }
   } catch (_) {}

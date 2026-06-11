@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -10,20 +11,22 @@ use tauri::{AppHandle, Emitter};
 use crate::models::ContentBlock;
 use crate::permission::PermissionService;
 
-/// 活跃的 streaming 进程句柄
-static ACTIVE_PROCESS: Mutex<Option<Arc<Mutex<Child>>>> = Mutex::new(None);
+/// 活跃的 streaming 进程表（v2.1.0 per-session：sessionId → child，多会话并行流式）
+static ACTIVE_PROCESSES: Mutex<Option<HashMap<String, Arc<Mutex<Child>>>>> = Mutex::new(None);
 
-/// 前端接收的流式事件
+/// 前端接收的流式事件（全部携带 session_id，前端按会话分发）
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
     /// 助手消息内容更新（终态快照，作为字符级 delta 的兜底校正）
     AssistantMessage {
+        session_id: String,
         message_id: String,
         content: Vec<ContentBlock>,
     },
     /// 字符级增量到达——content_block_start：某个 index 上出现新块
     BlockStart {
+        session_id: String,
         message_id: String,
         index: usize,
         content_block: ContentBlock,
@@ -35,22 +38,26 @@ pub enum StreamEvent {
     /// - thinking_delta { type, thinking }
     /// - signature_delta { type, signature }
     BlockDelta {
+        session_id: String,
         message_id: String,
         index: usize,
         delta: Value,
     },
     /// 字符级增量到达——content_block_stop：某个 index 上的块结束
     BlockStop {
+        session_id: String,
         message_id: String,
         index: usize,
     },
     /// 流式完成
     Result {
+        session_id: String,
         text: String,
         cost_usd: f64,
     },
     /// 错误
     Error {
+        session_id: String,
         message: String,
     },
 }
@@ -106,7 +113,7 @@ fn enhanced_path() -> String {
     format!("{}:{}", extra_paths.join(":"), existing)
 }
 
-/// 启动流式会话
+/// 启动流式会话（同会话已有流式则先终止旧流；不同会话互不影响）
 pub fn start_streaming(
     app: &AppHandle,
     session_id: &str,
@@ -115,19 +122,14 @@ pub fn start_streaming(
     model: Option<&str>,
     effort: Option<&str>,
 ) {
-    // 先终止已有进程
-    stop_streaming();
+    // 同会话旧进程先终止（重发场景）；其他会话的并行流式不受影响
+    stop_streaming(session_id);
 
-    // 1. 启动权限服务（失败立即上报错误，不静默降级）
-    let permission_service = match PermissionService::start(app.clone()) {
+    // 1. 启动该会话的权限服务（失败立即上报错误，不静默降级）
+    let permission_service = match PermissionService::start(app.clone(), session_id) {
         Ok(s) => s,
         Err(e) => {
-            let _ = app.emit(
-                "stream-event",
-                StreamEvent::Error {
-                    message: format!("权限服务启动失败：{}", e),
-                },
-            );
+            emit_error(app, session_id, format!("权限服务启动失败：{}", e));
             return;
         }
     };
@@ -137,12 +139,11 @@ pub fn start_streaming(
     let mcp_binary = match find_mcp_binary() {
         Some(p) => p,
         None => {
-            PermissionService::stop_global();
-            let _ = app.emit(
-                "stream-event",
-                StreamEvent::Error {
-                    message: "未找到 cc-space-mcp 二进制，无法启动权限服务".to_string(),
-                },
+            PermissionService::stop_for(session_id);
+            emit_error(
+                app,
+                session_id,
+                "未找到 cc-space-mcp 二进制，无法启动权限服务".to_string(),
             );
             return;
         }
@@ -200,37 +201,54 @@ pub fn start_streaming(
     {
         Ok(c) => c,
         Err(e) => {
-            PermissionService::stop_global();
-            let _ = app.emit(
-                "stream-event",
-                StreamEvent::Error {
-                    message: format!("启动 claude 失败: {}", e),
-                },
-            );
+            PermissionService::stop_for(session_id);
+            emit_error(app, session_id, format!("启动 claude 失败: {}", e));
             return;
         }
     };
 
     let child = Arc::new(Mutex::new(child));
-    *ACTIVE_PROCESS.lock().unwrap() = Some(child.clone());
+    ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(session_id.to_string(), child.clone());
 
     let handle = app.clone();
+    let sid = session_id.to_string();
     std::thread::spawn(move || {
-        read_stream(child, &handle);
-        // 子进程退出后回收权限服务
-        PermissionService::stop_global();
+        read_stream(child, &handle, &sid);
+        // 子进程退出后回收该会话的权限服务
+        PermissionService::stop_for(&sid);
     });
 }
 
-/// 终止当前流式进程
-pub fn stop_streaming() {
-    if let Some(process) = ACTIVE_PROCESS.lock().unwrap().take() {
+/// 终止指定会话的流式进程
+pub fn stop_streaming(session_id: &str) {
+    let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_mut()
+        .and_then(|m| m.remove(session_id));
+    if let Some(process) = process {
         if let Ok(mut child) = process.lock() {
             let _ = child.kill();
         }
     }
-    // 一并清理权限服务（pending 请求统一按 deny 收尾）
-    PermissionService::stop_global();
+    // 一并清理该会话的权限服务（pending 请求统一按 deny 收尾）
+    PermissionService::stop_for(session_id);
+}
+
+fn emit_error(app: &AppHandle, session_id: &str, message: String) {
+    let _ = app.emit(
+        "stream-event",
+        StreamEvent::Error {
+            session_id: session_id.to_string(),
+            message,
+        },
+    );
+    // 错误即终态：补发 stream-done 让前端走统一收尾
+    let _ = app.emit("stream-done", json!({ "session_id": session_id }));
 }
 
 /// 定位 cc-space-mcp 二进制
@@ -263,7 +281,7 @@ fn find_mcp_binary() -> Option<PathBuf> {
 }
 
 /// 读取进程 stdout，解析并 emit 事件
-fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
+fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle, session_id: &str) {
     let stdout = {
         let mut child = process.lock().unwrap();
         match child.stdout.take() {
@@ -289,7 +307,7 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
             Err(_) => continue,
         };
 
-        if let Some(event) = decode_stream_event(&value, &mut current_message_id) {
+        if let Some(event) = decode_stream_event(&value, session_id, &mut current_message_id) {
             match &event {
                 StreamEvent::Result { .. } => {
                     // result 事件暂存，等进程退出后再发送
@@ -324,6 +342,7 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
             if let Some(text) = stderr_text {
                 if !text.trim().is_empty() {
                     let _ = app.emit("stream-event", StreamEvent::Error {
+                        session_id: session_id.to_string(),
                         message: text.trim().to_string(),
                     });
                 }
@@ -336,11 +355,13 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
         let _ = app.emit("stream-event", &result);
     }
 
-    // 通知流结束
-    let _ = app.emit("stream-done", ());
+    // 通知该会话的流结束
+    let _ = app.emit("stream-done", json!({ "session_id": session_id }));
 
-    // 清理引用
-    *ACTIVE_PROCESS.lock().unwrap() = None;
+    // 清理引用（被 stop_streaming 主动 kill 时 entry 已移除，这里幂等）
+    if let Some(map) = ACTIVE_PROCESSES.lock().unwrap().as_mut() {
+        map.remove(session_id);
+    }
 }
 
 /// 解析单行 stream-json 为 StreamEvent
@@ -350,9 +371,11 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle) {
 /// 单个 block 事件本身不带 message_id，需要靠跨行状态拼接。
 fn decode_stream_event(
     value: &Value,
+    session_id: &str,
     current_message_id: &mut Option<String>,
 ) -> Option<StreamEvent> {
     let event_type = value.get("type")?.as_str()?;
+    let sid = session_id.to_string();
 
     match event_type {
         "stream_event" => {
@@ -377,6 +400,7 @@ fn decode_stream_event(
                     let content_block: ContentBlock =
                         serde_json::from_value(cb_value).ok()?;
                     Some(StreamEvent::BlockStart {
+                        session_id: sid,
                         message_id: mid,
                         index,
                         content_block,
@@ -387,6 +411,7 @@ fn decode_stream_event(
                     let index = inner.get("index")?.as_u64()? as usize;
                     let delta = inner.get("delta")?.clone();
                     Some(StreamEvent::BlockDelta {
+                        session_id: sid,
                         message_id: mid,
                         index,
                         delta,
@@ -396,6 +421,7 @@ fn decode_stream_event(
                     let mid = current_message_id.as_ref()?.clone();
                     let index = inner.get("index")?.as_u64()? as usize;
                     Some(StreamEvent::BlockStop {
+                        session_id: sid,
                         message_id: mid,
                         index,
                     })
@@ -416,7 +442,11 @@ fn decode_stream_event(
                 .get("content")
                 .and_then(|c| serde_json::from_value(c.clone()).ok())
                 .unwrap_or_default();
-            Some(StreamEvent::AssistantMessage { message_id, content })
+            Some(StreamEvent::AssistantMessage {
+                session_id: sid,
+                message_id,
+                content,
+            })
         }
         "progress" => {
             // data.message.type 必须是 "assistant"
@@ -436,7 +466,11 @@ fn decode_stream_event(
                 .get("content")
                 .and_then(|c| serde_json::from_value(c.clone()).ok())
                 .unwrap_or_default();
-            Some(StreamEvent::AssistantMessage { message_id, content })
+            Some(StreamEvent::AssistantMessage {
+                session_id: sid,
+                message_id,
+                content,
+            })
         }
         "result" => {
             let result_text = value
@@ -450,13 +484,17 @@ fn decode_stream_event(
                 .unwrap_or(false);
 
             if is_error {
-                Some(StreamEvent::Error { message: result_text })
+                Some(StreamEvent::Error {
+                    session_id: sid,
+                    message: result_text,
+                })
             } else {
                 let cost = value
                     .get("total_cost_usd")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
                 Some(StreamEvent::Result {
+                    session_id: sid,
                     text: result_text,
                     cost_usd: cost,
                 })

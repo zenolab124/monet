@@ -10,8 +10,8 @@ export function createSessionDetail() {
   const currentProjectId = ref<string | null>(null)
   const currentSessionId = ref<string | null>(null)
 
-  async function loadRecords(projectId: string, sessionId: string) {
-    if (currentProjectId.value === projectId && currentSessionId.value === sessionId) {
+  async function loadRecords(projectId: string, sessionId: string, force = false) {
+    if (!force && currentProjectId.value === projectId && currentSessionId.value === sessionId) {
       return
     }
 
