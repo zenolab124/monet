@@ -40,7 +40,6 @@ pub fn run() {
             commands::get_session_summary,
             commands::delete_session,
             commands::resume_in_terminal,
-            commands::new_session_in_terminal,
             commands::resume_in_vscode,
             commands::start_streaming,
             commands::stop_streaming,

@@ -12,6 +12,8 @@
  *   即：从位置 0 到 cursorPos 的子串完全匹配 `^\/[a-z\-]*$`。
  */
 
+import { MODELS, MODEL_ALIASES } from '@/utils/modelContext'
+
 /** 命令分类 */
 export type SlashCommandCategory = 'native' | 'pass'
 
@@ -58,15 +60,23 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: 'model',
-    hint: '切换当前会话的模型（sonnet / opus / haiku）',
+    hint: '切换当前会话的模型（fable / opus / sonnet / haiku 或完整 ID）',
     hasArg: true,
     argHint: '<name>',
     category: 'pass',
   },
 ]
 
-/** 已知模型别名（与 FR-006 对齐） */
-const KNOWN_MODELS = new Set(['sonnet', 'opus', 'haiku'])
+/** 合法 /model 参数 = 模型清单完整 ID + 短别名（单源派生自 modelContext） */
+const KNOWN_MODELS = new Set([
+  ...MODELS.map(m => m.id),
+  ...Object.keys(MODEL_ALIASES),
+])
+
+/** 短别名展开为完整 ID（已是完整 ID 则原样返回） */
+function resolveModelArg(arg: string): string {
+  return MODEL_ALIASES[arg] ?? arg
+}
 
 /** 触发面板的严格正则：从 0 到 cursorPos 必须完全匹配 */
 const TRIGGER_RE = /^\/[a-z-]*$/
@@ -140,17 +150,18 @@ export function parseCommand(input: string): ParsedCommand {
       return {
         kind: 'invalid',
         cmd,
-        reason: '请提供模型名，可选 sonnet / opus / haiku',
+        reason: '请提供模型名，可选 fable / opus / sonnet / haiku 或完整 ID',
       }
     }
     if (!KNOWN_MODELS.has(arg.toLowerCase())) {
       return {
         kind: 'invalid',
         cmd,
-        reason: '未知模型，可选 sonnet / opus / haiku',
+        reason: '未知模型，可选 fable / opus / sonnet / haiku 或完整 ID',
       }
     }
-    return { kind: 'pass', cmd, arg: arg.toLowerCase() }
+    // 短别名展开为完整 ID 再持久化:UI 选中态与 --model 传参统一用完整 ID
+    return { kind: 'pass', cmd, arg: resolveModelArg(arg.toLowerCase()) }
   }
 
   if (cmd.name === 'cd') {

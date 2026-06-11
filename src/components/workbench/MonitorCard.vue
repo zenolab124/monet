@@ -21,7 +21,7 @@ const props = defineProps<{
 const sid = computed(() => props.sessionId)
 
 const { projects } = useProjects()
-const { activeTab, expandSession, removeSession, flashSessionId } = useWorkbench()
+const { activeTab, expandSession, removeSession, flashSessionId, draftCwd } = useWorkbench()
 const { retrySession } = useStreaming()
 const { respondRequest } = usePermissionRequests()
 const { notifyTransient, sessionTitle, dismissError } = useNotifications()
@@ -40,8 +40,17 @@ const summary = computed(() => {
   return null
 })
 
+/** 应用内新建未落盘的草稿:标题与项目名占位 */
+const draft = computed(() => {
+  if (summary.value) return null
+  const cwd = draftCwd(props.sessionId)
+  return cwd ? { projectName: cwd.split('/').pop() || cwd } : null
+})
+
 const title = computed(() =>
-  summary.value ? displayTitle(summary.value.summary) : props.sessionId.slice(0, 8),
+  summary.value ? displayTitle(summary.value.summary)
+  : draft.value ? '新会话'
+  : props.sessionId.slice(0, 8),
 )
 
 // --- 秒级时钟:权限倒计时 + 流式持续时间共用,空闲时停表 ---
@@ -109,8 +118,8 @@ const tokenText = computed(() => {
 /** 点击卡片:未展开→展开;已展开→右区滚动聚焦(幂等) */
 function onCardClick() {
   const result = expandSession(activeTab.value.id, props.sessionId)
-  if (result.collapsedSessionId) {
-    notifyTransient(`已收起:${sessionTitle(result.collapsedSessionId)}`)
+  if (result.collapsedSessionIds.length > 0) {
+    notifyTransient(`已收起:${result.collapsedSessionIds.map(sessionTitle).join('、')}`)
   }
 }
 
@@ -254,7 +263,7 @@ function onDragEnd() {
 
     <!-- meta 行:项目名 + 持续/最后活动时间 + token;等权限时显示倒计时 -->
     <div class="px-2.5 pb-2 flex items-center gap-2.5 text-[10px] text-muted-foreground tabular-nums">
-      <span class="truncate">{{ summary?.projectName ?? '—' }}</span>
+      <span class="truncate">{{ summary?.projectName ?? draft?.projectName ?? '—' }}</span>
       <span v-if="timeoutSeconds !== null" class="text-accent shrink-0">{{ timeoutSeconds }} 秒后超时</span>
       <template v-else>
         <span class="shrink-0">{{ durationText }}</span>

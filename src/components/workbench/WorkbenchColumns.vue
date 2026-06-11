@@ -1,24 +1,68 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
-import { useWorkbench } from '@/composables/useWorkbench'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 
 /**
- * 右区多列布局(FR-004):布局与拖拽分隔复刻 SplitView 的浮起纸方案
- * (四周边距与列间隙均 10px,flex-grow 比例只作用于自由空间);
+ * 右区多列布局(FR-004):浮起纸方案——四周边距与列间隙均 10px,
+ * flex-grow 比例只作用于自由空间;
  * 同时承接两类拖拽落点(FR-005 ③卡片展开定位 / ④列头重排)。
  */
-const { activeTab, updateColumnSize, expandSession, reorderColumns, focusColumnRequest } = useWorkbench()
+const {
+  activeTab,
+  updateColumnSize,
+  expandSession,
+  reorderColumns,
+  focusColumnRequest,
+  enforceColumnCapacity,
+} = useWorkbench()
 const { notifyTransient, sessionTitle } = useNotifications()
 
 const containerRef = ref<HTMLElement>()
 const dragging = ref(false)
 
+// 右区实测宽度回写状态层:动态列上限(每列 ≥ MIN_COLUMN_WIDTH)依赖它。
+// 窗口缩小导致超员时自动收列(300ms 防抖:拖拽调窗过程中不连环触发)
+let zoneResizeObserver: ResizeObserver | null = null
+let capacityTimer: number | null = null
+
+function scheduleCapacityCheck() {
+  if (capacityTimer !== null) clearTimeout(capacityTimer)
+  capacityTimer = window.setTimeout(() => {
+    capacityTimer = null
+    const collapsed = enforceColumnCapacity()
+    if (collapsed.length > 0) {
+      notifyTransient(`空间不足,已收起:${collapsed.map(sessionTitle).join('、')}`)
+    }
+  }, 300)
+}
+
+onMounted(() => {
+  const el = containerRef.value
+  if (!el) return
+  setRightZoneWidth(el.clientWidth)
+  zoneResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.contentRect.width > 0) {
+        setRightZoneWidth(entry.contentRect.width)
+        scheduleCapacityCheck()
+      }
+    }
+  })
+  zoneResizeObserver.observe(el)
+})
+
+onUnmounted(() => {
+  zoneResizeObserver?.disconnect()
+  zoneResizeObserver = null
+  if (capacityTimer !== null) clearTimeout(capacityTimer)
+})
+
 const PAD = 10
 const GAP = 10
 
-/** 拖动第 index 条分隔线(算法同 SplitView,作用于当前 tab 的 columnSizes) */
+/** 拖动第 index 条分隔线(作用于当前 tab 的 columnSizes) */
 function onDividerMouseDown(e: MouseEvent, index: number) {
   e.preventDefault()
   dragging.value = true
@@ -92,8 +136,8 @@ function onZoneDrop(e: DragEvent) {
     e.preventDefault()
     // 左列卡片拖至右区:展开并按落点定位;软上限规则叠加(FR-004/005)
     const result = expandSession(activeTab.value.id, sessionId, at)
-    if (result.collapsedSessionId) {
-      notifyTransient(`已收起:${sessionTitle(result.collapsedSessionId)}`)
+    if (result.collapsedSessionIds.length > 0) {
+      notifyTransient(`已收起:${result.collapsedSessionIds.map(sessionTitle).join('、')}`)
     }
     return
   }

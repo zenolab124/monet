@@ -7,6 +7,8 @@ const props = defineProps<{
   used: number
   /** 容量 */
   capacity: number
+  /** 紧凑形态(单行顶栏用):条 + 百分比,完整数字进 title */
+  compact?: boolean
 }>()
 
 /** 0..1 的占用率(防越界) */
@@ -48,24 +50,34 @@ const capacityText = computed(() => formatTokens(props.capacity))
 </script>
 
 <template>
-  <div class="inline-flex items-center gap-2 min-w-32" :title="`已用 ${usedText} / 总容量 ${capacityText} (${percent}%)`">
+  <div
+    class="inline-flex items-center gap-2"
+    :class="{ 'min-w-32': !compact }"
+    :title="`已用 ${usedText} / 总容量 ${capacityText} (${percent}%)`"
+  >
     <!-- 进度条 -->
-    <div class="relative w-20 h-1.5 rounded-full overflow-hidden bg-muted shrink-0">
+    <div
+      class="relative h-1.5 rounded-full overflow-hidden bg-muted shrink-0"
+      :class="compact ? 'w-12' : 'w-20'"
+    >
       <div
         class="absolute inset-y-0 left-0 rounded-full transition-all duration-200"
         :class="barColorClass"
         :style="{ width: `${percent}%` }"
       />
     </div>
-    <!-- 文本 -->
-    <span class="text-xs whitespace-nowrap" :class="textColorClass">
-      {{ usedText }} / {{ capacityText }}
-      <span class="text-muted-foreground">({{ percent }}%)</span>
-    </span>
-    <!-- 上下文将满提示 -->
-    <span v-if="level === 2" class="text-xs text-destructive flex items-center gap-1">
-      <span class="i-carbon-warning-alt w-3 h-3" />
-      上下文将满
-    </span>
+    <!-- 紧凑形态:仅百分比(将满时染警示色已足够提示) -->
+    <span v-if="compact" class="text-xs tabular-nums" :class="textColorClass">{{ percent }}%</span>
+    <!-- 完整形态:数字 + 百分比 + 将满提示 -->
+    <template v-else>
+      <span class="text-xs whitespace-nowrap" :class="textColorClass">
+        {{ usedText }} / {{ capacityText }}
+        <span class="text-muted-foreground">({{ percent }}%)</span>
+      </span>
+      <span v-if="level === 2" class="text-xs text-destructive flex items-center gap-1">
+        <span class="i-carbon-warning-alt w-3 h-3" />
+        上下文将满
+      </span>
+    </template>
   </div>
 </template>

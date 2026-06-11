@@ -19,7 +19,7 @@ const props = defineProps<{
 }>()
 
 const { projects } = useProjects()
-const { collapseColumn, removeSession } = useWorkbench()
+const { collapseColumn, removeSession, draftCwd } = useWorkbench()
 const { confirm } = useConfirm()
 
 const sid = computed(() => props.column.sessionId)
@@ -31,6 +31,7 @@ const title = computed(() => {
     const s = p.sessions.find(s => s.id === props.column.sessionId)
     if (s) return displayTitle(s)
   }
+  if (draftCwd(props.column.sessionId)) return '新会话'
   return props.column.sessionId.slice(0, 8)
 })
 

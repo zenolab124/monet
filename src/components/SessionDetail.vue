@@ -10,7 +10,6 @@ import {
   streamingTick,
   finishedDirty,
 } from '@/composables/useStreaming'
-import { useSplitLayout } from '@/composables/useSplitLayout'
 import { useSessionSettings } from '@/composables/useSessionSettings'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
@@ -20,7 +19,7 @@ import {
   parseCommand,
   type SlashCommand,
 } from '@/composables/useSlashCommands'
-import { displayTitle, shortId, shortModel } from '@/types'
+import { shortId, shortModel } from '@/types'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
 import SystemEventRow from './SystemEventRow.vue'
@@ -34,14 +33,12 @@ import {
 } from '@/composables/usePermissionRequests'
 
 /**
- * 会话详情。三种宿主形态(v2.1.0 FR-004/009):
+ * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
  * - mode='archive'(默认):档案馆只读——无输入区/权限交互,底部常驻只读条;流式中会话可只读跟看
  * - mode='workbench':工作台右区列——完整交互(输入/斜杠/权限卡)
- * - paneId:档案馆分屏面板定位会话(只读)
  */
 const props = defineProps<{
-  paneId?: string
-  /** 直接指定会话(工作台列);优先于 paneId 与全局选中 */
+  /** 直接指定会话(工作台列);优先于全局选中 */
   sessionId?: string | null
   mode?: 'archive' | 'workbench'
 }>()
@@ -51,8 +48,7 @@ const interactive = computed(() => props.mode === 'workbench')
 
 const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
-const { state, activePaneId, splitPane, closePane, setPaneSession } = useSplitLayout()
-const { findSession, removeSession } = useWorkbench()
+const { findSession, removeSession, draftCwd } = useWorkbench()
 const { goToSession } = useNotifications()
 
 // 每个实例独立的 detail 数据
@@ -67,14 +63,8 @@ const textareaRef = ref<HTMLTextAreaElement>()
 
 // --- 会话 ID 来源 ---
 
-function findPaneSessionId(): string | null {
-  if (!props.paneId) return null
-  return state.value.panes.find(p => p.id === props.paneId)?.sessionId ?? null
-}
-
 const effectiveSessionId = computed(() => {
   if (props.sessionId !== undefined) return props.sessionId
-  if (props.paneId) return findPaneSessionId()
   return selectedSessionId.value
 })
 
@@ -117,18 +107,12 @@ function onInputChange() {
   if (slashError.value) slashError.value = null
 }
 
-// 全局选中变化时只同步到当前活跃面板(分屏模式)
-watch(selectedSessionId, (sid) => {
-  if (props.paneId && sid && activePaneId.value === props.paneId) {
-    setPaneSession(props.paneId, sid)
-  }
-})
-
-// 会话切换时复位 /clear 与 /help 的视图标志
+// 会话切换时复位 /clear 与 /help 的视图标志,滚动恢复跟随
 // (流式区已按会话隔离,无需也不应清流式数据——切回时继续展示)
 watch(effectiveSessionId, () => {
   hideHistory.value = false
   showHelpCard.value = false
+  followStreaming.value = true
 })
 
 // --- 权限请求(仅工作台列交互;档案馆只读不渲染) ---
@@ -166,13 +150,34 @@ function onDeleted() {
   if (sid && findSession(sid)) {
     removeSession(sid)
   }
-  if (props.paneId) {
-    setPaneSession(props.paneId, null)
-  } else if (!props.sessionId) {
+  if (!props.sessionId) {
     selectSession(null)
   }
   clearRecords()
   loadProjects()
+}
+
+/** 草稿会话(应用内新建未落盘)的合成 summary:首条消息落盘后自动让位真实数据 */
+function draftSummary(id: string, cwd: string): SessionSummary {
+  return {
+    id,
+    title: '新会话',
+    first_user_message: null,
+    model: null,
+    git_branch: null,
+    cwd,
+    version: null,
+    timestamp: null,
+    last_modified: Math.floor(Date.now() / 1000),
+    total_tokens: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+    file_size: 0,
+    message_count: 0,
+  }
 }
 
 const currentSession = computed<{ summary: SessionSummary; projectId: string } | null>(() => {
@@ -182,6 +187,9 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
     const s = p.sessions.find(s => s.id === sid)
     if (s) return { summary: s, projectId: p.id }
   }
+  // 工作台草稿:磁盘尚无 jsonl,合成最小 summary;projectId 按目录编码规则(/ → -)推导
+  const cwd = draftCwd(sid)
+  if (cwd) return { summary: draftSummary(sid, cwd), projectId: cwd.replace(/\//g, '-') }
   return null
 })
 
@@ -198,11 +206,15 @@ function onOpenInWorkbench() {
   if (sid) goToSession(sid)
 }
 
-/** 最近一条 assistant 记录(用于推断真实模型与上下文占用) */
+/**
+ * 最近一条「真实」assistant 记录(用于推断模型与上下文占用)。
+ * 跳过 model 为 <synthetic> 的合成消息(CLI 本地生成的 API Error 占位等)——
+ * 它们不代表会话用的模型,且 usage 全 0 会把上下文进度打回零。
+ */
 const lastAssistantRecord = computed(() => {
   for (let i = records.value.length - 1; i >= 0; i--) {
     const r = records.value[i]
-    if (r.type === 'assistant' && r.message) return r
+    if (r.type === 'assistant' && r.message && r.message.model !== '<synthetic>') return r
   }
   return null
 })
@@ -210,6 +222,15 @@ const lastAssistantRecord = computed(() => {
 /** 最近 assistant 跑过的真实 model 字符串(含 [1m] 后缀如有);为空时 fallback 到 summary.model */
 const lastAssistantModel = computed<string | null>(() => {
   return lastAssistantRecord.value?.message?.model ?? null
+})
+
+/**
+ * 顶栏展示用 model 字符串。summary.model 兜底也可能是 <synthetic>
+ * (整个会话只有合成记录时),过滤防止它被当自定义模型展示甚至被选用。
+ */
+const displayModelString = computed<string | null>(() => {
+  const m = lastAssistantModel.value ?? currentSession.value?.summary.model ?? null
+  return m === '<synthetic>' ? null : m
 })
 
 /**
@@ -342,16 +363,12 @@ function clearCurrentPaneView() {
 }
 
 function handleNewSession() {
-  // /new:仅档案馆分屏语义(开新 pane);工作台列绑定固定会话,引导用左列入口
+  // /new:工作台列绑定固定会话,引导用左列入口;档案馆回到空选择
   if (props.mode === 'workbench') {
     slashError.value = '工作台中请使用左列「＋」新建'
     return
   }
-  if (props.paneId) {
-    splitPane(props.paneId, null)
-  } else {
-    selectSession(null)
-  }
+  selectSession(null)
 }
 
 function handleChangeDirectory(arg: string) {
@@ -430,6 +447,7 @@ async function handleSend() {
   // unknown / 普通文本:走原始流式发送
   inputText.value = ''
   if (textareaRef.value) textareaRef.value.style.height = 'auto'
+  followStreaming.value = true
   scrollToBottom(true)
   await sendMessage(cs.summary.id, cs.summary.cwd, text, {
     model: settings.value.modelId ?? undefined,
@@ -444,19 +462,31 @@ function onInputKeydown(e: KeyboardEvent) {
   }
 }
 
-// 顶栏事件转发(档案馆分屏)
-function onSplitRight() {
-  if (props.paneId) splitPane(props.paneId, null)
-}
-function onClose() {
-  if (props.paneId) closePane(props.paneId)
-}
-
 /** 用户是否在底部附近(60px 阈值) */
 function isNearBottom(): boolean {
   const el = scrollContainer.value
   if (!el) return true
   return el.scrollHeight - el.scrollTop - el.clientHeight < 60
+}
+
+/**
+ * 滚动跟随状态:用户向上滚动(wheel 方向)即脱离——不能只靠 60px 阈值判定,
+ * 触控板起步每帧只移动几 px,逃不出阈值区间就会被每帧的跟随滚动拽回(锁死)。
+ * 滚回底部自动恢复;发消息/切会话重置为跟随。
+ */
+const followStreaming = ref(true)
+
+function onScrollWheel(e: WheelEvent) {
+  if (e.deltaY < 0) followStreaming.value = false
+}
+
+function onScroll() {
+  if (!followStreaming.value && isNearBottom()) followStreaming.value = true
+}
+
+function resumeFollow() {
+  followStreaming.value = true
+  scrollToBottom(true)
 }
 
 function scrollToBottom(force = false) {
@@ -474,7 +504,10 @@ function scrollToBottom(force = false) {
   })
 }
 
-watch(records, () => scrollToBottom(true))
+// 记录变化(加载/流后落账)只在跟随态回底:用户上滚阅读时不打扰
+watch(records, () => {
+  if (followStreaming.value) scrollToBottom(true)
+})
 
 // 本会话流式结束 → 等 jsonl 落账后 reload(只在本实例正在展示该会话时发生)
 watch(() => stream.value.streaming, async (val, oldVal) => {
@@ -515,25 +548,41 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
   }
 })
 
-// 滚动跟随:watch streamingTick(打字机每帧递增,统一覆盖各种 mutation),仅本会话流式中才滚
+// 滚动跟随:watch streamingTick(打字机每帧递增,统一覆盖各种 mutation),
+// 仅本会话流式中且用户未脱离跟随时才滚
 watch(streamingTick, () => {
-  if (stream.value.streaming) scrollToBottom()
+  if (stream.value.streaming && followStreaming.value) scrollToBottom()
 })
 
 watch(
   () => currentSession.value,
-  (cs) => {
+  async (cs) => {
     if (cs) {
       // 后台结束的流式(本实例未挂载期间)留下脏标记 → 强制刷新拿落账记录
       const force = finishedDirty.has(cs.summary.id)
       if (force) finishedDirty.delete(cs.summary.id)
-      loadRecords(cs.projectId, cs.summary.id, force)
+      await loadRecords(cs.projectId, cs.summary.id, force)
+      // 落账记录已到手:残留的流式区(turns/pendingUserMessage)让位,
+      // 否则历史区 user record 与 pendingUserMessage 双显、
+      // 残留 turn 经 streamingMessageIds 挡住历史区同 id 的完整记录
+      if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
+        clearStreamingTurns(cs.summary.id)
+      }
     } else {
       clearRecords()
     }
   },
   { immediate: true },
 )
+
+/** 顶栏手动刷新:磁盘记录为权威,流式已结束则连流式区残留一并重置 */
+async function onReload() {
+  await reloadRecords()
+  const sid = effectiveSessionId.value
+  if (sid && !stream.value.streaming) {
+    clearStreamingTurns(sid)
+  }
+}
 </script>
 
 <template>
@@ -543,25 +592,21 @@ watch(
   </div>
 
   <div v-else class="h-full flex flex-col">
-    <!-- 会话顶栏 -->
+    <!-- 会话顶栏(单行极简:标题由列头/列表承担,不重复显示) -->
     <SessionTopBar
-      :title="displayTitle(currentSession.summary)"
       :session-id="currentSession.summary.id"
       :short-id-value="shortId(currentSession.summary.id)"
       :project-id="currentSession.projectId"
       :cwd="currentSession.summary.cwd"
       :git-branch="currentSession.summary.git_branch"
-      :model-string="lastAssistantModel ?? currentSession.summary.model"
+      :model-string="displayModelString"
       :used-context-tokens="lastAssistantContextSize"
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
-      :show-split="!!paneId && mode !== 'workbench'"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
-      @split-right="onSplitRight"
-      @close="onClose"
-      @reload="reloadRecords"
+      @reload="onReload"
       @deleted="onDeleted"
     />
 
@@ -575,13 +620,21 @@ watch(
       <p class="text-destructive text-sm">{{ error }}</p>
     </div>
 
-    <!-- 无记录 -->
+    <!-- 无记录(草稿会话给引导文案) -->
     <div v-else-if="messages.length === 0 && !stream.streaming && !showHelpCard" class="flex-1 flex items-center justify-center">
-      <p class="text-muted-foreground text-sm">无对话记录</p>
+      <p class="text-muted-foreground text-sm">
+        {{ effectiveSessionId && draftCwd(effectiveSessionId) ? '新会话 — 输入第一条消息开始对话' : '无对话记录' }}
+      </p>
     </div>
 
     <!-- 对话消息流 -->
-    <div v-else ref="scrollContainer" class="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain">
+    <div
+      v-else
+      ref="scrollContainer"
+      class="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain relative"
+      @wheel.passive="onScrollWheel"
+      @scroll.passive="onScroll"
+    >
       <template v-if="!hideHistory">
         <template v-for="(msg, i) in messages" :key="msg.uuid || `msg-${i}`">
           <!-- system 事件行：无气泡形态,独立渲染 -->
@@ -600,16 +653,17 @@ watch(
                   ({{ shortModel(msg.message.model) }})
                 </span>
               </div>
-              <!-- 历史区也用 TransitionGroup 包裹(不加 appear,不触发首次淡入动画):
-                   让 DOM 结构跟流式区一致(都有 TransitionGroup 生成的 div 层),
-                   流式结束切换时 Vue 无需重排父容器 layout,避免末尾闪烁。 -->
-              <TransitionGroup name="block-fade" tag="div">
+              <!-- 历史区用普通 div 包裹:与流式区 TransitionGroup(tag="div") 的 DOM
+                   层级一致(切换时父容器无 layout 重排),但绝不播动画——发送瞬间上一轮
+                   内容从流式区转移进历史区,是 v-for 新成员,若包 TransitionGroup 会把
+                   旧内容重新淡入一遍(150ms 闪烁)。动画只属于流式区的真实新块。 -->
+              <div>
                 <MessageBlock
                   v-for="(block, i) in contentBlocks(msg)"
                   :key="i"
                   :block="block"
                 />
-              </TransitionGroup>
+              </div>
             </div>
           </div>
         </template>
@@ -649,6 +703,22 @@ watch(
 
       <!-- /help 本地帮助卡片 -->
       <SlashHelpCard v-if="showHelpCard" :commands="SLASH_COMMANDS" />
+
+      <!-- 脱离跟随提示:流式中用户上滚阅读时,贴滚动视口底部 -->
+      <div
+        v-if="stream.streaming && !followStreaming"
+        class="sticky bottom-0 flex justify-center pointer-events-none"
+      >
+        <button
+          class="pointer-events-auto px-3 py-1 text-xs rounded-full bg-popover border border-border
+                 shadow-paper text-muted-foreground hover:text-foreground transition-colors
+                 flex items-center gap-1"
+          @click="resumeFollow"
+        >
+          <span class="i-carbon-arrow-down w-3 h-3" />
+          回到底部
+        </button>
+      </div>
     </div>
 
     <!-- 工作台列:权限请求卡片(固定在输入栏上方) -->

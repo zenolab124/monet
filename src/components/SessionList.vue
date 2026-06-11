@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions, type SortOrder, type TimeRange } from '@/composables/useSessions'
-import { useSplitLayout } from '@/composables/useSplitLayout'
 import {
   displayTitle,
   relativeTime,
@@ -24,8 +23,6 @@ const {
   extractFilterOptions,
   selectSession,
 } = useSessions()
-const { activePaneId, splitPane, setPaneSession } = useSplitLayout()
-
 const sortedSessions = computed(() => filterAndSort(filteredSessions.value))
 const filterOptions = computed(() => extractFilterOptions(filteredSessions.value))
 
@@ -53,11 +50,6 @@ function pickBranch(branch: string) {
 function pickModel(model: string) {
   selectedModel.value = model
   showModelDropdown.value = false
-}
-
-// 分屏操作
-function splitRight(session: SessionSummary) {
-  splitPane(activePaneId.value, session.id)
 }
 
 // 原生右键菜单
@@ -264,16 +256,6 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
           <span v-if="session.model" class="text-muted-foreground">{{ shortModel(session.model) }}</span>
         </div>
 
-        <!-- 悬停分屏按钮 -->
-        <div class="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5">
-          <button
-            class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="右侧分屏"
-            @click.stop="splitRight(session)"
-          >
-            <span class="i-carbon-split-screen w-3 h-3" />
-          </button>
-        </div>
       </div>
     </div>
 

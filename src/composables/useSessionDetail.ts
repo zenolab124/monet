@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { SessionRecord } from '@/types'
 
-/** 每次调用创建独立实例，支持分屏场景 */
+/** 每次调用创建独立实例，支持工作台多列场景 */
 export function createSessionDetail() {
   const records = ref<SessionRecord[]>([])
   const loading = ref(false)

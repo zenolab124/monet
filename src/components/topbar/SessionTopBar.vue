@@ -1,23 +1,28 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
 import { inferModel, getContextWindow } from '@/utils/modelContext'
 import type { EffortLevel } from '@/composables/useSessionSettings'
-import ActionBar from '../ActionBar.vue'
+import { useConfirm } from '@/composables/useConfirm'
+import { useNotifications } from '@/composables/useNotifications'
 import ModelDropdown from './ModelDropdown.vue'
 import ContextProgress from './ContextProgress.vue'
 import EffortDropdown from './EffortDropdown.vue'
 
+/**
+ * 单行极简顶栏:常显区只留高频控件(模型/进度/努力),标题不再显示(列头已有),
+ * 元数据(ID/分支/时间)与操作(刷新/终端/VSCode/删除)统一收进 ⋯ 菜单。
+ * 窄列折叠的控件也进同一菜单——最窄退化为 [模型][⋯],保持整齐。
+ */
 const props = defineProps<{
-  /** 已计算好的 displayTitle */
-  title: string
-  /** 完整 sessionId */
+  /** 完整 sessionId(菜单内复制用) */
   sessionId: string
-  /** 已计算好的 shortId */
+  /** 已计算好的 shortId(菜单内展示) */
   shortIdValue: string
-  /** projectId(透传给 ActionBar 删除用) */
+  /** projectId(删除会话用) */
   projectId: string
-  /** session.cwd(透传给 ActionBar) */
+  /** session.cwd(终端/VSCode 打开用) */
   cwd: string | null
   /** git 分支 */
   gitBranch: string | null
@@ -31,47 +36,43 @@ const props = defineProps<{
   selectedModelId: string | null
   /** 用户已选择的努力等级 */
   selectedEffort: EffortLevel
-  /** 是否显示分屏按钮 */
-  showSplit?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'modelChange', modelId: string): void
   (e: 'effortChange', effort: EffortLevel): void
-  (e: 'split-right'): void
-  (e: 'close'): void
   (e: 'reload'): void
   (e: 'deleted'): void
 }>()
+
+const { confirm } = useConfirm()
+const { notifyTransient } = useNotifications()
 
 // --- 派生数据 ---
 
 /** 用户在顶栏选的模型(用于下拉显示当前选中);未选则用 modelString 真实值 */
 const effectiveModelStr = computed(() => props.selectedModelId ?? props.modelString)
 
-/** 解析后的 ModelInfo(用于决定元数据区是否重复展示模型,null 代表"未知") */
+/** 解析后的 ModelInfo(决定菜单内是否补充展示未知模型字符串) */
 const effectiveModel = computed(() => inferModel(effectiveModelStr.value))
 
 /** 上下文容量:按 jsonl 里真实跑过的模型字符串(含 [1m] 后缀)推断 */
 const capacity = computed(() => getContextWindow(props.modelString))
 
-// --- 窄分屏折叠 ---
+// --- 窄列折叠 ---
 //
-// PRD L350:容器 < 480px 时按优先级折叠
-// 折叠顺序:努力等级 → token 进度 → 模型切换(模型最后才折叠)
-//
-// 阈值划分(经验值,基于按钮+文本估算):
-//   >= 480px : 全部展示
-//   >= 380px : 折叠努力等级
-//   >= 280px : 折叠 token 进度
-//   <  280px : 仅显示模型
+// 单行布局的折叠顺序:努力等级 → token 进度,模型永不折叠。
+// 阈值按紧凑形态估算(模型 ~90 + 进度 ~75 + 努力 ~70 + 菜单 ~30 + gap/padding):
+//   >= 360px : 全部展示
+//   >= 280px : 折叠努力等级
+//   <  280px : 仅模型 + 菜单
+// 被折叠的控件进 ⋯ 菜单(完整形态)。
 
 const containerRef = ref<HTMLElement>()
 const containerWidth = ref(Number.POSITIVE_INFINITY)
 
-const showEffort = computed(() => containerWidth.value >= 480)
-const showProgress = computed(() => containerWidth.value >= 380)
-// 模型始终显示
+const showEffort = computed(() => containerWidth.value >= 360)
+const showProgress = computed(() => containerWidth.value >= 280)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -92,27 +93,70 @@ onUnmounted(() => {
   resizeObserver = null
 })
 
-// --- 溢出菜单(被折叠的项) ---
+// --- ⋯ 统一菜单(折叠控件 + 元数据 + 操作) ---
 
-const overflowOpen = ref(false)
-const overflowRef = ref<HTMLElement>()
-
-const hasOverflow = computed(() => !showEffort.value || !showProgress.value)
-
-function toggleOverflow() {
-  overflowOpen.value = !overflowOpen.value
-}
+const menuOpen = ref(false)
+const menuRef = ref<HTMLElement>()
 
 function onDocClick(e: MouseEvent) {
-  if (!overflowOpen.value) return
+  if (!menuOpen.value) return
   const target = e.target as Node
-  if (overflowRef.value && !overflowRef.value.contains(target)) {
-    overflowOpen.value = false
+  if (menuRef.value && !menuRef.value.contains(target)) {
+    menuOpen.value = false
   }
 }
 
 onMounted(() => document.addEventListener('mousedown', onDocClick))
 onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
+
+// --- 菜单操作 ---
+
+async function copySessionId() {
+  try {
+    await navigator.clipboard.writeText(props.sessionId)
+    notifyTransient('会话 ID 已复制')
+  } catch {
+    notifyTransient('复制失败', '请检查剪贴板权限')
+  }
+  menuOpen.value = false
+}
+
+function onReload() {
+  menuOpen.value = false
+  emit('reload')
+}
+
+async function openInTerminal() {
+  menuOpen.value = false
+  if (!props.cwd) return
+  try {
+    await invoke('resume_in_terminal', { cwd: props.cwd, sessionId: props.sessionId })
+  } catch (e) {
+    notifyTransient('终端打开失败', String(e))
+  }
+}
+
+async function openInVscode() {
+  menuOpen.value = false
+  if (!props.cwd) return
+  try {
+    await invoke('resume_in_vscode', { cwd: props.cwd })
+  } catch (e) {
+    notifyTransient('VS Code 打开失败', String(e))
+  }
+}
+
+async function onDelete() {
+  menuOpen.value = false
+  const ok = await confirm('删除该会话的全部记录?此操作不可恢复。', '删除')
+  if (!ok) return
+  try {
+    await invoke('delete_session', { projectId: props.projectId, sessionId: props.sessionId })
+    emit('deleted')
+  } catch (e) {
+    notifyTransient('删除失败', String(e))
+  }
+}
 
 // --- 事件转发 ---
 
@@ -125,85 +169,52 @@ function onEffortChange(level: EffortLevel) {
 </script>
 
 <template>
-  <div ref="containerRef" class="px-4 py-3 border-b border-border shrink-0">
-    <!-- 上排:标题 + 操作按钮 -->
-    <div class="flex items-start justify-between gap-2">
-      <h2 class="text-base font-semibold text-foreground truncate flex-1">
-        {{ title }}
-      </h2>
-      <div class="flex items-center gap-1 shrink-0">
-        <template v-if="showSplit">
-          <button
-            class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="右侧分屏"
-            @click="emit('split-right')"
-          >
-            <span class="i-carbon-split-screen w-3.5 h-3.5" />
-          </button>
-          <button
-            class="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="关闭面板"
-            @click="emit('close')"
-          >
-            <span class="i-carbon-close w-3.5 h-3.5" />
-          </button>
-        </template>
-        <button
-          class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
-          title="刷新会话"
-          @click="emit('reload')"
-        >
-          <span class="i-carbon-renew w-3.5 h-3.5" />
-          刷新
-        </button>
-        <ActionBar
-          :session-id="sessionId"
-          :project-id="projectId"
-          :cwd="cwd"
-          @deleted="emit('deleted')"
-        />
-      </div>
-    </div>
+  <div
+    ref="containerRef"
+    class="px-3 py-1.5 border-b border-border shrink-0 flex items-center gap-1.5"
+  >
+    <!-- 模型切换(永不折叠) -->
+    <ModelDropdown
+      :current="effectiveModelStr"
+      @select="onModelChange"
+    />
 
-    <!-- 下排:控件 + 元数据 -->
-    <div class="mt-2 flex items-center gap-2 flex-wrap">
-      <!-- 模型切换(始终显示) -->
-      <ModelDropdown
-        :current="effectiveModelStr"
-        @select="onModelChange"
-      />
+    <!-- token 进度(紧凑形态:条 + 百分比) -->
+    <ContextProgress
+      v-if="showProgress"
+      :used="usedContextTokens"
+      :capacity="capacity"
+      compact
+    />
 
-      <!-- token 上下文进度(中等宽度起显示) -->
-      <ContextProgress
-        v-if="showProgress"
-        :used="usedContextTokens"
-        :capacity="capacity"
-      />
+    <!-- 努力等级 -->
+    <EffortDropdown
+      v-if="showEffort"
+      :current="selectedEffort"
+      @select="onEffortChange"
+    />
 
-      <!-- 努力等级(宽屏起显示) -->
-      <EffortDropdown
-        v-if="showEffort"
-        :current="selectedEffort"
-        @select="onEffortChange"
-      />
+    <div class="ml-auto" />
 
-      <!-- 溢出菜单 -->
-      <div v-if="hasOverflow" ref="overflowRef" class="relative inline-flex">
-        <button
-          type="button"
-          class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
-                 transition-colors flex items-center gap-1 border border-border"
-          title="更多控件"
-          :aria-expanded="overflowOpen"
-          @click="toggleOverflow"
-        >
-          <span class="i-carbon-overflow-menu-horizontal w-3.5 h-3.5" />
-        </button>
-        <div
-          v-if="overflowOpen"
-          class="absolute top-full right-0 mt-1 z-50 p-2 rounded-md border border-border
-                 shadow-paper-lifted bg-popover flex flex-col gap-2 min-w-56"
-        >
+    <!-- ⋯ 统一菜单 -->
+    <div ref="menuRef" class="relative inline-flex shrink-0">
+      <button
+        type="button"
+        class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        title="会话信息与操作"
+        :aria-expanded="menuOpen"
+        @click="menuOpen = !menuOpen"
+      >
+        <span class="i-carbon-overflow-menu-horizontal w-3.5 h-3.5" />
+      </button>
+
+      <div
+        v-if="menuOpen"
+        class="absolute top-full right-0 mt-1 z-50 py-1 rounded-md border border-border
+               shadow-paper-lifted bg-popover w-60"
+      >
+        <!-- 窄列被折叠的控件 -->
+        <div v-if="!showProgress || !showEffort" class="px-2 py-1.5 flex flex-col gap-2 border-b border-border">
           <ContextProgress
             v-if="!showProgress"
             :used="usedContextTokens"
@@ -215,19 +226,58 @@ function onEffortChange(level: EffortLevel) {
             @select="onEffortChange"
           />
         </div>
-      </div>
 
-      <!-- 元数据(右侧) -->
-      <div class="text-xs text-muted-foreground flex items-center gap-2 flex-wrap ml-auto">
-        <span>ID: {{ shortIdValue }}</span>
-        <span v-if="gitBranch">
-          · 分支: <span>{{ gitBranch }}</span>
-        </span>
-        <span v-if="modelString && !effectiveModel">
-          · 模型: {{ shortModel(modelString) }}
-        </span>
-        <span>· {{ relativeTime(lastModified) }}</span>
+        <!-- 元数据 -->
+        <div class="px-3 py-1.5 text-xs text-muted-foreground flex flex-col gap-1 border-b border-border">
+          <button
+            class="flex items-center gap-1.5 hover:text-foreground transition-colors text-left"
+            title="复制完整会话 ID"
+            @click="copySessionId"
+          >
+            <span class="font-mono">{{ shortIdValue }}</span>
+            <span class="i-carbon-copy w-3 h-3 shrink-0" />
+          </button>
+          <span v-if="gitBranch" class="flex items-center gap-1.5">
+            <span class="i-carbon-branch w-3 h-3 shrink-0" />{{ gitBranch }}
+          </span>
+          <span v-if="modelString && !effectiveModel" class="truncate">{{ shortModel(modelString) }}</span>
+          <span>{{ relativeTime(lastModified) }}</span>
+        </div>
+
+        <!-- 操作 -->
+        <div class="py-1 flex flex-col">
+          <button class="menu-item" @click="onReload">
+            <span class="i-carbon-renew w-3.5 h-3.5" />刷新会话
+          </button>
+          <button v-if="cwd" class="menu-item" @click="openInTerminal">
+            <span class="i-carbon-terminal w-3.5 h-3.5" />在终端打开
+          </button>
+          <button v-if="cwd" class="menu-item" @click="openInVscode">
+            <span class="i-carbon-code w-3.5 h-3.5" />在 VS Code 打开
+          </button>
+          <button class="menu-item text-destructive hover:bg-destructive/10" @click="onDelete">
+            <span class="i-carbon-trash-can w-3.5 h-3.5" />删除会话
+          </button>
+        </div>
       </div>
     </div>
+
   </div>
 </template>
+
+<style scoped>
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 12px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--foreground);
+  transition: background-color 0.15s;
+}
+.menu-item:hover {
+  background: var(--muted);
+}
+</style>

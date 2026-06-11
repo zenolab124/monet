@@ -166,21 +166,31 @@ pub fn start_streaming(
 
     let (executable, prefix_args) = find_claude();
     let mut args = prefix_args;
+    // jsonl 已落盘 → --resume 续聊;未落盘(工作台应用内新建的草稿)→ --session-id
+    // 以前端指定的 UUID 新建会话。文件系统即事实源,首条消息失败后重试仍走新建,自愈。
+    let session_file = crate::commands::projects_dir()
+        .join(cwd.replace('/', "-"))
+        .join(format!("{}.jsonl", session_id));
+    let session_flag = if session_file.is_file() { "--resume" } else { "--session-id" };
     args.extend([
-        "--resume".to_string(),
+        session_flag.to_string(),
         session_id.to_string(),
         "--print".to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
         "--include-partial-messages".to_string(),
+        // --print 模式下新模型 thinking.display 默认 omitted(thinking_delta 全是空串),
+        // 该隐藏参数(hideHelp)恢复 summarized 摘要明文。版本飘移撤参时 CLI 会以
+        // unknown option 退出,stderr 经 StreamEvent::Error 上屏可定位,届时参照
+        // docs/knowledge/pitfalls/thinking-redacted-opus-4-7.md
+        "--thinking-display".to_string(),
+        "summarized".to_string(),
         "--mcp-config".to_string(),
         mcp_config,
         "--permission-prompt-tool".to_string(),
         "mcp__cc-space__approve_tool_use".to_string(),
     ]);
-    // thinking 摘要由全局 settings.json 的 env.CLAUDE_CODE_EXTRA_BODY 注入到 API body,
-    // 解决 vscode 插件 / cc-space / 终端三端一致问题(claude-code issue #49902 workaround)
     if let Some(m) = model.filter(|s| !s.is_empty()) {
         args.push("--model".to_string());
         args.push(m.to_string());

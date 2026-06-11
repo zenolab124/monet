@@ -35,12 +35,65 @@ interface WorkbenchState {
   tabSeq: number
   /** 展开序号计数 */
   openSeq: number
+  /**
+   * 应用内新建、尚未落盘的草稿会话(sessionId → cwd)。
+   * 首条消息经 CLI --session-id 落盘后由 pruneDrafts 清理;
+   * 落盘前各视图据此合成「新会话」占位显示。
+   */
+  drafts: Record<string, string>
 }
 
 const STORAGE_KEY = 'cc-space-workbench'
 
-/** 右区展开软上限(FR-004):超出时最早展开的列自动收回左列 */
-export const MAX_COLUMNS = 4
+/** 单列最小可用宽度(px):低于此值会话可读性崩坏(顶栏全折叠、输入框过窄) */
+export const MIN_COLUMN_WIDTH = 360
+
+/** 右区四周边距与列间隙(与 WorkbenchColumns 的 PAD/GAP 一致,动态上限计算用) */
+const COLUMN_GAP = 10
+
+/**
+ * 右区容器实测宽度:WorkbenchColumns 挂载后经 ResizeObserver 维护。
+ * v-show 隐藏报 0 不更新(保留最后有效值);初始按窗口减 ActivityBar(48)+左列(256) 估算。
+ */
+const rightZoneWidth = ref(Math.max(MIN_COLUMN_WIDTH, window.innerWidth - 48 - 256))
+
+export function setRightZoneWidth(w: number) {
+  if (w > 0) rightZoneWidth.value = w
+}
+
+/**
+ * 动态列上限(FR-004 演进):不固定列数,按「每列 ≥ 最小宽度」推算容量——
+ * n·MIN + (n-1)·GAP + 2·PAD ≤ W。屏幕够宽就能开更多列,窄屏自动收紧;
+ * 到达上限仍是软置换(最早展开的收回左列),不是拒绝。
+ */
+function dynamicMaxColumns(): number {
+  return Math.max(
+    1,
+    Math.floor((rightZoneWidth.value - COLUMN_GAP) / (MIN_COLUMN_WIDTH + COLUMN_GAP)),
+  )
+}
+
+/**
+ * 容量收紧(窗口缩小后调用):全部 tab 中超出动态上限的列收回左列,
+ * 最早展开者(openedSeq 最小)优先,与展开置换同序。
+ * @returns 当前激活 tab 被收回的会话(调用方 toast 提示;非激活 tab 静默收)
+ */
+function enforceColumnCapacity(): string[] {
+  const max = dynamicMaxColumns()
+  const collapsedInActive: string[] = []
+  for (const tab of state.value.tabs) {
+    let changed = false
+    while (tab.columns.length > max) {
+      const earliest = tab.columns.reduce((min, c) => (c.openedSeq < min.openedSeq ? c : min))
+      const idx = tab.columns.findIndex(c => c.id === earliest.id)
+      tab.columns.splice(idx, 1)
+      changed = true
+      if (tab.id === state.value.activeTabId) collapsedInActive.push(earliest.sessionId)
+    }
+    if (changed) tab.columnSizes = equalSizes(tab.columns.length)
+  }
+  return collapsedInActive
+}
 
 let idCounter = 0
 function genId(prefix: string) {
@@ -63,7 +116,7 @@ function createTabObject(seq: number): WorkbenchTab {
 
 function createInitialState(): WorkbenchState {
   const tab = createTabObject(1)
-  return { tabs: [tab], activeTabId: tab.id, tabSeq: 1, openSeq: 0 }
+  return { tabs: [tab], activeTabId: tab.id, tabSeq: 1, openSeq: 0, drafts: {} }
 }
 
 // ---- 持久化(NFR-002):任一变更后同步落盘;损坏时回退默认并提示 ----
@@ -103,11 +156,19 @@ function loadState(): WorkbenchState | null {
       }
     }
     if (!parsed.tabs.some(t => t.id === parsed.activeTabId)) return null
+    // drafts 为 v2.1.x 增量字段:旧数据缺省为 {},值非法则丢弃单条不作废整体
+    const drafts: Record<string, string> = {}
+    if (parsed.drafts && typeof parsed.drafts === 'object' && !Array.isArray(parsed.drafts)) {
+      for (const [k, v] of Object.entries(parsed.drafts)) {
+        if (typeof v === 'string' && v) drafts[k] = v
+      }
+    }
     return {
       tabs: parsed.tabs as WorkbenchTab[],
       activeTabId: parsed.activeTabId,
       tabSeq: typeof parsed.tabSeq === 'number' ? parsed.tabSeq : parsed.tabs.length,
       openSeq: typeof parsed.openSeq === 'number' ? parsed.openSeq : 0,
+      drafts,
     }
   } catch (_) {
     return null
@@ -213,8 +274,8 @@ function reorderTabs(fromIndex: number, toIndex: number) {
 // ---- 会话进出与展开(FR-002/004) ----
 
 export type OpenResult =
-  | { kind: 'added'; tabId: string; collapsedSessionId: string | null }
-  | { kind: 'existing'; tabId: string; collapsedSessionId: null }
+  | { kind: 'added'; tabId: string; collapsedSessionIds: string[] }
+  | { kind: 'existing'; tabId: string; collapsedSessionIds: string[] }
 
 /**
  * 「在工作台打开」:加入当前激活 tab 并自动展开;
@@ -225,41 +286,76 @@ function openSession(sessionId: string): OpenResult {
   if (found) {
     state.value.activeTabId = found.tab.id
     flashSession(sessionId)
-    return { kind: 'existing', tabId: found.tab.id, collapsedSessionId: null }
+    return { kind: 'existing', tabId: found.tab.id, collapsedSessionIds: [] }
   }
   const tab = activeTab.value
   tab.sessionIds.push(sessionId)
   const expanded = expandSession(tab.id, sessionId)
-  return { kind: 'added', tabId: tab.id, collapsedSessionId: expanded.collapsedSessionId }
+  return { kind: 'added', tabId: tab.id, collapsedSessionIds: expanded.collapsedSessionIds }
+}
+
+/**
+ * 应用内新建会话(FR-002 增强,替代经终端链路):前端生成 UUID 登记草稿,
+ * 加入当前激活 tab 并展开。首条消息由 Rust 端以 --session-id 新建落盘,
+ * 之后 watcher 刷新 projects,草稿被 pruneDrafts 收割,显示自动切换真实数据。
+ */
+function createDraftSession(cwd: string): string {
+  const sessionId = crypto.randomUUID()
+  state.value.drafts[sessionId] = cwd
+  openSession(sessionId)
+  return sessionId
+}
+
+/** 草稿会话的 cwd(非草稿返回 null)。各视图据此合成「新会话」占位 */
+function draftCwd(sessionId: string): string | null {
+  return state.value.drafts[sessionId] ?? null
+}
+
+/**
+ * 草稿收割:已落盘(isPersisted)或已不在任何工作台(被关闭弃用)的草稿删除。
+ * 由 App 层在 projects 刷新后调用。
+ */
+function pruneDrafts(isPersisted: (sessionId: string) => boolean) {
+  for (const sid of Object.keys(state.value.drafts)) {
+    if (isPersisted(sid) || !findSession(sid)) {
+      delete state.value.drafts[sid]
+    }
+  }
 }
 
 export interface ExpandResult {
-  /** 软上限置换时被收回的会话(调用方弹瞬态 toast「已收起:<标题>」) */
-  collapsedSessionId: string | null
+  /**
+   * 软上限置换时被收回的会话(调用方弹瞬态 toast「已收起:<标题>」)。
+   * 窗口缩小后已超员再展开时可能一次收回多个。
+   */
+  collapsedSessionIds: string[]
   /** 已展开时为聚焦而非新增 */
   focusedExisting: boolean
 }
 
 /**
- * 展开会话到右区(FR-004):软上限 4 列,超出时最早展开(openedSeq 最小)的列自动收回。
+ * 展开会话到右区(FR-004):列上限按容器宽度动态推算(每列 ≥ MIN_COLUMN_WIDTH),
+ * 超出时最早展开(openedSeq 最小)的列自动收回。
  * atIndex 指定插入列位(拖拽落点);缺省追加末尾。
  */
 function expandSession(tabId: string, sessionId: string, atIndex?: number): ExpandResult {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab || !tab.sessionIds.includes(sessionId)) {
-    return { collapsedSessionId: null, focusedExisting: false }
+    return { collapsedSessionIds: [], focusedExisting: false }
   }
   if (tab.columns.some(c => c.sessionId === sessionId)) {
     requestFocusColumn(sessionId)
-    return { collapsedSessionId: null, focusedExisting: true }
+    return { collapsedSessionIds: [], focusedExisting: true }
   }
 
-  let collapsedSessionId: string | null = null
-  if (tab.columns.length >= MAX_COLUMNS) {
+  // 置换到容量内(窗口缩小后可能超员,循环收回最早展开者直到容得下新列)
+  const collapsedSessionIds: string[] = []
+  const max = dynamicMaxColumns()
+  while (tab.columns.length >= max) {
     const earliest = tab.columns.reduce((min, c) => (c.openedSeq < min.openedSeq ? c : min))
     const removeIdx = tab.columns.findIndex(c => c.id === earliest.id)
     tab.columns.splice(removeIdx, 1)
-    collapsedSessionId = earliest.sessionId
+    collapsedSessionIds.push(earliest.sessionId)
   }
 
   state.value.openSeq += 1
@@ -272,7 +368,7 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
   const idx = atIndex === undefined ? tab.columns.length : Math.max(0, Math.min(atIndex, tab.columns.length))
   tab.columns.splice(idx, 0, column)
   tab.columnSizes = equalSizes(tab.columns.length)
-  return { collapsedSessionId, focusedExisting: false }
+  return { collapsedSessionIds, focusedExisting: false }
 }
 
 /** 收起列回左列(仍激活,FR-004「收起非退出」) */
@@ -327,7 +423,7 @@ function reorderColumns(tabId: string, fromIndex: number, toIndex: number) {
 }
 
 /**
- * 拖动第 index 条分隔线(算法同 useSplitLayout.updateSize):
+ * 拖动第 index 条分隔线:
  * leftRatio 是 columns[index] 的目标新比例,仅在相邻两列间重分配,clamp 防压没。
  */
 function updateColumnSize(tabId: string, index: number, leftRatio: number) {
@@ -357,7 +453,11 @@ export function useWorkbench() {
     setActiveTab,
     reorderTabs,
     openSession,
+    createDraftSession,
+    draftCwd,
+    pruneDrafts,
     expandSession,
+    enforceColumnCapacity,
     collapseColumn,
     removeSession,
     moveSessionToTab,

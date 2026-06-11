@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import ActivityBar from '@/components/ActivityBar.vue'
 import SessionsView from '@/views/SessionsView.vue'
 import HomeView from '@/views/HomeView.vue'
@@ -12,11 +12,18 @@ import { useUiState } from '@/composables/useUiState'
 import { initPermissionListener } from '@/composables/usePermissionRequests'
 import { initStreamListeners } from '@/composables/useStreaming'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
-import { stateWasReset } from '@/composables/useWorkbench'
+import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
 
-const { loadProjects } = useProjects()
+const { projects, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 const { activeSection } = useUiState()
+const { pruneDrafts } = useWorkbench()
+
+// 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉
+watch(projects, (list) => {
+  const ids = new Set(list.flatMap(p => p.sessions.map(s => s.id)))
+  pruneDrafts(sid => ids.has(sid))
+})
 
 function onKeydown(e: KeyboardEvent) {
   // Cmd+R: 刷新项目列表

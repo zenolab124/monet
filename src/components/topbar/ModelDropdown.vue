@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { MODELS, inferModel } from '@/utils/modelContext'
+import {
+  MODELS,
+  inferModel,
+  DEFAULT_CONTEXT,
+  type ModelInfo,
+} from '@/utils/modelContext'
 
 const props = defineProps<{
   /** 当前模型 ID(后端给的 model 字符串,可能是别名也可能是完整名) */
@@ -16,14 +21,38 @@ const containerRef = ref<HTMLElement>()
 const buttonRef = ref<HTMLButtonElement>()
 const focusedIndex = ref(0)
 
-/** 当前模型解析结果 */
+/** 当前模型解析结果(null = 清单外的自定义/未收录模型) */
 const currentModel = computed(() => inferModel(props.current))
-const currentLabel = computed(() => currentModel.value?.label ?? '未知')
 
-/** 当前选中项在列表中的索引(用于打勾对比) */
-const currentIndex = computed(() =>
-  currentModel.value ? MODELS.findIndex(m => m.id === currentModel.value!.id) : -1,
+/** 自定义模型直接显示原始名字,不显示「未知」 */
+const currentLabel = computed(() =>
+  currentModel.value?.label ?? props.current ?? '未知',
 )
+
+/**
+ * 下拉项 = 模型清单 + 当前自定义模型(若清单外):
+ * 会话在用清单外模型(CLI 自定义设置/代理模型)时附加为可选项,原名展示。
+ */
+const items = computed<ModelInfo[]>(() => {
+  if (props.current && !currentModel.value) {
+    return [
+      ...MODELS,
+      { id: props.current, label: props.current, contextWindow: DEFAULT_CONTEXT },
+    ]
+  }
+  return MODELS
+})
+
+/** 当前选中项在列表中的索引(用于打勾对比):优先原始字符串精确命中(自定义项) */
+const currentIndex = computed(() => {
+  const cur = props.current?.toLowerCase()
+  if (!cur) return -1
+  const exact = items.value.findIndex(m => m.id === cur)
+  if (exact >= 0) return exact
+  return currentModel.value
+    ? items.value.findIndex(m => m.id === currentModel.value!.id)
+    : -1
+})
 
 function toggle() {
   open.value = !open.value
@@ -41,7 +70,7 @@ function close() {
 }
 
 function selectAt(index: number) {
-  const m = MODELS[index]
+  const m = items.value[index]
   if (!m) return
   emit('select', m.id)
   close()
@@ -52,12 +81,12 @@ function onKeydown(e: KeyboardEvent) {
   switch (e.key) {
     case 'ArrowDown':
       e.preventDefault()
-      focusedIndex.value = (focusedIndex.value + 1) % MODELS.length
+      focusedIndex.value = (focusedIndex.value + 1) % items.value.length
       focusListItem(focusedIndex.value)
       break
     case 'ArrowUp':
       e.preventDefault()
-      focusedIndex.value = (focusedIndex.value - 1 + MODELS.length) % MODELS.length
+      focusedIndex.value = (focusedIndex.value - 1 + items.value.length) % items.value.length
       focusListItem(focusedIndex.value)
       break
     case 'Enter':
@@ -120,7 +149,7 @@ onUnmounted(() => {
              shadow-paper-lifted bg-popover"
     >
       <li
-        v-for="(m, i) in MODELS"
+        v-for="(m, i) in items"
         :key="m.id"
         data-item
         role="option"

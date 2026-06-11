@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { Menu } from '@tauri-apps/api/menu'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
@@ -12,7 +11,7 @@ import MonitorCard from './MonitorCard.vue'
  * 工作台左列(FR-003):当前 tab 全部会话的监控卡竖排(加入顺序,状态变化不重排)。
  * 底部「＋」格:从档案馆选择 / 新建会话(FR-002 进入口)。
  */
-const { activeTab } = useWorkbench()
+const { activeTab, createDraftSession } = useWorkbench()
 const { projects } = useProjects()
 const { switchSection } = useUiState()
 const { notifyTransient } = useNotifications()
@@ -25,15 +24,14 @@ const hint = computed(() => {
   return n === 0 ? null : `${n} 个会话 · ${m} 个已展开`
 })
 
-/** ＋ 菜单:从档案馆选择 / 新建会话(子菜单按项目,经终端起新会话,落盘后从档案馆打开) */
+/** ＋ 菜单:从档案馆选择 / 新建会话(子菜单按项目,应用内直开草稿卡,首条消息落盘) */
 async function onAddClick() {
   const projectItems = projects.value.slice(0, 12).map(p => ({
     id: `new-${p.id}`,
     text: p.display_path.split('/').pop() || p.display_path,
     action: () => {
-      void invoke('new_session_in_terminal', { cwd: p.display_path }).then(() => {
-        notifyTransient('已在终端开启新会话', '完成对话后可从档案馆打开到工作台')
-      }).catch(() => {})
+      createDraftSession(p.display_path)
+      notifyTransient('新会话已就绪', '输入第一条消息开始对话')
     },
   }))
   const menu = await Menu.new({

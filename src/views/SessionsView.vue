@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import Toolbar from '@/components/Toolbar.vue'
 import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import SessionList from '@/components/SessionList.vue'
-import SplitView from '@/components/SplitView.vue'
+import SessionDetail from '@/components/SessionDetail.vue'
 import { useUiState } from '@/composables/useUiState'
 
 /**
@@ -36,8 +36,11 @@ const sessionListWidth = computed(() => (sidebarsCollapsed.value ? '0px' : '288p
       >
         <SessionList />
       </section>
-      <main class="flex-1 min-w-0">
-        <SplitView />
+      <!-- 档案馆详情:单面板只读(分屏已随只读化下线,多开用工作台多列) -->
+      <main class="flex-1 min-w-0 p-2.5">
+        <div class="h-full bg-card border border-border rounded shadow-paper overflow-hidden">
+          <SessionDetail />
+        </div>
       </main>
     </div>
   </div>

@@ -107,6 +107,9 @@ export function relativeTime(timestamp: string | number): string {
 
 export function shortModel(model: string | null): string {
   if (!model) return ''
+  // CLI 本地合成的占位消息(API Error 等),非真实模型响应
+  if (model === '<synthetic>') return '系统'
+  if (model.includes('fable')) return 'Fable'
   if (model.includes('opus')) return 'Opus'
   if (model.includes('sonnet-4-5') || model.includes('sonnet-4.5')) return 'Sonnet 4.5'
   if (model.includes('sonnet')) return 'Sonnet'

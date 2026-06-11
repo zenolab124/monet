@@ -61,26 +61,6 @@ pub fn resume_in_terminal(cwd: String, session_id: String) -> Result<(), String>
     Ok(())
 }
 
-/// 在终端中开启指定项目的新会话（工作台左列「＋ → 新建会话」入口）。
-/// 新会话由 CLI 写盘后经文件监控出现在档案馆，再「在工作台打开」。
-#[tauri::command]
-pub fn new_session_in_terminal(cwd: String) -> Result<(), String> {
-    let escaped_cwd = cwd.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!(
-        r#"tell application "Terminal"
-            activate
-            do script "cd \"{}\" && claude"
-        end tell"#,
-        escaped_cwd
-    );
-    std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 /// 在 VSCode 中打开项目目录
 #[tauri::command]
 pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
@@ -144,7 +124,7 @@ fn session_path(project_id: &str, session_id: &str) -> PathBuf {
         .join(format!("{}.jsonl", session_id))
 }
 
-fn projects_dir() -> PathBuf {
+pub(crate) fn projects_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
         .join(".claude")

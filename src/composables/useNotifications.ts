@@ -104,6 +104,7 @@ function sessionTitle(sessionId: string): string {
     const s = p.sessions.find(s => s.id === sessionId)
     if (s) return displayTitle(s)
   }
+  if (useWorkbench().draftCwd(sessionId)) return '新会话'
   return sessionId.slice(0, 8)
 }
 
@@ -114,7 +115,7 @@ function sessionCwd(sessionId: string): string | null {
     const s = p.sessions.find(s => s.id === sessionId)
     if (s) return s.cwd
   }
-  return null
+  return useWorkbench().draftCwd(sessionId)
 }
 
 function permissionSub(req: PermissionRequest): string {
@@ -204,15 +205,15 @@ function goToSession(sessionId: string) {
   const { openSession, findSession, expandSession, setActiveTab } = useWorkbench()
   const { switchSection } = useUiState()
   const found = findSession(sessionId)
-  let collapsed: string | null = null
+  let collapsed: string[]
   if (found) {
     setActiveTab(found.tab.id)
-    collapsed = expandSession(found.tab.id, sessionId).collapsedSessionId
+    collapsed = expandSession(found.tab.id, sessionId).collapsedSessionIds
   } else {
-    collapsed = openSession(sessionId).collapsedSessionId
+    collapsed = openSession(sessionId).collapsedSessionIds
   }
-  if (collapsed) {
-    notifyTransient(`已收起:${sessionTitle(collapsed)}`)
+  if (collapsed.length > 0) {
+    notifyTransient(`已收起:${collapsed.map(sessionTitle).join('、')}`)
   }
   switchSection('workbench')
   // 错误事件已被注意:同步解除其 toast(左列卡状态仍如实反映)
