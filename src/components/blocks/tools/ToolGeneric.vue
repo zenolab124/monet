@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { renderMarkdown } from '@/composables/useMarkdown'
+import { renderMarkdownCached } from '@/composables/useMarkdown'
 
 const TEXT_TRUNCATE_LEN = 8192
 
@@ -82,8 +82,9 @@ function toggleLongText(key: string) {
   longTextExpanded.value[key] = !longTextExpanded.value[key]
 }
 
+// 模板内方法调用,组件每次重渲染都会执行——走缓存把重复 parse 压成 Map 查找
 function renderMd(text: string) {
-  return renderMarkdown(text)
+  return renderMarkdownCached(text)
 }
 </script>
 

@@ -687,6 +687,7 @@ async function onReload() {
               v-for="(block, i) in turn.content"
               :key="i"
               :block="block"
+              :streaming="stream.streaming"
             />
           </TransitionGroup>
         </div>

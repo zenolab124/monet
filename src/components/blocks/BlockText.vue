@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { ContentBlock } from '@/types'
-import { renderMarkdown } from '@/composables/useMarkdown'
+import { renderMarkdownPlain, renderMarkdownCached } from '@/composables/useMarkdown'
 
 const TEXT_TRUNCATE_LEN = 8192
 
 const props = defineProps<{
   block: Extract<ContentBlock, { type: 'text' }>
+  /** 会话仍在流式中:走无高亮降级渲染;结束翻 false 后同实例切完整渲染,代码块一次性上色 */
+  streaming?: boolean
 }>()
 
 const expanded = ref(false)
@@ -18,7 +20,9 @@ const displayText = computed(() => {
   return props.block.text.slice(0, TEXT_TRUNCATE_LEN)
 })
 
-const renderedHtml = computed(() => renderMarkdown(displayText.value))
+const renderedHtml = computed(() =>
+  props.streaming ? renderMarkdownPlain(displayText.value) : renderMarkdownCached(displayText.value),
+)
 </script>
 
 <template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { renderMarkdown } from '@/composables/useMarkdown'
+import { renderMarkdownCached } from '@/composables/useMarkdown'
 
 const props = defineProps<{
   input: Record<string, unknown>
@@ -13,7 +13,7 @@ const plan = computed(() => {
   return typeof v === 'string' ? v : ''
 })
 
-const renderedPlan = computed(() => renderMarkdown(plan.value))
+const renderedPlan = computed(() => renderMarkdownCached(plan.value))
 </script>
 
 <template>
