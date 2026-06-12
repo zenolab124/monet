@@ -99,6 +99,50 @@ export interface SchemaDiagnosis {
   }
 }
 
+// --- 工坊域(v2.3.0):get_workshop_assets 返回结构,Rust 端 #[serde(rename_all = "camelCase")] ---
+
+export interface WorkshopSkill {
+  name: string
+  description: string
+  version: string | null
+  source: string
+  path: string
+}
+
+export interface WorkshopCommand {
+  name: string
+  description: string
+  argumentHint: string | null
+  source: string
+  path: string
+}
+
+export interface WorkshopAgent {
+  name: string
+  description: string
+  source: string
+  path: string
+}
+
+/** 常见三值（PRD 口径）；Rust 端对配置显式 type 原样透传，运行时可能出现其他字符串 */
+export type McpTransport = 'stdio' | 'http' | 'sse' | (string & {})
+
+export interface WorkshopMcpServer {
+  name: string
+  transport: McpTransport
+  endpoint: string
+  enabled: boolean
+  source: string
+  path: string
+}
+
+export interface WorkshopAssets {
+  skills: WorkshopSkill[]
+  commands: WorkshopCommand[]
+  agents: WorkshopAgent[]
+  mcpServers: WorkshopMcpServer[]
+}
+
 // --- 工具函数 ---
 
 export function tokenTotal(t: TokenUsage): number {

@@ -13,6 +13,7 @@ mod streaming;
 mod tray;
 pub mod usage_stats;
 mod watcher;
+mod workshop;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,6 +55,9 @@ pub fn run() {
             commands::check_session_running,
             commands::get_usage_stats,
             commands::get_schema_diagnosis,
+            workshop::get_workshop_assets,
+            workshop::probe_mcp_server,
+            workshop::open_workshop_dir,
             channels::list_channels,
             channels::save_channel,
             channels::delete_channel,
