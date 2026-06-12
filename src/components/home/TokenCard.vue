@@ -1,0 +1,88 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { UsageStats } from '../../types'
+import { formatTokens } from '../../types'
+import HomeCard from './HomeCard.vue'
+
+/** Token 消耗卡（v2.2.0 FR-002）：本月总量 + 前 5 模型条形分布，其余合并「其他」 */
+const props = defineProps<{
+  usage: UsageStats | null
+  loading: boolean
+  error: string | null
+}>()
+
+const emit = defineEmits<{ retry: [] }>()
+
+const rows = computed(() => {
+  if (!props.usage) return []
+  const { total, byModel } = props.usage.month
+  const list = byModel.slice(0, 5).map((m) => ({ name: m.model, total: m.total }))
+  const rest = byModel.slice(5)
+  if (rest.length) {
+    list.push({ name: '其他', total: rest.reduce((s, m) => s + m.total, 0) })
+  }
+  return list.map((r) => ({
+    name: r.name,
+    amount: formatTokens(r.total),
+    pct: total > 0 ? (r.total / total) * 100 : 0,
+  }))
+})
+</script>
+
+<template>
+  <HomeCard icon="i-carbon-meter" title="Token 消耗" badge="本月">
+    <template v-if="error">
+      <div class="py-3 text-xs text-muted-foreground">加载失败</div>
+      <button class="retry-btn" @click="emit('retry')">重试</button>
+    </template>
+    <template v-else>
+      <div class="big-num">
+        {{ loading ? '—' : formatTokens(usage?.month.total ?? 0) }}<small>tokens</small>
+      </div>
+      <div class="mt-2.5 flex flex-col gap-1.25">
+        <div v-if="loading" class="text-2xs text-muted-foreground">统计中…</div>
+        <div v-else-if="!rows.length" class="text-2xs text-muted-foreground">本月暂无用量</div>
+        <div v-for="m in rows" :key="m.name" class="flex items-center gap-2 text-xs">
+          <span class="w-20 text-muted-foreground font-mono text-2xs truncate" :title="m.name">{{ m.name }}</span>
+          <span class="flex-1 h-1.25 rounded-sm bg-muted overflow-hidden">
+            <span class="block h-full rounded-sm bg-primary" :style="{ width: `${m.pct}%` }" />
+          </span>
+          <span class="w-12 text-right tabular-nums text-muted-foreground text-2xs">{{ m.amount }}</span>
+        </div>
+      </div>
+    </template>
+  </HomeCard>
+</template>
+
+<style scoped>
+.big-num {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.big-num small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  margin-left: 4px;
+}
+
+.text-2xs {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.retry-btn {
+  font-size: 11px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  background: var(--card);
+  cursor: pointer;
+}
+.retry-btn:hover {
+  background: var(--muted);
+}
+</style>

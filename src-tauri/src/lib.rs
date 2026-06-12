@@ -6,8 +6,11 @@ mod discovery;
 mod models;
 mod parser;
 mod permission;
+/// pub：schema-probe bin 复用扫描与 diff 核心
+pub mod probe;
 mod streaming;
 mod tray;
+pub mod usage_stats;
 mod watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -46,6 +49,8 @@ pub fn run() {
             commands::respond_permission,
             commands::get_cli_settings,
             commands::check_session_running,
+            commands::get_usage_stats,
+            commands::get_schema_diagnosis,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

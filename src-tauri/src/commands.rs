@@ -5,7 +5,9 @@ use crate::discovery;
 use crate::models::*;
 use crate::parser;
 use crate::permission::PermissionService;
+use crate::probe;
 use crate::streaming;
+use crate::usage_stats;
 
 /// 获取所有项目（含会话摘要）
 #[tauri::command]
@@ -182,6 +184,24 @@ pub fn check_session_running(session_id: String) -> bool {
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .any(|l| l.contains(&session_id) && l.contains("claude"))
+}
+
+/// 全项目 token 用量聚合（v2.2.0 FR-001）：首页 Token 卡 / 活跃热力图数据源。
+/// 全量扫描秒级耗时，丢 blocking 线程池跑，不占 IPC 主线程
+#[tauri::command]
+pub async fn get_usage_stats() -> Result<usage_stats::UsageStats, String> {
+    tauri::async_runtime::spawn_blocking(usage_stats::collect_usage_stats)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// schema-probe 全量扫描（v2.2.0 FR-004）：首页兼容性诊断卡数据源。
+/// 返回结构与 CLI `--json` 输出同构（既有契约）
+#[tauri::command]
+pub async fn get_schema_diagnosis() -> Result<probe::Report, String> {
+    tauri::async_runtime::spawn_blocking(|| probe::run_probe(None))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 fn session_path(project_id: &str, session_id: &str) -> PathBuf {

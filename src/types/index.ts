@@ -67,6 +67,38 @@ export type SessionRecord =
   | { type: 'file_history_snapshot'; message_id: string | null; is_snapshot_update: boolean | null }
   | { type: 'unknown'; raw_type: string }
 
+// --- 首页统计（v2.2.0，与 Rust usage_stats / probe 模块对应）---
+
+export interface DailyUsage {
+  date: string
+  total: number
+}
+
+export interface ModelUsage {
+  model: string
+  total: number
+}
+
+export interface UsageStats {
+  daily: DailyUsage[]
+  month: {
+    total: number
+    byModel: ModelUsage[]
+  }
+}
+
+/** get_schema_diagnosis 返回的子集——前端只消费诊断卡需要的字段 */
+export interface SchemaDiagnosis {
+  scanned_files: number
+  record_types: {
+    supported: Record<string, number>
+    unknown: Record<string, unknown>
+  }
+  tools: {
+    generic_undeclared: Record<string, unknown>
+  }
+}
+
 // --- 工具函数 ---
 
 export function tokenTotal(t: TokenUsage): number {

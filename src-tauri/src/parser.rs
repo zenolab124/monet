@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -7,7 +8,7 @@ use serde_json::Value;
 
 use crate::models::*;
 
-/// 轻量结构体：仅提取 assistant 消息的 usage，跳过 content 反序列化
+/// 轻量结构体：仅提取 assistant 消息的 id/usage，跳过 content 反序列化
 #[derive(Deserialize)]
 struct UsageExtractor {
     #[serde(rename = "type")]
@@ -17,6 +18,7 @@ struct UsageExtractor {
 
 #[derive(Deserialize)]
 struct UsageMessage {
+    id: Option<String>,
     usage: Option<TokenUsage>,
 }
 
@@ -84,6 +86,9 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     let mut earliest_timestamp: Option<String> = None;
     let mut total_tokens = TokenUsage::default();
     let mut message_count: u32 = 0;
+    // 同一次 API 响应拆多行时每行重复携带相同 usage，按 message.id 去重只计首次
+    // （v2.2.0 FR-007；id 缺失的行按行独立计）。set 跨完整/轻量两条路径共享
+    let mut seen_usage_ids: HashSet<String> = HashSet::new();
 
     for (i, line) in reader.lines().enumerate() {
         let line = match line.ok() {
@@ -133,9 +138,15 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
                             model = msg.get("model").and_then(|m| m.as_str()).map(String::from);
                         }
                         if let Some(usage) = msg.get("usage") {
-                            let u: TokenUsage =
-                                serde_json::from_value(usage.clone()).unwrap_or_default();
-                            total_tokens.accumulate(&u);
+                            let first_seen = match msg.get("id").and_then(|i| i.as_str()) {
+                                Some(id) => seen_usage_ids.insert(id.to_string()),
+                                None => true,
+                            };
+                            if first_seen {
+                                let u: TokenUsage =
+                                    serde_json::from_value(usage.clone()).unwrap_or_default();
+                                total_tokens.accumulate(&u);
+                            }
                         }
                     }
                     if earliest_timestamp.is_none() {
@@ -202,7 +213,13 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
                         if ext.record_type.as_deref() == Some("assistant") {
                             if let Some(msg) = ext.message {
                                 if let Some(u) = msg.usage {
-                                    total_tokens.accumulate(&u);
+                                    let first_seen = match &msg.id {
+                                        Some(id) => seen_usage_ids.insert(id.clone()),
+                                        None => true,
+                                    };
+                                    if first_seen {
+                                        total_tokens.accumulate(&u);
+                                    }
                                 }
                             }
                         }
@@ -235,6 +252,42 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
         file_size,
         message_count,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn assistant_line(id: Option<&str>, output_tokens: u64) -> String {
+        let id_part = id.map(|i| format!("\"id\":\"{i}\",")).unwrap_or_default();
+        format!(
+            "{{\"type\":\"assistant\",\"timestamp\":\"2026-06-11T10:00:00.000Z\",\"message\":{{{id_part}\"model\":\"claude-fable-5\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":{output_tokens},\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}}}}"
+        )
+    }
+
+    /// FR-007：同一 message.id 多行只计一次 usage；无 id 行按行独立计。
+    /// 同时覆盖完整路径（前 max_lines）与轻量路径（之后）共享去重集
+    #[test]
+    fn summary_dedups_usage_by_message_id() {
+        let path = std::env::temp_dir().join("cc-space-test-dedup.jsonl");
+        let mut f = fs::File::create(&path).unwrap();
+        // 完整路径内：同 id 两行 + 无 id 一行
+        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
+        writeln!(f, "{}", assistant_line(None, 7)).unwrap();
+        // 轻量路径内（max_lines=3 之后）：msg_a 第三次出现 + 新 id 一次
+        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_b"), 50)).unwrap();
+        drop(f);
+
+        let summary = parse_summary(&path, 3).unwrap();
+        // msg_a 计一次(110) + 无 id(17) + msg_b(60)
+        assert_eq!(summary.total_tokens.total(), 110 + 17 + 60);
+        // message_count 维持按行计数口径不变
+        assert_eq!(summary.message_count, 5);
+        fs::remove_file(&path).ok();
+    }
 }
 
 /// 从文件尾部搜索 ai-title 记录
