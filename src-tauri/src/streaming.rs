@@ -240,10 +240,13 @@ pub fn start_streaming(
 
     let handle = app.clone();
     let sid = session_id.to_string();
+    let sock = socket_path.clone();
     std::thread::spawn(move || {
         read_stream(child, &handle, &sid);
-        // 子进程退出后回收该会话的权限服务
-        PermissionService::stop_for(&sid);
+        // 子进程退出后回收该会话的权限服务——仅清理本 turn 自己的实例。
+        // 不能盲调 stop_for(sid)：同会话连发时新 turn 可能已注册新 socket，
+        // 盲删会害新 turn 的权限请求 Connection refused（race，见 stop_if_socket 注释）
+        PermissionService::stop_if_socket(&sid, &sock);
     });
 }
 
@@ -382,9 +385,13 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle, session_id: &str) {
     // 通知该会话的流结束
     let _ = app.emit("stream-done", json!({ "session_id": session_id }));
 
-    // 清理引用（被 stop_streaming 主动 kill 时 entry 已移除，这里幂等）
+    // 清理引用——仅移除本 turn 自己的 child。同会话连发时新 turn 可能已注册新 child，
+    // 按 session_id 盲删会误删新 turn 的进程句柄（之后 stop_streaming 找不到它、无法 kill）。
+    // 用 Arc 指针身份校验：被新 turn 接管后不动。
     if let Some(map) = ACTIVE_PROCESSES.lock().unwrap().as_mut() {
-        map.remove(session_id);
+        if map.get(session_id).is_some_and(|c| Arc::ptr_eq(c, &process)) {
+            map.remove(session_id);
+        }
     }
 }
 

@@ -6,6 +6,7 @@ import {
   DEFAULT_CONTEXT,
   type ModelInfo,
 } from '@/utils/modelContext'
+import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 
 const props = defineProps<{
   /** 当前模型 ID(后端给的 model 字符串,可能是别名也可能是完整名) */
@@ -24,10 +25,24 @@ const focusedIndex = ref(0)
 /** 当前模型解析结果(null = 清单外的自定义/未收录模型) */
 const currentModel = computed(() => inferModel(props.current))
 
-/** 自定义模型直接显示原始名字,不显示「未知」 */
-const currentLabel = computed(() =>
-  currentModel.value?.label ?? props.current ?? '未知',
-)
+const { cliDefaults } = useCliDefaults()
+
+/** CLI 默认模型展示标签(settings.json model 字段可为别名,经清单解析;未收录显原名) */
+const cliDefaultModelLabel = computed(() => {
+  const m = cliDefaults.value.model
+  if (!m) return null
+  return inferModel(m)?.label ?? m
+})
+
+/**
+ * 按钮标签:清单命中显 label,清单外自定义显原始名;
+ * 会话未选且无记录(新会话)时显「默认 · <CLI 真值>」,免去用户猜测默认是什么
+ */
+const currentLabel = computed(() => {
+  if (currentModel.value) return currentModel.value.label
+  if (props.current) return props.current
+  return cliDefaultModelLabel.value ? `默认 · ${cliDefaultModelLabel.value}` : '默认'
+})
 
 /**
  * 下拉项 = 模型清单 + 当前自定义模型(若清单外):
@@ -57,6 +72,8 @@ const currentIndex = computed(() => {
 function toggle() {
   open.value = !open.value
   if (open.value) {
+    // settings.json 是活文件:每次打开下拉重读,「默认」标签不显示过期值
+    refreshCliDefaults()
     // 默认聚焦到当前项;若当前项无效(老会话),聚焦清单首项
     focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value : 0
     nextTick(() => focusListItem(focusedIndex.value))

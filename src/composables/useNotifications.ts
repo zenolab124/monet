@@ -13,7 +13,6 @@ import { useUiState } from './useUiState'
 import { onStreamFinished, getStream, useStreaming } from './useStreaming'
 import {
   usePermissionRequests,
-  onPermissionTimeout,
   type PermissionRequest,
 } from './usePermissionRequests'
 
@@ -267,12 +266,7 @@ export async function initNotificationLayer(): Promise<void> {
     },
   )
 
-  // 3. 权限超时:持久型已被移除,补瞬态「已自动拒绝」
-  onPermissionTimeout((req) => {
-    notifyTransient(`权限已自动拒绝:${sessionTitle(req.sessionId)}`, permissionSub(req))
-  })
-
-  // 4. 外部会话出错兜底(FR-010):不属于任何工作台的会话 jsonl 新增 api_error
+  // 3. 外部会话出错兜底(FR-010):不属于任何工作台的会话 jsonl 新增 api_error
   await listen<{ sessionId: string; projectId: string; content: string }>(
     'session-api-error',
     (e) => {

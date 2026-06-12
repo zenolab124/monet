@@ -53,13 +53,13 @@ const title = computed(() =>
   : props.sessionId.slice(0, 8),
 )
 
-// --- 秒级时钟:权限倒计时 + 流式持续时间共用,空闲时停表 ---
+// --- 秒级时钟:流式持续时间显示用,空闲时停表 ---
 
 const now = ref(Date.now())
 let timer: number | null = null
 
 watch(
-  () => !!headPerm.value || stream.value.streaming,
+  () => stream.value.streaming,
   (active) => {
     if (active && timer === null) {
       timer = window.setInterval(() => {
@@ -75,11 +75,6 @@ watch(
 
 onUnmounted(() => {
   if (timer !== null) clearInterval(timer)
-})
-
-const timeoutSeconds = computed(() => {
-  if (!headPerm.value) return null
-  return Math.max(0, Math.ceil((headPerm.value.timeoutAt - now.value) / 1000))
 })
 
 /** 决策条单行摘要:工具名 + 目标 */
@@ -261,14 +256,11 @@ function onDragEnd() {
       >重试</button>
     </div>
 
-    <!-- meta 行:项目名 + 持续/最后活动时间 + token;等权限时显示倒计时 -->
+    <!-- meta 行:项目名 + 持续/最后活动时间 + token -->
     <div class="px-2.5 pb-2 flex items-center gap-2.5 text-[10px] text-muted-foreground tabular-nums">
       <span class="truncate">{{ summary?.projectName ?? draft?.projectName ?? '—' }}</span>
-      <span v-if="timeoutSeconds !== null" class="text-accent shrink-0">{{ timeoutSeconds }} 秒后超时</span>
-      <template v-else>
-        <span class="shrink-0">{{ durationText }}</span>
-        <span v-if="tokenText" class="shrink-0">{{ tokenText }}</span>
-      </template>
+      <span class="shrink-0">{{ durationText }}</span>
+      <span v-if="tokenText" class="shrink-0">{{ tokenText }}</span>
     </div>
   </div>
 </template>

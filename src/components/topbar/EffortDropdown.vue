@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import type { EffortLevel, EffortSetting } from '@/composables/useSessionSettings'
+import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 
 const props = defineProps<{
   /** null = 本会话未设置(按应用默认行为发送);'ultracode' = 超档(经 --settings 注入) */
@@ -38,15 +39,28 @@ const buttonRef = ref<HTMLButtonElement>()
 const focusedIndex = ref(0)
 
 const currentIndex = computed(() => OPTIONS.findIndex(o => o.value === props.current))
-/** 未设置的会话显示「默认」:具体取值由应用默认决定,不在此处解释 */
+
+const { cliDefaults } = useCliDefaults()
+
+/** CLI 默认行为的展示标签:ultracode 全局开关优先(其自带 xhigh),其次 effortLevel */
+const cliDefaultLabel = computed(() => {
+  if (cliDefaults.value.ultracode) return 'Ultracode'
+  const lv = cliDefaults.value.effort_level
+  return lv && lv in EFFORT_LABELS ? EFFORT_LABELS[lv as EffortLevel] : null
+})
+
+/** 未设置的会话显示「默认 · <CLI 真值>」,免去用户猜测默认对应哪一档 */
 const currentLabel = computed(() => {
   const o = OPTIONS.find(o => o.value === props.current)
-  return o ? o.label : '默认'
+  if (o) return o.label
+  return cliDefaultLabel.value ? `默认 · ${cliDefaultLabel.value}` : '默认'
 })
 
 function toggle() {
   open.value = !open.value
   if (open.value) {
+    // settings.json 是活文件:每次打开下拉重读,「默认」标签不显示过期值
+    refreshCliDefaults()
     focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value : 0
     nextTick(() => focusListItem(focusedIndex.value))
   }

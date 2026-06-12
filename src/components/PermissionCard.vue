@@ -29,20 +29,7 @@ const emit = defineEmits<{
   (e: 'decide', decision: PermissionDecision): void
 }>()
 
-// --- 倒计时 ---
-
-/** 当前时间戳(每秒刷一次) */
-const now = ref(Date.now())
-let timer: number | null = null
-
 onMounted(() => {
-  timer = window.setInterval(() => {
-    now.value = Date.now()
-    // 超时自动拒绝(防御:Rust 端也会超时,这里做一次 UI 兜底)
-    if (now.value >= props.request.timeoutAt) {
-      emit('decide', 'deny')
-    }
-  }, 1000)
   // 默认聚焦"允许一次"
   allowOnceBtn.value?.focus()
   // 全局键盘监听(Enter/Esc)
@@ -50,22 +37,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (timer !== null) {
-    clearInterval(timer)
-    timer = null
-  }
   window.removeEventListener('keydown', onKeydown, { capture: true } as any)
-})
-
-const remainingSec = computed(() => {
-  const diff = Math.max(0, props.request.timeoutAt - now.value)
-  return Math.ceil(diff / 1000)
-})
-
-const remainingPct = computed(() => {
-  const total = 60_000
-  const remain = Math.max(0, props.request.timeoutAt - now.value)
-  return Math.min(100, Math.max(0, (remain / total) * 100))
 })
 
 // --- 工具组件解析 ---
@@ -151,20 +123,6 @@ function onKeydown(e: KeyboardEvent) {
           {{ request.danger.reason }}
         </div>
       </div>
-
-      <!-- 倒计时 -->
-      <div class="text-2xs text-muted-foreground font-mono shrink-0 tabular-nums" aria-live="polite">
-        剩余 {{ remainingSec }}s
-      </div>
-    </div>
-
-    <!-- 倒计时进度条(发条) -->
-    <div class="h-0.5 bg-muted">
-      <div
-        class="h-full transition-all"
-        :class="isDanger ? 'bg-accent/60' : 'bg-primary/60'"
-        :style="{ width: `${remainingPct}%` }"
-      />
     </div>
 
     <!-- 中部:工具参数预览(复用 blocks/tools 组件) -->

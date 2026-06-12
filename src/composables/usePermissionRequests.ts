@@ -32,8 +32,6 @@ export interface PermissionRequest {
   timestamp: number
   /** 危险标识(前端在入队前提前计算) */
   danger: DangerousFlag | null
-  /** 超时拒绝时刻(ms);timestamp + 60_000 */
-  timeoutAt: number
 }
 
 /** Rust → Front 事件 payload 形状 */
@@ -61,34 +59,28 @@ const queue = ref<PermissionRequest[]>([])
 const sessionAllowList = new Map<string, boolean>()
 
 /**
- * 计算 sessionAllow 缓存键。无可用关键参数时返回 null,
- * 此时不进缓存(防止"模糊放行"风险)。
+ * 计算 sessionAllow 缓存键。
+ *   - 有细分参数(file_path/command/url):按参数缓存,同工具不同目标分别记忆
+ *     (Bash 总带 command、Edit/Write 带 file_path,危险操作仍按具体目标细分,不放大授权面)
+ *   - 无细分参数(Workflow/AskUserQuestion/ExitPlanMode 等交互/编排工具):退化为
+ *     「本会话此工具整体放行」。这类工具没有可细分的危险维度,旧实现因取不到参数
+ *     返回 null → 不缓存 →「允许此会话」对它们形同虚设,每次必再问。
  */
 function buildSessionKey(
   sid: string,
   toolName: string,
   input: Record<string, unknown>,
-): string | null {
+): string {
   const pick = (k: string): string | null => {
     const v = input[k]
     return typeof v === 'string' && v.length > 0 ? v : null
   }
   const param = pick('file_path') ?? pick('command') ?? pick('url')
-  if (!param) return null
-  return `${sid}::${toolName}::${param}`
+  return param ? `${sid}::${toolName}::${param}` : `${sid}::${toolName}`
 }
 
 /** 全局监听句柄 */
 let unlisten: UnlistenFn | null = null
-let unlistenTimeout: UnlistenFn | null = null
-
-/** 超时回调（通知层订阅:「已自动拒绝」瞬态提示） */
-type TimeoutCallback = (req: PermissionRequest) => void
-const timeoutCallbacks = new Set<TimeoutCallback>()
-
-export function onPermissionTimeout(cb: TimeoutCallback) {
-  timeoutCallbacks.add(cb)
-}
 
 /**
  * 启动监听。整个 app 生命周期调用一次(建议在 App.vue onMounted)。
@@ -96,22 +88,6 @@ export function onPermissionTimeout(cb: TimeoutCallback) {
  */
 export async function initPermissionListener(): Promise<void> {
   if (unlisten) return
-
-  // Rust 60s 超时事件:从队列移除该 requestId(Rust 已自动 deny,前端不需再 invoke)
-  unlistenTimeout = await listen<{ requestId: string }>(
-    'permission-timeout',
-    (e) => {
-      const req = queue.value.find(r => r.requestId === e.payload.requestId)
-      queue.value = queue.value.filter(r => r.requestId !== e.payload.requestId)
-      if (req) {
-        timeoutCallbacks.forEach(cb => {
-          try {
-            cb(req)
-          } catch (_) { /* 通知层异常不阻断 */ }
-        })
-      }
-    },
-  )
 
   unlisten = await listen<PermissionRequestEventPayload>(
     'permission-request',
@@ -143,7 +119,6 @@ export async function initPermissionListener(): Promise<void> {
         input,
         timestamp,
         danger: checkDangerous(toolName, input),
-        timeoutAt: timestamp + 60_000,
       })
     },
   )
@@ -152,9 +127,7 @@ export async function initPermissionListener(): Promise<void> {
 /** 停止监听(测试或 app 退出时) */
 export async function disposePermissionListener(): Promise<void> {
   unlisten?.()
-  unlistenTimeout?.()
   unlisten = null
-  unlistenTimeout = null
 }
 
 /** 某会话的待决请求队列（响应式过滤视图） */

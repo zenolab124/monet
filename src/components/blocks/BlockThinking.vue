@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import type { ContentBlock } from '@/types'
+import { useThinkingExpand } from '@/composables/useThinkingExpand'
 
 const props = defineProps<{
   block: Extract<ContentBlock, { type: 'thinking' }>
 }>()
 
-const expanded = ref(false)
+// 展开状态全局联动:点开一个 = 全部展开并记住,所有实例消费同一份状态
+const { thinkingExpanded: expanded, toggle } = useThinkingExpand()
 
 /**
  * 三态判断:
@@ -25,7 +27,7 @@ const isThinking = computed(() => !hasPlainText.value && !props.block.signature)
     <template v-if="hasPlainText">
       <button
         class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-        @click="expanded = !expanded"
+        @click="toggle"
       >
         <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
         思考过程（{{ block.thinking.length }} 字）

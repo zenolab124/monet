@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed } from 'vue'
 import { useNotifications, type PersistentToast } from '@/composables/useNotifications'
 import { usePermissionRequests } from '@/composables/usePermissionRequests'
 
@@ -20,24 +20,6 @@ const visiblePersistent = computed<PersistentToast[]>(() =>
 const foldedCount = computed(() =>
   Math.max(0, persistentToasts.value.length - PERSISTENT_LIMIT),
 )
-
-// 权限倒计时:单 interval 驱动全部 toast
-const now = ref(Date.now())
-let timer: number | null = null
-
-onMounted(() => {
-  timer = window.setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
-})
-onUnmounted(() => {
-  if (timer !== null) clearInterval(timer)
-})
-
-function remainSeconds(t: PersistentToast): number | null {
-  if (t.kind !== 'permission') return null
-  return Math.max(0, Math.ceil((t.request.timeoutAt - now.value) / 1000))
-}
 
 async function onAllow(t: PersistentToast) {
   if (t.kind === 'permission') await respondRequest(t.request.requestId, 'allow_once')
@@ -100,8 +82,7 @@ async function onDeny(t: PersistentToast) {
           <template v-if="t.kind === 'permission'">
             <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="onAllow(t)">允许</button>
             <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="onDeny(t)">拒绝</button>
-            <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">去会话</button>
-            <span class="ml-auto text-[10.5px] text-accent tabular-nums">{{ remainSeconds(t) }}s</span>
+            <button class="ml-auto px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">去会话</button>
           </template>
           <template v-else>
             <button

@@ -44,6 +44,8 @@ pub fn run() {
             commands::start_streaming,
             commands::stop_streaming,
             commands::respond_permission,
+            commands::get_cli_settings,
+            commands::check_session_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

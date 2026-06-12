@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
@@ -113,6 +113,7 @@ watch(effectiveSessionId, () => {
   hideHistory.value = false
   showHelpCard.value = false
   followStreaming.value = true
+  lastScrollTop = 0
 })
 
 // --- 权限请求(仅工作台列交互;档案馆只读不渲染) ---
@@ -480,8 +481,27 @@ function onScrollWheel(e: WheelEvent) {
   if (e.deltaY < 0) followStreaming.value = false
 }
 
+/** 上次 scroll 事件的 scrollTop:方向判定用(scroll 事件本身不带方向) */
+let lastScrollTop = 0
+
+// 恢复跟随不能用 60px 严判:流式中 scrollHeight 每帧增长,scroll 事件到达时
+// 用户刚滚到的"底部"常已被新内容推出阈值,判定永远失败且内容增长不再产生
+// scroll 事件——脱离态就此卡死。改为方向(向下) + 宽阈值(120px)双条件;
+// 向上(拖滚动条/键盘,wheel 之外的路径)统一在此兜底脱离。
 function onScroll() {
-  if (!followStreaming.value && isNearBottom()) followStreaming.value = true
+  const el = scrollContainer.value
+  if (!el) return
+  const delta = el.scrollTop - lastScrollTop
+  lastScrollTop = el.scrollTop
+  if (delta < 0) {
+    followStreaming.value = false
+  } else if (
+    delta > 0 &&
+    !followStreaming.value &&
+    el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  ) {
+    followStreaming.value = true
+  }
 }
 
 function resumeFollow() {
@@ -554,6 +574,90 @@ watch(streamingTick, () => {
   if (stream.value.streaming && followStreaming.value) scrollToBottom()
 })
 
+// --- 外部运行跟随 ---
+//
+// 应用关闭后 claude CLI 子进程不随窗口退出(刻意保留:任务继续跑),重开应用后
+// stdout 管道已不可重接。改走伪流式:探测到该会话仍有 CLI 进程在跑(命令行含
+// session-id)时,周期静默 reload jsonl 落账记录 + 保持滚动跟随,进程退出后做
+// 一次收尾 reload。整段追加无打字机,但进度不再需要手动刷新。
+// 注意:声明须在下方 immediate watch 之前(其回调在 setup 同步阶段就会执行)。
+
+const externalRunning = ref(false)
+let followSessionId: string | null = null
+let externalTimer: number | null = null
+let probing = false
+
+/** 静默重载:不动 loading 态/滚动状态,记录数有增长才替换(jsonl 仅追加) */
+async function silentReloadRecords() {
+  const cs = currentSession.value
+  if (!cs) return
+  try {
+    const fresh = await invoke<SessionRecord[]>('get_session_records', {
+      projectId: cs.projectId,
+      sessionId: cs.summary.id,
+    })
+    // 异步窗口内可能已切会话
+    if (effectiveSessionId.value !== cs.summary.id) return
+    if (fresh.length > records.value.length) records.value = fresh
+  } catch {
+    // 下一轮探测重试
+  }
+}
+
+async function probeExternal() {
+  if (probing) return
+  probing = true
+  try {
+    const cs = currentSession.value
+    // 本地流式由 stream-event 实时驱动,无需外部探测
+    if (!cs || stream.value.streaming) {
+      externalRunning.value = false
+      stopExternalFollow()
+      return
+    }
+    let running = false
+    try {
+      running = await invoke<boolean>('check_session_running', { sessionId: cs.summary.id })
+    } catch {
+      // 探测失败视为未运行
+    }
+    if (effectiveSessionId.value !== cs.summary.id) return
+    if (running) {
+      if (!externalRunning.value) {
+        externalRunning.value = true
+        followStreaming.value = true
+      }
+      await silentReloadRecords()
+    } else if (externalRunning.value) {
+      // 进程刚退出:收尾 reload 拿最终落账,结束跟随
+      externalRunning.value = false
+      await silentReloadRecords()
+      stopExternalFollow()
+    } else {
+      stopExternalFollow()
+    }
+  } finally {
+    probing = false
+  }
+}
+
+function startExternalFollow() {
+  stopExternalFollow()
+  externalRunning.value = false
+  // 先起定时器再立即探一次:未运行的会话首轮探测即自停,运行中的持续跟随
+  externalTimer = window.setInterval(probeExternal, 1500)
+  probeExternal()
+}
+
+function stopExternalFollow() {
+  if (externalTimer !== null) {
+    clearInterval(externalTimer)
+    externalTimer = null
+  }
+}
+
+onUnmounted(stopExternalFollow)
+
 watch(
   () => currentSession.value,
   async (cs) => {
@@ -568,7 +672,15 @@ watch(
       if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
         clearStreamingTurns(cs.summary.id)
       }
+      // 会话身份变化才重启外部探测:currentSession 是 computed 新对象,
+      // projects 静默刷新会高频触发本 watch,不能直接当探测信号
+      if (cs.summary.id !== followSessionId) {
+        followSessionId = cs.summary.id
+        startExternalFollow()
+      }
     } else {
+      followSessionId = null
+      stopExternalFollow()
       clearRecords()
     }
   },
@@ -740,6 +852,12 @@ async function onReload() {
         {{ slashError }}
       </div>
 
+      <!-- 外部运行跟随提示:CLI 进程在应用外继续跑,期间禁发(同 session 双进程会冲突) -->
+      <div v-if="externalRunning" class="mb-1 text-xs text-muted-foreground flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-claude animate-pulse shrink-0" />
+        会话正在后台运行,实时跟随中(进程结束后可继续输入)
+      </div>
+
       <SlashCommandPanel
         :visible="slashPanelVisible"
         :query="inputText"
@@ -752,8 +870,8 @@ async function onReload() {
         <textarea
           ref="textareaRef"
           v-model="inputText"
-          :disabled="stream.streaming"
-          placeholder="输入消息… (Shift+Enter 换行,/ 触发命令补全)"
+          :disabled="stream.streaming || externalRunning"
+          :placeholder="externalRunning ? '会话在后台运行中…' : '输入消息… (Shift+Enter 换行,/ 触发命令补全)'"
           rows="1"
           class="flex-1 px-3 py-2 text-sm rounded-md bg-popover border border-border
                  text-foreground placeholder-muted-foreground resize-none
@@ -774,7 +892,7 @@ async function onReload() {
         </button>
         <button
           v-else
-          :disabled="!inputText.trim()"
+          :disabled="!inputText.trim() || externalRunning"
           class="px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0
                  disabled:opacity-30 disabled:cursor-not-allowed"
           @click="handleSend"

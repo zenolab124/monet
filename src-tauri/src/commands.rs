@@ -118,6 +118,61 @@ pub fn respond_permission(
     }
 }
 
+/// CLI 全局配置摘要(~/.claude/settings.json):顶栏「默认」项展示真值用
+#[derive(serde::Serialize)]
+pub struct CliSettings {
+    pub model: Option<String>,
+    pub effort_level: Option<String>,
+    pub ultracode: bool,
+}
+
+/// 读取 CLI settings.json 的模型/努力默认值。
+/// settings.json 是活文件(CLI 内 /effort 等实时改写),每次调用现读现解析、
+/// 绝不进程级缓存,见 docs/knowledge/pitfalls/cli-settings-live-rewrite.md
+#[tauri::command]
+pub fn get_cli_settings() -> CliSettings {
+    let path = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("settings.json");
+    let json: Option<serde_json::Value> = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let get_str = |key: &str| {
+        json.as_ref()
+            .and_then(|j| j.get(key))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    };
+    CliSettings {
+        model: get_str("model"),
+        effort_level: get_str("effortLevel"),
+        ultracode: json
+            .as_ref()
+            .and_then(|j| j.get("ultracode"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    }
+}
+
+/// 检测某会话是否仍有 claude CLI 进程在运行(进程命令行含该 session-id)。
+/// 覆盖两类:本应用 spawn 后随窗口关闭失联的进程、外部终端 `claude --resume <id>`。
+/// 交互式 REPL(命令行不带 session-id)检测不到,属已知边界。
+/// Windows 无 ps,Command 失败时返回 false 优雅降级。
+#[tauri::command]
+pub fn check_session_running(session_id: String) -> bool {
+    // session_id 为 UUID,误匹配概率可忽略;再限定 claude 关键字防偶然碰撞
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "command"])
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|l| l.contains(&session_id) && l.contains("claude"))
+}
+
 fn session_path(project_id: &str, session_id: &str) -> PathBuf {
     projects_dir()
         .join(project_id)

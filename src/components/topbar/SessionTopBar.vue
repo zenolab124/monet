@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
 import { inferModel, getContextWindow } from '@/utils/modelContext'
 import type { EffortSetting } from '@/composables/useSessionSettings'
+import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import ModelDropdown from './ModelDropdown.vue'
@@ -56,9 +57,16 @@ const effectiveModelStr = computed(() => props.selectedModelId ?? props.modelStr
 /** 解析后的 ModelInfo(决定菜单内是否补充展示未知模型字符串) */
 const effectiveModel = computed(() => inferModel(effectiveModelStr.value))
 
+const { cliDefaults } = useCliDefaults()
+// 顶栏挂载即拉一次 CLI 默认值(settings.json 活文件,下拉打开时还会各自重读)
+onMounted(() => refreshCliDefaults())
+
 /** 上下文容量:按 jsonl 里真实跑过的模型字符串(含 [1m] 后缀)推断 */
-// 容量:真实跑过的模型优先;新会话尚无记录时用已选模型推断(否则选了 1M 档仍显示 200K 误导)
-const capacity = computed(() => getContextWindow(props.modelString ?? props.selectedModelId))
+// 容量回退链:真实跑过的模型 → 顶栏已选模型(否则选了 1M 档仍显示 200K 误导)
+// → CLI 默认模型(新会话无记录无选择时,如 CLI 默认 sonnet 实为 200K 档)
+const capacity = computed(() =>
+  getContextWindow(props.modelString ?? props.selectedModelId ?? cliDefaults.value.model),
+)
 
 // --- 窄列折叠 ---
 //

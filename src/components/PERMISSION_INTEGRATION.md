@@ -52,8 +52,10 @@ Rust 端收到响应后,把 `{ behavior: "allow" }` 或 `{ behavior: "deny", mes
 
 ### 1.3 超时
 
-- Rust 端独立超时(60s),前端 UI 也独立超时(60s),两边都拒绝即可。
-- 前端超时拒绝由 `PermissionCard.vue` 的 setInterval 兜底,触发 `decide('deny')`。
+- 权限请求**永不自动超时**:Rust 端 `wait_decision` 一直阻塞等用户决策,cc-space-mcp
+  侧也不设 socket 读超时。请求卡住直到用户点允许/拒绝,或会话被停止/中断
+  (`stop_for`/`shutdown` 置 stop_flag 唤醒并按 deny 收尾)。
+- 前端无倒计时、无自动拒绝兜底;`permission-timeout` 事件已废弃。
 
 ---
 

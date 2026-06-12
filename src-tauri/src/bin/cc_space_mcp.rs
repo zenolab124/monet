@@ -26,9 +26,6 @@ const SERVER_VERSION: &str = "0.1.0";
 /// MCP 协议版本（写死一个常用版本，claude CLI 容忍主版本号匹配）
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// 主进程 socket 通信超时（>= PRD 60s + 余量）
-const SOCKET_READ_TIMEOUT_SECS: u64 = 75;
-
 fn main() {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -183,9 +180,8 @@ fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String
 
     let mut stream = UnixStream::connect(&sock_path)
         .map_err(|e| format!("连接 {} 失败：{}", sock_path, e))?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(SOCKET_READ_TIMEOUT_SECS)))
-        .map_err(|e| e.to_string())?;
+    // 不设读超时:主进程永不超时,这里一直阻塞等用户决策。
+    // 异常路径(主进程退出/socket 关闭)由 read 返回 0 字节自然 break,不会永久挂死。
     stream
         .set_write_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| e.to_string())?;

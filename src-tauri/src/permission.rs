@@ -16,14 +16,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-
-/// 单次权限请求的超时（PRD 规定 60s 自动 deny）
-const REQUEST_TIMEOUT_SECS: u64 = 60;
 
 /// 等待轮询步长（避免 busy-loop）
 const POLL_INTERVAL_MS: u64 = 50;
@@ -32,8 +29,6 @@ const POLL_INTERVAL_MS: u64 = 50;
 struct PendingRequest {
     /// 收到响应后写到这里
     decision: Mutex<Option<Decision>>,
-    /// 创建时刻（用于超时判定）
-    created_at: Instant,
 }
 
 /// 用户决策
@@ -157,6 +152,30 @@ impl PermissionService {
         }
     }
 
+    /// 仅当该会话当前注册的服务正是 `socket_path` 这一实例时才停止。
+    ///
+    /// 同会话连发场景下，每个 streaming turn 新建一个 socket。旧 turn 的 read_stream
+    /// 线程退出时若按 session_id 盲调 stop_for，会误删新 turn 刚注册的服务（socket 被
+    /// shutdown → 新 turn 的 cc-space-mcp 连接 Connection refused / pending 被强制 deny）。
+    /// 用 socket 路径做实例身份校验：被新 turn 接管后旧线程不再触碰。
+    pub fn stop_if_socket(session_id: &str, socket_path: &std::path::Path) {
+        let service = {
+            let mut guard = SERVICES.lock().unwrap();
+            let is_current = guard
+                .as_ref()
+                .and_then(|m| m.get(session_id))
+                .is_some_and(|s| s.socket_path.as_path() == socket_path);
+            if is_current {
+                guard.as_mut().and_then(|m| m.remove(session_id))
+            } else {
+                None
+            }
+        };
+        if let Some(service) = service {
+            service.shutdown();
+        }
+    }
+
     /// 内部：置停止位 + deny 全部 pending + 清 socket 文件
     fn shutdown(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
@@ -253,7 +272,6 @@ fn handle_connection(
     let request_id = format!("perm-{}", REQ_COUNTER.fetch_add(1, Ordering::Relaxed));
     let pending_req = Arc::new(PendingRequest {
         decision: Mutex::new(None),
-        created_at: Instant::now(),
     });
 
     pending
@@ -274,20 +292,11 @@ fn handle_connection(
     };
     let _ = app.emit("permission-request", &payload);
 
-    // 等用户响应或超时
-    let decision = wait_decision(&pending_req, &stop_flag);
+    // 永不超时:阻塞等用户响应或服务停止(中断收尾会唤醒并按 deny 写回)
+    let final_decision = wait_decision(&pending_req, &stop_flag);
 
     // 移除 pending
     pending.lock().unwrap().remove(&request_id);
-
-    // 超时：emit permission-timeout 让前端可见
-    let final_decision = match decision {
-        Some(d) => d,
-        None => {
-            let _ = app.emit("permission-timeout", json!({ "requestId": request_id }));
-            Decision::Deny("超时拒绝".to_string())
-        }
-    };
 
     // 写回响应
     let resp = match final_decision {
@@ -303,25 +312,22 @@ fn handle_connection(
     Ok(())
 }
 
-/// 阻塞等待决策（轮询），命中三种条件之一返回：用户响应 / 超时 / 服务停止
+/// 阻塞等待决策（轮询，永不超时）：命中用户响应或服务停止两者之一返回。
+/// 不再自动拒绝——卡住等用户点，直到 stop_for/shutdown 在流式中断收尾时置 stop_flag 唤醒。
 fn wait_decision(
     req: &PendingRequest,
     stop_flag: &Arc<std::sync::atomic::AtomicBool>,
-) -> Option<Decision> {
-    let timeout = Duration::from_secs(REQUEST_TIMEOUT_SECS);
+) -> Decision {
     loop {
         {
             let slot = req.decision.lock().unwrap();
             if let Some(d) = slot.as_ref() {
-                return Some(d.clone());
+                return d.clone();
             }
         }
         if stop_flag.load(Ordering::Relaxed) {
             // 服务停止时按拒绝处理
-            return Some(Decision::Deny("流式中断，自动拒绝".to_string()));
-        }
-        if req.created_at.elapsed() >= timeout {
-            return None;
+            return Decision::Deny("流式中断，自动拒绝".to_string());
         }
         thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
     }
