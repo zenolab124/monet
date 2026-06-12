@@ -55,16 +55,36 @@ pub fn delete_session(project_id: String, session_id: String) -> Result<(), Stri
     Ok(())
 }
 
-/// 在终端中恢复会话
+/// 在终端中恢复会话。channel 非空时经 `--settings <渠道文件>` 带上会话渠道——
+/// 终端用渠道原文件(非 runtime 合成):与「终端可直接复用渠道文件」的设计一致,
+/// 终端环境的变量残留属用户自己的 shell 管辖,不做防御注入
 #[tauri::command]
-pub fn resume_in_terminal(cwd: String, session_id: String) -> Result<(), String> {
+pub fn resume_in_terminal(
+    cwd: String,
+    session_id: String,
+    channel: Option<String>,
+) -> Result<(), String> {
+    let settings_part = match channel
+        .as_deref()
+        .filter(|c| !c.is_empty() && *c != crate::channels::OFFICIAL_ID)
+    {
+        Some(ch) => {
+            crate::channels::validate_id(ch)?;
+            let path = crate::channels::channel_file_path(ch);
+            if !path.is_file() {
+                return Err(format!("渠道配置不存在: {}", ch));
+            }
+            format!(" --settings \\\"{}\\\"", path.display())
+        }
+        None => String::new(),
+    };
     let escaped_cwd = cwd.replace('\\', "\\\\").replace('"', "\\\"");
     let script = format!(
         r#"tell application "Terminal"
             activate
-            do script "cd \"{}\" && claude --resume {}"
+            do script "cd \"{}\" && claude{} --resume {}"
         end tell"#,
-        escaped_cwd, session_id
+        escaped_cwd, settings_part, session_id
     );
     std::process::Command::new("osascript")
         .arg("-e")
@@ -93,6 +113,8 @@ pub fn start_streaming(
     message: String,
     model: Option<String>,
     effort: Option<String>,
+    channel: Option<String>,
+    advisor: bool,
 ) {
     streaming::start_streaming(
         &app,
@@ -101,6 +123,8 @@ pub fn start_streaming(
         &message,
         model.as_deref(),
         effort.as_deref(),
+        channel.as_deref(),
+        advisor,
     );
 }
 

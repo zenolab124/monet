@@ -11,6 +11,8 @@ import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults
 const props = defineProps<{
   /** 当前模型 ID(后端给的 model 字符串,可能是别名也可能是完整名) */
   current: string | null
+  /** 禁用(顾问模式下主模型锁定为 Sonnet,不可改) */
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -70,6 +72,7 @@ const currentIndex = computed(() => {
 })
 
 function toggle() {
+  if (props.disabled) return
   open.value = !open.value
   if (open.value) {
     // settings.json 是活文件:每次打开下拉重读,「默认」标签不显示过期值
@@ -147,9 +150,11 @@ onUnmounted(() => {
     <button
       ref="buttonRef"
       type="button"
+      :disabled="disabled"
       class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
-             transition-colors flex items-center gap-1 border border-border"
-      :title="`模型:${currentLabel}`"
+             transition-colors flex items-center gap-1 border border-border
+             disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+      :title="disabled ? '顾问模式下主模型锁定为 Sonnet' : `模型:${currentLabel}`"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
       @click="toggle"

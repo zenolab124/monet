@@ -3,13 +3,14 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
 import { inferModel, getContextWindow } from '@/utils/modelContext'
-import type { EffortSetting } from '@/composables/useSessionSettings'
+import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import ModelDropdown from './ModelDropdown.vue'
 import ContextProgress from './ContextProgress.vue'
 import EffortDropdown from './EffortDropdown.vue'
+import ChannelDropdown from './ChannelDropdown.vue'
 
 /**
  * 单行极简顶栏:常显区只留高频控件(模型/进度/努力),标题不再显示(列头已有),
@@ -37,11 +38,19 @@ const props = defineProps<{
   selectedModelId: string | null
   /** 用户已选择的努力等级(null = 跟随 CLI,'ultracode' = 超档) */
   selectedEffort: EffortSetting
+  /** 渠道选择(null = 跟随应用默认;'official' = 强制官方;其他 = 渠道 id) */
+  selectedChannelId: string | null
+  /** 解析后的最终注入渠道 id(null = 官方):终端恢复带渠道用 */
+  resolvedChannelId: string | null
+  /** 顾问模式开关状态 */
+  selectedAdvisor: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'modelChange', modelId: string): void
   (e: 'effortChange', effort: EffortSetting): void
+  (e: 'channelChange', channelId: string | null): void
+  (e: 'advisorChange', advisor: boolean): void
   (e: 'reload'): void
   (e: 'deleted'): void
 }>()
@@ -51,8 +60,26 @@ const { notifyTransient } = useNotifications()
 
 // --- 派生数据 ---
 
-/** 用户在顶栏选的模型(用于下拉显示当前选中);未选则用 modelString 真实值 */
-const effectiveModelStr = computed(() => props.selectedModelId ?? props.modelString)
+/** 用户在顶栏选的模型(用于下拉显示当前选中);顾问模式锁 Sonnet,未选则用 modelString 真实值 */
+const effectiveModelStr = computed(() =>
+  props.selectedAdvisor ? ADVISOR_MAIN_MODEL : (props.selectedModelId ?? props.modelString),
+)
+
+/** 顾问仅在官方渠道(firstParty)生效:非官方渠道下禁用并提示 */
+const advisorDisabled = computed(() => !!props.resolvedChannelId)
+
+/** 顾问开关 title 文案 */
+const advisorTitle = computed(() => {
+  if (advisorDisabled.value) return '顾问仅在官方渠道可用(当前为第三方渠道)'
+  return props.selectedAdvisor
+    ? '顾问模式:开启(主 Sonnet + Fable 顾问)'
+    : '开启顾问模式(主 Sonnet + Fable 顾问)'
+})
+
+function onAdvisorToggle() {
+  if (advisorDisabled.value) return
+  emit('advisorChange', !props.selectedAdvisor)
+}
 
 /** 解析后的 ModelInfo(决定菜单内是否补充展示未知模型字符串) */
 const effectiveModel = computed(() => inferModel(effectiveModelStr.value))
@@ -70,16 +97,18 @@ const capacity = computed(() =>
 
 // --- 窄列折叠 ---
 //
-// 单行布局的折叠顺序:努力等级 → token 进度,模型永不折叠。
-// 阈值按紧凑形态估算(模型 ~90 + 进度 ~75 + 努力 ~70 + 菜单 ~30 + gap/padding):
-//   >= 360px : 全部展示
-//   >= 280px : 折叠努力等级
+// 单行布局的折叠顺序:渠道 → 努力等级 → token 进度,模型永不折叠。
+// 阈值按紧凑形态估算(模型 ~90 + 进度 ~75 + 努力 ~70 + 渠道 ~110 + 菜单 ~30 + gap/padding):
+//   >= 480px : 全部展示
+//   >= 360px : 折叠渠道
+//   >= 280px : 再折叠努力等级
 //   <  280px : 仅模型 + 菜单
 // 被折叠的控件进 ⋯ 菜单(完整形态)。
 
 const containerRef = ref<HTMLElement>()
 const containerWidth = ref(Number.POSITIVE_INFINITY)
 
+const showChannel = computed(() => containerWidth.value >= 480)
 const showEffort = computed(() => containerWidth.value >= 360)
 const showProgress = computed(() => containerWidth.value >= 280)
 
@@ -139,7 +168,12 @@ async function openInTerminal() {
   menuOpen.value = false
   if (!props.cwd) return
   try {
-    await invoke('resume_in_terminal', { cwd: props.cwd, sessionId: props.sessionId })
+    // 带上会话渠道(--settings <渠道文件>),终端恢复不静默回落官方
+    await invoke('resume_in_terminal', {
+      cwd: props.cwd,
+      sessionId: props.sessionId,
+      channel: props.resolvedChannelId,
+    })
   } catch (e) {
     notifyTransient('终端打开失败', String(e))
   }
@@ -175,6 +209,9 @@ function onModelChange(id: string) {
 function onEffortChange(level: EffortSetting) {
   emit('effortChange', level)
 }
+function onChannelChange(channelId: string | null) {
+  emit('channelChange', channelId)
+}
 </script>
 
 <template>
@@ -185,6 +222,7 @@ function onEffortChange(level: EffortSetting) {
     <!-- 模型切换(永不折叠) -->
     <ModelDropdown
       :current="effectiveModelStr"
+      :disabled="selectedAdvisor"
       @select="onModelChange"
     />
 
@@ -202,6 +240,30 @@ function onEffortChange(level: EffortSetting) {
       :current="selectedEffort"
       @select="onEffortChange"
     />
+
+    <!-- 渠道 -->
+    <ChannelDropdown
+      v-if="showChannel"
+      :current="selectedChannelId"
+      @select="onChannelChange"
+    />
+
+    <!-- 顾问模式开关 -->
+    <button
+      v-if="showChannel"
+      type="button"
+      :disabled="advisorDisabled"
+      class="px-2 py-1 text-xs rounded-md border transition-colors flex items-center gap-1 shrink-0
+             disabled:opacity-40 disabled:cursor-not-allowed"
+      :class="selectedAdvisor && !advisorDisabled
+        ? 'border-primary text-primary bg-primary/10'
+        : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'"
+      :title="advisorTitle"
+      @click="onAdvisorToggle"
+    >
+      <span class="i-carbon-idea w-3.5 h-3.5" />
+      <span>顾问</span>
+    </button>
 
     <div class="ml-auto" />
 
@@ -223,7 +285,7 @@ function onEffortChange(level: EffortSetting) {
                shadow-paper-lifted bg-popover w-60"
       >
         <!-- 窄列被折叠的控件 -->
-        <div v-if="!showProgress || !showEffort" class="px-2 py-1.5 flex flex-col gap-2 border-b border-border">
+        <div v-if="!showProgress || !showEffort || !showChannel" class="px-2 py-1.5 flex flex-col gap-2 border-b border-border">
           <ContextProgress
             v-if="!showProgress"
             :used="usedContextTokens"
@@ -234,6 +296,26 @@ function onEffortChange(level: EffortSetting) {
             :current="selectedEffort"
             @select="onEffortChange"
           />
+          <ChannelDropdown
+            v-if="!showChannel"
+            :current="selectedChannelId"
+            @select="onChannelChange"
+          />
+          <button
+            v-if="!showChannel"
+            type="button"
+            :disabled="advisorDisabled"
+            class="px-2 py-1 text-xs rounded-md border transition-colors flex items-center gap-1.5 self-start
+                   disabled:opacity-40 disabled:cursor-not-allowed"
+            :class="selectedAdvisor && !advisorDisabled
+              ? 'border-primary text-primary bg-primary/10'
+              : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'"
+            :title="advisorTitle"
+            @click="onAdvisorToggle"
+          >
+            <span class="i-carbon-idea w-3.5 h-3.5" />
+            <span>顾问模式</span>
+          </button>
         </div>
 
         <!-- 元数据 -->

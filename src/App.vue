@@ -4,6 +4,7 @@ import ActivityBar from '@/components/ActivityBar.vue'
 import SessionsView from '@/views/SessionsView.vue'
 import HomeView from '@/views/HomeView.vue'
 import WorkbenchView from '@/views/WorkbenchView.vue'
+import SettingsView from '@/views/SettingsView.vue'
 import ToastStack from '@/components/notifications/ToastStack.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useProjects } from '@/composables/useProjects'
@@ -58,6 +59,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <WorkbenchView v-show="activeSection === 'workbench'" class="flex-1 min-w-0" />
     <SessionsView v-show="activeSection === 'sessions'" class="flex-1 min-w-0" />
     <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
+    <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
 
     <!-- 通知层:任何域可见(FR-006) -->
     <ToastStack />

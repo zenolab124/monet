@@ -121,6 +121,8 @@ pub fn start_streaming(
     message: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    channel: Option<&str>,
+    advisor: bool,
 ) {
     // 同会话旧进程先终止（重发场景）；其他会话的并行流式不受影响
     stop_streaming(session_id);
@@ -198,33 +200,64 @@ pub fn start_streaming(
         "--permission-prompt-tool".to_string(),
         "mcp__cc-space__approve_tool_use".to_string(),
     ]);
+    let ultracode = effort == Some("ultracode");
+
+    // 注入合成:--settings 指向 per-spawn runtime 文件,渠道 env / ultracode / 顾问模式
+    // 三类注入合并于此(--settings 只能出现一次)。主载体必须是 --settings(命令行参数层):
+    // 实测用户 settings.json 的 env 字段会反向覆盖 spawn 注入的进程环境变量,纯 env 注入
+    // 会静默失效;spawn env 同值双注入堵启动期缝隙。token 经文件路径传递,不进 argv
+    // (message/mcp-config 已在 ps 可见,凭据不能加入)。
+    let channel_opt = channel.filter(|s| !s.is_empty() && *s != crate::channels::OFFICIAL_ID);
+    let channel_injection =
+        match crate::channels::prepare_injection(channel_opt, session_id, ultracode, advisor) {
+            Ok(Some(inj)) => {
+                args.push("--settings".to_string());
+                args.push(inj.settings_arg.clone());
+                Some(inj)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                PermissionService::stop_for(session_id);
+                emit_error(app, session_id, format!("会话配置加载失败:{}", e));
+                return;
+            }
+        };
+
+    // 顾问模式由前端把 model 强制为 sonnet 后下发,此处只透传;顾问注入已并入上方 --settings
     if let Some(m) = model.filter(|s| !s.is_empty()) {
         args.push("--model".to_string());
         args.push(m.to_string());
     }
-    if let Some(e) = effort.filter(|s| !s.is_empty()) {
-        if e == "ultracode" {
-            // ultracode 是会话级设置而非 effort 档位(CLI 不支持在 settings.json 持久化,
-            // session-only),经 --settings 注入;自带 xhigh + 对实质任务自动编排多智能体 workflow
-            args.push("--settings".to_string());
-            args.push(r#"{"ultracode": true}"#.to_string());
-        } else {
-            args.push("--effort".to_string());
-            args.push(e.to_string());
-        }
+    // ultracode 已并入 --settings(上方合成),此处只处理具体 effort 档位
+    if let Some(e) = effort.filter(|s| !s.is_empty() && *s != "ultracode") {
+        args.push("--effort".to_string());
+        args.push(e.to_string());
     }
     args.push(message.to_string());
 
-    let child = match Command::new(&executable)
+    let mut command = Command::new(&executable);
+    command
         .args(&args)
         .current_dir(cwd)
         .env("PATH", enhanced_path())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    if let Some(inj) = &channel_injection {
+        // 先移除继承环境的认证/路由残留(clear_env = DEFENSE_ENV_KEYS + 渠道缺 token 时的
+        // AUTH_TOKEN),再注入渠道 env(渠道显式配置的同名键以渠道为准)
+        for key in &inj.clear_env {
+            command.env_remove(key);
+        }
+        for (k, v) in &inj.env {
+            command.env(k, v);
+        }
+    }
+    let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
+            if let Some(inj) = &channel_injection {
+                crate::channels::cleanup_runtime_file(&inj.runtime_path);
+            }
             PermissionService::stop_for(session_id);
             emit_error(app, session_id, format!("启动 claude 失败: {}", e));
             return;
@@ -241,12 +274,18 @@ pub fn start_streaming(
     let handle = app.clone();
     let sid = session_id.to_string();
     let sock = socket_path.clone();
+    let runtime_file = channel_injection.map(|inj| inj.runtime_path);
     std::thread::spawn(move || {
         read_stream(child, &handle, &sid);
         // 子进程退出后回收该会话的权限服务——仅清理本 turn 自己的实例。
         // 不能盲调 stop_for(sid)：同会话连发时新 turn 可能已注册新 socket，
         // 盲删会害新 turn 的权限请求 Connection refused（race，见 stop_if_socket 注释）
         PermissionService::stop_if_socket(&sid, &sock);
+        // 渠道 runtime 文件(含 token 副本)随进程生命周期即删;文件名带纳秒后缀,
+        // 不会误删同会话新 turn 的文件
+        if let Some(p) = runtime_file {
+            crate::channels::cleanup_runtime_file(&p);
+        }
     });
 }
 

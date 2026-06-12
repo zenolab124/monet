@@ -57,6 +57,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { Menu } from '@tauri-apps/api/menu'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useConfirm } from '@/composables/useConfirm'
+import { readStoredChannelId } from '@/composables/useSessionSettings'
+import { resolveChannel, refreshChannels } from '@/composables/useChannels'
 
 async function onContextMenu(e: MouseEvent, session: SessionSummary) {
   e.preventDefault()
@@ -66,7 +68,12 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
   if (session.cwd) {
     items.push({
       text: '在终端恢复',
-      action: () => invoke('resume_in_terminal', { cwd: session.cwd!, sessionId: session.id }),
+      action: async () => {
+        // 带上该会话已存的渠道(resolve 跟随默认),终端恢复不静默回落官方
+        await refreshChannels()
+        const channel = resolveChannel(readStoredChannelId(session.id))
+        await invoke('resume_in_terminal', { cwd: session.cwd!, sessionId: session.id, channel })
+      },
     })
   }
 

@@ -69,8 +69,13 @@ const badgeText = computed(() => {
       <span :class="themeIcon[mode]" class="w-4.5 h-4.5 block" />
     </button>
 
-    <!-- 设置（v2.1.0+ 点亮） -->
-    <button class="ab-item ab-disabled" title="设置（即将推出）" disabled>
+    <!-- 设置(自多渠道起点亮:渠道管理是第一个设置域) -->
+    <button
+      class="ab-item"
+      :class="{ active: activeSection === 'settings' }"
+      title="设置"
+      @click="switchSection('settings')"
+    >
       <span class="i-carbon-settings w-4.5 h-4.5 block" />
     </button>
   </nav>

@@ -10,7 +10,13 @@ import {
   streamingTick,
   finishedDirty,
 } from '@/composables/useStreaming'
-import { useSessionSettings } from '@/composables/useSessionSettings'
+import { useSessionSettings, ADVISOR_MAIN_MODEL, type ChannelMark } from '@/composables/useSessionSettings'
+import {
+  refreshChannels,
+  resolveChannel,
+  channelDisplayName,
+  OFFICIAL_CHANNEL_ID,
+} from '@/composables/useChannels'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
 import {
@@ -147,8 +153,8 @@ async function onStopStreaming() {
   await stopStreaming(sid)
 }
 
-// --- 会话级设置(模型 / 努力等级) ---
-const { settings, setModel, setEffort } = useSessionSettings(effectiveSessionId)
+// --- 会话级设置(模型 / 努力等级 / 渠道) ---
+const { settings, setModel, setEffort, setChannel, setAdvisor } = useSessionSettings(effectiveSessionId)
 
 function onModelChange(modelId: string) {
   setModel(modelId)
@@ -156,6 +162,60 @@ function onModelChange(modelId: string) {
 
 function onEffortChange(effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultracode' | null) {
   setEffort(effort)
+}
+
+// --- 渠道(per-session 选择 + 切换横线记账) ---
+
+// 渠道名解析(badge/横线)需要清单:实例创建时拉一次,下拉每次打开还会各自重读
+refreshChannels()
+
+/** 解析后的最终注入渠道 id(null = 官方/零注入):发送与终端恢复共用 */
+const resolvedChannelId = computed(() => resolveChannel(settings.value.channelId))
+
+function onChannelChange(channelId: string | null) {
+  const list = messages.value
+  const last = list.length > 0 ? list[list.length - 1] : null
+  setChannel(channelId, last?.uuid ?? null)
+}
+
+function onAdvisorChange(advisor: boolean) {
+  setAdvisor(advisor)
+}
+
+/** 当前消息流里出现的 uuid 集合:判断 mark 锚点是否还在视图内 */
+const messageUuidSet = computed(() => {
+  const set = new Set<string>()
+  for (const m of messages.value) if (m.uuid) set.add(m.uuid)
+  return set
+})
+
+/**
+ * 切换横线按锚点消息 uuid 分组(null = 会话起点的切换)。
+ * 锚点消息已不在视图内(被 api_error 折叠吞掉 / 流式中切换尚未落盘 / /clear 隐藏历史)的 mark
+ * 不进此表,改由 unanchoredChannelMarks 在消息流末尾兜底渲染——绝不静默消失。
+ */
+const channelMarksByUuid = computed(() => {
+  const map = new Map<string | null, ChannelMark[]>()
+  for (const m of settings.value.channelMarks) {
+    if (m.afterUuid !== null && !messageUuidSet.value.has(m.afterUuid)) continue
+    const group = map.get(m.afterUuid)
+    if (group) group.push(m)
+    else map.set(m.afterUuid, [m])
+  }
+  return map
+})
+
+/** 锚点已失效的切换横线:统一在消息流末尾按顺序兜底渲染 */
+const unanchoredChannelMarks = computed(() =>
+  settings.value.channelMarks.filter(
+    m => m.afterUuid !== null && !messageUuidSet.value.has(m.afterUuid),
+  ),
+)
+
+function channelMarkLabel(m: ChannelMark): string {
+  if (m.channelId === null) return '已切回默认渠道'
+  if (m.channelId === OFFICIAL_CHANNEL_ID) return '已切换至官方渠道'
+  return `已切换至「${channelDisplayName(m.channelId)}」渠道`
 }
 
 // --- 会话数据 ---
@@ -465,9 +525,16 @@ async function handleSend() {
   if (textareaRef.value) textareaRef.value.style.height = 'auto'
   followStreaming.value = true
   scrollToBottom(true)
+  const advisor = settings.value.advisor
+  // 发送前重读渠道清单:解析「跟随默认」时拿到最新默认(手编 settings.json 或首次
+  // 加载竞态),resolvedChannelId 是读 ref 的 computed,refresh 后同步更新
+  await refreshChannels()
   await sendMessage(cs.summary.id, cs.summary.cwd, text, {
-    model: settings.value.modelId ?? undefined,
+    // 顾问模式锁主模型为 Sonnet(Fable 顾问经 --settings 注入);否则用会话选择
+    model: advisor ? ADVISOR_MAIN_MODEL : (settings.value.modelId ?? undefined),
     effort: settings.value.effort,
+    channel: resolvedChannelId.value,
+    advisor,
   })
 }
 
@@ -731,8 +798,13 @@ async function onReload() {
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
+      :selected-channel-id="settings.channelId"
+      :resolved-channel-id="resolvedChannelId"
+      :selected-advisor="settings.advisor"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
+      @channel-change="onChannelChange"
+      @advisor-change="onAdvisorChange"
       @reload="onReload"
       @deleted="onDeleted"
     />
@@ -763,6 +835,17 @@ async function onReload() {
       @scroll.passive="onScroll"
     >
       <template v-if="!hideHistory">
+        <!-- 渠道切换横线:会话起点的切换(本地记账,jsonl 无渠道信息) -->
+        <div
+          v-for="(m, j) in channelMarksByUuid.get(null) ?? []"
+          :key="`channel-mark-start-${j}`"
+          class="channel-mark"
+        >
+          <div class="flex-1 h-px bg-border" />
+          <span class="i-carbon-cloud w-3 h-3" />
+          <span>{{ channelMarkLabel(m) }}</span>
+          <div class="flex-1 h-px bg-border" />
+        </div>
         <template v-for="(msg, i) in messages" :key="msg.uuid || `msg-${i}`">
           <!-- system 事件行：无气泡形态,独立渲染 -->
           <SystemEventRow v-if="msg.type === 'system'" :record="msg" />
@@ -793,7 +876,29 @@ async function onReload() {
               </div>
             </div>
           </div>
+          <!-- 渠道切换横线:锚定在切换时刻的最后一条消息之后 -->
+          <div
+            v-for="(m, j) in (msg.uuid ? channelMarksByUuid.get(msg.uuid) ?? [] : [])"
+            :key="`channel-mark-${msg.uuid}-${j}`"
+            class="channel-mark"
+          >
+            <div class="flex-1 h-px bg-border" />
+            <span class="i-carbon-cloud w-3 h-3" />
+            <span>{{ channelMarkLabel(m) }}</span>
+            <div class="flex-1 h-px bg-border" />
+          </div>
         </template>
+        <!-- 锚点失效的切换横线兜底:末尾按序渲染,不静默消失 -->
+        <div
+          v-for="(m, j) in unanchoredChannelMarks"
+          :key="`channel-mark-tail-${j}`"
+          class="channel-mark"
+        >
+          <div class="flex-1 h-px bg-border" />
+          <span class="i-carbon-cloud w-3 h-3" />
+          <span>{{ channelMarkLabel(m) }}</span>
+          <div class="flex-1 h-px bg-border" />
+        </div>
       </template>
 
       <div v-if="stream.pendingUserMessage" class="flex gap-3 msg-block">
@@ -939,5 +1044,14 @@ async function onReload() {
 <style scoped>
 .msg-block {
   contain: layout style;
+}
+/* 渠道切换横线:细分隔线 + 居中小字,本地记账的轻量视觉(非消息气泡) */
+.channel-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  user-select: none;
 }
 </style>

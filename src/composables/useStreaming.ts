@@ -9,6 +9,13 @@ export interface SendOptions {
   model?: string
   /** null/缺省 = 跟随 CLI(不附加 --effort);'ultracode' 经 --settings 注入 */
   effort?: EffortSetting
+  /**
+   * 已解析的最终渠道 id(resolveChannel 产物):null/缺省 = 零注入走官方。
+   * 解析值进 lastSent 一起缓存——重试必须复用发送时的渠道,不受期间默认值变化影响
+   */
+  channel?: string | null
+  /** 顾问模式:true 时经 --settings 注入 advisorModel + env flag(主模型由调用方强制为 sonnet) */
+  advisor?: boolean
 }
 
 export interface StreamingTurn {
@@ -593,6 +600,8 @@ async function sendMessage(
       message,
       model: opts.model ?? null,
       effort: opts.effort ?? null,
+      channel: opts.channel ?? null,
+      advisor: opts.advisor ?? false,
     })
   } catch (e) {
     state.streamError = String(e)

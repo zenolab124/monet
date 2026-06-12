@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod cache;
+mod channels;
 mod commands;
 mod discovery;
 mod models;
@@ -35,6 +36,8 @@ pub fn run() {
             }
             // 启动文件监控
             watcher::start(app.handle());
+            // 渠道 runtime 残留清理(上次异常退出可能留下含 token 的合成文件)
+            channels::cleanup_runtime_dir();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +54,11 @@ pub fn run() {
             commands::check_session_running,
             commands::get_usage_stats,
             commands::get_schema_diagnosis,
+            channels::list_channels,
+            channels::save_channel,
+            channels::delete_channel,
+            channels::set_default_channel,
+            channels::reveal_channels_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
