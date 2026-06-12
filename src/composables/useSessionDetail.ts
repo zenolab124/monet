@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { SessionRecord } from '@/types'
+import { probeSessionLoad } from '@/utils/perfProbe'
 
 /** 每次调用创建独立实例，支持工作台多列场景 */
 export function createSessionDetail() {
@@ -20,11 +21,14 @@ export function createSessionDetail() {
     currentProjectId.value = projectId
     currentSessionId.value = sessionId
 
+    const probe = probeSessionLoad(sessionId)
     try {
       records.value = await invoke<SessionRecord[]>('get_session_records', {
         projectId,
         sessionId,
       })
+      probe?.afterInvoke(records.value.length)
+      probe?.afterAssign()
     } catch (e) {
       error.value = String(e)
       records.value = []

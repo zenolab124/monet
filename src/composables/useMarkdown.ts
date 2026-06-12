@@ -1,6 +1,9 @@
 import MarkdownIt from 'markdown-it'
 import markdownItShiki from '@shikijs/markdown-it'
 import type { BundledLanguage } from 'shiki'
+// 相对路径 + .ts 扩展名而非 @ 别名:scripts/bench/render-bench.mjs 用 node 直接 import 本模块,
+// node 原生 ESM 不解析 vite 别名且要求显式扩展名
+import { probeMd } from '../utils/perfProbe.ts'
 
 // 常用语言，按需加载
 const LANGS: BundledLanguage[] = [
@@ -24,6 +27,9 @@ markdownItShiki({
   themes: { light: 'github-light', dark: 'github-dark' },
   langs: LANGS,
   defaultColor: false,
+  // 白名单外语言(nginx/ini/...)回退纯文本,否则 codeToHtml 抛 ShikiError 炸掉整个块渲染。
+  // 'text' 是 shiki 运行时放行的 special language,不在 BundledLanguage 类型里,需断言
+  fallbackLanguage: 'text' as BundledLanguage,
 }).then(plugin => {
   const md = new MarkdownIt(mdOpts)
   md.use(plugin)
@@ -33,7 +39,10 @@ markdownItShiki({
 
 /** 流式降级渲染:跳过 shiki 高亮。流式中文本每帧变化,全量高亮是逐帧主线程大头 */
 export function renderMarkdownPlain(text: string): string {
-  return plainMd.render(text)
+  const t0 = performance.now()
+  const html = plainMd.render(text)
+  probeMd('plain', performance.now() - t0)
+  return html
 }
 
 // 完成态渲染缓存:key 为原文,LRU。shiki 输出用 CSS 变量双主题,HTML 不随亮暗切换变,可安全缓存
@@ -47,9 +56,12 @@ export function renderMarkdownCached(text: string): string {
     // 命中移到队尾,维持 LRU 序(Map 迭代序 = 插入序)
     htmlCache.delete(text)
     htmlCache.set(text, hit)
+    probeMd('hit', 0)
     return hit
   }
+  const t0 = performance.now()
   const html = activeMd.render(text)
+  probeMd('miss', performance.now() - t0)
   // shiki 就绪前的结果是无高亮版,不入缓存,避免固化素色 HTML
   if (shikiReady) {
     htmlCache.set(text, html)

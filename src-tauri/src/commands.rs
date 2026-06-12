@@ -17,7 +17,18 @@ pub fn get_projects() -> Vec<Project> {
 #[tauri::command]
 pub fn get_session_records(project_id: String, session_id: String) -> Vec<SessionRecord> {
     let path = session_path(&project_id, &session_id);
-    parser::parse_messages(&path)
+    let t0 = std::time::Instant::now();
+    let records = parser::parse_messages(&path);
+    if cfg!(debug_assertions) {
+        // dev 埋点:与前端 [perf] 会话加载报告的 invoke 段对照,差值即 IPC 序列化成本
+        eprintln!(
+            "[perf] parse_messages {}: {} records · {:.1}ms",
+            &session_id[..session_id.len().min(8)],
+            records.len(),
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    records
 }
 
 /// 获取单个会话的摘要信息

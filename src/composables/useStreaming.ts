@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ContentBlock } from '@/types'
 import type { EffortSetting } from './useSessionSettings'
+import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 
 export interface SendOptions {
   model?: string
@@ -542,6 +543,8 @@ function finishStream(sessionId: string) {
   flushTextDeltas(true, sessionId)
   streamingTick.value++
   state.streaming = false
+  probeFinishFlip(sessionId)
+  frameWatchRelease()
   state.activeTool = null
   finishedDirty.add(sessionId)
   markTailDirty(sessionId)
@@ -574,6 +577,7 @@ async function sendMessage(
   tailTextAcc.delete(sessionId)
 
   state.streaming = true
+  frameWatchRetain()
   state.streamError = null
   state.pendingUserMessage = message
   state.streamingTurns = []
