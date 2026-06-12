@@ -19,7 +19,11 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { resolveTool } from './blocks/tools'
-import type { PermissionRequest, PermissionDecision } from '@/composables/usePermissionRequests'
+import {
+  isInteractiveTool,
+  type PermissionRequest,
+  type PermissionDecision,
+} from '@/composables/usePermissionRequests'
 
 const props = defineProps<{
   request: PermissionRequest
@@ -45,6 +49,9 @@ onBeforeUnmount(() => {
 const ToolComponent = computed(() => resolveTool(props.request.toolName))
 
 const isDanger = computed(() => props.request.danger !== null)
+
+/** 交互工具(如 EnterPlanMode)不提供「允许此会话」——静默放行没有意义且危险 */
+const showAllowSession = computed(() => !isInteractiveTool(props.request.toolName))
 
 // --- 按钮 refs ---
 
@@ -148,6 +155,7 @@ function onKeydown(e: KeyboardEvent) {
       </button>
 
       <button
+        v-if="showAllowSession"
         ref="allowSessionBtn"
         type="button"
         class="btn btn-warn"

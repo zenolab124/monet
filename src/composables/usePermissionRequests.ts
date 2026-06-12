@@ -46,6 +46,31 @@ interface PermissionRequestEventPayload {
 /** 用户决策类型 */
 export type PermissionDecision = 'allow_once' | 'allow_session' | 'deny'
 
+/** 响应时的附加载荷（交互工具专用） */
+export interface RespondExtra {
+  /** deny 时带给模型的理由/反馈（如打回计划的修改意见） */
+  message?: string
+  /** allow 时改写工具 input（如 AskUserQuestion 注入 answers） */
+  updatedInput?: Record<string, unknown>
+}
+
+/**
+ * 交互工具集合：经权限通道下发、但语义是「向用户收集输入」而非「申请授权」。
+ *
+ *  - AskUserQuestion：提问收集答案，须经 updatedInput 回传 answers
+ *  - ExitPlanMode：计划批准（allow=批准 / deny+message=打回修改意见）
+ *  - EnterPlanMode：请求进入只读规划模式
+ *
+ * 这些工具：1) 不参与 allow_session 缓存——静默放行=空答/自动批准，灾难；
+ * 2) UI 上走专用卡片而非三档权限按钮；3) toast 不提供就地允许/拒绝。
+ */
+export const INTERACTIVE_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'EnterPlanMode'])
+
+/** 判断是否交互工具（提问/计划批准类） */
+export function isInteractiveTool(toolName: string): boolean {
+  return INTERACTIVE_TOOLS.has(toolName)
+}
+
 /** 权限请求队列(模块级单例,跨会话混合,按 sessionId 过滤消费) */
 const queue = ref<PermissionRequest[]>([])
 
@@ -62,9 +87,10 @@ const sessionAllowList = new Map<string, boolean>()
  * 计算 sessionAllow 缓存键。
  *   - 有细分参数(file_path/command/url):按参数缓存,同工具不同目标分别记忆
  *     (Bash 总带 command、Edit/Write 带 file_path,危险操作仍按具体目标细分,不放大授权面)
- *   - 无细分参数(Workflow/AskUserQuestion/ExitPlanMode 等交互/编排工具):退化为
- *     「本会话此工具整体放行」。这类工具没有可细分的危险维度,旧实现因取不到参数
- *     返回 null → 不缓存 →「允许此会话」对它们形同虚设,每次必再问。
+ *   - 无细分参数(Workflow 等编排工具):退化为「本会话此工具整体放行」。
+ *
+ * 注意:INTERACTIVE_TOOLS(提问/计划批准类)完全不进缓存——入队与响应两侧都排除,
+ * 静默放行它们等于空答提问/自动批准计划。
  */
 function buildSessionKey(
   sid: string,
@@ -94,8 +120,8 @@ export async function initPermissionListener(): Promise<void> {
     async (e) => {
       const { requestId, sessionId, toolName, input, timestamp } = e.payload
 
-      // 先查 session allow list:命中则不入队、直接放行
-      if (sessionId) {
+      // 先查 session allow list:命中则不入队、直接放行（交互工具不查——必须用户亲答）
+      if (sessionId && !isInteractiveTool(toolName)) {
         const key = buildSessionKey(sessionId, toolName, input)
         if (key && sessionAllowList.get(key)) {
           try {
@@ -156,10 +182,12 @@ export function hasPendingPermission(sessionId: string): boolean {
  *
  * @param requestId 要响应的请求
  * @param decision  用户决策
+ * @param extra     交互工具附加载荷:allow 带 updatedInput(答案注入)、deny 带 message(反馈)
  */
 export async function respondRequest(
   requestId: string,
   decision: PermissionDecision,
+  extra?: RespondExtra,
 ): Promise<void> {
   const req = queue.value.find(r => r.requestId === requestId)
   if (!req) return
@@ -167,8 +195,8 @@ export async function respondRequest(
   // 先出队再 invoke,避免 invoke 失败时卡住队列
   queue.value = queue.value.filter(r => r.requestId !== requestId)
 
-  // allow_session:写入缓存
-  if (decision === 'allow_session' && req.sessionId) {
+  // allow_session:写入缓存（交互工具防御性排除,UI 本不该给这个选项）
+  if (decision === 'allow_session' && req.sessionId && !isInteractiveTool(req.toolName)) {
     const key = buildSessionKey(req.sessionId, req.toolName, req.input)
     if (key) sessionAllowList.set(key, true)
   }
@@ -177,7 +205,8 @@ export async function respondRequest(
     await invoke('respond_permission', {
       requestId: req.requestId,
       allow: decision !== 'deny',
-      message: decision === 'deny' ? '用户拒绝' : null,
+      message: decision === 'deny' ? (extra?.message ?? '用户拒绝') : null,
+      updatedInput: decision !== 'deny' ? (extra?.updatedInput ?? null) : null,
     })
   } catch (_) {
     // 响应失败:不再补救,Rust 端会按超时处理

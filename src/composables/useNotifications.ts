@@ -117,8 +117,34 @@ function sessionCwd(sessionId: string): string | null {
   return useWorkbench().draftCwd(sessionId)
 }
 
+/** 持久 toast / 系统通知的类型标签：交互工具按真实语义命名，不再一律「权限请求」 */
+export function requestKindLabel(toolName: string): string {
+  switch (toolName) {
+    case 'AskUserQuestion': return 'Claude 在提问'
+    case 'ExitPlanMode': return '计划待批准'
+    case 'EnterPlanMode': return '请求进入计划模式'
+    default: return '权限请求'
+  }
+}
+
 function permissionSub(req: PermissionRequest): string {
   const input = req.input
+  // 交互工具:摘要取内容本身,比工具名更有信息量
+  if (req.toolName === 'AskUserQuestion') {
+    const qs = input.questions
+    const first = Array.isArray(qs) && typeof (qs[0] as any)?.question === 'string'
+      ? (qs[0] as any).question as string
+      : ''
+    const tail = Array.isArray(qs) && qs.length > 1 ? ` 等 ${qs.length} 问` : ''
+    return first ? `${first.length > 40 ? first.slice(0, 40) + '…' : first}${tail}` : '待回答'
+  }
+  if (req.toolName === 'ExitPlanMode') {
+    const plan = typeof input.plan === 'string' ? input.plan.split('\n')[0].replace(/^#+\s*/, '') : ''
+    return plan ? (plan.length > 48 ? plan.slice(0, 48) + '…' : plan) : '计划已就绪'
+  }
+  if (req.toolName === 'EnterPlanMode') {
+    return '批准后进入只读规划阶段'
+  }
   for (const k of ['file_path', 'command', 'url', 'pattern']) {
     const v = input[k]
     if (typeof v === 'string' && v) {
@@ -255,7 +281,7 @@ export async function initNotificationLayer(): Promise<void> {
       for (const req of queue.value) {
         if (!knownRequests.has(req.requestId)) {
           knownRequests.add(req.requestId)
-          void maybeNotifySystem('权限请求', `${sessionTitle(req.sessionId)} · ${permissionSub(req)}`)
+          void maybeNotifySystem(requestKindLabel(req.toolName), `${sessionTitle(req.sessionId)} · ${permissionSub(req)}`)
         }
       }
       // 收缩集合防泄漏

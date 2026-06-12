@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { parseQuestions } from '@/utils/askQuestions'
 
 const props = defineProps<{
   input: Record<string, unknown>
@@ -7,41 +8,27 @@ const props = defineProps<{
   name: string
 }>()
 
-interface ParsedOption {
-  label: string
-  description: string
-}
+const questions = computed(() => parseQuestions(props.input))
 
-interface ParsedQuestion {
-  header: string
-  question: string
-  multiSelect: boolean
-  options: ParsedOption[]
-}
-
-/** input.questions 容错解析：任何字段缺失都降级为空，不抛错 */
-const questions = computed<ParsedQuestion[]>(() => {
-  const raw = props.input.questions
-  if (!Array.isArray(raw)) return []
-  return raw.map((q): ParsedQuestion => {
-    const obj = (typeof q === 'object' && q !== null ? q : {}) as Record<string, unknown>
-    const options = Array.isArray(obj.options)
-      ? obj.options.map((o): ParsedOption => {
-          const oo = (typeof o === 'object' && o !== null ? o : {}) as Record<string, unknown>
-          return {
-            label: typeof oo.label === 'string' ? oo.label : '',
-            description: typeof oo.description === 'string' ? oo.description : '',
-          }
-        })
-      : []
-    return {
-      header: typeof obj.header === 'string' ? obj.header : '',
-      question: typeof obj.question === 'string' ? obj.question : '',
-      multiSelect: obj.multiSelect === true,
-      options,
-    }
-  })
+/** 已答会话的回显:input.answers 经权限组件注入后落盘,key=问题文本 */
+const answers = computed<Record<string, string | string[]>>(() => {
+  const raw = props.input.answers
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+    ? (raw as Record<string, string | string[]>)
+    : {}
 })
+
+function isChosen(question: string, label: string): boolean {
+  const a = answers.value[question]
+  return Array.isArray(a) ? a.includes(label) : a === label
+}
+
+/** answers 值不匹配任何选项 label 时,是「其他」自由文本 */
+function customAnswer(question: string, options: { label: string }[]): string {
+  const a = answers.value[question]
+  const vals = Array.isArray(a) ? a : typeof a === 'string' ? [a] : []
+  return vals.filter(v => v && !options.some(o => o.label === v)).join('、')
+}
 </script>
 
 <template>
@@ -58,9 +45,19 @@ const questions = computed<ParsedQuestion[]>(() => {
       </div>
       <ul class="mt-1.5 space-y-1">
         <li v-for="(opt, oi) in q.options" :key="oi" class="flex gap-1.5 items-baseline">
-          <span class="i-carbon-radio-button w-3 h-3 shrink-0 translate-y-0.5 text-muted-foreground" />
-          <span class="text-foreground">{{ opt.label }}</span>
+          <span
+            class="w-3 h-3 shrink-0 translate-y-0.5"
+            :class="isChosen(q.question, opt.label)
+              ? 'i-carbon-radio-button-checked text-primary'
+              : 'i-carbon-radio-button text-muted-foreground'"
+          />
+          <span :class="isChosen(q.question, opt.label) ? 'text-foreground font-medium' : 'text-foreground'">{{ opt.label }}</span>
           <span v-if="opt.description" class="text-muted-foreground">— {{ opt.description }}</span>
+        </li>
+        <li v-if="customAnswer(q.question, q.options)" class="flex gap-1.5 items-baseline">
+          <span class="i-carbon-radio-button-checked w-3 h-3 shrink-0 translate-y-0.5 text-primary" />
+          <span class="text-foreground font-medium">{{ customAnswer(q.question, q.options) }}</span>
+          <span class="text-muted-foreground">— 自定义回答</span>
         </li>
       </ul>
     </div>

@@ -112,15 +112,17 @@ pub fn stop_streaming(session_id: String) {
 
 /// 前端响应权限请求
 ///
-/// `allow=true` 时透传给 claude CLI `{"behavior":"allow"}`
+/// `allow=true` 时透传给 claude CLI `{"behavior":"allow","updatedInput"?:...}`，
+/// updated_input 用于交互工具（AskUserQuestion 答案注入等），缺省由 mcp 回填原 input
 /// `allow=false` 时返回 `{"behavior":"deny","message":...}`，message 缺省为「用户拒绝」
 #[tauri::command]
 pub fn respond_permission(
     request_id: String,
     allow: bool,
     message: Option<String>,
+    updated_input: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    let ok = PermissionService::respond(&request_id, allow, message);
+    let ok = PermissionService::respond(&request_id, allow, message, updated_input);
     if ok {
         Ok(())
     } else {

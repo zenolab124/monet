@@ -34,7 +34,9 @@ struct PendingRequest {
 /// 用户决策
 #[derive(Debug, Clone)]
 enum Decision {
-    Allow,
+    /// 携带可选 updatedInput：交互工具（AskUserQuestion 等）经此回传用户答案，
+    /// None 时 cc-space-mcp 回填原始 input
+    Allow(Option<Value>),
     Deny(String),
 }
 
@@ -116,7 +118,12 @@ impl PermissionService {
     }
 
     /// 提交一个用户决策（requestId 全进程唯一，跨实例查找）。返回是否找到对应的 pending 请求
-    pub fn respond(request_id: &str, allow: bool, message: Option<String>) -> bool {
+    pub fn respond(
+        request_id: &str,
+        allow: bool,
+        message: Option<String>,
+        updated_input: Option<Value>,
+    ) -> bool {
         let services: Vec<Arc<PermissionService>> = SERVICES
             .lock()
             .unwrap()
@@ -129,7 +136,7 @@ impl PermissionService {
                 let mut slot = req.decision.lock().unwrap();
                 if slot.is_none() {
                     *slot = Some(if allow {
-                        Decision::Allow
+                        Decision::Allow(updated_input)
                     } else {
                         Decision::Deny(message.unwrap_or_else(|| "用户拒绝".to_string()))
                     });
@@ -300,7 +307,10 @@ fn handle_connection(
 
     // 写回响应
     let resp = match final_decision {
-        Decision::Allow => json!({ "behavior": "allow" }),
+        Decision::Allow(Some(updated)) => {
+            json!({ "behavior": "allow", "updatedInput": updated })
+        }
+        Decision::Allow(None) => json!({ "behavior": "allow" }),
         Decision::Deny(msg) => json!({ "behavior": "deny", "message": msg }),
     };
     let mut out = stream;

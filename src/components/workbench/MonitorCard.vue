@@ -4,7 +4,7 @@ import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useSessionStream, useStreaming } from '@/composables/useStreaming'
 import { useSessionStatus } from '@/composables/useSessionStatus'
-import { queueForSession, usePermissionRequests } from '@/composables/usePermissionRequests'
+import { queueForSession, usePermissionRequests, isInteractiveTool } from '@/composables/usePermissionRequests'
 import { useNotifications } from '@/composables/useNotifications'
 import { useConfirm } from '@/composables/useConfirm'
 import { displayTitle, formatTokens, relativeTime } from '@/types'
@@ -81,12 +81,20 @@ onUnmounted(() => {
 const permSummary = computed(() => {
   const p = headPerm.value
   if (!p) return ''
+  if (p.toolName === 'AskUserQuestion') return 'Claude 在提问'
+  if (p.toolName === 'ExitPlanMode') return '计划待批准'
+  if (p.toolName === 'EnterPlanMode') return '请求进入计划模式'
   for (const k of ['file_path', 'command', 'url', 'pattern']) {
     const v = p.input[k]
     if (typeof v === 'string' && v) return `${p.toolName} · ${v.split('\n')[0]}`
   }
   return p.toolName
 })
+
+/** 交互工具(提问/计划)无法就地允许/拒绝,决策条改为引导去会话作答 */
+const headPermInteractive = computed(
+  () => !!headPerm.value && isInteractiveTool(headPerm.value.toolName),
+)
 
 /** 出错重试条(stream 源且有可重发消息) */
 const canRetry = computed(() => status.value.key === 'error' && !!stream.value.lastSent)
@@ -233,14 +241,22 @@ function onDragEnd() {
       @click.stop
     >
       <span class="flex-1 min-w-0 truncate font-mono text-[10.5px] text-muted-foreground">{{ permSummary }}</span>
+      <!-- 提问/计划类:就地无法作答,引导展开会话 -->
       <button
+        v-if="headPermInteractive"
         class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
-        @click.stop="onAllow"
-      >允许</button>
-      <button
-        class="px-2 py-0.5 text-[10.5px] rounded border border-border text-muted-foreground shrink-0"
-        @click.stop="onDeny"
-      >拒</button>
+        @click.stop="onCardClick"
+      >去回答</button>
+      <template v-else>
+        <button
+          class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
+          @click.stop="onAllow"
+        >允许</button>
+        <button
+          class="px-2 py-0.5 text-[10.5px] rounded border border-border text-muted-foreground shrink-0"
+          @click.stop="onDeny"
+        >拒</button>
+      </template>
     </div>
 
     <!-- 就地决策条:出错重试 -->

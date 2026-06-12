@@ -1,0 +1,198 @@
+<script setup lang="ts">
+/**
+ * ExitPlanMode 计划批准卡
+ *
+ * Claude 在计划模式完成方案后经权限通道请求批准：
+ *   - 批准计划 → allow（CLI 切回普通模式开始动手，后续写操作仍逐项询问）
+ *   - 打回修改 → deny + message（修改意见随 deny 回传，Claude 继续完善计划）
+ *
+ * 键盘：Enter(焦点不在输入框) → 批准；Esc → 收起意见输入。
+ */
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { renderMarkdownCached } from '@/composables/useMarkdown'
+import type { PermissionRequest, PermissionDecision, RespondExtra } from '@/composables/usePermissionRequests'
+
+const props = defineProps<{
+  request: PermissionRequest
+}>()
+
+const emit = defineEmits<{
+  (e: 'decide', decision: PermissionDecision, extra?: RespondExtra): void
+}>()
+
+const plan = computed(() => {
+  const v = props.request.input.plan
+  return typeof v === 'string' ? v : ''
+})
+
+const renderedPlan = computed(() => renderMarkdownCached(plan.value))
+
+/** 打回意见输入态 */
+const rejecting = ref(false)
+const feedback = ref('')
+const feedbackBox = ref<HTMLTextAreaElement | null>(null)
+
+function approve() {
+  emit('decide', 'allow_once')
+}
+
+function openReject() {
+  rejecting.value = true
+  void nextTick(() => feedbackBox.value?.focus())
+}
+
+function sendReject() {
+  const msg = feedback.value.trim()
+  emit('decide', 'deny', {
+    message: msg ? `用户打回了计划，修改意见：${msg}` : '用户打回了计划，请继续完善',
+  })
+}
+
+function inTextInput(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(target.tagName)
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && !inTextInput(e.target)) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!rejecting.value) approve()
+    return
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (inTextInput(e.target)) {
+      ;(e.target as HTMLElement).blur()
+      return
+    }
+    if (rejecting.value) rejecting.value = false
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown, { capture: true }))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, { capture: true } as any))
+</script>
+
+<template>
+  <div
+    class="plan-card rounded-md border border-border bg-popover shadow-paper-lifted"
+    role="dialog"
+    aria-label="计划待批准"
+  >
+    <!-- 头部 -->
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-border">
+      <span class="i-carbon-task-approved w-4 h-4 text-primary shrink-0" aria-hidden="true" />
+      <span class="text-sm font-medium text-foreground">计划待批准</span>
+      <span class="text-xs text-muted-foreground">批准后 Claude 开始动手实施</span>
+    </div>
+
+    <!-- 计划正文 -->
+    <div class="px-3 py-2 max-h-96 overflow-y-auto">
+      <div v-if="plan" class="prose-msg text-xs" v-html="renderedPlan" />
+      <div v-else class="text-xs text-muted-foreground">（计划内容为空）</div>
+    </div>
+
+    <!-- 打回意见输入 -->
+    <div v-if="rejecting" class="px-3 pb-2">
+      <textarea
+        ref="feedbackBox"
+        v-model="feedback"
+        class="feedback-box"
+        rows="3"
+        placeholder="说明哪里需要调整（可留空直接打回）"
+      />
+    </div>
+
+    <!-- 底部按钮 -->
+    <div class="flex items-center gap-2 px-3 py-2 border-t border-border">
+      <template v-if="!rejecting">
+        <button type="button" class="btn btn-primary" @click="approve">
+          <span class="i-carbon-checkmark w-3.5 h-3.5" aria-hidden="true" />
+          批准计划
+        </button>
+        <div class="flex-1" />
+        <button type="button" class="btn btn-ghost" @click="openReject">
+          <span class="i-carbon-edit w-3.5 h-3.5" aria-hidden="true" />
+          打回修改
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" class="btn btn-primary" @click="sendReject">
+          <span class="i-carbon-send w-3.5 h-3.5" aria-hidden="true" />
+          发送修改意见
+        </button>
+        <div class="flex-1" />
+        <button type="button" class="btn btn-ghost" @click="rejecting = false">
+          返回
+        </button>
+      </template>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.plan-card {
+  min-width: 320px;
+  max-width: 640px;
+  width: 100%;
+}
+
+.feedback-box {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.feedback-box:focus {
+  border-color: var(--primary);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+  outline: none;
+}
+
+.btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.btn-primary:hover {
+  box-shadow: var(--shadow-paper);
+}
+
+.btn-ghost {
+  border-color: var(--border);
+  color: var(--muted-foreground);
+}
+.btn-ghost:hover {
+  background-color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none !important;
+  }
+}
+</style>

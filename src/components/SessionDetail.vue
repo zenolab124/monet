@@ -27,9 +27,12 @@ import SessionTopBar from './topbar/SessionTopBar.vue'
 import SlashCommandPanel from './SlashCommandPanel.vue'
 import SlashHelpCard from './SlashHelpCard.vue'
 import PermissionCard from './PermissionCard.vue'
+import QuestionCard from './QuestionCard.vue'
+import PlanApprovalCard from './PlanApprovalCard.vue'
 import {
   usePermissionRequests,
   currentForSession,
+  type RespondExtra,
 } from '@/composables/usePermissionRequests'
 
 /**
@@ -120,9 +123,21 @@ watch(effectiveSessionId, () => {
 const permissionRequest = currentForSession(effectiveSessionId)
 const { respondRequest, denyAllForSession } = usePermissionRequests()
 
-async function onPermissionDecide(decision: 'allow_once' | 'allow_session' | 'deny') {
+/** 按工具分发卡片:提问/计划批准走专用交互卡,其余走通用权限卡 */
+const requestCard = computed(() => {
+  switch (permissionRequest.value?.toolName) {
+    case 'AskUserQuestion': return QuestionCard
+    case 'ExitPlanMode': return PlanApprovalCard
+    default: return PermissionCard
+  }
+})
+
+async function onPermissionDecide(
+  decision: 'allow_once' | 'allow_session' | 'deny',
+  extra?: RespondExtra,
+) {
   const req = permissionRequest.value
-  if (req) await respondRequest(req.requestId, decision)
+  if (req) await respondRequest(req.requestId, decision, extra)
 }
 
 async function onStopStreaming() {
@@ -834,12 +849,13 @@ async function onReload() {
       </div>
     </div>
 
-    <!-- 工作台列:权限请求卡片(固定在输入栏上方) -->
+    <!-- 工作台列:权限/提问/计划卡片(固定在输入栏上方,按工具分发) -->
     <div
       v-if="interactive && permissionRequest"
       class="px-4 pb-2 shrink-0 flex justify-center"
     >
-      <PermissionCard
+      <component
+        :is="requestCard"
         :key="permissionRequest.requestId"
         :request="permissionRequest"
         @decide="onPermissionDecide"

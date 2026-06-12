@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useNotifications, type PersistentToast } from '@/composables/useNotifications'
-import { usePermissionRequests } from '@/composables/usePermissionRequests'
+import { useNotifications, requestKindLabel, type PersistentToast } from '@/composables/useNotifications'
+import { usePermissionRequests, isInteractiveTool } from '@/composables/usePermissionRequests'
 
 /**
  * 右下角通知层(FR-006):任何域可见。
@@ -27,6 +27,25 @@ async function onAllow(t: PersistentToast) {
 
 async function onDeny(t: PersistentToast) {
   if (t.kind === 'permission') await respondRequest(t.request.requestId, 'deny')
+}
+
+/** 交互工具(提问/计划)不提供就地允许/拒绝——必须去会话里作答 */
+function needsSession(t: PersistentToast): boolean {
+  return t.kind === 'permission' && isInteractiveTool(t.request.toolName)
+}
+
+function toastLabel(t: PersistentToast): string {
+  return t.kind === 'permission' ? requestKindLabel(t.request.toolName) : '出错停住'
+}
+
+function toastIcon(t: PersistentToast): string {
+  if (t.kind === 'error') return 'i-carbon-warning text-destructive'
+  switch (t.request.toolName) {
+    case 'AskUserQuestion': return 'i-carbon-help text-accent'
+    case 'ExitPlanMode':
+    case 'EnterPlanMode': return 'i-carbon-task-approved text-accent'
+    default: return 'i-carbon-locked text-accent'
+  }
 }
 </script>
 
@@ -57,13 +76,8 @@ async function onDeny(t: PersistentToast) {
       >
         <!-- 标题行 = 事件类型 + 会话标题截断 -->
         <div class="flex items-center gap-1.5 text-xs font-semibold">
-          <span
-            class="w-3.5 h-3.5 shrink-0"
-            :class="t.kind === 'permission'
-              ? 'i-carbon-locked text-accent'
-              : 'i-carbon-warning text-destructive'"
-          />
-          <span class="truncate">{{ t.kind === 'permission' ? '权限请求' : '出错停住' }} · {{ t.title }}</span>
+          <span class="w-3.5 h-3.5 shrink-0" :class="toastIcon(t)" />
+          <span class="truncate">{{ toastLabel(t) }} · {{ t.title }}</span>
           <button
             v-if="t.kind === 'error'"
             class="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
@@ -80,9 +94,15 @@ async function onDeny(t: PersistentToast) {
         <!-- 操作 -->
         <div class="flex items-center gap-1.5">
           <template v-if="t.kind === 'permission'">
-            <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="onAllow(t)">允许</button>
-            <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="onDeny(t)">拒绝</button>
-            <button class="ml-auto px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">去会话</button>
+            <!-- 提问/计划类:就地无法作答,「去会话」提为主操作 -->
+            <template v-if="needsSession(t)">
+              <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="goToSession(t.sessionId)">去会话回答</button>
+            </template>
+            <template v-else>
+              <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="onAllow(t)">允许</button>
+              <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="onDeny(t)">拒绝</button>
+              <button class="ml-auto px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">去会话</button>
+            </template>
           </template>
           <template v-else>
             <button
