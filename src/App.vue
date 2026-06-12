@@ -5,6 +5,7 @@ import SessionsView from '@/views/SessionsView.vue'
 import HomeView from '@/views/HomeView.vue'
 import WorkbenchView from '@/views/WorkbenchView.vue'
 import WorkshopView from '@/views/WorkshopView.vue'
+import AutomationView from '@/views/AutomationView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import ToastStack from '@/components/notifications/ToastStack.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -60,6 +61,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <WorkbenchView v-show="activeSection === 'workbench'" class="flex-1 min-w-0" />
     <SessionsView v-show="activeSection === 'sessions'" class="flex-1 min-w-0" />
     <WorkshopView v-show="activeSection === 'workshop'" class="flex-1 min-w-0" />
+    <AutomationView v-show="activeSection === 'automation'" class="flex-1 min-w-0" />
     <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
     <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
 

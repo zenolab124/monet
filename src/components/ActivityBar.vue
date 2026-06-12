@@ -21,7 +21,7 @@ const topDomains: DomainItem[] = [
   { key: 'sessions', icon: 'i-carbon-chat', label: '档案', section: 'sessions' },
   { key: 'search', icon: 'i-carbon-search', label: '搜索' },
   { key: 'workshop', icon: 'i-carbon-tools', label: '工坊', section: 'workshop' },
-  { key: 'automation', icon: 'i-carbon-bot', label: '自动化' },
+  { key: 'automation', icon: 'i-carbon-bot', label: '自动化', section: 'automation' },
   { key: 'home', icon: 'i-carbon-home', label: '首页', section: 'home' },
 ]
 
