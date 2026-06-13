@@ -2,6 +2,7 @@ import { reactive, computed, ref, type Ref, type ComputedRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ContentBlock } from '@/types'
+import { triggerTitleGeneration } from './useSessionMeta'
 import type { EffortSetting } from './useSessionSettings'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 
@@ -16,6 +17,8 @@ export interface SendOptions {
   channel?: string | null
   /** 顾问模式:true 时经 --settings 注入 advisorModel + env flag(主模型由调用方强制为 sonnet) */
   advisor?: boolean
+  /** Anthropic image content blocks(base64 编码) */
+  images?: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>
 }
 
 export interface StreamingTurn {
@@ -51,6 +54,8 @@ export interface SessionStreamState {
   realContextWindow: number | null
   /** API 报告的已用 input token 数（result 事件 modelUsage.inputTokens） */
   realUsedTokens: number | null
+  /** Remote Control 是否已启用（open_session 自动启用，手动可关） */
+  rcActive: boolean
 }
 
 interface BlockDeltaPayload {
@@ -96,6 +101,7 @@ function createState(): SessionStreamState {
     lastSent: null,
     realContextWindow: null,
     realUsedTokens: null,
+    rcActive: false,
   }
 }
 
@@ -549,6 +555,7 @@ export async function initStreamListeners(): Promise<void> {
 
   await listen<{ session_id: string }>('stream-done', (event) => {
     const sid = event.payload?.session_id
+    console.log('[streaming] stream-done received:', sid)
     if (sid) finishStream(sid)
   })
 }
@@ -588,14 +595,16 @@ async function sendMessage(
   opts: SendOptions = {},
 ) {
   const state = getStream(sessionId)
-  if (state.streaming) return
+  const wasStreaming = state.streaming
 
   // 清掉上一轮的 turn 索引、残余 pending 与尾部
   for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
   tailTextAcc.delete(sessionId)
 
-  state.streaming = true
-  frameWatchRetain()
+  if (!wasStreaming) {
+    state.streaming = true
+    frameWatchRetain()
+  }
   state.streamError = null
   state.pendingUserMessage = message
   state.streamingTurns = []
@@ -603,6 +612,7 @@ async function sendMessage(
   state.activeTool = null
   state.tail = []
   state.lastSent = { cwd, message, opts }
+  triggerTitleGeneration(sessionId, cwd)
 
   try {
     await invoke('start_streaming', {
@@ -613,7 +623,9 @@ async function sendMessage(
       effort: opts.effort ?? null,
       channel: opts.channel ?? null,
       advisor: opts.advisor ?? false,
+      images: opts.images?.length ? opts.images : null,
     })
+    state.rcActive = true
   } catch (e) {
     state.streamError = String(e)
     finishStream(sessionId)

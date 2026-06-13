@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench, type WorkbenchColumn } from '@/composables/useWorkbench'
 import { useSessionStream } from '@/composables/useStreaming'
 import { useSessionStatus } from '@/composables/useSessionStatus'
 import { useConfirm } from '@/composables/useConfirm'
+import { useNotifications } from '@/composables/useNotifications'
 import { displayTitle } from '@/types'
+import { useSessionMeta } from '@/composables/useSessionMeta'
+
+const { getMeta } = useSessionMeta()
 import SessionDetail from '../SessionDetail.vue'
 
 /**
@@ -21,6 +26,32 @@ const props = defineProps<{
 const { projects } = useProjects()
 const { collapseColumn, removeSession, draftCwd } = useWorkbench()
 const { confirm } = useConfirm()
+const { notifyTransient } = useNotifications()
+
+const rcLoading = ref(false)
+
+async function onToggleRC() {
+  const enabling = !stream.value.rcActive
+  rcLoading.value = true
+  try {
+    const session = projects.value.flatMap(p => p.sessions).find(s => s.id === props.column.sessionId)
+    await invoke('toggle_remote_control', {
+      sessionId: props.column.sessionId,
+      cwd: session?.cwd ?? '',
+      model: null,
+      effort: null,
+      channel: null,
+      advisor: false,
+      enabled: enabling,
+    })
+    stream.value.rcActive = enabling
+    notifyTransient(enabling ? 'Remote Control 已开启' : 'Remote Control 已关闭')
+  } catch (e) {
+    notifyTransient('Remote Control 操作失败', String(e))
+  } finally {
+    rcLoading.value = false
+  }
+}
 
 const sid = computed(() => props.column.sessionId)
 const stream = useSessionStream(sid)
@@ -29,7 +60,7 @@ const status = useSessionStatus(sid)
 const title = computed(() => {
   for (const p of projects.value) {
     const s = p.sessions.find(s => s.id === props.column.sessionId)
-    if (s) return displayTitle(s)
+    if (s) return displayTitle(s, getMeta(s.id)?.title)
   }
   if (draftCwd(props.column.sessionId)) return '新会话'
   return props.column.sessionId.slice(0, 8)
@@ -82,14 +113,23 @@ function onDragEnd() {
       />
       <span class="flex-1 min-w-0 truncate text-xs font-semibold">{{ title }}</span>
       <button
-        class="w-5.5 h-5.5 grid place-items-center rounded text-muted-foreground hover:text-foreground hover:bg-muted shrink-0"
+        :disabled="rcLoading"
+        class="col-head-btn disabled:opacity-40"
+        :class="stream.rcActive ? 'border-primary! text-primary!' : ''"
+        :title="stream.rcActive ? 'Remote Control 已开启（点击关闭）' : '开启 Remote Control'"
+        @click.stop="onToggleRC"
+      >
+        <span class="i-carbon-remote-connection w-3 h-3" />
+      </button>
+      <button
+        class="col-head-btn"
         title="收起回左列"
         @click="onCollapse"
       >
         <span class="i-carbon-chevron-left w-3 h-3" />
       </button>
       <button
-        class="w-5.5 h-5.5 grid place-items-center rounded text-muted-foreground hover:text-destructive hover:bg-muted shrink-0"
+        class="col-head-btn hover:text-destructive!"
         title="关闭(退出工作台)"
         @click="onClose"
       >
@@ -105,6 +145,21 @@ function onDragEnd() {
 </template>
 
 <style scoped>
+.col-head-btn {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  transition: color 0.15s, background-color 0.15s;
+}
+.col-head-btn:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
 .col-dot-pulse {
   animation: col-pulse 1.6s ease-in-out infinite;
 }

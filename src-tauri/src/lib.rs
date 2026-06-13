@@ -14,6 +14,7 @@ mod tray;
 pub mod usage_stats;
 mod watcher;
 mod automation;
+mod metadata;
 mod workshop;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,6 +22,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -63,6 +65,7 @@ pub fn run() {
             commands::start_streaming,
             commands::stop_streaming,
             commands::close_session,
+            commands::toggle_remote_control,
             commands::respond_permission,
             commands::get_cli_settings,
             commands::check_session_running,
@@ -80,6 +83,9 @@ pub fn run() {
             channels::set_default_channel,
             channels::reveal_channels_dir,
             commands::open_in_default_app,
+            metadata::get_all_meta,
+            metadata::update_meta,
+            metadata::generate_title,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

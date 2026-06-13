@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-start-dragging",
     "shell:allow-open",
-    "notification:default"
+    "notification:default",
+    "window-state:default"
   ]
 }

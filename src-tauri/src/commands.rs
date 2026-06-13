@@ -116,6 +116,7 @@ pub async fn start_streaming(
     effort: Option<String>,
     channel: Option<String>,
     advisor: bool,
+    images: Option<Vec<serde_json::Value>>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         streaming::send_message(
@@ -127,6 +128,7 @@ pub async fn start_streaming(
             effort.as_deref(),
             channel.as_deref(),
             advisor,
+            images.as_deref(),
         )
     })
     .await
@@ -137,6 +139,34 @@ pub async fn start_streaming(
 #[tauri::command]
 pub fn stop_streaming(session_id: String) -> Result<(), String> {
     streaming::interrupt_session(&session_id)
+}
+
+/// 开关 Remote Control（进程未启动时自动连接）
+#[tauri::command]
+pub async fn toggle_remote_control(
+    app: tauri::AppHandle,
+    session_id: String,
+    cwd: String,
+    model: Option<String>,
+    effort: Option<String>,
+    channel: Option<String>,
+    advisor: bool,
+    enabled: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        streaming::toggle_remote_control(
+            &app,
+            &session_id,
+            &cwd,
+            model.as_deref(),
+            effort.as_deref(),
+            channel.as_deref(),
+            advisor,
+            enabled,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 关闭会话进程（SIGTERM → 5s → SIGKILL）
@@ -205,22 +235,34 @@ pub fn get_cli_settings() -> CliSettings {
     }
 }
 
-/// 检测某会话是否仍有 claude CLI 进程在运行(进程命令行含该 session-id)。
-/// 覆盖两类:本应用 spawn 后随窗口关闭失联的进程、外部终端 `claude --resume <id>`。
+/// 检测某会话是否有**外部** claude CLI 进程在运行。
+/// 排除 CC Space 自身持有的长活进程 PID，只报告终端 `claude --resume` / VS Code 等外部进程。
 /// 交互式 REPL(命令行不带 session-id)检测不到,属已知边界。
 /// Windows 无 ps,Command 失败时返回 false 优雅降级。
 #[tauri::command]
 pub fn check_session_running(session_id: String) -> bool {
-    // session_id 为 UUID,误匹配概率可忽略;再限定 claude 关键字防偶然碰撞
+    let own_pid = crate::streaming::get_own_pid(&session_id);
+
     let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "command"])
+        .args(["-axo", "pid,command"])
         .output()
     else {
         return false;
     };
     String::from_utf8_lossy(&output.stdout)
         .lines()
-        .any(|l| l.contains(&session_id) && l.contains("claude"))
+        .any(|l| {
+            if !l.contains(&session_id) || !l.contains("claude") {
+                return false;
+            }
+            if let Some(own) = own_pid {
+                let pid = l.trim().split_whitespace().next().and_then(|s| s.parse::<u32>().ok());
+                if pid == Some(own) {
+                    return false;
+                }
+            }
+            true
+        })
 }
 
 /// 全项目 token 用量聚合（v2.2.0 FR-001）：首页 Token 卡 / 活跃热力图数据源。

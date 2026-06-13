@@ -50,7 +50,7 @@ function toastIcon(t: PersistentToast): string {
 </script>
 
 <template>
-  <div class="fixed right-4 bottom-4 z-60 w-[340px] flex flex-col gap-2 pointer-events-none">
+  <div class="fixed right-4 top-[20vh] z-60 w-[340px] flex flex-col gap-2 pointer-events-none">
     <!-- 瞬态型(5s 自动消失) -->
     <TransitionGroup name="toast-fade">
       <div
@@ -148,6 +148,6 @@ function toastIcon(t: PersistentToast): string {
 .toast-fade-enter-from,
 .toast-fade-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(-6px);
 }
 </style>

@@ -22,6 +22,16 @@ struct SessionProcess {
 static ACTIVE_PROCESSES: Mutex<Option<HashMap<String, Arc<Mutex<SessionProcess>>>>> =
     Mutex::new(None);
 
+/// 获取 CC Space 为指定会话持有的长活进程 PID（check_session_running 排除自有进程用）
+pub fn get_own_pid(session_id: &str) -> Option<u32> {
+    ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id))
+        .map(|sp| sp.lock().unwrap().child.id())
+}
+
 /// 前端接收的流式事件（全部携带 session_id，前端按会话分发）
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -328,7 +338,15 @@ fn open_session(
         }
     }
 
-    // 9. 存入 ACTIVE_PROCESSES
+    // 9. 默认开启 Remote Control（进程活着就有 RC，关进程自动断）
+    let rc_msg = json!({
+        "type": "control_request",
+        "request_id": "rc-init",
+        "request": {"subtype": "remote_control", "enabled": true}
+    });
+    let _ = write_stdin(&mut stdin, &rc_msg);
+
+    // 10. 存入 ACTIVE_PROCESSES
     let pid = child.id();
     eprintln!("[long-lived] 新建进程 PID={} 会话={}", pid, &session_id[..session_id.len().min(8)]);
     let sp_arc = Arc::new(Mutex::new(SessionProcess {
@@ -368,6 +386,7 @@ pub fn send_message(
     effort: Option<&str>,
     channel: Option<&str>,
     advisor: bool,
+    images: Option<&[serde_json::Value]>,
 ) -> Result<(), String> {
     let exists = ACTIVE_PROCESSES
         .lock()
@@ -401,14 +420,59 @@ pub fn send_message(
             write_stdin(&mut sp.stdin, &ctrl)?;
         }
     }
+    let mut content: Vec<serde_json::Value> = Vec::new();
+    if let Some(imgs) = images {
+        content.extend_from_slice(imgs);
+    }
+    content.push(json!({"type": "text", "text": message}));
     let msg = json!({
         "type": "user",
         "session_id": "",
         "message": {
             "role": "user",
-            "content": [{"type": "text", "text": message}]
+            "content": content
         },
         "parent_tool_use_id": null
+    });
+    write_stdin(&mut sp.stdin, &msg)
+}
+
+/// 开关 Remote Control（通过 control_request 动态启用/禁用；进程未启动时自动连接）
+pub fn toggle_remote_control(
+    app: &AppHandle,
+    session_id: &str,
+    cwd: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    channel: Option<&str>,
+    advisor: bool,
+    enabled: bool,
+) -> Result<(), String> {
+    let exists = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map_or(false, |m| m.contains_key(session_id));
+
+    if !exists {
+        open_session(app, session_id, cwd, model, effort, channel, advisor)?;
+    }
+
+    let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned())
+        .ok_or("会话进程不存在")?;
+
+    let mut sp = process.lock().unwrap();
+    eprintln!("[long-lived] Remote Control enabled={} PID={} 会话={}", enabled, sp.child.id(), &session_id[..session_id.len().min(8)]);
+    sp.request_counter += 1;
+    let req_id = format!("rc-{}", sp.request_counter);
+    let msg = json!({
+        "type": "control_request",
+        "request_id": req_id,
+        "request": {"subtype": "remote_control", "enabled": enabled}
     });
     write_stdin(&mut sp.stdin, &msg)
 }
@@ -556,6 +620,7 @@ fn read_stream(
 
         // "result" 标记一轮结束（进程继续活着等下一条 stdin 消息）
         if raw_type == "result" {
+            eprintln!("[stream] result received, emitting stream-done for {}", &session_id[..session_id.len().min(8)]);
             let _ = app.emit("stream-done", json!({ "session_id": session_id }));
         }
     }
@@ -727,7 +792,9 @@ fn decode_stream_event(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
 
-            if is_error {
+            let is_interrupt = result_text.is_empty()
+                || result_text.contains("interrupted by user");
+            if is_error && !is_interrupt {
                 Some(StreamEvent::Error {
                     session_id: sid,
                     message: result_text,
