@@ -12,6 +12,7 @@ import { useNotifications } from '@/composables/useNotifications'
 import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
+import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 
 /**
  * 设置域(第一期只有渠道管理)。
@@ -179,6 +180,15 @@ function onSaved() {
             打开配置目录
           </button>
         </div>
+      </section>
+
+      <!-- Agent iframe 通信 demo -->
+      <section class="mt-8">
+        <h2 class="text-sm font-medium mb-1">实验室</h2>
+        <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
+          验证 Tauri webview 中 iframe + postMessage 双向通信链路。
+        </p>
+        <AgentIframeDemo />
       </section>
 
       <!-- 兼容性诊断 -->

@@ -8,6 +8,9 @@ import { queueForSession, usePermissionRequests, isInteractiveTool } from '@/com
 import { useNotifications } from '@/composables/useNotifications'
 import { useConfirm } from '@/composables/useConfirm'
 import { displayTitle, formatTokens, relativeTime } from '@/types'
+import { useSessionMeta } from '@/composables/useSessionMeta'
+
+const { getMeta } = useSessionMeta()
 
 /**
  * 左列监控卡(FR-003):状态行 / 标题 / 尾部区 / 就地决策条 / meta 行。
@@ -48,7 +51,7 @@ const draft = computed(() => {
 })
 
 const title = computed(() =>
-  summary.value ? displayTitle(summary.value.summary)
+  summary.value ? displayTitle(summary.value.summary, getMeta(props.sessionId)?.title)
   : draft.value ? '新会话'
   : props.sessionId.slice(0, 8),
 )

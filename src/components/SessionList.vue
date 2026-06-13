@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions, type SortOrder, type TimeRange } from '@/composables/useSessions'
+import { useSessionMeta } from '@/composables/useSessionMeta'
 import {
   displayTitle,
   relativeTime,
@@ -11,6 +12,8 @@ import {
   shortModel,
 } from '@/types'
 import type { SessionSummary } from '@/types'
+
+const { getMeta } = useSessionMeta()
 
 const { filteredSessions, sessionStats, loadProjects } = useProjects()
 const {
@@ -251,7 +254,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
         @contextmenu="onContextMenu($event, session)"
       >
         <div class="text-sm text-foreground truncate pr-12">
-          {{ displayTitle(session) }}
+          {{ displayTitle(session, getMeta(session.id)?.title) }}
         </div>
         <div class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate">
           <span v-if="session.git_branch">{{ session.git_branch }}</span>

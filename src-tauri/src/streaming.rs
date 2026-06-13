@@ -620,7 +620,6 @@ fn read_stream(
 
         // "result" 标记一轮结束（进程继续活着等下一条 stdin 消息）
         if raw_type == "result" {
-            eprintln!("[stream] result received, emitting stream-done for {}", &session_id[..session_id.len().min(8)]);
             let _ = app.emit("stream-done", json!({ "session_id": session_id }));
         }
     }

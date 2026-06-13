@@ -7,6 +7,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification'
 import { displayTitle } from '@/types'
+import { useSessionMeta } from './useSessionMeta'
 import { useProjects } from './useProjects'
 import { useWorkbench } from './useWorkbench'
 import { useUiState } from './useUiState'
@@ -99,9 +100,10 @@ export type PersistentToast =
 
 function sessionTitle(sessionId: string): string {
   const { projects } = useProjects()
+  const { getMeta } = useSessionMeta()
   for (const p of projects.value) {
     const s = p.sessions.find(s => s.id === sessionId)
-    if (s) return displayTitle(s)
+    if (s) return displayTitle(s, getMeta(sessionId)?.title)
   }
   if (useWorkbench().draftCwd(sessionId)) return '新会话'
   return sessionId.slice(0, 8)

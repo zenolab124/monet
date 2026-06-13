@@ -194,8 +194,9 @@ export function shortModel(model: string | null): string {
   return model
 }
 
-/** 会话显示标题 */
-export function displayTitle(s: SessionSummary): string {
+/** 会话显示标题（metaTitle 优先于 JSONL 原始标题） */
+export function displayTitle(s: SessionSummary, metaTitle?: string): string {
+  if (metaTitle) return metaTitle
   if (s.title) return s.title
   if (s.first_user_message) {
     const text = s.first_user_message.slice(0, 60)

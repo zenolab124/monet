@@ -555,7 +555,6 @@ export async function initStreamListeners(): Promise<void> {
 
   await listen<{ session_id: string }>('stream-done', (event) => {
     const sid = event.payload?.session_id
-    console.log('[streaming] stream-done received:', sid)
     if (sid) finishStream(sid)
   })
 }
