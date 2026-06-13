@@ -143,7 +143,6 @@ function onTabDrop(e: DragEvent, index: number, tab: WorkbenchTab) {
 </script>
 
 <template>
-  <!-- 左侧 30px 让位红绿灯(ActivityBar 48px + 30px = 78px 总让位),空白处可拖窗 -->
   <div
     class="shrink-0 flex items-end gap-0.5 pl-[30px] pr-2 pt-2 border-b border-border overflow-x-auto tabs-scroll"
     data-tauri-drag-region

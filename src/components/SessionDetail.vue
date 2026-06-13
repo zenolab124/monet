@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted, provide } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
@@ -37,6 +37,7 @@ import PermissionCard from './PermissionCard.vue'
 import QuestionCard from './QuestionCard.vue'
 import PlanApprovalCard from './PlanApprovalCard.vue'
 import MsgClamp from './MsgClamp.vue'
+import { useImageInput } from '@/composables/useImageInput'
 import {
   usePermissionRequests,
   currentForSession,
@@ -71,6 +72,9 @@ const { sendMessage, stopStreaming, clearStreamingTurns } = useStreaming()
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
+
+const imageInput = useImageInput({ pasteTarget: textareaRef })
+onMounted(() => imageInput.attach())
 
 // --- 会话 ID 来源 ---
 
@@ -543,7 +547,7 @@ function handleModelSwitch(modelName: string) {
 
 async function handleSend() {
   const text = inputText.value.trim()
-  if (!text || !currentSession.value) return
+  if ((!text && !imageInput.images.value.length) || !currentSession.value) return
   const cs = currentSession.value
   if (!cs.summary.cwd) return
 
@@ -578,15 +582,15 @@ async function handleSend() {
   followStreaming.value = true
   scrollToBottom(true)
   const advisor = settings.value.advisor
-  // 发送前重读渠道清单:解析「跟随默认」时拿到最新默认(手编 settings.json 或首次
-  // 加载竞态),resolvedChannelId 是读 ref 的 computed,refresh 后同步更新
+  const images = imageInput.images.value.length ? await imageInput.toImageBlocks() : undefined
+  imageInput.clearImages()
   await refreshChannels()
   await sendMessage(cs.summary.id, cs.summary.cwd, text, {
-    // 顾问模式锁主模型为 Sonnet(Fable 顾问经 --settings 注入);否则用会话选择
     model: advisor ? ADVISOR_MAIN_MODEL : (settings.value.modelId ?? undefined),
     effort: settings.value.effort,
     channel: resolvedChannelId.value,
     advisor,
+    images,
   })
 }
 
@@ -602,9 +606,14 @@ let lastScrollTop = 0
 let resumedAt = 0
 let scrollCoalesced = false
 let scrollRafId = 0
+let programmaticScroll = false
 
 function onScrollWheel(e: WheelEvent) {
-  if (e.deltaY < 0) followStreaming.value = false
+  if (e.deltaY < -3) {
+    const el = scrollContainer.value
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 5) return
+    followStreaming.value = false
+  }
 }
 
 function onScroll() {
@@ -613,18 +622,23 @@ function onScroll() {
     scrollRafId = 0
     const el = scrollContainer.value
     if (!el) return
+    if (programmaticScroll) {
+      lastScrollTop = el.scrollTop
+      programmaticScroll = false
+      return
+    }
     const delta = el.scrollTop - lastScrollTop
     lastScrollTop = el.scrollTop
-    if (performance.now() - resumedAt < 150) return
-    if (delta < 0) {
+    if (performance.now() - resumedAt < 300) return
+    if (delta < 0 && el.scrollHeight - el.scrollTop - el.clientHeight > 5) {
       followStreaming.value = false
-    } else if (
-      delta > 0 &&
-      !followStreaming.value &&
-      el.scrollHeight - el.scrollTop - el.clientHeight < 200
-    ) {
-      followStreaming.value = true
-      resumedAt = performance.now()
+    } else if (delta > 0 && !followStreaming.value) {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      const threshold = Math.max(el.clientHeight * 0.5, 400)
+      if (distFromBottom < threshold) {
+        followStreaming.value = true
+        resumedAt = performance.now()
+      }
     }
   })
 }
@@ -644,12 +658,16 @@ function scrollToBottom(force = false) {
       scrollCoalesced = false
       const el = scrollContainer.value
       if (!el) return
+      programmaticScroll = true
       el.scrollTop = el.scrollHeight
     })
   })
 }
 
-// 记录变化(加载/流后落账)只在跟随态回底:用户上滚阅读时不打扰
+watch(() => stream.value.pendingUserMessage, (val) => {
+  if (val) scrollToBottom(true)
+})
+
 watch(records, () => {
   if (followStreaming.value) scrollToBottom(true)
 })
@@ -711,6 +729,7 @@ const externalRunning = ref(false)
 let followSessionId: string | null = null
 let externalTimer: number | null = null
 let probing = false
+let externalIdleTicks = 0
 
 /** 静默重载:不动 loading 态/滚动状态,记录数有增长才替换(jsonl 仅追加) */
 async function silentReloadRecords() {
@@ -737,6 +756,7 @@ async function probeExternal() {
     // 本地流式由 stream-event 实时驱动,无需外部探测
     if (!cs || stream.value.streaming) {
       externalRunning.value = false
+      externalIdleTicks = 0
       stopExternalFollow()
       return
     }
@@ -748,17 +768,36 @@ async function probeExternal() {
     }
     if (effectiveSessionId.value !== cs.summary.id) return
     if (running) {
-      if (!externalRunning.value) {
-        externalRunning.value = true
-        followStreaming.value = true
-      }
+      const prevCount = records.value.length
       await silentReloadRecords()
+      const changed = records.value.length > prevCount
+      if (changed) {
+        externalIdleTicks = 0
+        if (!externalRunning.value) {
+          externalRunning.value = true
+          followStreaming.value = true
+        }
+      } else if (externalRunning.value) {
+        externalIdleTicks++
+        if (externalIdleTicks >= 4) {
+          // 连续 4 轮(~6s)无新输出 → 外部长活进程闲置,解除锁定
+          externalRunning.value = false
+        }
+      } else {
+        externalIdleTicks++
+        if (externalIdleTicks >= 4) {
+          // 从未产出过新记录 → 闲置进程,停止探测
+          stopExternalFollow()
+        }
+      }
     } else if (externalRunning.value) {
       // 进程刚退出:收尾 reload 拿最终落账,结束跟随
       externalRunning.value = false
+      externalIdleTicks = 0
       await silentReloadRecords()
       stopExternalFollow()
     } else {
+      externalIdleTicks = 0
       stopExternalFollow()
     }
   } finally {
@@ -769,6 +808,7 @@ async function probeExternal() {
 function startExternalFollow() {
   stopExternalFollow()
   externalRunning.value = false
+  externalIdleTicks = 0
   // 先起定时器再立即探一次:未运行的会话首轮探测即自停,运行中的持续跟随
   externalTimer = window.setInterval(probeExternal, 1500)
   probeExternal()
@@ -1062,11 +1102,32 @@ async function onReload() {
         @close="onSlashClose"
       />
 
-      <div class="flex items-end gap-2">
+      <div v-if="imageInput.images.value.length" class="mb-2 flex gap-2 flex-wrap">
+        <div
+          v-for="img in imageInput.images.value"
+          :key="img.id"
+          class="relative w-14 h-14 rounded border border-border overflow-hidden group"
+        >
+          <img :src="img.dataUrl" class="w-full h-full object-cover" />
+          <button
+            class="absolute top-0 right-0 w-4 h-4 rounded-bl bg-destructive/80 text-destructive-foreground
+                   flex items-center justify-center text-2.5 leading-none opacity-0 group-hover:opacity-100 transition-opacity"
+            @click="imageInput.removeImage(img.id)"
+          >
+            &times;
+          </button>
+        </div>
+      </div>
+
+      <div v-if="imageInput.lastError.value" class="mb-1 text-xs text-destructive">
+        {{ imageInput.lastError.value.message }}
+      </div>
+
+      <div class="flex items-center gap-2">
         <textarea
           ref="textareaRef"
           v-model="inputText"
-          :disabled="stream.streaming || externalRunning"
+          :disabled="externalRunning"
           :placeholder="externalRunning ? '会话在后台运行中…' : '输入消息… (Shift+Enter 换行,/ 触发命令补全)'"
           rows="1"
           class="flex-1 px-3 py-2 text-sm rounded-md bg-popover border border-border
@@ -1080,7 +1141,7 @@ async function onReload() {
           @select="syncCursor"
         />
         <button
-          v-if="stream.streaming"
+          v-if="stream.streaming && !inputText.trim() && !imageInput.images.value.length"
           class="px-3 py-2 text-xs rounded-md bg-accent text-accent-foreground hover:shadow-paper transition-shadow shrink-0"
           @click="onStopStreaming"
         >
@@ -1088,7 +1149,7 @@ async function onReload() {
         </button>
         <button
           v-else
-          :disabled="!inputText.trim() || externalRunning"
+          :disabled="(!inputText.trim() && !imageInput.images.value.length) || externalRunning"
           class="px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0
                  disabled:opacity-30 disabled:cursor-not-allowed"
           @click="handleSend"

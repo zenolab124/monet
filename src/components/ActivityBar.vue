@@ -41,7 +41,6 @@ const badgeText = computed(() => {
     class="w-12 shrink-0 flex flex-col items-center gap-1 pb-2.5 bg-secondary border-r border-border"
     data-tauri-drag-region
   >
-    <!-- macOS 红绿灯区（Overlay 标题栏），同时是窗口拖拽区 -->
     <div class="h-9 shrink-0 w-full" data-tauri-drag-region />
 
     <button

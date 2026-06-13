@@ -36,12 +36,10 @@ function clearSearch() {
 </script>
 
 <template>
-  <!-- macOS 红绿灯横跨 ActivityBar(48px)与本栏，剩余预留 30px -->
   <div
     class="h-11 shrink-0 flex items-center gap-3 pr-3 border-b border-border"
     data-tauri-drag-region
   >
-    <!-- 红绿灯占位 -->
     <div class="w-[30px] shrink-0" data-tauri-drag-region />
 
     <!-- 侧栏显隐切换 -->

@@ -4,3 +4,7 @@ src-tauri/target/
 *.log
 .DS_Store
 *.local
+
+# 私有文档（不公开）
+CLAUDE.md
+docs/
