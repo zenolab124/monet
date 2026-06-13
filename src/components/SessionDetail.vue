@@ -281,6 +281,7 @@ function draftSummary(id: string, cwd: string): SessionSummary {
     },
     file_size: 0,
     message_count: 0,
+    context_window: null,
   }
 }
 
@@ -600,27 +601,32 @@ const followStreaming = ref(true)
 let lastScrollTop = 0
 let resumedAt = 0
 let scrollCoalesced = false
+let scrollRafId = 0
 
 function onScrollWheel(e: WheelEvent) {
   if (e.deltaY < 0) followStreaming.value = false
 }
 
 function onScroll() {
-  const el = scrollContainer.value
-  if (!el) return
-  const delta = el.scrollTop - lastScrollTop
-  lastScrollTop = el.scrollTop
-  if (performance.now() - resumedAt < 150) return
-  if (delta < 0) {
-    followStreaming.value = false
-  } else if (
-    delta > 0 &&
-    !followStreaming.value &&
-    el.scrollHeight - el.scrollTop - el.clientHeight < 200
-  ) {
-    followStreaming.value = true
-    resumedAt = performance.now()
-  }
+  if (scrollRafId) return
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = 0
+    const el = scrollContainer.value
+    if (!el) return
+    const delta = el.scrollTop - lastScrollTop
+    lastScrollTop = el.scrollTop
+    if (performance.now() - resumedAt < 150) return
+    if (delta < 0) {
+      followStreaming.value = false
+    } else if (
+      delta > 0 &&
+      !followStreaming.value &&
+      el.scrollHeight - el.scrollTop - el.clientHeight < 200
+    ) {
+      followStreaming.value = true
+      resumedAt = performance.now()
+    }
+  })
 }
 
 function resumeFollow() {
@@ -832,7 +838,7 @@ async function onReload() {
       :git-branch="currentSession.summary.git_branch"
       :model-string="displayModelString"
       :used-context-tokens="stream.realUsedTokens ?? lastAssistantContextSize"
-      :real-context-window="stream.realContextWindow"
+      :real-context-window="stream.realContextWindow ?? currentSession.summary.context_window ?? null"
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
@@ -890,8 +896,8 @@ async function onReload() {
           :key="group.user?.uuid || `group-${gi}`"
           class="space-y-4"
         >
-          <!-- 用户消息:吸顶卡片,限于本轮 -->
-          <div v-if="group.user" class="user-msg-sticky">
+          <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
+          <div v-if="group.user" :class="group.responses.some(r => r.type === 'assistant') ? 'user-msg-sticky' : ''">
             <div class="flex gap-3">
               <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
