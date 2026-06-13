@@ -104,9 +104,10 @@ pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 开始流式会话
+/// 发送消息（长活进程：自动 open + stdin 写入；替代旧 per-message spawn）。
+/// async + spawn_blocking：open_session 的初始化握手是阻塞 I/O，不能卡 IPC 主线程
 #[tauri::command]
-pub fn start_streaming(
+pub async fn start_streaming(
     app: tauri::AppHandle,
     session_id: String,
     cwd: String,
@@ -115,23 +116,33 @@ pub fn start_streaming(
     effort: Option<String>,
     channel: Option<String>,
     advisor: bool,
-) {
-    streaming::start_streaming(
-        &app,
-        &session_id,
-        &cwd,
-        &message,
-        model.as_deref(),
-        effort.as_deref(),
-        channel.as_deref(),
-        advisor,
-    );
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        streaming::send_message(
+            &app,
+            &session_id,
+            &cwd,
+            &message,
+            model.as_deref(),
+            effort.as_deref(),
+            channel.as_deref(),
+            advisor,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-/// 停止指定会话的流式（v2.1.0 per-session：多会话并行互不影响）
+/// 中断当前回复（发 interrupt 控制消息，不杀进程）
 #[tauri::command]
-pub fn stop_streaming(session_id: String) {
-    streaming::stop_streaming(&session_id);
+pub fn stop_streaming(session_id: String) -> Result<(), String> {
+    streaming::interrupt_session(&session_id)
+}
+
+/// 关闭会话进程（SIGTERM → 5s → SIGKILL）
+#[tauri::command]
+pub fn close_session(session_id: String) {
+    streaming::close_session(&session_id);
 }
 
 /// 前端响应权限请求
@@ -228,6 +239,33 @@ pub async fn get_schema_diagnosis() -> Result<probe::Report, String> {
     tauri::async_runtime::spawn_blocking(|| probe::run_probe(None))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// 用系统默认应用打开文件(macOS: open / Windows: cmd start / Linux: xdg-open)
+#[tauri::command]
+pub fn open_in_default_app(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn session_path(project_id: &str, session_id: &str) -> PathBuf {

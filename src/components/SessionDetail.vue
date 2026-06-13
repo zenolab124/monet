@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted, provide } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
@@ -26,6 +26,7 @@ import {
   type SlashCommand,
 } from '@/composables/useSlashCommands'
 import { shortId, shortModel } from '@/types'
+import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
 import SystemEventRow from './SystemEventRow.vue'
@@ -35,6 +36,7 @@ import SlashHelpCard from './SlashHelpCard.vue'
 import PermissionCard from './PermissionCard.vue'
 import QuestionCard from './QuestionCard.vue'
 import PlanApprovalCard from './PlanApprovalCard.vue'
+import MsgClamp from './MsgClamp.vue'
 import {
   usePermissionRequests,
   currentForSession,
@@ -79,6 +81,32 @@ const effectiveSessionId = computed(() => {
 
 // per-session 流式状态(v2.1.0:多会话并行,各列独立)
 const stream = useSessionStream(effectiveSessionId)
+
+// --- tool_result 全局查找表(跨消息配对:tool_use 在 assistant、tool_result 在 user) ---
+const toolResultMap = computed(() => {
+  const map = new Map<string, ToolResultData>()
+  for (const r of records.value) {
+    if (r.type !== 'user' || !r.message) continue
+    const content = r.message.content
+    if (typeof content === 'string') continue
+    for (const b of content) {
+      if (b.type === 'tool_result') {
+        const tr = b as Extract<ContentBlock, { type: 'tool_result' }>
+        map.set(tr.tool_use_id, { content: tr.content, is_error: tr.is_error })
+      }
+    }
+  }
+  for (const turn of stream.value.streamingTurns) {
+    for (const b of turn.content) {
+      if (b.type === 'tool_result') {
+        const tr = b as Extract<ContentBlock, { type: 'tool_result' }>
+        map.set(tr.tool_use_id, { content: tr.content, is_error: tr.is_error })
+      }
+    }
+  }
+  return map
+})
+provide('toolResultMap', toolResultMap)
 
 // --- 斜杠命令(FR-004)状态 ---
 
@@ -356,6 +384,28 @@ const messages = computed(() => {
   })
 })
 
+type VisibleRecord = Extract<SessionRecord, { type: 'user' | 'assistant' | 'system' }>
+
+interface MsgGroup {
+  user: VisibleRecord | null
+  responses: VisibleRecord[]
+}
+
+const messageGroups = computed(() => {
+  const groups: MsgGroup[] = []
+  let cur: MsgGroup = { user: null, responses: [] }
+  for (const msg of messages.value) {
+    if (msg.type === 'user') {
+      if (cur.user || cur.responses.length) groups.push(cur)
+      cur = { user: msg, responses: [] }
+    } else {
+      cur.responses.push(msg)
+    }
+  }
+  if (cur.user || cur.responses.length) groups.push(cur)
+  return groups
+})
+
 /** 解析私有标签,转为特殊渲染块 */
 const TAG_RE = /<(system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)[^>]*>([\s\S]*?)<\/\1>/g
 const DISCARD_TAGS_RE = /<\/?(?:antml:thinking|antml:function_calls|antml:invoke|antml:parameter)[^>]*>/g
@@ -394,7 +444,7 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
   } else {
     blocks = record.message.content
   }
-  return blocks.flatMap(b => {
+  const expanded = blocks.flatMap(b => {
     if (b.type !== 'text') return [b]
     const text = (b as any).text as string
     const skillMatch = text.match(/^Base directory for this skill:\s*(\S+)/)
@@ -408,6 +458,7 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
     }
     return [b]
   })
+  return expanded
 }
 
 // --- 斜杠命令处理 ---
@@ -545,63 +596,49 @@ function onInputKeydown(e: KeyboardEvent) {
   }
 }
 
-/** 用户是否在底部附近(60px 阈值) */
-function isNearBottom(): boolean {
-  const el = scrollContainer.value
-  if (!el) return true
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 60
-}
-
-/**
- * 滚动跟随状态:用户向上滚动(wheel 方向)即脱离——不能只靠 60px 阈值判定,
- * 触控板起步每帧只移动几 px,逃不出阈值区间就会被每帧的跟随滚动拽回(锁死)。
- * 滚回底部自动恢复;发消息/切会话重置为跟随。
- */
 const followStreaming = ref(true)
+let lastScrollTop = 0
+let resumedAt = 0
+let scrollCoalesced = false
 
 function onScrollWheel(e: WheelEvent) {
   if (e.deltaY < 0) followStreaming.value = false
 }
 
-/** 上次 scroll 事件的 scrollTop:方向判定用(scroll 事件本身不带方向) */
-let lastScrollTop = 0
-
-// 恢复跟随不能用 60px 严判:流式中 scrollHeight 每帧增长,scroll 事件到达时
-// 用户刚滚到的"底部"常已被新内容推出阈值,判定永远失败且内容增长不再产生
-// scroll 事件——脱离态就此卡死。改为方向(向下) + 宽阈值(120px)双条件;
-// 向上(拖滚动条/键盘,wheel 之外的路径)统一在此兜底脱离。
 function onScroll() {
   const el = scrollContainer.value
   if (!el) return
   const delta = el.scrollTop - lastScrollTop
   lastScrollTop = el.scrollTop
+  if (performance.now() - resumedAt < 150) return
   if (delta < 0) {
     followStreaming.value = false
   } else if (
     delta > 0 &&
     !followStreaming.value &&
-    el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    el.scrollHeight - el.scrollTop - el.clientHeight < 200
   ) {
     followStreaming.value = true
+    resumedAt = performance.now()
   }
 }
 
 function resumeFollow() {
   followStreaming.value = true
+  resumedAt = performance.now()
   scrollToBottom(true)
 }
 
 function scrollToBottom(force = false) {
-  if (!force && !isNearBottom()) return
+  if (!force && !followStreaming.value) return
+  if (scrollCoalesced) return
+  scrollCoalesced = true
   nextTick(() => {
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const el = scrollContainer.value
-        if (!el) return
-        // 全程 instant:smooth 在字符级流式高频调用下会被浏览器取消重启动画,
-        // 反而出现"弹跳"。逐帧 instant 移动小距离,60fps 下肉眼是连续平滑的。
-        el.scrollTo({ top: el.scrollHeight, behavior: 'instant' })
-      })
+      scrollCoalesced = false
+      const el = scrollContainer.value
+      if (!el) return
+      el.scrollTop = el.scrollHeight
     })
   })
 }
@@ -794,7 +831,8 @@ async function onReload() {
       :cwd="currentSession.summary.cwd"
       :git-branch="currentSession.summary.git_branch"
       :model-string="displayModelString"
-      :used-context-tokens="lastAssistantContextSize"
+      :used-context-tokens="stream.realUsedTokens ?? lastAssistantContextSize"
+      :real-context-window="stream.realContextWindow"
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
@@ -846,40 +884,32 @@ async function onReload() {
           <span>{{ channelMarkLabel(m) }}</span>
           <div class="flex-1 h-px bg-border" />
         </div>
-        <template v-for="(msg, i) in messages" :key="msg.uuid || `msg-${i}`">
-          <!-- system 事件行：无气泡形态,独立渲染 -->
-          <SystemEventRow v-if="msg.type === 'system'" :record="msg" />
-          <div v-else class="flex gap-3 msg-block">
-            <div
-              class="w-0.5 shrink-0 rounded-full"
-              :class="msg.type === 'user' ? 'bg-primary/60' : 'bg-claude/60'"
-            />
-            <div class="min-w-0 flex-1">
-              <div class="text-xs font-medium mb-1"
-                :class="msg.type === 'user' ? 'text-primary' : 'text-claude'"
-              >
-                {{ msg.type === 'user' ? '你' : 'Claude' }}
-                <span v-if="msg.type === 'assistant' && msg.message?.model" class="text-muted-foreground font-normal">
-                  ({{ shortModel(msg.message.model) }})
-                </span>
-              </div>
-              <!-- 历史区用普通 div 包裹:与流式区 TransitionGroup(tag="div") 的 DOM
-                   层级一致(切换时父容器无 layout 重排),但绝不播动画——发送瞬间上一轮
-                   内容从流式区转移进历史区,是 v-for 新成员,若包 TransitionGroup 会把
-                   旧内容重新淡入一遍(150ms 闪烁)。动画只属于流式区的真实新块。 -->
-              <div>
-                <MessageBlock
-                  v-for="(block, i) in contentBlocks(msg)"
-                  :key="i"
-                  :block="block"
-                />
+        <!-- 按轮次分组:每组包含一条用户消息 + 后续回复,sticky 限制在组内 -->
+        <div
+          v-for="(group, gi) in messageGroups"
+          :key="group.user?.uuid || `group-${gi}`"
+          class="space-y-4"
+        >
+          <!-- 用户消息:吸顶卡片,限于本轮 -->
+          <div v-if="group.user" class="user-msg-sticky">
+            <div class="flex gap-3">
+              <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
+              <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
+                <div class="text-xs font-medium mb-1 text-primary">你</div>
+                <MsgClamp>
+                  <MessageBlock
+                    v-for="(block, bi) in contentBlocks(group.user as any)"
+                    :key="bi"
+                    :block="block"
+                  />
+                </MsgClamp>
               </div>
             </div>
           </div>
-          <!-- 渠道切换横线:锚定在切换时刻的最后一条消息之后 -->
+          <!-- 渠道切换横线:用户消息锚点 -->
           <div
-            v-for="(m, j) in (msg.uuid ? channelMarksByUuid.get(msg.uuid) ?? [] : [])"
-            :key="`channel-mark-${msg.uuid}-${j}`"
+            v-for="(m, j) in (group.user?.uuid ? channelMarksByUuid.get(group.user.uuid) ?? [] : [])"
+            :key="`channel-mark-${group.user?.uuid}-${j}`"
             class="channel-mark"
           >
             <div class="flex-1 h-px bg-border" />
@@ -887,7 +917,40 @@ async function onReload() {
             <span>{{ channelMarkLabel(m) }}</span>
             <div class="flex-1 h-px bg-border" />
           </div>
-        </template>
+          <!-- 回复(AI + system) -->
+          <template v-for="resp in group.responses" :key="resp.uuid || resp">
+            <SystemEventRow v-if="resp.type === 'system'" :record="resp" />
+            <div v-else class="flex gap-3 msg-block">
+              <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
+              <div class="min-w-0 flex-1">
+                <div class="text-xs font-medium mb-1 text-claude">
+                  Claude
+                  <span v-if="(resp as any).message?.model" class="text-muted-foreground font-normal">
+                    ({{ shortModel((resp as any).message.model) }})
+                  </span>
+                </div>
+                <div>
+                  <MessageBlock
+                    v-for="(block, bi) in contentBlocks(resp as any)"
+                    :key="bi"
+                    :block="block"
+                  />
+                </div>
+              </div>
+            </div>
+            <!-- 渠道切换横线:回复消息锚点 -->
+            <div
+              v-for="(m, j) in (resp.uuid ? channelMarksByUuid.get(resp.uuid) ?? [] : [])"
+              :key="`channel-mark-${resp.uuid}-${j}`"
+              class="channel-mark"
+            >
+              <div class="flex-1 h-px bg-border" />
+              <span class="i-carbon-cloud w-3 h-3" />
+              <span>{{ channelMarkLabel(m) }}</span>
+              <div class="flex-1 h-px bg-border" />
+            </div>
+          </template>
+        </div>
         <!-- 锚点失效的切换横线兜底:末尾按序渲染,不静默消失 -->
         <div
           v-for="(m, j) in unanchoredChannelMarks"
@@ -901,33 +964,39 @@ async function onReload() {
         </div>
       </template>
 
-      <div v-if="stream.pendingUserMessage" class="flex gap-3 msg-block">
-        <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium mb-1 text-primary">你</div>
-          <div class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
+      <!-- 流式区:pendingUserMessage + streamingTurns 包进同一容器,sticky 限于本轮 -->
+      <div v-if="stream.pendingUserMessage || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
+        <div v-if="stream.pendingUserMessage" class="user-msg-sticky">
+          <div class="flex gap-3">
+            <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
+            <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
+              <div class="text-xs font-medium mb-1 text-primary">你</div>
+              <MsgClamp>
+                <div class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
+              </MsgClamp>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div v-for="turn in stream.streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
-        <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium mb-1 text-claude">Claude</div>
-          <!-- key 命名跟历史区对齐(纯索引),减少结束切换时 Vue diff 的额外 keyed-list 比对 -->
-          <TransitionGroup name="block-fade" tag="div" appear>
-            <MessageBlock
-              v-for="(block, i) in turn.content"
-              :key="i"
-              :block="block"
-              :streaming="stream.streaming"
-            />
-          </TransitionGroup>
+        <div v-for="turn in stream.streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
+          <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-medium mb-1 text-claude">Claude</div>
+            <TransitionGroup name="block-fade" tag="div" appear>
+              <MessageBlock
+                v-for="(block, i) in filterConsumedResults(turn.content)"
+                :key="i"
+                :block="block"
+                :streaming="stream.streaming"
+              />
+            </TransitionGroup>
+          </div>
         </div>
-      </div>
 
-      <div v-if="stream.streaming && stream.streamingTurns.length === 0" class="flex gap-3">
-        <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
-        <div class="text-xs text-muted-foreground">思考中...</div>
+        <div v-if="stream.streaming && stream.streamingTurns.length === 0" class="flex gap-3">
+          <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
+          <div class="text-xs text-muted-foreground">思考中...</div>
+        </div>
       </div>
 
       <div v-if="stream.streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">
@@ -1044,6 +1113,11 @@ async function onReload() {
 <style scoped>
 .msg-block {
   contain: layout style;
+}
+.user-msg-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 /* 渠道切换横线:细分隔线 + 居中小字,本地记账的轻量视觉(非消息气泡) */
 .channel-mark {

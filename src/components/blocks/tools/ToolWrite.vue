@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { fileName } from '@/utils/path'
 
 const TRUNCATE_LEN = 8192
 
@@ -13,6 +14,8 @@ const filePath = computed(() => {
   const v = props.input.file_path
   return typeof v === 'string' ? v : ''
 })
+
+const displayName = computed(() => fileName(filePath.value))
 
 const content = computed(() => {
   const v = props.input.content
@@ -40,7 +43,7 @@ const sizeKb = computed(() => Math.round(content.value.length / 1024))
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform shrink-0" :class="{ 'rotate-90': expanded }" />
       <span class="i-carbon-document-add w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">Write</span>
-      <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ filePath }}</span>
+      <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ displayName }}</span>
       <span v-if="content" class="text-muted-foreground ml-1">（{{ content.length }} 字符）</span>
     </button>
     <div v-if="expanded" class="mt-2">

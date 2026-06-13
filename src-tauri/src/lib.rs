@@ -40,6 +40,17 @@ pub fn run() {
             watcher::start(app.handle());
             // 渠道 runtime 残留清理(上次异常退出可能留下含 token 的合成文件)
             channels::cleanup_runtime_dir();
+
+            // 应用退出时 SIGTERM 所有长活会话进程
+            let handle = app.handle().clone();
+            if let Some(window) = handle.get_webview_window("main") {
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Destroyed = event {
+                        streaming::close_all_sessions();
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +62,7 @@ pub fn run() {
             commands::resume_in_vscode,
             commands::start_streaming,
             commands::stop_streaming,
+            commands::close_session,
             commands::respond_permission,
             commands::get_cli_settings,
             commands::check_session_running,
@@ -67,6 +79,7 @@ pub fn run() {
             channels::delete_channel,
             channels::set_default_channel,
             channels::reveal_channels_dir,
+            commands::open_in_default_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

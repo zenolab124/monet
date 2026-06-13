@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { fileName } from '@/utils/path'
 
 const props = defineProps<{
   input: Record<string, unknown>
@@ -11,6 +13,8 @@ const filePath = computed(() => {
   const v = props.input.file_path
   return typeof v === 'string' ? v : ''
 })
+
+const displayName = computed(() => fileName(filePath.value))
 
 const offset = computed(() => {
   const v = props.input.offset
@@ -28,6 +32,15 @@ const lineRange = computed(() => {
   const end = limit.value !== null ? start + limit.value : null
   return end !== null ? `L${start}-${end}` : `L${start}-`
 })
+
+async function openFile() {
+  if (!filePath.value) return
+  try {
+    await invoke('open_in_default_app', { path: filePath.value })
+  } catch {
+    // 静默降级
+  }
+}
 </script>
 
 <template>
@@ -35,8 +48,13 @@ const lineRange = computed(() => {
     <div class="flex items-center gap-1.5">
       <span class="i-carbon-document w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">Read</span>
-      <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ filePath }}</span>
-      <span v-if="lineRange" class="font-mono text-muted-foreground ml-1">{{ lineRange }}</span>
+      <button
+        v-if="filePath"
+        class="font-mono text-muted-foreground hover:text-primary hover:underline truncate transition-colors"
+        :title="filePath"
+        @click="openFile"
+      >{{ displayName }}</button>
+      <span v-if="lineRange" class="font-mono text-muted-foreground">{{ lineRange }}</span>
     </div>
   </div>
 </template>
