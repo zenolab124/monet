@@ -8,7 +8,7 @@
  * PRD: docs/prd/v1.0.0-realtime-session-experience.md FR-005
  */
 
-import { ref, computed, onBeforeUnmount, type Ref } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, type Ref } from 'vue'
 import {
   validateImage,
   readMagicProbe,
@@ -230,16 +230,20 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
   // ---- 事件绑定:粘贴 ----
   function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items
+    const itemDetails = items
+      ? Array.from(items).map((it, i) => `[${i}] kind=${it.kind} type=${it.type}`)
+      : []
+    console.debug('[ImagePaste] clipboardData.items:', items?.length ?? 'null', itemDetails)
     if (!items || items.length === 0) return
     const files: File[] = []
     for (let i = 0; i < items.length; i += 1) {
       const item = items[i]
-      // 仅处理 kind=file 的(纯文本走默认行为,不拦截)
       if (item.kind === 'file') {
         const f = item.getAsFile()
         if (f) files.push(f)
       }
     }
+    console.debug('[ImagePaste] extracted files:', files.length, files.map(f => `${f.type} ${f.size}B`))
     if (files.length === 0) return
     // 命中图片粘贴,阻止默认行为(否则文本框可能插入文件名)
     e.preventDefault()
@@ -292,12 +296,19 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
 
   function attach() {
     const p = opts.pasteTarget?.value
-    if (p) {
+    if (p && p !== pasteEl) {
+      if (pasteEl) pasteEl.removeEventListener('paste', onPaste as EventListener)
       pasteEl = p as HTMLElement
       pasteEl.addEventListener('paste', onPaste as EventListener)
     }
     const d = opts.dropTarget?.value
-    if (d) {
+    if (d && d !== dropEl) {
+      if (dropEl) {
+        dropEl.removeEventListener('dragenter', onDragEnter as EventListener)
+        dropEl.removeEventListener('dragover', onDragOver as EventListener)
+        dropEl.removeEventListener('dragleave', onDragLeave as EventListener)
+        dropEl.removeEventListener('drop', onDrop as EventListener)
+      }
       dropEl = d
       dropEl.addEventListener('dragenter', onDragEnter as EventListener)
       dropEl.addEventListener('dragover', onDragOver as EventListener)
@@ -318,6 +329,13 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
       dropEl.removeEventListener('drop', onDrop as EventListener)
       dropEl = null
     }
+  }
+
+  if (opts.pasteTarget) {
+    watch(() => opts.pasteTarget!.value, () => { detach(); attach() })
+  }
+  if (opts.dropTarget) {
+    watch(() => opts.dropTarget!.value, () => { detach(); attach() })
   }
 
   onBeforeUnmount(detach)
