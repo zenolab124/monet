@@ -9,7 +9,9 @@ import {
 import { useUiState } from '@/composables/useUiState'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
+import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
+import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 
 /**
  * 设置域(第一期只有渠道管理)。
@@ -19,6 +21,7 @@ import ChannelForm from '@/components/settings/ChannelForm.vue'
 const { channels, defaultChannelId, deleteChannel, setDefaultChannel, revealChannelsDir } =
   useChannels()
 const { activeSection } = useUiState()
+const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
 
@@ -29,7 +32,10 @@ onMounted(() => refreshChannels())
 
 // v-show 常驻挂载,onMounted 只触发一次:每次切到设置页重读,反映他处(下拉/手编)的改动
 watch(activeSection, (s) => {
-  if (s === 'settings') refreshChannels()
+  if (s === 'settings') {
+    refreshChannels()
+    ensureLoaded()
+  }
 })
 
 async function onDelete(ch: ChannelInfo) {
@@ -173,6 +179,21 @@ function onSaved() {
             打开配置目录
           </button>
         </div>
+      </section>
+
+      <!-- 兼容性诊断 -->
+      <section class="mt-8">
+        <h2 class="text-sm font-medium mb-1">兼容性诊断</h2>
+        <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
+          扫描所有会话文件，检查记录类型和工具的解析覆盖率。未识别的类型和兜底工具会在这里列出，用于开发排查。
+        </p>
+        <DiagnosisCard
+          :diag="diag"
+          :loading="diagLoading"
+          :error="diagError"
+          :scanned-at="diagAt"
+          @retry="retryDiag"
+        />
       </section>
     </div>
   </div>

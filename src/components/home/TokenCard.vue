@@ -13,6 +13,27 @@ const props = defineProps<{
 
 const emit = defineEmits<{ retry: [] }>()
 
+const lastMonthTotal = computed(() => {
+  if (!props.usage) return 0
+  const now = new Date()
+  const lm = now.getMonth() === 0 ? 11 : now.getMonth() - 1
+  const ly = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+  return props.usage.daily
+    .filter(d => {
+      const [y, m] = d.date.split('-').map(Number)
+      return y === ly && m === lm + 1
+    })
+    .reduce((sum, d) => sum + d.total, 0)
+})
+
+const trend = computed(() => {
+  const curr = props.usage?.month.total ?? 0
+  const prev = lastMonthTotal.value
+  if (prev === 0) return null
+  const pct = Math.round(((curr - prev) / prev) * 100)
+  return { pct: Math.abs(pct), up: pct >= 0, label: pct >= 0 ? '↑' : '↓' }
+})
+
 const rows = computed(() => {
   if (!props.usage) return []
   const { total, byModel } = props.usage.month
@@ -38,6 +59,9 @@ const rows = computed(() => {
     <template v-else>
       <div class="big-num">
         {{ loading ? '—' : formatTokens(usage?.month.total ?? 0) }}<small>tokens</small>
+        <span v-if="trend && !loading" class="trend" :class="trend.up ? 'up' : 'down'">
+          {{ trend.label }}{{ trend.pct }}%
+        </span>
       </div>
       <div class="mt-2.5 flex flex-col gap-1.25">
         <div v-if="loading" class="text-2xs text-muted-foreground">统计中…</div>
@@ -67,6 +91,13 @@ const rows = computed(() => {
   color: var(--muted-foreground);
   margin-left: 4px;
 }
+.trend {
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+.trend.up { color: var(--accent); }
+.trend.down { color: var(--primary); }
 
 .text-2xs {
   font-size: 10px;

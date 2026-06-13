@@ -15,7 +15,7 @@ const props = defineProps<{
   error: string | null
 }>()
 
-const emit = defineEmits<{ retry: [] }>()
+const emit = defineEmits<{ retry: []; 'select-date': [date: string] }>()
 
 const WEEKS = 16
 
@@ -79,8 +79,12 @@ const rows = computed<Cell[][]>(() => {
             v-for="cell in row"
             :key="cell.date"
             class="hm-cell shrink-0"
-            :class="cell.future ? 'future' : cell.level ? `l${cell.level}` : ''"
+            :class="[
+              cell.future ? 'future' : cell.level ? `l${cell.level}` : '',
+              !cell.future && cell.total > 0 ? 'clickable' : '',
+            ]"
             :title="cell.future ? undefined : `${cell.date} · ${formatTokens(cell.total)} tokens`"
+            @click="!cell.future && cell.total > 0 && emit('select-date', cell.date)"
           />
         </div>
       </div>
@@ -111,6 +115,13 @@ const rows = computed<Cell[][]>(() => {
 }
 .hm-cell.future {
   visibility: hidden;
+}
+.hm-cell.clickable {
+  cursor: pointer;
+}
+.hm-cell.clickable:hover {
+  outline: 1.5px solid var(--foreground);
+  outline-offset: -1px;
 }
 .hm-cell.l1 {
   background: color-mix(in oklch, var(--primary) 25%, var(--card));

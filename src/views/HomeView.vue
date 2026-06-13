@@ -1,40 +1,57 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import DiagnosisCard from '../components/home/DiagnosisCard.vue'
-import HeatmapCard from '../components/home/HeatmapCard.vue'
+import TodaySummaryCard from '../components/home/TodaySummaryCard.vue'
 import TokenCard from '../components/home/TokenCard.vue'
+import CostEstimateCard from '../components/home/CostEstimateCard.vue'
+import StreakCard from '../components/home/StreakCard.vue'
+import ModelPreferenceCard from '../components/home/ModelPreferenceCard.vue'
+import RecentSessionsCard from '../components/home/RecentSessionsCard.vue'
+import ProjectActivityCard from '../components/home/ProjectActivityCard.vue'
+import BranchActivityCard from '../components/home/BranchActivityCard.vue'
+import WorkRhythmCard from '../components/home/WorkRhythmCard.vue'
+import SessionDepthCard from '../components/home/SessionDepthCard.vue'
+import HeatmapCard from '../components/home/HeatmapCard.vue'
 import { useHomeStats } from '../composables/useHomeStats'
+import { useProjects } from '../composables/useProjects'
+import { useSessions } from '../composables/useSessions'
 import { useUiState } from '../composables/useUiState'
 
-/**
- * 首页总览（v2.2.0 实化）：Token 消耗 / 兼容性诊断 / 活跃热力三卡实数据。
- * 首次进入首页惰性触发加载（含启动即恢复到首页的场景），会话期缓存，头部手动刷新。
- */
-
-const { activeSection } = useUiState()
+const { activeSection, switchSection } = useUiState()
 const {
   usage, usageLoading, usageError, retryUsage,
-  diag, diagLoading, diagError, diagAt, retryDiag,
   ensureLoaded, refresh,
 } = useHomeStats()
+const { projects, loading: projectsLoading, loadProjects } = useProjects()
+const { selectSession } = useSessions()
 
 watch(
   activeSection,
   (section) => {
-    if (section === 'home') ensureLoaded()
+    if (section === 'home') {
+      ensureLoaded()
+      if (!projects.value.length) loadProjects()
+    }
   },
   { immediate: true },
 )
 
-const refreshing = computed(() => usageLoading.value || diagLoading.value)
+const refreshing = computed(() => usageLoading.value)
 
 const headDate = computed(() => {
-  // 显式依赖加载状态：无依赖的 computed 会被永久缓存，
-  // 应用跨午夜长驻后点刷新日期不会更新（FR-006 验收第 3 条）
   void refreshing.value
   const d = new Date()
   return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日 · 本月数据`
 })
+
+function onGoSession(sessionId: string) {
+  selectSession(sessionId)
+  switchSection('sessions')
+}
+
+function onSelectDate(date: string) {
+  void date
+  switchSection('sessions')
+}
 </script>
 
 <template>
@@ -54,15 +71,17 @@ const headDate = computed(() => {
       </div>
 
       <div class="card-grid">
+        <TodaySummaryCard :usage="usage" :projects="projects" :loading="usageLoading || projectsLoading" />
+        <StreakCard :usage="usage" :loading="usageLoading" />
         <TokenCard :usage="usage" :loading="usageLoading" :error="usageError" @retry="retryUsage" />
-        <DiagnosisCard
-          :diag="diag"
-          :loading="diagLoading"
-          :error="diagError"
-          :scanned-at="diagAt"
-          @retry="retryDiag"
-        />
-        <HeatmapCard :usage="usage" :loading="usageLoading" :error="usageError" @retry="retryUsage" />
+        <CostEstimateCard :projects="projects" :loading="projectsLoading" />
+        <RecentSessionsCard :projects="projects" :loading="projectsLoading" @go-session="onGoSession" />
+        <ModelPreferenceCard :projects="projects" :loading="projectsLoading" />
+        <ProjectActivityCard :projects="projects" :loading="projectsLoading" />
+        <BranchActivityCard :projects="projects" :loading="projectsLoading" />
+        <WorkRhythmCard :projects="projects" :loading="projectsLoading" />
+        <SessionDepthCard :projects="projects" :loading="projectsLoading" />
+        <HeatmapCard :usage="usage" :loading="usageLoading" :error="usageError" @retry="retryUsage" @select-date="onSelectDate" />
       </div>
     </div>
   </main>
@@ -74,7 +93,6 @@ const headDate = computed(() => {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
-/* 窄窗降单列（FR-007 验收口径 <900px） */
 @media (max-width: 900px) {
   .card-grid {
     grid-template-columns: 1fr;
