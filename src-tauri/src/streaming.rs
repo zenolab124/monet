@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -11,8 +11,16 @@ use tauri::{AppHandle, Emitter};
 use crate::models::ContentBlock;
 use crate::permission::PermissionService;
 
-/// 活跃的 streaming 进程表（v2.1.0 per-session：sessionId → child，多会话并行流式）
-static ACTIVE_PROCESSES: Mutex<Option<HashMap<String, Arc<Mutex<Child>>>>> = Mutex::new(None);
+/// 长活进程会话实例（进程跨轮复用，不杀不重启）
+struct SessionProcess {
+    child: Child,
+    stdin: ChildStdin,
+    request_counter: u64,
+}
+
+/// 活跃的长活进程表（sessionId → SessionProcess）
+static ACTIVE_PROCESSES: Mutex<Option<HashMap<String, Arc<Mutex<SessionProcess>>>>> =
+    Mutex::new(None);
 
 /// 前端接收的流式事件（全部携带 session_id，前端按会话分发）
 #[derive(Debug, Clone, Serialize)]
@@ -49,11 +57,14 @@ pub enum StreamEvent {
         message_id: String,
         index: usize,
     },
-    /// 流式完成
+    /// 流式完成（携带 modelUsage 真值：上下文容量 + token 用量）
     Result {
         session_id: String,
         text: String,
         cost_usd: f64,
+        context_window: Option<u64>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
     },
     /// 错误
     Error {
@@ -113,52 +124,52 @@ fn enhanced_path() -> String {
     format!("{}:{}", extra_paths.join(":"), existing)
 }
 
-/// 启动流式会话（同会话已有流式则先终止旧流；不同会话互不影响）
-pub fn start_streaming(
+/// 向长活进程 stdin 写入一行 JSON
+fn write_stdin(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
+    let line = serde_json::to_string(msg).map_err(|e| format!("JSON 序列化失败: {}", e))?;
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|_| stdin.write_all(b"\n"))
+        .and_then(|_| stdin.flush())
+        .map_err(|e| format!("stdin 写入失败: {}", e))
+}
+
+/// SIGTERM 指定 PID（macOS/Linux）
+fn sigterm_pid(pid: u32) {
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .output();
+}
+
+/// 打开会话进程：spawn 长活 CLI + 初始化握手 + 启动 stdout 读取线程
+fn open_session(
     app: &AppHandle,
     session_id: &str,
     cwd: &str,
-    message: &str,
     model: Option<&str>,
     effort: Option<&str>,
     channel: Option<&str>,
     advisor: bool,
-) {
-    // 同会话旧进程先终止（重发场景）；其他会话的并行流式不受影响
-    stop_streaming(session_id);
-
-    // cwd 缺失时 spawn 报 ENOENT,与 claude 二进制缺失同文案无法区分——前置校验给出指向性报错
-    // (场景:项目源目录已删除/改名,或路径解码歧义)
+) -> Result<(), String> {
     if !std::path::Path::new(cwd).is_dir() {
-        emit_error(app, session_id, format!("工作目录不存在: {}", cwd));
-        return;
+        return Err(format!("工作目录不存在: {}", cwd));
     }
 
-    // 1. 启动该会话的权限服务（失败立即上报错误，不静默降级）
-    let permission_service = match PermissionService::start(app.clone(), session_id) {
-        Ok(s) => s,
-        Err(e) => {
-            emit_error(app, session_id, format!("权限服务启动失败：{}", e));
-            return;
-        }
-    };
+    // 1. 权限服务（per-session 生命周期：open 时 start，进程退出时 stop）
+    let permission_service = PermissionService::start(app.clone(), session_id)
+        .map_err(|e| format!("权限服务启动失败：{}", e))?;
     let socket_path = permission_service.socket_path().to_path_buf();
 
-    // 2. 定位 cc-space-mcp 二进制
+    // 2. MCP 二进制
     let mcp_binary = match find_mcp_binary() {
         Some(p) => p,
         None => {
             PermissionService::stop_for(session_id);
-            emit_error(
-                app,
-                session_id,
-                "未找到 cc-space-mcp 二进制，无法启动权限服务".to_string(),
-            );
-            return;
+            return Err("未找到 cc-space-mcp 二进制，无法启动权限服务".to_string());
         }
     };
 
-    // 3. 构建 MCP 配置 JSON（claude CLI 接受 JSON 字符串或文件路径）
+    // 3. MCP 配置
     let mcp_config = json!({
         "mcpServers": {
             "cc-space": {
@@ -173,26 +184,25 @@ pub fn start_streaming(
     })
     .to_string();
 
+    // 4. CLI 参数（不带 --print，不传消息文本；加 --input-format stream-json）
     let (executable, prefix_args) = find_claude();
     let mut args = prefix_args;
-    // jsonl 已落盘 → --resume 续聊;未落盘(工作台应用内新建的草稿)→ --session-id
-    // 以前端指定的 UUID 新建会话。文件系统即事实源,首条消息失败后重试仍走新建,自愈。
     let session_file = crate::commands::projects_dir()
         .join(cwd.replace('/', "-"))
         .join(format!("{}.jsonl", session_id));
-    let session_flag = if session_file.is_file() { "--resume" } else { "--session-id" };
+    let session_flag = if session_file.is_file() {
+        "--resume"
+    } else {
+        "--session-id"
+    };
     args.extend([
         session_flag.to_string(),
         session_id.to_string(),
-        "--print".to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
+        "--input-format".to_string(),
+        "stream-json".to_string(),
         "--verbose".to_string(),
-        "--include-partial-messages".to_string(),
-        // --print 模式下新模型 thinking.display 默认 omitted(thinking_delta 全是空串),
-        // 该隐藏参数(hideHelp)恢复 summarized 摘要明文。版本飘移撤参时 CLI 会以
-        // unknown option 退出,stderr 经 StreamEvent::Error 上屏可定位,届时参照
-        // docs/knowledge/pitfalls/thinking-redacted-opus-4-7.md
         "--thinking-display".to_string(),
         "summarized".to_string(),
         "--mcp-config".to_string(),
@@ -200,13 +210,10 @@ pub fn start_streaming(
         "--permission-prompt-tool".to_string(),
         "mcp__cc-space__approve_tool_use".to_string(),
     ]);
+
     let ultracode = effort == Some("ultracode");
 
-    // 注入合成:--settings 指向 per-spawn runtime 文件,渠道 env / ultracode / 顾问模式
-    // 三类注入合并于此(--settings 只能出现一次)。主载体必须是 --settings(命令行参数层):
-    // 实测用户 settings.json 的 env 字段会反向覆盖 spawn 注入的进程环境变量,纯 env 注入
-    // 会静默失效;spawn env 同值双注入堵启动期缝隙。token 经文件路径传递,不进 argv
-    // (message/mcp-config 已在 ps 可见,凭据不能加入)。
+    // 5. 渠道/ultracode/顾问注入（合成 --settings）
     let channel_opt = channel.filter(|s| !s.is_empty() && *s != crate::channels::OFFICIAL_ID);
     let channel_injection =
         match crate::channels::prepare_injection(channel_opt, session_id, ultracode, advisor) {
@@ -218,33 +225,29 @@ pub fn start_streaming(
             Ok(None) => None,
             Err(e) => {
                 PermissionService::stop_for(session_id);
-                emit_error(app, session_id, format!("会话配置加载失败:{}", e));
-                return;
+                return Err(format!("会话配置加载失败:{}", e));
             }
         };
 
-    // 顾问模式由前端把 model 强制为 sonnet 后下发,此处只透传;顾问注入已并入上方 --settings
     if let Some(m) = model.filter(|s| !s.is_empty()) {
         args.push("--model".to_string());
         args.push(m.to_string());
     }
-    // ultracode 已并入 --settings(上方合成),此处只处理具体 effort 档位
     if let Some(e) = effort.filter(|s| !s.is_empty() && *s != "ultracode") {
         args.push("--effort".to_string());
         args.push(e.to_string());
     }
-    args.push(message.to_string());
 
+    // 6. Spawn（stdin/stdout/stderr 全 piped）
     let mut command = Command::new(&executable);
     command
         .args(&args)
         .current_dir(cwd)
         .env("PATH", enhanced_path())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(inj) = &channel_injection {
-        // 先移除继承环境的认证/路由残留(clear_env = DEFENSE_ENV_KEYS + 渠道缺 token 时的
-        // AUTH_TOKEN),再注入渠道 env(渠道显式配置的同名键以渠道为准)
         for key in &inj.clear_env {
             command.env_remove(key);
         }
@@ -252,57 +255,232 @@ pub fn start_streaming(
             command.env(k, v);
         }
     }
-    let child = match command.spawn() {
-        Ok(c) => c,
-        Err(e) => {
+    let mut child = command.spawn().map_err(|e| {
+        if let Some(inj) = &channel_injection {
+            crate::channels::cleanup_runtime_file(&inj.runtime_path);
+        }
+        PermissionService::stop_for(session_id);
+        format!("启动 claude 失败: {}", e)
+    })?;
+
+    // 7. Take handles
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "无法获取 stdin".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "无法获取 stdout".to_string())?;
+    let stderr = child.stderr.take();
+
+    // 8. 初始化握手（没有这个握手，进程不处理任何消息）
+    let init_msg = json!({
+        "type": "control_request",
+        "request_id": "init-1",
+        "request": {"subtype": "initialize"}
+    });
+    write_stdin(&mut stdin, &init_msg).map_err(|e| {
+        PermissionService::stop_for(session_id);
+        if let Some(inj) = &channel_injection {
+            crate::channels::cleanup_runtime_file(&inj.runtime_path);
+        }
+        format!("初始化握手写入失败: {}", e)
+    })?;
+
+    let mut reader = BufReader::new(stdout);
+    let mut line_buf = String::new();
+    loop {
+        line_buf.clear();
+        let bytes_read = reader.read_line(&mut line_buf).map_err(|e| {
+            PermissionService::stop_for(session_id);
             if let Some(inj) = &channel_injection {
                 crate::channels::cleanup_runtime_file(&inj.runtime_path);
             }
+            format!("初始化握手读取失败: {}", e)
+        })?;
+        if bytes_read == 0 {
             PermissionService::stop_for(session_id);
-            emit_error(app, session_id, format!("启动 claude 失败: {}", e));
-            return;
+            let stderr_msg = stderr
+                .map(|s| {
+                    let mut r = BufReader::new(s);
+                    let mut buf = String::new();
+                    let _ = std::io::Read::read_to_string(&mut r, &mut buf);
+                    buf
+                })
+                .unwrap_or_default();
+            if let Some(inj) = &channel_injection {
+                crate::channels::cleanup_runtime_file(&inj.runtime_path);
+            }
+            return Err(format!(
+                "进程在初始化阶段退出{}",
+                if stderr_msg.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", stderr_msg.trim())
+                }
+            ));
         }
-    };
+        if let Ok(v) = serde_json::from_str::<Value>(&line_buf) {
+            if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
+                break;
+            }
+        }
+    }
 
-    let child = Arc::new(Mutex::new(child));
+    // 9. 存入 ACTIVE_PROCESSES
+    let pid = child.id();
+    eprintln!("[long-lived] 新建进程 PID={} 会话={}", pid, &session_id[..session_id.len().min(8)]);
+    let sp_arc = Arc::new(Mutex::new(SessionProcess {
+        child,
+        stdin,
+        request_counter: 1,
+    }));
     ACTIVE_PROCESSES
         .lock()
         .unwrap()
         .get_or_insert_with(HashMap::new)
-        .insert(session_id.to_string(), child.clone());
+        .insert(session_id.to_string(), sp_arc.clone());
 
+    // 10. 启动 stdout 读取线程（reader 已消费掉握手响应，后续全是流式事件）
     let handle = app.clone();
     let sid = session_id.to_string();
-    let sock = socket_path.clone();
+    let sock = socket_path;
     let runtime_file = channel_injection.map(|inj| inj.runtime_path);
     std::thread::spawn(move || {
-        read_stream(child, &handle, &sid);
-        // 子进程退出后回收该会话的权限服务——仅清理本 turn 自己的实例。
-        // 不能盲调 stop_for(sid)：同会话连发时新 turn 可能已注册新 socket，
-        // 盲删会害新 turn 的权限请求 Connection refused（race，见 stop_if_socket 注释）
+        read_stream(reader, stderr, sp_arc.clone(), &handle, &sid);
         PermissionService::stop_if_socket(&sid, &sock);
-        // 渠道 runtime 文件(含 token 副本)随进程生命周期即删;文件名带纳秒后缀,
-        // 不会误删同会话新 turn 的文件
         if let Some(p) = runtime_file {
             crate::channels::cleanup_runtime_file(&p);
         }
     });
+
+    Ok(())
 }
 
-/// 终止指定会话的流式进程
-pub fn stop_streaming(session_id: &str) {
+/// 发送消息（自动 open 会话进程；替代旧 start_streaming）
+pub fn send_message(
+    app: &AppHandle,
+    session_id: &str,
+    cwd: &str,
+    message: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    channel: Option<&str>,
+    advisor: bool,
+) -> Result<(), String> {
+    let exists = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map_or(false, |m| m.contains_key(session_id));
+
+    if !exists {
+        open_session(app, session_id, cwd, model, effort, channel, advisor)?;
+    }
+
     let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned())
+        .ok_or("会话进程不存在")?;
+
+    let mut sp = process.lock().unwrap();
+    if exists {
+        eprintln!("[long-lived] 复用进程 PID={} 会话={}", sp.child.id(), &session_id[..session_id.len().min(8)]);
+        // 动态切模型（复用进程时生效；新建进程已在启动参数中指定）
+        if let Some(m) = model.filter(|s| !s.is_empty()) {
+            sp.request_counter += 1;
+            let req_id = format!("set-model-{}", sp.request_counter);
+            let ctrl = json!({
+                "type": "control_request",
+                "request_id": req_id,
+                "request": {"subtype": "set_model", "model": m}
+            });
+            write_stdin(&mut sp.stdin, &ctrl)?;
+        }
+    }
+    let msg = json!({
+        "type": "user",
+        "session_id": "",
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": message}]
+        },
+        "parent_tool_use_id": null
+    });
+    write_stdin(&mut sp.stdin, &msg)
+}
+
+/// 中断当前回复（发 interrupt 控制消息，不杀进程）
+pub fn interrupt_session(session_id: &str) -> Result<(), String> {
+    let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned());
+
+    match process {
+        Some(p) => {
+            let mut sp = p.lock().unwrap();
+            eprintln!("[long-lived] 中断进程 PID={} 会话={}", sp.child.id(), &session_id[..session_id.len().min(8)]);
+            sp.request_counter += 1;
+            let req_id = format!("interrupt-{}", sp.request_counter);
+            let msg = json!({
+                "type": "control_request",
+                "request_id": req_id,
+                "request": {"subtype": "interrupt"}
+            });
+            write_stdin(&mut sp.stdin, &msg)
+        }
+        None => Ok(()),
+    }
+}
+
+/// 关闭会话进程（SIGTERM → 5s → SIGKILL）
+pub fn close_session(session_id: &str) {
+    let process_arc = ACTIVE_PROCESSES
         .lock()
         .unwrap()
         .as_mut()
         .and_then(|m| m.remove(session_id));
-    if let Some(process) = process {
-        if let Ok(mut child) = process.lock() {
-            let _ = child.kill();
-        }
+
+    if let Some(process_arc) = process_arc {
+        let pid = {
+            let sp = process_arc.lock().unwrap();
+            sp.child.id()
+        };
+        sigterm_pid(pid);
+
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            if let Ok(mut sp) = process_arc.lock() {
+                if sp.child.try_wait().ok().flatten().is_none() {
+                    let _ = sp.child.kill();
+                }
+            }
+        });
     }
-    // 一并清理该会话的权限服务（pending 请求统一按 deny 收尾）
+
     PermissionService::stop_for(session_id);
+}
+
+/// 关闭所有活跃会话进程（应用退出时调用）
+pub fn close_all_sessions() {
+    let processes: Vec<(String, Arc<Mutex<SessionProcess>>)> = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_mut()
+        .map(|m| m.drain().collect())
+        .unwrap_or_default();
+
+    for (sid, process_arc) in processes {
+        if let Ok(sp) = process_arc.lock() {
+            sigterm_pid(sp.child.id());
+        }
+        PermissionService::stop_for(&sid);
+    }
 }
 
 fn emit_error(app: &AppHandle, session_id: &str, message: String) {
@@ -313,7 +491,6 @@ fn emit_error(app: &AppHandle, session_id: &str, message: String) {
             message,
         },
     );
-    // 错误即终态：补发 stream-done 让前端走统一收尾
     let _ = app.emit("stream-done", json!({ "session_id": session_id }));
 }
 
@@ -346,20 +523,15 @@ fn find_mcp_binary() -> Option<PathBuf> {
     None
 }
 
-/// 读取进程 stdout，解析并 emit 事件
-fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle, session_id: &str) {
-    let stdout = {
-        let mut child = process.lock().unwrap();
-        match child.stdout.take() {
-            Some(out) => out,
-            None => return,
-        }
-    };
-
-    let reader = BufReader::new(stdout);
-    let mut buffered_result: Option<StreamEvent> = None;
-    // partial messages 模式下，content_block_* 不携带 message_id，
-    // 由 message_start 注入、后续 block 事件复用，直到下一个 message_start 覆盖
+/// 读取长活进程 stdout——逐行解析流式事件，result 立即 emit + stream-done 标记轮次结束，
+/// 循环仅在 stdout EOF（进程退出）时终止
+fn read_stream(
+    reader: BufReader<std::process::ChildStdout>,
+    stderr: Option<std::process::ChildStderr>,
+    process: Arc<Mutex<SessionProcess>>,
+    app: &AppHandle,
+    session_id: &str,
+) {
     let mut current_message_id: Option<String> = None;
 
     for line in reader.lines() {
@@ -373,63 +545,65 @@ fn read_stream(process: Arc<Mutex<Child>>, app: &AppHandle, session_id: &str) {
             Err(_) => continue,
         };
 
+        let raw_type = value
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
+
         if let Some(event) = decode_stream_event(&value, session_id, &mut current_message_id) {
-            match &event {
-                StreamEvent::Result { .. } => {
-                    // result 事件暂存，等进程退出后再发送
-                    buffered_result = Some(event);
-                }
-                _ => {
-                    let _ = app.emit("stream-event", &event);
-                }
-            }
+            let _ = app.emit("stream-event", &event);
+        }
+
+        // "result" 标记一轮结束（进程继续活着等下一条 stdin 消息）
+        if raw_type == "result" {
+            let _ = app.emit("stream-done", json!({ "session_id": session_id }));
         }
     }
 
-    // 等待进程退出
-    let exit_status = {
-        let mut child = process.lock().unwrap();
-        child.wait().ok()
+    // stdout EOF —— 进程已退出
+
+    // 判断是否属于非预期退出（close_session 会先从 map 移除再 SIGTERM，
+    // 所以 map 中仍存在 = 非预期退出，需要上报错误）
+    let was_unexpected = {
+        let mut map = ACTIVE_PROCESSES.lock().unwrap();
+        if let Some(m) = map.as_mut() {
+            if m.get(session_id).is_some_and(|c| Arc::ptr_eq(c, &process)) {
+                m.remove(session_id);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     };
 
-    // 检查非正常退出
-    if let Some(status) = exit_status {
-        if !status.success() {
-            // 读取 stderr
-            let stderr_text = {
-                let mut child = process.lock().unwrap();
-                child.stderr.take().map(|stderr| {
+    if was_unexpected {
+        // 等待并检查退出状态
+        let exit_status = {
+            let mut sp = process.lock().unwrap();
+            sp.child.wait().ok()
+        };
+
+        if let Some(status) = exit_status {
+            if !status.success() {
+                let stderr_text = stderr.map(|stderr| {
                     let mut reader = BufReader::new(stderr);
                     let mut buf = String::new();
                     let _ = std::io::Read::read_to_string(&mut reader, &mut buf);
                     buf
-                })
-            };
-            if let Some(text) = stderr_text {
-                if !text.trim().is_empty() {
-                    let _ = app.emit("stream-event", StreamEvent::Error {
-                        session_id: session_id.to_string(),
-                        message: text.trim().to_string(),
-                    });
-                }
+                });
+                let err_msg = stderr_text
+                    .filter(|t| !t.trim().is_empty())
+                    .map(|t| t.trim().to_string())
+                    .unwrap_or_else(|| format!("进程异常退出 (code: {})", status));
+                emit_error(app, session_id, err_msg);
+            } else {
+                // 正常退出但未预期（CLI 自行决定退出），通知前端收尾
+                let _ = app.emit("stream-done", json!({ "session_id": session_id }));
             }
-        }
-    }
-
-    // 发送暂存的 result
-    if let Some(result) = buffered_result {
-        let _ = app.emit("stream-event", &result);
-    }
-
-    // 通知该会话的流结束
-    let _ = app.emit("stream-done", json!({ "session_id": session_id }));
-
-    // 清理引用——仅移除本 turn 自己的 child。同会话连发时新 turn 可能已注册新 child，
-    // 按 session_id 盲删会误删新 turn 的进程句柄（之后 stop_streaming 找不到它、无法 kill）。
-    // 用 Arc 指针身份校验：被新 turn 接管后不动。
-    if let Some(map) = ACTIVE_PROCESSES.lock().unwrap().as_mut() {
-        if map.get(session_id).is_some_and(|c| Arc::ptr_eq(c, &process)) {
-            map.remove(session_id);
+        } else {
+            emit_error(app, session_id, "进程异常退出".to_string());
         }
     }
 }
@@ -563,13 +737,17 @@ fn decode_stream_event(
                     .get("total_cost_usd")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
+                let usage = value.get("modelUsage");
                 Some(StreamEvent::Result {
                     session_id: sid,
                     text: result_text,
                     cost_usd: cost,
+                    context_window: usage.and_then(|u| u.get("contextWindow")).and_then(|v| v.as_u64()),
+                    input_tokens: usage.and_then(|u| u.get("inputTokens")).and_then(|v| v.as_u64()),
+                    output_tokens: usage.and_then(|u| u.get("outputTokens")).and_then(|v| v.as_u64()),
                 })
             }
         }
-        _ => None, // system, last-prompt 等忽略
+        _ => None, // system, control_response, last-prompt 等忽略
     }
 }

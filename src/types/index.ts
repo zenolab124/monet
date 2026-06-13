@@ -20,6 +20,7 @@ export interface SessionSummary {
   total_tokens: TokenUsage
   file_size: number
   message_count: number
+  context_window: number | null
 }
 
 export interface Project {

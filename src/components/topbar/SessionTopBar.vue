@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
-import { inferModel, getContextWindow } from '@/utils/modelContext'
+import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
 import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
@@ -32,6 +32,8 @@ const props = defineProps<{
   modelString: string | null
   /** 已占用上下文 token 数(最近一次 assistant 响应的 input + cache_read_input_tokens) */
   usedContextTokens: number
+  /** API 报告的真实上下文容量（来自 result 事件 modelUsage.contextWindow，null 时回退推断） */
+  realContextWindow: number | null
   /** 最后修改时间(秒级时间戳) */
   lastModified: number
   /** 用户已选择的模型 ID(来自 useSessionSettings,可能为 null) */
@@ -81,18 +83,29 @@ function onAdvisorToggle() {
   emit('advisorChange', !props.selectedAdvisor)
 }
 
-/** 解析后的 ModelInfo(决定菜单内是否补充展示未知模型字符串) */
-const effectiveModel = computed(() => inferModel(effectiveModelStr.value))
+/** 解析后的 ModelInfo。API 模型名永远不带 [1m]，无法区分 200K/1M 变体——
+ *  有真实容量时按真实值修正；无真实值时默认取 1M 变体（Claude Code CLI 默认 1M） */
+const effectiveModel = computed(() => {
+  const model = inferModel(effectiveModelStr.value)
+  if (!model) return model
+  if (model.id.endsWith('[1m]')) return model
+  const oneMVariant = MODELS.find(m => m.id === `${model.id}[1m]`)
+  if (!oneMVariant) return model
+  if (props.realContextWindow) {
+    return props.realContextWindow >= oneMVariant.contextWindow ? oneMVariant : model
+  }
+  return oneMVariant
+})
 
 const { cliDefaults } = useCliDefaults()
 // 顶栏挂载即拉一次 CLI 默认值(settings.json 活文件,下拉打开时还会各自重读)
 onMounted(() => refreshCliDefaults())
 
-/** 上下文容量:按 jsonl 里真实跑过的模型字符串(含 [1m] 后缀)推断 */
-// 容量回退链:真实跑过的模型 → 顶栏已选模型(否则选了 1M 档仍显示 200K 误导)
-// → CLI 默认模型(新会话无记录无选择时,如 CLI 默认 sonnet 实为 200K 档)
+/** 上下文容量:API 真值 → effectiveModel 容量 → 模型名推断兜底 */
 const capacity = computed(() =>
-  getContextWindow(props.modelString ?? props.selectedModelId ?? cliDefaults.value.model),
+  props.realContextWindow
+    ?? effectiveModel.value?.contextWindow
+    ?? getContextWindow(props.selectedModelId ?? cliDefaults.value.model),
 )
 
 // --- 窄列折叠 ---
@@ -221,7 +234,7 @@ function onChannelChange(channelId: string | null) {
   >
     <!-- 模型切换(永不折叠) -->
     <ModelDropdown
-      :current="effectiveModelStr"
+      :current="effectiveModel?.id ?? effectiveModelStr"
       :disabled="selectedAdvisor"
       @select="onModelChange"
     />

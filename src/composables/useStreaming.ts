@@ -47,6 +47,10 @@ export interface SessionStreamState {
   tail: TailLine[]
   /** 最近一次发送的消息（出错重试用） */
   lastSent: { cwd: string; message: string; opts: SendOptions } | null
+  /** API 报告的真实上下文容量（result 事件 modelUsage.contextWindow） */
+  realContextWindow: number | null
+  /** API 报告的已用 input token 数（result 事件 modelUsage.inputTokens） */
+  realUsedTokens: number | null
 }
 
 interface BlockDeltaPayload {
@@ -69,6 +73,9 @@ interface StreamEventPayload {
   // result
   text?: string
   cost_usd?: number
+  context_window?: number
+  input_tokens?: number
+  output_tokens?: number
   // error
   message?: string
 }
@@ -87,6 +94,8 @@ function createState(): SessionStreamState {
     activeTool: null,
     tail: [],
     lastSent: null,
+    realContextWindow: null,
+    realUsedTokens: null,
   }
 }
 
@@ -527,6 +536,8 @@ export async function initStreamListeners(): Promise<void> {
       case 'result':
         // result 到达,流将结束;工具等待态清空
         state.activeTool = null
+        if (payload.context_window) state.realContextWindow = payload.context_window
+        if (payload.input_tokens) state.realUsedTokens = payload.input_tokens
         markTailDirty(sid)
         break
       case 'error':
@@ -630,14 +641,24 @@ function clearStreamingTurns(sessionId: string) {
   markTailDirty(sessionId)
 }
 
-/** 中断某会话的流式 */
+/** 中断当前回复（发 interrupt 控制消息，不杀进程；
+ *  stream-done 由 CLI interrupt 响应的 result 事件驱动，无需前端同步 finishStream。
+ *  interrupt 失败时前端兜底收尾，防止永远卡在 streaming 状态） */
 async function stopStreaming(sessionId: string) {
   try {
     await invoke('stop_streaming', { sessionId })
   } catch (_) {
+    finishStream(sessionId)
+  }
+}
+
+/** 关闭会话进程（SIGTERM → 5s → SIGKILL） */
+async function closeSession(sessionId: string) {
+  try {
+    await invoke('close_session', { sessionId })
+  } catch (_) {
     // ignore
   }
-  finishStream(sessionId)
 }
 
 export function useStreaming() {
@@ -647,6 +668,7 @@ export function useStreaming() {
     sendMessage,
     retrySession,
     stopStreaming,
+    closeSession,
     clearStreamingTurns,
   }
 }

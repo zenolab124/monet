@@ -86,6 +86,7 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     let mut earliest_timestamp: Option<String> = None;
     let mut total_tokens = TokenUsage::default();
     let mut message_count: u32 = 0;
+    let mut context_window: Option<u64> = None;
     // 同一次 API 响应拆多行时每行重复携带相同 usage，按 message.id 去重只计首次
     // （v2.2.0 FR-007；id 缺失的行按行独立计）。set 跨完整/轻量两条路径共享
     let mut seen_usage_ids: HashSet<String> = HashSet::new();
@@ -166,6 +167,15 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
                         .and_then(|t| t.as_str())
                         .map(String::from);
                 }
+                Some("result") => {
+                    if let Some(cw) = value
+                        .get("modelUsage")
+                        .and_then(|u| u.get("contextWindow"))
+                        .and_then(|v| v.as_u64())
+                    {
+                        context_window = Some(cw);
+                    }
+                }
                 _ => {}
             }
         } else {
@@ -227,6 +237,21 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
                 }
                 continue;
             }
+
+            if line.contains("\"result\"") && line.contains("\"modelUsage\"") {
+                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                    if value.get("type").and_then(|t| t.as_str()) == Some("result") {
+                        if let Some(cw) = value
+                            .get("modelUsage")
+                            .and_then(|u| u.get("contextWindow"))
+                            .and_then(|v| v.as_u64())
+                        {
+                            context_window = Some(cw);
+                        }
+                    }
+                }
+                continue;
+            }
         }
     }
 
@@ -251,6 +276,7 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
         total_tokens,
         file_size,
         message_count,
+        context_window,
     })
 }
 

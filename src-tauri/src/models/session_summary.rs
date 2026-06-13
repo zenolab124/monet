@@ -21,6 +21,8 @@ pub struct SessionSummary {
     pub file_size: u64,
     /// 用户+助手消息计数
     pub message_count: u32,
+    /// API 报告的上下文容量（JSONL result 事件 modelUsage.contextWindow，取最后一条）
+    pub context_window: Option<u64>,
 }
 
 impl SessionSummary {
