@@ -141,6 +141,12 @@ pub fn stop_streaming(session_id: String) -> Result<(), String> {
     streaming::interrupt_session(&session_id)
 }
 
+/// 运行时切换权限模式
+#[tauri::command]
+pub fn set_permission_mode(session_id: String, mode: String) -> Result<(), String> {
+    streaming::set_permission_mode(&session_id, &mode)
+}
+
 /// 开关 Remote Control（进程未启动时自动连接）
 #[tauri::command]
 pub async fn toggle_remote_control(

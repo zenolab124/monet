@@ -48,3 +48,5 @@ serde_yaml = "0.9"
 # 且避免 rustls 默认链的 aws-lc-rs 重编译负担
 reqwest = { version = "0.13.2", default-features = false, features = ["native-tls"] }
 tauri-plugin-window-state = "2.4.1"
+cron = "0.15"
+uuid = { version = "1", features = ["v4"] }

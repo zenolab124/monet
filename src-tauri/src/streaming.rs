@@ -84,7 +84,7 @@ pub enum StreamEvent {
 }
 
 /// 查找 claude 可执行文件路径
-fn find_claude() -> (String, Vec<String>) {
+pub fn find_claude() -> (String, Vec<String>) {
     let candidates = [
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
@@ -107,7 +107,7 @@ fn find_claude() -> (String, Vec<String>) {
 }
 
 /// 构建增强 PATH 环境变量
-fn enhanced_path() -> String {
+pub fn enhanced_path() -> String {
     let home = dirs::home_dir().unwrap_or_default();
     let mut extra_paths = vec![
         "/opt/homebrew/bin".to_string(),
@@ -499,6 +499,30 @@ pub fn interrupt_session(session_id: &str) -> Result<(), String> {
             write_stdin(&mut sp.stdin, &msg)
         }
         None => Ok(()),
+    }
+}
+
+/// 运行时切换权限模式
+pub fn set_permission_mode(session_id: &str, mode: &str) -> Result<(), String> {
+    let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned());
+
+    match process {
+        Some(p) => {
+            let mut sp = p.lock().unwrap();
+            sp.request_counter += 1;
+            let req_id = format!("set-perm-mode-{}", sp.request_counter);
+            let msg = json!({
+                "type": "control_request",
+                "request_id": req_id,
+                "request": {"subtype": "set_permission_mode", "permission_mode": mode}
+            });
+            write_stdin(&mut sp.stdin, &msg)
+        }
+        None => Err("会话进程不存在".to_string()),
     }
 }
 

@@ -15,6 +15,7 @@ import { useUiState } from '@/composables/useUiState'
 import { initPermissionListener } from '@/composables/usePermissionRequests'
 import { initStreamListeners } from '@/composables/useStreaming'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
+import { useRoutines } from '@/composables/useRoutines'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
 
 const { projects, loadProjects } = useProjects()
@@ -46,6 +47,7 @@ onMounted(async () => {
   await initStreamListeners()
   await initPermissionListener()
   await initNotificationLayer()
+  await useRoutines().initRoutineListener()
   // 工作台持久化损坏回退提示(NFR-002)
   if (stateWasReset) {
     useNotifications().notifyTransient('工作台状态已重置')

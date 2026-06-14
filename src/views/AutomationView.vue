@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
 import { useAutomation, buildRows } from '@/composables/useAutomation'
+import { useRoutines, type RoutineDefinition, type RoutineRow } from '@/composables/useRoutines'
+import RoutineForm from '@/components/automation/RoutineForm.vue'
 
 const { activeSection } = useUiState()
 const {
@@ -10,9 +12,23 @@ const {
   errorConfig, errorStats, ensureLoaded, refresh,
 } = useAutomation()
 
+const {
+  routines: routineRows,
+  loading: routinesLoading,
+  error: routinesError,
+  ensureLoaded: ensureRoutinesLoaded,
+  refresh: refreshRoutines,
+  deleteRoutine,
+  updateRoutine,
+  runNow,
+} = useRoutines()
+
 // 首次进入自动化域加载数据
 watch(activeSection, (s) => {
-  if (s === 'automation') ensureLoaded()
+  if (s === 'automation') {
+    ensureLoaded()
+    ensureRoutinesLoaded()
+  }
 }, { immediate: true })
 
 /** 表格行：配置为主体，统计异步填充 */
@@ -57,11 +73,40 @@ async function openFile(path: string) {
 }
 
 const isLoading = computed(() => loadingConfig.value || loadingStats.value)
+
+// --- Routines UI ---
+const showRoutineForm = ref<'new' | RoutineDefinition | null>(null)
+const deletingId = ref<string | null>(null)
+
+function onRoutineFormSaved() {
+  showRoutineForm.value = null
+}
+
+async function onToggleRoutine(r: RoutineRow) {
+  await updateRoutine(r.id, { enabled: !r.enabled })
+}
+
+async function onDeleteRoutine(r: RoutineRow) {
+  deletingId.value = r.id
+  try {
+    await deleteRoutine(r.id)
+  } finally {
+    deletingId.value = null
+  }
+}
+
+async function onRunNow(r: RoutineRow) {
+  try {
+    await runNow(r.id)
+  } catch {
+    // 已在运行中，忽略
+  }
+}
 </script>
 
 <template>
   <div class="h-full overflow-y-auto px-6.5 py-5" data-tauri-drag-region>
-    <div class="max-w-190 mx-auto">
+    <div class="max-w-190 mx-auto bg-card border border-border rounded shadow-paper px-5 py-4">
 
       <!-- 页头 -->
       <div class="flex items-center gap-2.5 mb-5">
@@ -176,12 +221,115 @@ const isLoading = computed(() => loadingConfig.value || loadingStats.value)
         </template>
       </section>
 
-      <!-- 定时任务区（FR-004：固定说明空态） -->
+      <!-- 定时任务区 -->
       <section>
-        <h2 class="sec-title">定时任务（Routines）</h2>
-        <p class="auto-note">
-          定时任务由 claude.ai 云端管理（/schedule 创建），本地无可读数据源，暂不支持展示。
-        </p>
+        <div class="flex items-center gap-2 mb-2.5">
+          <h2 class="sec-title mb-0">定时任务（Routines）</h2>
+          <div class="ml-auto flex items-center gap-1.5">
+            <button class="auto-btn" :disabled="routinesLoading" @click="refreshRoutines">
+              <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': routinesLoading }" />
+            </button>
+            <button class="auto-btn" @click="showRoutineForm = 'new'">
+              <span class="i-carbon-add w-3 h-3" />
+              新建
+            </button>
+          </div>
+        </div>
+
+        <!-- 加载中 -->
+        <div v-if="routinesLoading && !routineRows.length" class="py-8 text-center text-xs text-muted-foreground">
+          加载中…
+        </div>
+
+        <!-- 加载失败 -->
+        <div v-else-if="routinesError" class="py-8 text-center">
+          <p class="text-xs text-destructive">加载失败</p>
+          <button class="auto-btn mt-3" @click="refreshRoutines">重试</button>
+        </div>
+
+        <!-- 空态 -->
+        <div v-else-if="!routineRows.length && !showRoutineForm" class="auto-empty">
+          <p class="text-sm text-muted-foreground">暂无定时任务</p>
+          <p class="text-xs text-muted-foreground mt-1">创建后，CC Space 运行期间将按计划自动执行 Claude 指令</p>
+        </div>
+
+        <!-- 表格 -->
+        <div v-if="routineRows.length" class="auto-table-wrap">
+          <table class="auto-table">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>时间计划</th>
+                <th>指令</th>
+                <th>状态</th>
+                <th>上次执行</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in routineRows" :key="r.id">
+                <td class="text-xs font-medium">{{ r.name }}</td>
+                <td>
+                  <code class="text-[11px]">{{ r.cronExpression }}</code>
+                  <div v-if="r.originalText" class="text-[10px] text-muted-foreground mt-0.5">{{ r.originalText }}</div>
+                </td>
+                <td>
+                  <span class="truncate-cmd" :title="r.prompt">{{ r.prompt }}</span>
+                </td>
+                <td class="text-xs">
+                  <span v-if="r.isRunning" class="text-accent">运行中…</span>
+                  <span v-else-if="r.enabled" class="text-success">已启用</span>
+                  <span v-else class="text-muted-foreground">已暂停</span>
+                </td>
+                <td class="text-xs">
+                  <template v-if="!r.lastExecution">—</template>
+                  <template v-else>
+                    <span :class="r.lastExecution.exitCode === 0 ? 'text-success' : 'text-destructive'">
+                      {{ r.lastExecution.exitCode === 0 ? '✓' : '✗' }}
+                    </span>
+                    <span class="text-muted-foreground"> {{ formatTime(r.lastExecution.startedAt) }}</span>
+                  </template>
+                </td>
+                <td>
+                  <div class="flex items-center gap-0.5">
+                    <button
+                      class="auto-open-btn" :title="r.enabled ? '暂停' : '启用'"
+                      @click="onToggleRoutine(r)"
+                    >
+                      <span class="w-3 h-3 block" :class="r.enabled ? 'i-carbon-pause' : 'i-carbon-play'" />
+                    </button>
+                    <button class="auto-open-btn" title="编辑" @click="showRoutineForm = r">
+                      <span class="i-carbon-edit w-3 h-3 block" />
+                    </button>
+                    <button
+                      class="auto-open-btn" title="立即运行"
+                      :disabled="r.isRunning"
+                      @click="onRunNow(r)"
+                    >
+                      <span class="i-carbon-flash w-3 h-3 block" />
+                    </button>
+                    <button
+                      class="auto-open-btn" title="删除"
+                      :disabled="deletingId === r.id"
+                      @click="onDeleteRoutine(r)"
+                    >
+                      <span class="i-carbon-trash-can w-3 h-3 block" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 新建/编辑表单 -->
+        <div v-if="showRoutineForm" class="mt-3">
+          <RoutineForm
+            :routine="showRoutineForm === 'new' ? null : showRoutineForm"
+            @saved="onRoutineFormSaved"
+            @cancel="showRoutineForm = null"
+          />
+        </div>
       </section>
 
     </div>

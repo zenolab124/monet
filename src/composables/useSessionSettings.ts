@@ -26,6 +26,8 @@ export interface ChannelMark {
   at: number
 }
 
+export type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'dontAsk'
+
 export interface SessionSettings {
   /** null 表示未设置(回退使用 session 自带 model 字段) */
   modelId: string | null
@@ -36,17 +38,22 @@ export interface SessionSettings {
   channelMarks: ChannelMark[]
   /** 顾问模式:开启后主模型强制 sonnet + 经 --settings 注入 fable 顾问(见 settings-backlog 第 3 条) */
   advisor: boolean
+  /** 权限模式:运行时热切换,通过 control_request 发给 CLI */
+  permissionMode: PermissionMode
 }
 
 // effort 为 null = 本会话未设置 → 按应用默认行为发送。应用默认当前实现为「不传
 // --effort,由 CLI 自行决定」;将来由设置页配置(可选值含跟随 CLI/具体档位,见
 // docs/settings-backlog.md),「跟随 CLI/默认值」不出现在会话级选项中
+const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'plan', 'acceptEdits', 'dontAsk']
+
 export const DEFAULT_SETTINGS: SessionSettings = {
   modelId: null,
   effort: null,
   channelId: null,
   channelMarks: [],
   advisor: false,
+  permissionMode: 'default',
 }
 
 /** 顾问模式锁定的主模型(硬编码,未来设置页全局配置——见 docs/settings-backlog.md 第 3 条) */
@@ -94,12 +101,17 @@ function loadFromStorage(sid: string): SessionSettings {
     const channelId = typeof parsed.channelId === 'string' && parsed.channelId.length > 0
       ? parsed.channelId
       : null
+    const permissionMode: PermissionMode =
+      typeof parsed.permissionMode === 'string' && VALID_PERMISSION_MODES.includes(parsed.permissionMode as PermissionMode)
+        ? parsed.permissionMode as PermissionMode
+        : 'default'
     return {
       modelId,
       effort,
       channelId,
       channelMarks: sanitizeMarks(parsed.channelMarks),
       advisor: parsed.advisor === true,
+      permissionMode,
     }
   } catch (_) {
     return structuredClone(DEFAULT_SETTINGS)
@@ -142,6 +154,8 @@ export interface UseSessionSettingsReturn {
   setChannel: (channelId: string | null, afterUuid: string | null) => void
   /** 开关顾问模式 */
   setAdvisor: (advisor: boolean) => void
+  /** 切换权限模式 */
+  setPermissionMode: (mode: PermissionMode) => void
   /** 重置为默认并清除 localStorage */
   reset: () => void
 }
@@ -201,6 +215,10 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
     internal.value = { ...internal.value, advisor }
   }
 
+  function setPermissionMode(mode: PermissionMode) {
+    internal.value = { ...internal.value, permissionMode: mode }
+  }
+
   function reset() {
     const sid = sessionId.value
     if (sid) removeFromStorage(sid)
@@ -209,5 +227,5 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
 
   const settings = computed<SessionSettings>(() => internal.value)
 
-  return { settings, setModel, setEffort, setChannel, setAdvisor, reset }
+  return { settings, setModel, setEffort, setChannel, setAdvisor, setPermissionMode, reset }
 }

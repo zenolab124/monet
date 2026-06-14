@@ -24,6 +24,7 @@ import {
   type PermissionRequest,
   type PermissionDecision,
 } from '@/composables/usePermissionRequests'
+import { getHint } from '@/composables/usePermissionHints'
 
 const props = defineProps<{
   request: PermissionRequest
@@ -52,6 +53,8 @@ const isDanger = computed(() => props.request.danger !== null)
 
 /** 交互工具(如 EnterPlanMode)不提供「允许此会话」——静默放行没有意义且危险 */
 const showAllowSession = computed(() => !isInteractiveTool(props.request.toolName))
+
+const hint = computed(() => getHint(props.request.requestId))
 
 // --- 按钮 refs ---
 
@@ -130,6 +133,16 @@ function onKeydown(e: KeyboardEvent) {
           {{ request.danger.reason }}
         </div>
       </div>
+    </div>
+
+    <!-- AI 批注 -->
+    <div
+      v-if="hint?.text || hint?.loading"
+      class="hint-bar flex items-start gap-1.5 mx-3 mt-1.5 px-2 py-1.5 rounded border border-border/60 bg-muted/40"
+    >
+      <span class="i-carbon-sparkle w-3.5 h-3.5 text-primary/60 shrink-0 mt-px" aria-hidden="true" />
+      <span v-if="hint.loading" class="text-2xs text-muted-foreground italic">分析中…</span>
+      <span v-else class="text-2xs text-foreground/80 leading-relaxed">{{ hint.text }}</span>
     </div>
 
     <!-- 中部:工具参数预览(复用 blocks/tools 组件) -->

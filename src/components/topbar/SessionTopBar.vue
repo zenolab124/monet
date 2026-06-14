@@ -11,6 +11,8 @@ import ModelDropdown from './ModelDropdown.vue'
 import ContextProgress from './ContextProgress.vue'
 import EffortDropdown from './EffortDropdown.vue'
 import ChannelDropdown from './ChannelDropdown.vue'
+import PermissionModeDropdown from './PermissionModeDropdown.vue'
+import type { PermissionMode } from '@/composables/useSessionSettings'
 
 /**
  * 单行极简顶栏:常显区只留高频控件(模型/进度/努力),标题不再显示(列头已有),
@@ -46,6 +48,8 @@ const props = defineProps<{
   resolvedChannelId: string | null
   /** 顾问模式开关状态 */
   selectedAdvisor: boolean
+  /** 权限模式 */
+  selectedPermissionMode: PermissionMode
 }>()
 
 const emit = defineEmits<{
@@ -53,6 +57,7 @@ const emit = defineEmits<{
   (e: 'effortChange', effort: EffortSetting): void
   (e: 'channelChange', channelId: string | null): void
   (e: 'advisorChange', advisor: boolean): void
+  (e: 'permissionModeChange', mode: PermissionMode): void
   (e: 'reload'): void
   (e: 'deleted'): void
 }>()
@@ -225,6 +230,9 @@ function onEffortChange(level: EffortSetting) {
 function onChannelChange(channelId: string | null) {
   emit('channelChange', channelId)
 }
+function onPermissionModeChange(mode: PermissionMode) {
+  emit('permissionModeChange', mode)
+}
 </script>
 
 <template>
@@ -252,6 +260,13 @@ function onChannelChange(channelId: string | null) {
       v-if="showEffort"
       :current="selectedEffort"
       @select="onEffortChange"
+    />
+
+    <!-- 权限模式 -->
+    <PermissionModeDropdown
+      v-if="showEffort"
+      :current="selectedPermissionMode"
+      @select="onPermissionModeChange"
     />
 
     <!-- 渠道 -->
@@ -308,6 +323,11 @@ function onChannelChange(channelId: string | null) {
             v-if="!showEffort"
             :current="selectedEffort"
             @select="onEffortChange"
+          />
+          <PermissionModeDropdown
+            v-if="!showEffort"
+            :current="selectedPermissionMode"
+            @select="onPermissionModeChange"
           />
           <ChannelDropdown
             v-if="!showChannel"

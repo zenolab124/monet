@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -95,7 +94,7 @@ pub fn update_meta(session_id: String, patch: SessionMeta) -> Result<SessionMeta
     })
 }
 
-fn agent_cwd() -> PathBuf {
+pub fn agent_cwd() -> PathBuf {
     let p = dirs::home_dir()
         .unwrap_or_default()
         .join(".claude")
@@ -156,37 +155,7 @@ pub async fn generate_title(
     let title = tauri::async_runtime::spawn_blocking(move || {
         let snippet = extract_conversation_snippet(&pid, &sid)
             .ok_or_else(|| "会话无内容".to_string())?;
-
-        let prompt = format!(
-            "对话内容：\n{}\n\n请为这段对话生成标题。",
-            snippet
-        );
-
-        let output = Command::new("claude")
-            .arg("-p")
-            .arg(&prompt)
-            .arg("--system-prompt")
-            .arg("你是一个标题生成器。根据对话内容生成一个10字以内的中文标题。只输出标题本身，不要加引号、标点或任何其他内容。")
-            .arg("--model")
-            .arg("claude-haiku-4-5-20251001")
-            .arg("--effort")
-            .arg("low")
-            .arg("--output-format")
-            .arg("text")
-            .current_dir(agent_cwd())
-            .output()
-            .map_err(|e| format!("spawn claude 失败: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("claude 返回错误: {}", stderr));
-        }
-
-        let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if title.is_empty() {
-            return Err("生成的标题为空".to_string());
-        }
-        Ok(title)
+        crate::agent::generate_title(&snippet)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -198,4 +167,25 @@ pub async fn generate_title(
     });
 
     Ok(title)
+}
+
+#[tauri::command]
+pub async fn generate_permission_hint(
+    tool_name: String,
+    input_json: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::agent::permission_hint(&tool_name, &input_json)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn parse_natural_schedule(text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::agent::parse_cron(&text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

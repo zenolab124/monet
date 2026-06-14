@@ -13,8 +13,10 @@ mod streaming;
 mod tray;
 pub mod usage_stats;
 mod watcher;
+mod agent;
 mod automation;
 mod metadata;
+mod routines;
 mod workshop;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -42,6 +44,10 @@ pub fn run() {
             watcher::start(app.handle());
             // 渠道 runtime 残留清理(上次异常退出可能留下含 token 的合成文件)
             channels::cleanup_runtime_dir();
+            // AgentService 常驻进程
+            agent::init();
+            // 本地定时任务调度器
+            routines::init_scheduler(app.handle().clone());
 
             // 应用退出时 SIGTERM 所有长活会话进程
             let handle = app.handle().clone();
@@ -49,6 +55,8 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::Destroyed = event {
                         streaming::close_all_sessions();
+                        agent::shutdown();
+                        routines::shutdown_scheduler();
                     }
                 });
             }
@@ -67,6 +75,7 @@ pub fn run() {
             commands::close_session,
             commands::toggle_remote_control,
             commands::respond_permission,
+            commands::set_permission_mode,
             commands::get_cli_settings,
             commands::check_session_running,
             commands::get_usage_stats,
@@ -86,6 +95,14 @@ pub fn run() {
             metadata::get_all_meta,
             metadata::update_meta,
             metadata::generate_title,
+            metadata::generate_permission_hint,
+            metadata::parse_natural_schedule,
+            routines::get_routines,
+            routines::create_routine,
+            routines::update_routine,
+            routines::delete_routine,
+            routines::get_routine_logs,
+            routines::run_routine_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

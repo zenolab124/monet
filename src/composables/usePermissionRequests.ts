@@ -17,6 +17,7 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { checkDangerous, type DangerousFlag } from '@/utils/dangerousOps'
+import { requestHint, clearHint } from './usePermissionHints'
 
 /** 队列中的单条权限请求(已扩展前端字段) */
 export interface PermissionRequest {
@@ -146,6 +147,11 @@ export async function initPermissionListener(): Promise<void> {
         timestamp,
         danger: checkDangerous(toolName, input),
       })
+
+      // 异步生成 AI 批注（不阻塞决策）
+      if (!isInteractiveTool(toolName)) {
+        requestHint(requestId, toolName, input)
+      }
     },
   )
 }
@@ -194,6 +200,7 @@ export async function respondRequest(
 
   // 先出队再 invoke,避免 invoke 失败时卡住队列
   queue.value = queue.value.filter(r => r.requestId !== requestId)
+  clearHint(requestId)
 
   // allow_session:写入缓存（交互工具防御性排除,UI 本不该给这个选项）
   if (decision === 'allow_session' && req.sessionId && !isInteractiveTool(req.toolName)) {
@@ -222,6 +229,7 @@ export async function denyAllForSession(sessionId: string): Promise<void> {
   const pending = queue.value.filter(r => r.sessionId === sessionId)
   queue.value = queue.value.filter(r => r.sessionId !== sessionId)
   for (const req of pending) {
+    clearHint(req.requestId)
     try {
       await invoke('respond_permission', {
         requestId: req.requestId,

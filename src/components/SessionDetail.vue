@@ -67,7 +67,7 @@ const { goToSession } = useNotifications()
 const detail = createSessionDetail()
 const { records, loading, error, loadRecords, reloadRecords, clearRecords } = detail
 
-const { sendMessage, stopStreaming, clearStreamingTurns } = useStreaming()
+const { sendMessage, stopStreaming, clearStreamingTurns, setPermissionMode } = useStreaming()
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
@@ -186,7 +186,7 @@ async function onStopStreaming() {
 }
 
 // --- 会话级设置(模型 / 努力等级 / 渠道) ---
-const { settings, setModel, setEffort, setChannel, setAdvisor } = useSessionSettings(effectiveSessionId)
+const { settings, setModel, setEffort, setChannel, setAdvisor, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
 
 function onModelChange(modelId: string) {
   setModel(modelId)
@@ -212,6 +212,14 @@ function onChannelChange(channelId: string | null) {
 
 function onAdvisorChange(advisor: boolean) {
   setAdvisor(advisor)
+}
+
+function onPermissionModeChange(mode: import('@/composables/useSessionSettings').PermissionMode) {
+  persistPermissionMode(mode)
+  const sid = effectiveSessionId.value
+  if (sid) {
+    setPermissionMode(sid, mode).catch(() => {})
+  }
 }
 
 /** 当前消息流里出现的 uuid 集合:判断 mark 锚点是否还在视图内 */
@@ -885,10 +893,12 @@ async function onReload() {
       :selected-channel-id="settings.channelId"
       :resolved-channel-id="resolvedChannelId"
       :selected-advisor="settings.advisor"
+      :selected-permission-mode="settings.permissionMode"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @channel-change="onChannelChange"
       @advisor-change="onAdvisorChange"
+      @permission-mode-change="onPermissionModeChange"
       @reload="onReload"
       @deleted="onDeleted"
     />

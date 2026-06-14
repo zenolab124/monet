@@ -672,6 +672,10 @@ async function closeSession(sessionId: string) {
   }
 }
 
+async function setPermissionMode(sessionId: string, mode: string) {
+  await invoke('set_permission_mode', { sessionId, mode })
+}
+
 export function useStreaming() {
   return {
     streams,
@@ -681,5 +685,6 @@ export function useStreaming() {
     stopStreaming,
     closeSession,
     clearStreamingTurns,
+    setPermissionMode,
   }
 }
