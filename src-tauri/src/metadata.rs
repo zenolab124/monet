@@ -182,6 +182,15 @@ pub async fn generate_permission_hint(
 }
 
 #[tauri::command]
+pub async fn translate_settings_fields(fields_json: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::agent::translate_settings(&fields_json)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn parse_natural_schedule(text: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         crate::agent::parse_cron(&text)

@@ -144,8 +144,7 @@ function onTabDrop(e: DragEvent, index: number, tab: WorkbenchTab) {
 
 <template>
   <div
-    class="shrink-0 flex items-end gap-0.5 pl-[30px] pr-2 pt-2 border-b border-border overflow-x-auto tabs-scroll"
-    data-tauri-drag-region
+    class="h-full flex items-center gap-0.5 pr-2 overflow-x-auto tabs-scroll"
   >
     <button
       v-for="(tab, i) in state.tabs"
@@ -198,24 +197,22 @@ function onTabDrop(e: DragEvent, index: number, tab: WorkbenchTab) {
 .wb-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  padding: 4px 14px;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--radius) var(--radius) 0 0;
+  gap: 5px;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
   position: relative;
-  top: 1px;
   white-space: nowrap;
   flex-shrink: 0;
+  height: 22px;
 }
 .wb-tab:hover {
   background: var(--muted);
 }
 .wb-tab.active {
-  background: var(--background);
-  border-color: var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-paper);
   color: var(--foreground);
   font-weight: 500;
 }

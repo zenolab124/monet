@@ -38,10 +38,11 @@ withDefaults(defineProps<{
   border-radius: var(--radius);
   box-shadow: var(--shadow-paper);
   padding: 10px 14px;
-  margin-bottom: 8px;
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 .fi-name {
   font-size: 12.5px;

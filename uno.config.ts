@@ -32,7 +32,10 @@ export default defineConfig({
     transformerVariantGroup(),
   ],
   safelist: ['i-carbon-sun', 'i-carbon-moon', 'i-carbon-screen', 'i-carbon-renew'],
-  shortcuts: neutralShortcuts as never,
+  shortcuts: [
+    ...neutralShortcuts as never[],
+    ['content-area', 'max-w-280 mx-auto w-full'],
+  ],
   rules: [
     // paper 三层棕偏阴影（铁律：阴影只用这两枚 token）
     ['shadow-paper', { 'box-shadow': 'var(--shadow-paper)' }],

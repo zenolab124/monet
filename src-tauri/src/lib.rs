@@ -18,6 +18,7 @@ mod automation;
 mod metadata;
 mod routines;
 mod workshop;
+mod cli_settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -48,6 +49,8 @@ pub fn run() {
             agent::init();
             // 本地定时任务调度器
             routines::init_scheduler(app.handle().clone());
+            // 后台刷新 CLI settings schema
+            cli_settings::refresh_settings_schema();
 
             // 应用退出时 SIGTERM 所有长活会话进程
             let handle = app.handle().clone();
@@ -97,12 +100,17 @@ pub fn run() {
             metadata::generate_title,
             metadata::generate_permission_hint,
             metadata::parse_natural_schedule,
+            metadata::translate_settings_fields,
             routines::get_routines,
             routines::create_routine,
             routines::update_routine,
             routines::delete_routine,
             routines::get_routine_logs,
             routines::run_routine_now,
+            cli_settings::get_settings_schema,
+            cli_settings::get_full_cli_settings,
+            cli_settings::update_cli_settings,
+            cli_settings::refresh_settings_schema,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

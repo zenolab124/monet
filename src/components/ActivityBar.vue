@@ -38,10 +38,9 @@ const badgeText = computed(() => {
 
 <template>
   <nav
-    class="w-12 shrink-0 flex flex-col items-center gap-1 pb-2.5 bg-secondary border-r border-border"
+    class="w-12 shrink-0 flex flex-col items-center gap-1 pt-1.5 pb-2.5 bg-secondary border-r border-border"
     data-tauri-drag-region
   >
-    <div class="h-9 shrink-0 w-full" data-tauri-drag-region />
 
     <button
       v-for="item in topDomains"

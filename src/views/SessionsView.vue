@@ -1,15 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import Toolbar from '@/components/Toolbar.vue'
 import ProjectSidebar from '@/components/ProjectSidebar.vue'
 import SessionList from '@/components/SessionList.vue'
 import SessionDetail from '@/components/SessionDetail.vue'
 import { useUiState } from '@/composables/useUiState'
-
-/**
- * 会话域：原顶层三栏整体降级为本组件挂入新壳（v2.0.0 FR-006）。
- * 交互不变；终态语义为档案馆（v2.1.0 只读化）。
- */
 
 const { sidebarsCollapsed } = useUiState()
 
@@ -19,9 +13,7 @@ const sessionListWidth = computed(() => (sidebarsCollapsed.value ? '0px' : '288p
 </script>
 
 <template>
-  <div class="h-full flex flex-col">
-    <Toolbar />
-    <div class="flex-1 flex min-h-0">
+  <div class="h-full flex min-h-0">
       <aside
         class="shrink-0 border-r border-border overflow-hidden sidebar-collapsible"
         :class="{ 'border-r-0': sidebarsCollapsed }"
@@ -42,7 +34,6 @@ const sessionListWidth = computed(() => (sidebarsCollapsed.value ? '0px' : '288p
           <SessionDetail />
         </div>
       </main>
-    </div>
   </div>
 </template>
 

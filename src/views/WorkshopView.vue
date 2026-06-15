@@ -96,16 +96,14 @@ async function openDir() {
 </script>
 
 <template>
-  <div class="h-full flex min-w-0">
-    <!-- 左：四类子导航 -->
+  <div class="h-full p-2.5">
+    <div class="h-full flex bg-card border border-border rounded-lg shadow-paper overflow-hidden">
     <WorkshopNav v-model="category" :items="navItems" :counts="counts" />
 
-    <!-- 右：列表区 -->
-    <main class="flex-1 min-w-0 overflow-y-auto px-6.5 py-5" data-tauri-drag-region>
-      <div class="max-w-190 mx-auto">
-        <!-- 页头 -->
+    <main class="flex-1 min-w-0 overflow-y-auto px-6.5 py-5">
+      <div class="content-area">
         <div class="flex items-center gap-2.5 mb-4">
-          <h1 class="text-lg font-semibold">{{ head.title }}</h1>
+          <h2 class="text-base font-semibold">{{ head.title }}</h2>
           <span class="text-xs text-muted-foreground">{{ head.sub }}</span>
           <div class="ml-auto flex items-center gap-1.5">
             <span v-if="openFailed" class="text-xs text-destructive">打开失败</span>
@@ -139,6 +137,7 @@ async function openDir() {
         </template>
       </div>
     </main>
+    </div>
   </div>
 </template>
 

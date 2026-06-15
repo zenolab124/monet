@@ -29,7 +29,7 @@ defineProps<{
     <p class="text-xs text-muted-foreground">{{ emptyTitle }}</p>
     <p class="text-xs text-muted-foreground mt-1">{{ emptyHint }}</p>
   </div>
-  <div v-else>
+  <div v-else class="asset-grid">
     <AssetItem
       v-for="item in items"
       :key="`${item.path}|${item.name}`"
@@ -41,3 +41,16 @@ defineProps<{
     />
   </div>
 </template>
+
+<style scoped>
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 768px) {
+  .asset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

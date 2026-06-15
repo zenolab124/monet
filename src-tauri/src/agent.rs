@@ -306,6 +306,22 @@ pub fn generate_title(snippet: &str) -> Result<String, String> {
     request_blocking(&prompt)
 }
 
+/// 解读 settings 字段——不是翻译，是专家解释
+pub fn translate_settings(fields_json: &str) -> Result<String, String> {
+    let prompt = format!(
+        "【角色：Claude Code 配置专家】你深度理解 Claude Code CLI 的每个配置项。\
+        输入是 JSON 数组，每项有 key（settings.json 字段名）和 description（官方英文说明）。\n\n\
+        对每个字段，输出：\n\
+        - key：原字段名\n\
+        - name：中文简称（≤6字，如「自动记忆」「沙箱配置」）\n\
+        - desc：面向用户的中文解读（≤60字）——不要翻译英文原文，而是用大白话说清楚：\
+          这个开关/值实际控制什么行为？开了/关了/改了会怎样？什么人需要关注它？\n\n\
+        输出纯 JSON 数组，不要 markdown 代码块、不要其他文字。\n\n{}",
+        fields_json
+    );
+    request_blocking(&prompt)
+}
+
 /// 自然语言转 cron 表达式
 pub fn parse_cron(text: &str) -> Result<String, String> {
     let prompt = format!(

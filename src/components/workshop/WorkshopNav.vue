@@ -37,6 +37,7 @@ defineEmits<{ (e: 'update:modelValue', v: WorkshopCategory): void }>()
 .ws-nav {
   width: 190px;
   padding: 12px 8px;
+  background: var(--background);
 }
 .ws-pane-title {
   padding: 12px 16px 4px;

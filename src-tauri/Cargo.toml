@@ -46,7 +46,7 @@ serde_yaml = "0.9"
 # 工坊域(v2.3.0):MCP http 探活(FR-005)。default-features=false 砍掉无关默认件;
 # native-tls 走平台 TLS(macOS Security.framework / Windows SChannel),https 端点探活必需,
 # 且避免 rustls 默认链的 aws-lc-rs 重编译负担
-reqwest = { version = "0.13.2", default-features = false, features = ["native-tls"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["native-tls", "blocking"] }
 tauri-plugin-window-state = "2.4.1"
 cron = "0.15"
 uuid = { version = "1", features = ["v4"] }

@@ -55,19 +55,10 @@ function onSelectDate(date: string) {
 </script>
 
 <template>
-  <main class="h-full overflow-y-auto px-8 py-6.5" data-tauri-drag-region>
-    <div class="max-w-220 mx-auto">
+  <main class="h-full overflow-y-auto px-8 py-6.5">
+    <div class="content-area">
       <div class="flex items-baseline gap-3 mb-4.5">
-        <h1 class="text-lg font-semibold">总览</h1>
         <span class="text-xs text-muted-foreground">{{ headDate }}</span>
-        <button
-          class="refresh-btn ml-auto"
-          :disabled="refreshing"
-          title="重新统计"
-          @click="refresh"
-        >
-          <span class="i-carbon-renew w-3.5 h-3.5" :class="{ 'animate-spin': refreshing }" />
-        </button>
       </div>
 
       <div class="card-grid">
@@ -93,7 +84,7 @@ function onSelectDate(date: string) {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .card-grid {
     grid-template-columns: 1fr;
   }

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue'
+import TitleBar from '@/components/TitleBar.vue'
+import TitleBarTools from '@/components/TitleBarTools.vue'
 import ActivityBar from '@/components/ActivityBar.vue'
+import WorkbenchTabs from '@/components/workbench/WorkbenchTabs.vue'
 import SessionsView from '@/views/SessionsView.vue'
 import HomeView from '@/views/HomeView.vue'
 import WorkbenchView from '@/views/WorkbenchView.vue'
@@ -57,19 +60,26 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <!-- 新壳：ActivityBar + 区域 v-show 切换（DOM 常驻，流式/滚动/监听零丢失） -->
-  <div class="h-screen w-screen flex bg-background text-foreground" @contextmenu.prevent>
-    <ActivityBar />
-    <WorkbenchView v-show="activeSection === 'workbench'" class="flex-1 min-w-0" />
-    <SessionsView v-show="activeSection === 'sessions'" class="flex-1 min-w-0" />
-    <WorkshopView v-show="activeSection === 'workshop'" class="flex-1 min-w-0" />
-    <AutomationView v-show="activeSection === 'automation'" class="flex-1 min-w-0" />
-    <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
-    <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
+  <div class="h-screen w-screen flex flex-col bg-background text-foreground" @contextmenu.prevent>
+    <TitleBar>
+      <template #leading>
+        <WorkbenchTabs v-if="activeSection === 'workbench'" />
+      </template>
+      <template #trailing>
+        <TitleBarTools />
+      </template>
+    </TitleBar>
+    <div class="flex-1 flex min-h-0">
+      <ActivityBar />
+      <WorkbenchView v-show="activeSection === 'workbench'" class="flex-1 min-w-0" />
+      <SessionsView v-show="activeSection === 'sessions'" class="flex-1 min-w-0" />
+      <WorkshopView v-show="activeSection === 'workshop'" class="flex-1 min-w-0" />
+      <AutomationView v-show="activeSection === 'automation'" class="flex-1 min-w-0" />
+      <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
+      <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
+    </div>
 
-    <!-- 通知层:任何域可见(FR-006) -->
     <ToastStack />
-    <!-- 全局确认弹窗 -->
     <ConfirmDialog />
   </div>
 </template>

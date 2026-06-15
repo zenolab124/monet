@@ -13,6 +13,7 @@ import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
+import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 
 const { channels, defaultChannelId, deleteChannel, setDefaultChannel, revealChannelsDir } =
   useChannels()
@@ -21,7 +22,7 @@ const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHom
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
 
-type Tab = 'general' | 'channels' | 'models' | 'lab' | 'diag'
+type Tab = 'general' | 'channels' | 'models' | 'claude-code' | 'lab' | 'diag'
 const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
@@ -100,6 +101,9 @@ function onSaved() {
       </button>
       <button :class="['side-item', { active: activeTab === 'models' }]" @click="activeTab = 'models'">
         <span class="i-carbon-bot w-3.5 h-3.5" />模型
+      </button>
+      <button :class="['side-item', { active: activeTab === 'claude-code' }]" @click="activeTab = 'claude-code'">
+        <span class="i-carbon-json w-3.5 h-3.5" />Claude Code
       </button>
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
         <span class="i-carbon-chemistry w-3.5 h-3.5" />实验室
@@ -280,6 +284,11 @@ function onSaved() {
               <span>自动探测可用性（选到不可用档位后置灰）</span>
             </label>
           </div>
+        </section>
+
+        <!-- ====== Claude Code 配置 ====== -->
+        <section v-show="activeTab === 'claude-code'">
+          <ClaudeCodeSettings />
         </section>
 
         <!-- ====== 实验室 ====== -->

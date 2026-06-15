@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
 import { useAutomation, buildRows } from '@/composables/useAutomation'
@@ -30,6 +30,9 @@ watch(activeSection, (s) => {
     ensureRoutinesLoaded()
   }
 }, { immediate: true })
+
+type AutoTab = 'hooks' | 'routines'
+const autoTab = ref<AutoTab>('hooks')
 
 /** 表格行：配置为主体，统计异步填充 */
 const rows = computed(() => {
@@ -105,25 +108,28 @@ async function onRunNow(r: RoutineRow) {
 </script>
 
 <template>
-  <div class="h-full overflow-y-auto px-6.5 py-5" data-tauri-drag-region>
-    <div class="max-w-190 mx-auto bg-card border border-border rounded shadow-paper px-5 py-4">
+  <div class="h-full p-2.5">
+    <div class="h-full flex bg-card border border-border rounded-lg shadow-paper overflow-hidden">
 
-      <!-- 页头 -->
-      <div class="flex items-center gap-2.5 mb-5">
-        <h1 class="text-lg font-semibold">自动化</h1>
-        <div class="ml-auto flex items-center gap-1.5">
-          <span v-if="openFailMsg" class="text-xs text-destructive">{{ openFailMsg }}</span>
-          <button class="auto-btn" :disabled="!config" @click="openGlobalConfig">打开配置</button>
-          <button class="auto-btn" :disabled="isLoading" @click="refresh">
-            <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': isLoading }" />
-            刷新
-          </button>
-        </div>
-      </div>
+    <!-- 侧栏导航 -->
+    <nav class="auto-nav">
+      <div class="auto-nav-title">自动化</div>
+      <button :class="['auto-nav-item', { active: autoTab === 'hooks' }]" @click="autoTab = 'hooks'">
+        <span class="i-carbon-flow w-3.5 h-3.5" />Hooks
+        <span class="auto-nav-count">{{ rows.length || '—' }}</span>
+      </button>
+      <button :class="['auto-nav-item', { active: autoTab === 'routines' }]" @click="autoTab = 'routines'">
+        <span class="i-carbon-time w-3.5 h-3.5" />定时任务
+        <span class="auto-nav-count">{{ routineRows.length || '—' }}</span>
+      </button>
+    </nav>
 
-      <!-- Hooks 区 -->
-      <section class="mb-6">
-        <h2 class="sec-title">Hooks</h2>
+    <!-- 内容区 -->
+    <div class="flex-1 min-w-0 overflow-y-auto">
+    <div class="content-area px-5 py-4">
+
+      <!-- Hooks -->
+      <section v-show="autoTab === 'hooks'">
 
         <!-- 配置加载中 -->
         <div v-if="loadingConfig && !config" class="py-8 text-center text-xs text-muted-foreground">
@@ -221,8 +227,8 @@ async function onRunNow(r: RoutineRow) {
         </template>
       </section>
 
-      <!-- 定时任务区 -->
-      <section>
+      <!-- 定时任务 -->
+      <section v-show="autoTab === 'routines'">
         <div class="flex items-center gap-2 mb-2.5">
           <h2 class="sec-title mb-0">定时任务（Routines）</h2>
           <div class="ml-auto flex items-center gap-1.5">
@@ -333,10 +339,57 @@ async function onRunNow(r: RoutineRow) {
       </section>
 
     </div>
+    </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* 侧栏导航 */
+.auto-nav {
+  width: 160px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 14px 8px;
+  background: var(--background);
+}
+.auto-nav-title {
+  padding: 0 8px;
+  margin-bottom: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.auto-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--muted-foreground);
+  border-radius: var(--radius);
+  cursor: pointer;
+  margin-bottom: 2px;
+  border: none;
+  background: none;
+}
+.auto-nav-item:hover {
+  background: var(--muted);
+}
+.auto-nav-item.active {
+  color: var(--primary);
+  background: var(--card);
+  box-shadow: var(--shadow-paper);
+}
+.auto-nav-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .sec-title {
   font-size: 11px;
   font-weight: 600;
