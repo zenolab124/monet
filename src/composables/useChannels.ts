@@ -91,8 +91,52 @@ async function setAgentChain(chain: string[]): Promise<void> {
   await refreshChannels()
 }
 
+const revealedTokens = ref<Record<string, string>>({})
+
+async function revealToken(id: string): Promise<string | null> {
+  if (revealedTokens.value[id]) return revealedTokens.value[id]
+  try {
+    const token = await invoke<string | null>('get_channel_token', { id })
+    if (token) revealedTokens.value = { ...revealedTokens.value, [id]: token }
+    return token
+  } catch { return null }
+}
+
+function hideToken(id: string) {
+  const { [id]: _, ...rest } = revealedTokens.value
+  revealedTokens.value = rest
+}
+
 async function revealChannelsDir(): Promise<void> {
   await invoke('reveal_channels_dir')
+}
+
+interface ProbeResult {
+  online: boolean
+  status: string
+  models: string[]
+  latencyMs: number
+}
+
+const probeResults = ref<Record<string, ProbeResult>>({})
+const probing = ref<Record<string, boolean>>({})
+
+async function probeChannel(id: string): Promise<ProbeResult | null> {
+  probing.value = { ...probing.value, [id]: true }
+  try {
+    const result = await invoke<ProbeResult>('probe_channel', { id })
+    probeResults.value = { ...probeResults.value, [id]: result }
+    return result
+  } catch {
+    return null
+  } finally {
+    probing.value = { ...probing.value, [id]: false }
+  }
+}
+
+async function probeAllChannels(): Promise<void> {
+  const ids = channels.value.map(c => c.id)
+  await Promise.allSettled(ids.map(id => probeChannel(id)))
 }
 
 export function useChannels() {
@@ -100,6 +144,8 @@ export function useChannels() {
     channels,
     sessionChain,
     agentChain,
+    probeResults,
+    probing,
     refreshChannels,
     saveChannel,
     deleteChannel,
@@ -107,5 +153,10 @@ export function useChannels() {
     setSessionChain,
     setAgentChain,
     revealChannelsDir,
+    probeChannel,
+    probeAllChannels,
+    revealedTokens,
+    revealToken,
+    hideToken,
   }
 }

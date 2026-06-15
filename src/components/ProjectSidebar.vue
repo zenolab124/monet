@@ -2,8 +2,7 @@
 import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
-import { formatBytes } from '@/types'
-import { relativeTime } from '@/types'
+import { formatBytes, formatTokens, tokenTotal, relativeTime } from '@/types'
 
 const { t } = useI18n()
 const {
@@ -24,10 +23,21 @@ function isSelected(id: string) {
   return selectedProjectIds.value.has(id)
 }
 
-/** 从完整路径中提取最后一段作为项目名 */
 function projectName(displayPath: string) {
   const parts = displayPath.split('/')
   return parts[parts.length - 1] || displayPath
+}
+
+function projectPath(displayPath: string) {
+  const i = displayPath.lastIndexOf('/')
+  if (i <= 0) return ''
+  const raw = displayPath.slice(0, i).replace(/^\/Users\/[^/]+/, '~')
+  if (raw === '~' || raw.split('/').filter(Boolean).length < 2) return ''
+  return raw
+}
+
+function projectTokens(project: typeof projects.value[number]) {
+  return project.sessions.reduce((sum, s) => sum + tokenTotal(s.total_tokens), 0)
 }
 </script>
 
@@ -55,11 +65,14 @@ function projectName(displayPath: string) {
     </div>
 
     <!-- 项目列表 -->
-    <div v-else class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain">
-      <button
-        v-for="project in projects"
+    <div v-else class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain flex flex-col p-1">
+      <template
+        v-for="(project, i) in projects"
         :key="project.id"
-        class="w-full text-left px-3 py-1.5 flex items-start gap-2 rounded-md transition-colors
+      >
+      <div v-if="i > 0" class="ml-6 mr-2.5 border-t border-border/30" />
+      <button
+        class="w-full text-left px-2.5 py-2 flex items-start gap-2 rounded-md transition-colors
                hover:bg-muted group"
         :class="{ 'bg-card shadow-paper': isSelected(project.id) }"
         @click="toggleProject(project.id)"
@@ -70,15 +83,24 @@ function projectName(displayPath: string) {
           :class="isSelected(project.id) ? 'bg-primary' : 'bg-transparent group-hover:bg-muted-foreground'"
         />
         <div class="min-w-0 flex-1">
-          <div class="text-sm text-foreground truncate" :title="project.display_path">
-            {{ projectName(project.display_path) }}
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="text-sm text-foreground truncate font-medium" :title="project.display_path">
+              {{ projectName(project.display_path) }}
+            </span>
+            <span v-if="project.last_active" class="text-xs text-muted-foreground shrink-0">
+              {{ relativeTime(project.last_active) }}
+            </span>
           </div>
-          <div class="text-xs text-muted-foreground flex gap-2 mt-0.5">
+          <div v-if="projectPath(project.display_path)" class="text-xs text-muted-foreground/50 truncate mt-px">
+            {{ projectPath(project.display_path) }}
+          </div>
+          <div class="text-xs text-muted-foreground mt-px flex items-baseline justify-between">
             <span>{{ $t('archive.sessionCount', { count: project.session_count }) }}</span>
-            <span v-if="project.last_active">{{ relativeTime(project.last_active) }}</span>
+            <span>{{ formatTokens(projectTokens(project)) }}</span>
           </div>
         </div>
       </button>
+      </template>
     </div>
 
     <!-- 底部统计 -->

@@ -22,8 +22,10 @@ import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 
 const { t } = useI18n()
 const {
-  channels, sessionChain, agentChain,
+  channels, sessionChain, agentChain, probeResults, probing,
+  revealedTokens, revealToken, hideToken,
   deleteChannel, setChannelEnabled, setSessionChain, setAgentChain, revealChannelsDir,
+  probeChannel, probeAllChannels,
 } = useChannels()
 const { activeSection } = useUiState()
 const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
@@ -75,7 +77,7 @@ onMounted(() => refreshChannels())
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
-    refreshChannels()
+    refreshChannels().then(() => probeAllChannels())
     ensureLoaded()
   }
 })
@@ -328,12 +330,51 @@ function onSaved() {
                         </template>
                       </div>
                     </div>
-                    <div v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID" class="chain-row-2">
-                      <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
-                      <span v-if="channelById(stripPrefix(pid)).authTokenMasked" class="ml-auto shrink-0">{{ channelById(stripPrefix(pid)).authTokenMasked }}</span>
-                    </div>
-                    <div v-else class="chain-row-2">
-                      <span class="text-muted-foreground/60 italic">OAuth</span>
+                    <div class="chain-row-2">
+                      <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
+                        <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
+                        <span class="flex items-center gap-0.5 shrink-0">
+                          <span class="font-mono">{{ revealedTokens[stripPrefix(pid)] || channelById(stripPrefix(pid)).authTokenMasked || '' }}</span>
+                          <button
+                            v-if="channelById(stripPrefix(pid)).authTokenMasked"
+                            class="chain-action"
+                            @pointerdown.stop
+                            @click="revealedTokens[stripPrefix(pid)] ? hideToken(stripPrefix(pid)) : revealToken(stripPrefix(pid))"
+                          >
+                            <span :class="revealedTokens[stripPrefix(pid)] ? 'i-carbon-view-off' : 'i-carbon-view'" class="w-3 h-3" />
+                          </button>
+                        </span>
+                      </template>
+                      <span v-else class="text-muted-foreground/60 italic">OAuth</span>
+                      <span class="ml-auto shrink-0 flex items-center gap-1.5">
+                        <template v-if="probing[stripPrefix(pid)]">
+                          <span class="i-carbon-renew w-2.5 h-2.5 animate-spin" />
+                        </template>
+                        <template v-else-if="probeResults[stripPrefix(pid)]">
+                          <span
+                            class="inline-block w-1.5 h-1.5 rounded-full"
+                            :class="probeResults[stripPrefix(pid)].online ? 'bg-green-600' : 'bg-destructive'"
+                          />
+                          <span v-if="probeResults[stripPrefix(pid)].online && probeResults[stripPrefix(pid)].models.length">
+                            {{ probeResults[stripPrefix(pid)].models.length }} {{ $t('common.model').toLowerCase() }}s
+                          </span>
+                          <span v-else-if="!probeResults[stripPrefix(pid)].online">
+                            {{ probeResults[stripPrefix(pid)].status === 'auth_error' ? '401' : probeResults[stripPrefix(pid)].status }}
+                          </span>
+                          <span v-if="probeResults[stripPrefix(pid)].latencyMs" class="text-muted-foreground/50">
+                            {{ probeResults[stripPrefix(pid)].latencyMs }}ms
+                          </span>
+                        </template>
+                        <button
+                          v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID"
+                          class="chain-action"
+                          :title="$t('settings.probeChannel')"
+                          @pointerdown.stop
+                          @click="probeChannel(stripPrefix(pid))"
+                        >
+                          <span class="i-carbon-activity w-3 h-3" />
+                        </button>
+                      </span>
                     </div>
                   </div>
                 </SortableChainItem>
@@ -369,12 +410,51 @@ function onSaved() {
                         </template>
                       </div>
                     </div>
-                    <div v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID" class="chain-row-2">
-                      <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
-                      <span v-if="channelById(stripPrefix(pid)).authTokenMasked" class="ml-auto shrink-0">{{ channelById(stripPrefix(pid)).authTokenMasked }}</span>
-                    </div>
-                    <div v-else class="chain-row-2">
-                      <span class="text-muted-foreground/60 italic">OAuth</span>
+                    <div class="chain-row-2">
+                      <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
+                        <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
+                        <span class="flex items-center gap-0.5 shrink-0">
+                          <span class="font-mono">{{ revealedTokens[stripPrefix(pid)] || channelById(stripPrefix(pid)).authTokenMasked || '' }}</span>
+                          <button
+                            v-if="channelById(stripPrefix(pid)).authTokenMasked"
+                            class="chain-action"
+                            @pointerdown.stop
+                            @click="revealedTokens[stripPrefix(pid)] ? hideToken(stripPrefix(pid)) : revealToken(stripPrefix(pid))"
+                          >
+                            <span :class="revealedTokens[stripPrefix(pid)] ? 'i-carbon-view-off' : 'i-carbon-view'" class="w-3 h-3" />
+                          </button>
+                        </span>
+                      </template>
+                      <span v-else class="text-muted-foreground/60 italic">OAuth</span>
+                      <span class="ml-auto shrink-0 flex items-center gap-1.5">
+                        <template v-if="probing[stripPrefix(pid)]">
+                          <span class="i-carbon-renew w-2.5 h-2.5 animate-spin" />
+                        </template>
+                        <template v-else-if="probeResults[stripPrefix(pid)]">
+                          <span
+                            class="inline-block w-1.5 h-1.5 rounded-full"
+                            :class="probeResults[stripPrefix(pid)].online ? 'bg-green-600' : 'bg-destructive'"
+                          />
+                          <span v-if="probeResults[stripPrefix(pid)].online && probeResults[stripPrefix(pid)].models.length">
+                            {{ probeResults[stripPrefix(pid)].models.length }} {{ $t('common.model').toLowerCase() }}s
+                          </span>
+                          <span v-else-if="!probeResults[stripPrefix(pid)].online">
+                            {{ probeResults[stripPrefix(pid)].status === 'auth_error' ? '401' : probeResults[stripPrefix(pid)].status }}
+                          </span>
+                          <span v-if="probeResults[stripPrefix(pid)].latencyMs" class="text-muted-foreground/50">
+                            {{ probeResults[stripPrefix(pid)].latencyMs }}ms
+                          </span>
+                        </template>
+                        <button
+                          v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID"
+                          class="chain-action"
+                          :title="$t('settings.probeChannel')"
+                          @pointerdown.stop
+                          @click="probeChannel(stripPrefix(pid))"
+                        >
+                          <span class="i-carbon-activity w-3 h-3" />
+                        </button>
+                      </span>
                     </div>
                   </div>
                 </SortableChainItem>

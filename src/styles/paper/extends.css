@@ -39,14 +39,18 @@ body {
 .form-input,
 .form-select,
 .form-textarea {
-  padding: 5px 8px;
+  padding: 7px 10px;
   font-size: 12px;
+  line-height: 1.4;
   font-family: inherit;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--popover);
   color: var(--foreground);
   transition: border-color 0.15s;
+}
+.form-select {
+  height: 32px;
 }
 .form-input:focus,
 .form-select:focus,

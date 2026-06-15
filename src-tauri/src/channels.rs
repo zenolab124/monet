@@ -500,6 +500,23 @@ pub fn set_agent_chain(chain: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_channel_token(id: String) -> Result<Option<String>, String> {
+    if id == OFFICIAL_ID {
+        return Ok(None);
+    }
+    validate_id(&id)?;
+    let path = channel_file_path(&id);
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let root: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(root
+        .get("env")
+        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+        .and_then(|v| v.as_str())
+        .filter(|t| !t.is_empty())
+        .map(String::from))
+}
+
+#[tauri::command]
 pub fn reveal_channels_dir() -> Result<(), String> {
     let dir = channels_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -613,3 +630,109 @@ pub fn cleanup_runtime_dir() {
         }
     }
 }
+
+// ---- 渠道探活 + 模型发现 ----
+
+use std::sync::OnceLock;
+use std::time::Duration;
+
+fn probe_client() -> Result<&'static reqwest::blocking::Client, String> {
+    static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(8))
+                .build()
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeResult {
+    pub online: bool,
+    pub status: String,
+    pub models: Vec<String>,
+    pub latency_ms: u64,
+}
+
+#[tauri::command]
+pub async fn probe_channel(id: String) -> Result<ProbeResult, String> {
+    if id == OFFICIAL_ID {
+        return Ok(ProbeResult {
+            online: true,
+            status: "official".to_string(),
+            models: vec![],
+            latency_ms: 0,
+        });
+    }
+
+    let (base_url, token) = read_channel_credentials(&id)
+        .ok_or_else(|| format!("渠道 {} 凭据不可读", id))?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        probe_channel_blocking(&base_url, &token)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn probe_channel_blocking(base_url: &str, token: &str) -> Result<ProbeResult, String> {
+    let client = probe_client()?;
+    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+    let start = std::time::Instant::now();
+
+    let resp = client
+        .get(&url)
+        .header("x-api-key", token)
+        .header("anthropic-version", "2023-06-01")
+        .send();
+
+    match resp {
+        Ok(r) => {
+            let latency = start.elapsed().as_millis() as u64;
+            let status_code = r.status().as_u16();
+
+            if status_code == 401 || status_code == 403 {
+                return Ok(ProbeResult {
+                    online: false,
+                    status: "auth_error".to_string(),
+                    models: vec![],
+                    latency_ms: latency,
+                });
+            }
+
+            let mut models = Vec::new();
+            if r.status().is_success() {
+                if let Ok(body) = r.json::<Value>() {
+                    if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
+                        for item in data {
+                            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                                models.push(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(ProbeResult {
+                online: true,
+                status: format!("{}", status_code),
+                models,
+                latency_ms: latency,
+            })
+        }
+        Err(e) => {
+            let latency = start.elapsed().as_millis() as u64;
+            Ok(ProbeResult {
+                online: false,
+                status: if e.is_timeout() { "timeout".to_string() } else { "offline".to_string() },
+                models: vec![],
+                latency_ms: latency,
+            })
+        }
+    }
+}
+

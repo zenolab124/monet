@@ -118,26 +118,21 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- 统计卡片：横向铺开，数字与标签水平排列，避免窄宽度下换行 -->
-    <div class="px-3 py-2 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
-      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-foreground truncate">{{ sessionStats.sessionCount }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">{{ $t('archive.sessionLabel') }}</span>
+    <!-- 统计卡片 -->
+    <div class="px-3 py-2 flex items-center gap-1.5 whitespace-nowrap">
+      <div class="flex-1 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-foreground">{{ sessionStats.sessionCount }}</span>
+        <span class="text-xs text-muted-foreground">{{ $t('archive.sessionLabel') }}</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
-      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-foreground truncate">{{ formatTokens(sessionStats.totalTokens) }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">Token</span>
+      <div class="flex-1 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-foreground">{{ formatTokens(sessionStats.totalTokens) }}</span>
+        <span class="text-xs text-muted-foreground">Token</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
-      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-foreground truncate">{{ formatBytes(sessionStats.totalSize) }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">{{ $t('archive.diskLabel') }}</span>
-      </div>
-      <span class="w-px h-3 bg-divider shrink-0" />
-      <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
-        <span class="text-sm font-semibold text-foreground truncate">{{ sessionStats.activeDays }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">{{ $t('archive.activeLabel') }}</span>
+      <div class="flex-1 flex items-baseline gap-1 justify-center">
+        <span class="text-sm font-semibold text-foreground">{{ formatBytes(sessionStats.totalSize) }}</span>
+        <span class="text-xs text-muted-foreground">{{ $t('archive.diskLabel') }}</span>
       </div>
     </div>
 
@@ -247,15 +242,18 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
         <p class="text-muted-foreground text-xs mt-1">{{ $t('archive.adjustFilter') }}</p>
       </div>
 
-      <div
-        v-for="session in sortedSessions"
+      <template
+        v-for="(session, i) in sortedSessions"
         :key="session.id"
+      >
+      <div v-if="i > 0" class="mx-3 border-t border-border/30" />
+      <div
         class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors hover:bg-muted cursor-pointer group relative shrink-0"
         :class="{ 'bg-card border-border shadow-paper': selectedSessionId === session.id }"
         @click="selectSession(session.id)"
         @contextmenu="onContextMenu($event, session)"
       >
-        <div class="text-sm text-foreground truncate pr-12">
+        <div class="text-sm text-foreground truncate">
           {{ displayTitle(session, getMeta(session.id)?.title) }}
         </div>
         <div class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate">
@@ -269,6 +267,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
         </div>
 
       </div>
+      </template>
     </div>
 
   </div>

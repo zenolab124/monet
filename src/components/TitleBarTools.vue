@@ -8,7 +8,7 @@ import { useHomeStats } from '@/composables/useHomeStats'
 import { useAutomation } from '@/composables/useAutomation'
 
 const { t } = useI18n()
-const { activeSection, sidebarsCollapsed, toggleSidebars } = useUiState()
+const { activeSection } = useUiState()
 
 // --- 档案馆搜索 ---
 const { searchQuery } = useSessions()
@@ -53,15 +53,6 @@ async function openGlobalConfig() {
 <template>
   <!-- 档案馆 -->
   <template v-if="activeSection === 'sessions'">
-    <button
-      class="p-1.5 rounded-md hover:bg-muted transition-colors"
-      :title="sidebarsCollapsed ? $t('titlebar.toggleSidebar') : $t('titlebar.hideSidebar')"
-      @click="toggleSidebars"
-    >
-      <span
-        :class="[sidebarsCollapsed ? 'i-carbon-side-panel-open' : 'i-carbon-side-panel-close', 'w-4 h-4 text-foreground block']"
-      />
-    </button>
     <div class="relative">
       <span class="absolute left-2 top-1/2 -translate-y-1/2 i-carbon-search w-3.5 h-3.5 text-muted-foreground" />
       <input

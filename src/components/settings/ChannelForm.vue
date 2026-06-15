@@ -58,7 +58,7 @@ async function onSave() {
     await saveChannel({
       id: trimmedId,
       name: name.value.trim(),
-      baseUrl: baseUrl.value.trim(),
+      baseUrl: baseUrl.value.trim().replace(/\/+$/, ''),
       authToken: authToken.value.trim() || undefined,
       note: note.value.trim() || undefined,
     })
@@ -93,7 +93,7 @@ async function onSave() {
     </label>
 
     <label class="form-field">
-      <span class="form-label">Base URL</span>
+      <span class="form-label">Base URL <span class="text-muted-foreground font-normal">{{ $t('settings.channelForm.baseUrlHint') }}</span></span>
       <input
         v-model="baseUrl"
         type="text"
