@@ -333,17 +333,6 @@ function onSaved() {
                     <div class="chain-row-2">
                       <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
                         <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
-                        <span class="flex items-center gap-0.5 shrink-0">
-                          <span class="font-mono">{{ revealedTokens[stripPrefix(pid)] || channelById(stripPrefix(pid)).authTokenMasked || '' }}</span>
-                          <button
-                            v-if="channelById(stripPrefix(pid)).authTokenMasked"
-                            class="chain-action"
-                            @pointerdown.stop
-                            @click="revealedTokens[stripPrefix(pid)] ? hideToken(stripPrefix(pid)) : revealToken(stripPrefix(pid))"
-                          >
-                            <span :class="revealedTokens[stripPrefix(pid)] ? 'i-carbon-view-off' : 'i-carbon-view'" class="w-3 h-3" />
-                          </button>
-                        </span>
                       </template>
                       <span v-else class="text-muted-foreground/60 italic">OAuth</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">
@@ -413,17 +402,6 @@ function onSaved() {
                     <div class="chain-row-2">
                       <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
                         <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
-                        <span class="flex items-center gap-0.5 shrink-0">
-                          <span class="font-mono">{{ revealedTokens[stripPrefix(pid)] || channelById(stripPrefix(pid)).authTokenMasked || '' }}</span>
-                          <button
-                            v-if="channelById(stripPrefix(pid)).authTokenMasked"
-                            class="chain-action"
-                            @pointerdown.stop
-                            @click="revealedTokens[stripPrefix(pid)] ? hideToken(stripPrefix(pid)) : revealToken(stripPrefix(pid))"
-                          >
-                            <span :class="revealedTokens[stripPrefix(pid)] ? 'i-carbon-view-off' : 'i-carbon-view'" class="w-3 h-3" />
-                          </button>
-                        </span>
                       </template>
                       <span v-else class="text-muted-foreground/60 italic">OAuth</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">

@@ -1,15 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChannels, type ChannelInfo } from '@/composables/useChannels'
 
-/**
- * 渠道新建/编辑表单。
- * 安全口径:authToken 是 write-only——编辑时不回显原值,留空 = 保持不变;
- * 输入框用 password 型避免肩窥,保存后即出渲染层。
- */
 const props = defineProps<{
-  /** null = 新建 */
   channel: ChannelInfo | null
 }>()
 
@@ -19,7 +13,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { saveChannel } = useChannels()
+const { saveChannel, revealToken } = useChannels()
 
 const isNew = computed(() => props.channel === null)
 
@@ -28,11 +22,19 @@ const name = ref(props.channel?.name ?? '')
 const baseUrl = ref(props.channel?.baseUrl ?? '')
 const authToken = ref('')
 const note = ref(props.channel?.note ?? '')
+const tokenVisible = ref(false)
 
 const saving = ref(false)
 const formError = ref<string | null>(null)
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
+
+onMounted(async () => {
+  if (!isNew.value && props.channel) {
+    const token = await revealToken(props.channel.id)
+    if (token) authToken.value = token
+  }
+})
 
 async function onSave() {
   formError.value = null
@@ -49,7 +51,7 @@ async function onSave() {
     formError.value = t('settings.channelForm.baseUrlError')
     return
   }
-  if (isNew.value && !authToken.value.trim()) {
+  if (!authToken.value.trim()) {
     formError.value = t('settings.channelForm.tokenError')
     return
   }
@@ -59,7 +61,7 @@ async function onSave() {
       id: trimmedId,
       name: name.value.trim(),
       baseUrl: baseUrl.value.trim().replace(/\/+$/, ''),
-      authToken: authToken.value.trim() || undefined,
+      authToken: authToken.value.trim(),
       note: note.value.trim() || undefined,
     })
     emit('saved')
@@ -103,16 +105,25 @@ async function onSave() {
       />
     </label>
 
-    <label class="form-field">
+    <div class="form-field">
       <span class="form-label">Auth Token</span>
-      <input
-        v-model="authToken"
-        type="password"
-        :placeholder="isNew ? 'sk-…(写入 ANTHROPIC_AUTH_TOKEN)' : $t('settings.channelForm.tokenKeepPlaceholder')"
-        class="form-input font-mono"
-        autocomplete="off"
-      />
-    </label>
+      <div class="relative">
+        <input
+          v-model="authToken"
+          :type="tokenVisible ? 'text' : 'password'"
+          placeholder="sk-…"
+          class="form-input font-mono w-full pr-8"
+          autocomplete="off"
+        />
+        <button
+          type="button"
+          class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          @click="tokenVisible = !tokenVisible"
+        >
+          <span :class="tokenVisible ? 'i-carbon-view-off' : 'i-carbon-view'" class="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
 
     <label class="form-field">
       <span class="form-label">{{ $t('settings.channelForm.noteLabel') }}</span>

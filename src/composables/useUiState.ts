@@ -10,6 +10,8 @@ export type AppSection = 'workbench' | 'sessions' | 'home' | 'settings' | 'works
 interface UiState {
   sidebarsCollapsed: boolean
   activeSection: AppSection
+  projectSidebarWidth: number
+  sessionListWidth: number
 }
 
 function loadState(): UiState {
