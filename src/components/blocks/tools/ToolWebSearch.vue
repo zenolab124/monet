@@ -42,11 +42,11 @@ async function copyText(text: string, target: 'in' | 'out') {
     </div>
 
     <div v-if="query" class="group mt-1.5 flex items-center gap-1.5">
-      <span class="text-muted-foreground/60 shrink-0 font-mono text-2xs">输入</span>
+      <span class="text-muted-foreground/60 shrink-0 font-mono text-2xs">{{ $t('common.input') }}</span>
       <code class="flex-1 truncate font-mono text-foreground" :title="query">{{ query }}</code>
       <button
         class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-        title="复制查询"
+        :title="$t('block.toolWebSearch.copyQuery')"
         @click="copyText(query, 'in')"
       >
         <span v-if="copiedIn" class="i-carbon-checkmark w-3 h-3 text-primary" />
@@ -58,7 +58,7 @@ async function copyText(text: string, target: 'in' | 'out') {
       <span
         class="shrink-0 font-mono text-2xs mt-px"
         :class="result?.is_error ? 'text-destructive/60' : 'text-muted-foreground/60'"
-      >输出</span>
+      >{{ $t('common.output') }}</span>
       <pre
         class="flex-1 min-w-0 font-mono whitespace-pre-wrap break-all cursor-pointer select-text out-clamp"
         :class="[
@@ -69,7 +69,7 @@ async function copyText(text: string, target: 'in' | 'out') {
       >{{ resultText }}</pre>
       <button
         class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-px"
-        title="复制结果"
+        :title="$t('block.toolWebSearch.copyResult')"
         @click.stop="copyText(resultText, 'out')"
       >
         <span v-if="copiedOut" class="i-carbon-checkmark w-3 h-3 text-primary" />

@@ -9,12 +9,15 @@
  * 键盘：Enter(焦点不在输入框) → 批准；Esc → 收起意见输入。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { renderMarkdownCached } from '@/composables/useMarkdown'
 import type { PermissionRequest, PermissionDecision, RespondExtra } from '@/composables/usePermissionRequests'
 
 const props = defineProps<{
   request: PermissionRequest
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   (e: 'decide', decision: PermissionDecision, extra?: RespondExtra): void
@@ -44,7 +47,7 @@ function openReject() {
 function sendReject() {
   const msg = feedback.value.trim()
   emit('decide', 'deny', {
-    message: msg ? `用户打回了计划，修改意见：${msg}` : '用户打回了计划，请继续完善',
+    message: msg ? t('permission.plan.rejectWithFeedback', { msg }) : t('permission.plan.rejectDefault'),
   })
 }
 
@@ -78,19 +81,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, { capture
   <div
     class="plan-card rounded-md border border-border bg-popover shadow-paper-lifted"
     role="dialog"
-    aria-label="计划待批准"
+    :aria-label="$t('permission.plan.title')"
   >
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-2 border-b border-border">
       <span class="i-carbon-task-approved w-4 h-4 text-primary shrink-0" aria-hidden="true" />
-      <span class="text-sm font-medium text-foreground">计划待批准</span>
-      <span class="text-xs text-muted-foreground">批准后 Claude 开始动手实施</span>
+      <span class="text-sm font-medium text-foreground">{{ $t('permission.plan.title') }}</span>
+      <span class="text-xs text-muted-foreground">{{ $t('permission.plan.subtitle') }}</span>
     </div>
 
     <!-- 计划正文 -->
     <div class="px-3 py-2 max-h-96 overflow-y-auto">
       <div v-if="plan" class="prose-msg text-xs" v-html="renderedPlan" />
-      <div v-else class="text-xs text-muted-foreground">（计划内容为空）</div>
+      <div v-else class="text-xs text-muted-foreground">{{ $t('permission.plan.empty') }}</div>
     </div>
 
     <!-- 打回意见输入 -->
@@ -100,7 +103,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, { capture
         v-model="feedback"
         class="feedback-box"
         rows="3"
-        placeholder="说明哪里需要调整（可留空直接打回）"
+        :placeholder="$t('permission.plan.rejectPlaceholder')"
       />
     </div>
 
@@ -109,22 +112,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, { capture
       <template v-if="!rejecting">
         <button type="button" class="btn btn-primary" @click="approve">
           <span class="i-carbon-checkmark w-3.5 h-3.5" aria-hidden="true" />
-          批准计划
+          {{ $t('permission.plan.approve') }}
         </button>
         <div class="flex-1" />
         <button type="button" class="btn btn-ghost" @click="openReject">
           <span class="i-carbon-edit w-3.5 h-3.5" aria-hidden="true" />
-          打回修改
+          {{ $t('permission.plan.reject') }}
         </button>
       </template>
       <template v-else>
         <button type="button" class="btn btn-primary" @click="sendReject">
           <span class="i-carbon-send w-3.5 h-3.5" aria-hidden="true" />
-          发送修改意见
+          {{ $t('permission.plan.sendFeedback') }}
         </button>
         <div class="flex-1" />
         <button type="button" class="btn btn-ghost" @click="rejecting = false">
-          返回
+          {{ $t('common.back') }}
         </button>
       </template>
     </div>

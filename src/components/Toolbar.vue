@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useSessions } from '@/composables/useSessions'
 import { useUiState } from '@/composables/useUiState'
 
+
 const { searchQuery } = useSessions()
 const { sidebarsCollapsed, toggleSidebars } = useUiState()
 
@@ -45,7 +46,7 @@ function clearSearch() {
     <!-- 侧栏显隐切换 -->
     <button
       class="p-1.5 rounded-md hover:bg-muted transition-colors shrink-0"
-      :title="sidebarsCollapsed ? '显示侧栏' : '隐藏侧栏'"
+      :title="sidebarsCollapsed ? $t('titlebar.toggleSidebar') : $t('titlebar.hideSidebar')"
       @click="toggleSidebars"
     >
       <span
@@ -63,7 +64,7 @@ function clearSearch() {
         ref="inputRef"
         v-model="localQuery"
         type="text"
-        placeholder="搜索全部会话… (⌘F)"
+        :placeholder="$t('titlebar.searchAllSessions')"
         class="w-full pl-7 pr-7 py-1 text-xs rounded-md bg-popover border border-border
                text-foreground placeholder-muted-foreground
                focus:outline-none focus:border-ring transition-colors"

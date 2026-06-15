@@ -21,7 +21,7 @@ const renderedPlan = computed(() => renderMarkdownCached(plan.value))
     <div class="flex items-center gap-1.5 flex-wrap">
       <span class="i-carbon-checkmark-outline w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">ExitPlanMode</span>
-      <span class="px-1.5 py-0.5 rounded border border-accent/50 text-accent">等待用户确认</span>
+      <span class="px-1.5 py-0.5 rounded border border-accent/50 text-accent">{{ $t('block.toolPlan.waitConfirm') }}</span>
     </div>
     <div v-if="plan" class="mt-2 prose-msg" v-html="renderedPlan" />
   </div>

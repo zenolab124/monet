@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useCliSettings, type SettingsField, type SchemaProperty } from '@/composables/useCliSettings'
 import { useUiState } from '@/composables/useUiState'
 
+const { t } = useI18n()
 const { activeSection } = useUiState()
 const {
   hasSchema, loading, translating, groups, groupOrder,
@@ -154,12 +156,12 @@ async function onRemove(key: string) {
   <div>
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h2 class="text-[13px] font-semibold">Claude Code 配置</h2>
+        <h2 class="text-[13px] font-semibold">{{ $t('settings.cliConfig.title') }}</h2>
         <p class="text-[11px] text-muted-foreground mt-0.5">
-          读写 <span class="font-mono">~/.claude/settings.json</span>
-          <span v-if="hasSchema" class="ml-1">· schema 已加载</span>
-          <span v-else class="ml-1 text-accent">· schema 未就绪</span>
-          <span v-if="translating" class="ml-1">· AI 翻译中…</span>
+          {{ $t('settings.cliConfig.subtitle') }}
+          <span v-if="hasSchema" class="ml-1">{{ $t('settings.cliConfig.schemaLoaded') }}</span>
+          <span v-else class="ml-1 text-accent">{{ $t('settings.cliConfig.schemaNotReady') }}</span>
+          <span v-if="translating" class="ml-1">{{ $t('settings.cliConfig.aiTranslating') }}</span>
         </p>
       </div>
       <button
@@ -167,7 +169,7 @@ async function onRemove(key: string) {
         :disabled="loading"
         @click="refreshSchema"
       >
-        <span class="i-carbon-renew w-3 h-3 mr-1" :class="{ 'animate-spin': loading }" />刷新 Schema
+        <span class="i-carbon-renew w-3 h-3 mr-1" :class="{ 'animate-spin': loading }" />{{ $t('settings.cliConfig.refreshSchema') }}
       </button>
     </div>
 
@@ -178,7 +180,7 @@ async function onRemove(key: string) {
         v-model="search"
         type="text"
         class="search-input"
-        placeholder="搜索配置项（key、中文名、说明…）"
+        :placeholder="$t('settings.cliConfig.searchPlaceholder')"
       />
       <button
         v-if="search"
@@ -190,11 +192,11 @@ async function onRemove(key: string) {
     </div>
 
     <div v-if="loading && !groupOrder.length" class="text-xs text-muted-foreground py-8 text-center">
-      加载中…
+      {{ $t('common.loading') }}
     </div>
 
     <div v-else-if="search && !filteredGroupOrder.length" class="text-xs text-muted-foreground py-6 text-center">
-      无匹配项
+      {{ $t('common.noMatch') }}
     </div>
 
     <!-- 分组手风琴 -->
@@ -219,8 +221,8 @@ async function onRemove(key: string) {
               <template v-else>
                 <span class="font-mono text-[11px] font-medium">{{ f.key }}</span>
               </template>
-              <span v-if="f.source === 'custom'" class="custom-badge">自定义</span>
-              <span v-if="savingKeys.has(f.key)" class="text-[10px] text-accent">保存中…</span>
+              <span v-if="f.source === 'custom'" class="custom-badge">{{ $t('settings.cliConfig.custom') }}</span>
+              <span v-if="savingKeys.has(f.key)" class="text-[10px] text-accent">{{ $t('common.saving') }}</span>
             </div>
             <div class="text-[10.5px] text-muted-foreground mt-0.5 leading-snug">
               <template v-if="getTranslation(f.key)?.desc">
@@ -250,7 +252,7 @@ async function onRemove(key: string) {
                 :value="f.value ?? '__unset__'"
                 @change="onEnumChange(f, $event)"
               >
-                <option value="__unset__">— 未设置 —</option>
+                <option value="__unset__">{{ $t('settings.cliConfig.notSet') }}</option>
                 <option v-for="opt in f.schema?.enum" :key="String(opt)" :value="opt">
                   {{ opt }}
                 </option>
@@ -296,7 +298,7 @@ async function onRemove(key: string) {
             <button
               v-if="isSet(f)"
               class="remove-btn"
-              title="移除此字段"
+              :title="$t('settings.cliConfig.removeField')"
               @click="onRemove(f.key)"
             >
               <span class="i-carbon-close w-3 h-3" />
@@ -308,10 +310,10 @@ async function onRemove(key: string) {
 
     <!-- 新增自定义字段 -->
     <div class="add-section">
-      <h3 class="text-[11px] font-medium text-muted-foreground mb-2">添加配置项</h3>
+      <h3 class="text-[11px] font-medium text-muted-foreground mb-2">{{ $t('settings.cliConfig.addConfig') }}</h3>
       <div class="flex gap-2 items-end">
         <div class="flex-1 min-w-0">
-          <label class="text-[10px] text-muted-foreground">字段名</label>
+          <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldName') }}</label>
           <input
             v-model="addingKey"
             type="text"
@@ -320,7 +322,7 @@ async function onRemove(key: string) {
           />
         </div>
         <div class="flex-1 min-w-0">
-          <label class="text-[10px] text-muted-foreground">值（JSON 或文本）</label>
+          <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldValue') }}</label>
           <input
             v-model="addingValue"
             type="text"
@@ -333,7 +335,7 @@ async function onRemove(key: string) {
           :disabled="!addingKey.trim()"
           @click="onAddCustom"
         >
-          添加
+          {{ $t('common.add') }}
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
@@ -17,6 +18,7 @@ const {
   focusColumnRequest,
   enforceColumnCapacity,
 } = useWorkbench()
+const { t } = useI18n()
 const { notifyTransient, sessionTitle } = useNotifications()
 
 const containerRef = ref<HTMLElement>()
@@ -33,7 +35,7 @@ function scheduleCapacityCheck() {
     capacityTimer = null
     const collapsed = enforceColumnCapacity()
     if (collapsed.length > 0) {
-      notifyTransient(`空间不足,已收起:${collapsed.map(sessionTitle).join('、')}`)
+      notifyTransient(t('workbench.columns.noSpace', { names: collapsed.map(sessionTitle).join('、') }))
     }
   }, 300)
 }
@@ -137,7 +139,7 @@ function onZoneDrop(e: DragEvent) {
     // 左列卡片拖至右区:展开并按落点定位;软上限规则叠加(FR-004/005)
     const result = expandSession(activeTab.value.id, sessionId, at)
     if (result.collapsedSessionIds.length > 0) {
-      notifyTransient(`已收起:${result.collapsedSessionIds.map(sessionTitle).join('、')}`)
+      notifyTransient(t('workbench.columns.collapsed', { names: result.collapsedSessionIds.map(sessionTitle).join('、') }))
     }
     return
   }
@@ -182,7 +184,7 @@ watch(focusColumnRequest, async (req) => {
       v-if="activeTab.columns.length === 0"
       class="flex-1 grid place-items-center text-xs text-muted-foreground"
     >
-      从左列选择会话展开
+      {{ $t('workbench.columns.empty') }}
     </div>
 
     <template v-for="(col, i) in activeTab.columns" :key="col.id">

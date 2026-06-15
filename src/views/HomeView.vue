@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import TodaySummaryCard from '../components/home/TodaySummaryCard.vue'
 import TokenCard from '../components/home/TokenCard.vue'
 import CostEstimateCard from '../components/home/CostEstimateCard.vue'
@@ -16,6 +17,7 @@ import { useProjects } from '../composables/useProjects'
 import { useSessions } from '../composables/useSessions'
 import { useUiState } from '../composables/useUiState'
 
+const { t } = useI18n()
 const { activeSection, switchSection } = useUiState()
 const {
   usage, usageLoading, usageError, retryUsage,
@@ -40,7 +42,7 @@ const refreshing = computed(() => usageLoading.value)
 const headDate = computed(() => {
   void refreshing.value
   const d = new Date()
-  return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日 · 本月数据`
+  return t('time.dateHeader', { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() })
 })
 
 function onGoSession(sessionId: string) {

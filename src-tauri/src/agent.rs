@@ -115,6 +115,10 @@ fn write_line(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
 
 /// 向 AgentService 发送请求，阻塞等待响应文本。
 /// prompt 中包含角色指令 + 实际内容（不用 system prompt，一个进程服务多种角色）。
+pub(crate) fn request_blocking_pub(prompt: &str) -> Result<String, String> {
+    request_blocking(prompt)
+}
+
 fn request_blocking(prompt: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let preview: String = prompt.chars().take(40).collect();

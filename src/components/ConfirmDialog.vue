@@ -2,6 +2,7 @@
 import { useConfirm } from '@/composables/useConfirm'
 
 const { visible, message, confirmLabel, settle } = useConfirm()
+
 </script>
 
 <template>
@@ -19,7 +20,7 @@ const { visible, message, confirmLabel, settle } = useConfirm()
           class="px-3 py-1.5 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           @click="settle(false)"
         >
-          取消
+          {{ $t('common.cancel') }}
         </button>
         <button
           class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow"

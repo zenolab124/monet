@@ -1,4 +1,5 @@
 import { ref, computed, watch } from 'vue'
+import i18n from '../locales'
 
 /**
  * 工作台状态模型（v2.1.0 FR-001/002/004 + NFR-002）
@@ -107,7 +108,7 @@ function equalSizes(n: number): number[] {
 function createTabObject(seq: number): WorkbenchTab {
   return {
     id: genId('wbtab'),
-    name: `工作台 ${seq}`,
+    name: i18n.global.t('workbench.defaultTabName', { seq }),
     sessionIds: [],
     columns: [],
     columnSizes: [],

@@ -24,6 +24,6 @@ onMounted(() => {
     class="text-xs text-muted-foreground/70 mt-0.5 cursor-pointer select-none hover:text-muted-foreground transition-colors"
     @click="expanded = !expanded"
   >
-    {{ expanded ? '收起 ▲' : '展开 ▼' }}
+    {{ expanded ? $t('common.collapseUp') : $t('common.expandDown') }}
   </div>
 </template>

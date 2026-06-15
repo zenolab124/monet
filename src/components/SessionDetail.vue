@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
@@ -54,6 +55,8 @@ const props = defineProps<{
   sessionId?: string | null
   mode?: 'archive' | 'workbench'
 }>()
+
+const { t } = useI18n()
 
 /** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
 const interactive = computed(() => props.mode === 'workbench')
@@ -253,9 +256,9 @@ const unanchoredChannelMarks = computed(() =>
 )
 
 function channelMarkLabel(m: ChannelMark): string {
-  if (m.channelId === null) return '已切回默认渠道'
-  if (m.channelId === OFFICIAL_CHANNEL_ID) return '已切换至官方渠道'
-  return `已切换至「${channelDisplayName(m.channelId)}」渠道`
+  if (m.channelId === null) return t('session.channelSwitchedDefault')
+  if (m.channelId === OFFICIAL_CHANNEL_ID) return t('session.channelSwitchedOfficial')
+  return t('session.channelSwitched', { name: channelDisplayName(m.channelId) })
 }
 
 // --- 会话数据 ---
@@ -277,7 +280,7 @@ function onDeleted() {
 function draftSummary(id: string, cwd: string): SessionSummary {
   return {
     id,
-    title: '新会话',
+    title: t('session.newSessionTitle'),
     first_user_message: null,
     model: null,
     git_branch: null,
@@ -505,7 +508,7 @@ function clearCurrentPaneView() {
 function handleNewSession() {
   // /new:工作台列绑定固定会话,引导用左列入口;档案馆回到空选择
   if (props.mode === 'workbench') {
-    slashError.value = '工作台中请使用左列「＋」新建'
+    slashError.value = t('session.slashNewInWorkbench')
     return
   }
   selectSession(null)
@@ -513,17 +516,17 @@ function handleNewSession() {
 
 function handleChangeDirectory(arg: string) {
   if (props.mode === 'workbench') {
-    slashError.value = '工作台列已绑定会话,请从档案馆打开其他会话'
+    slashError.value = t('session.slashOpenInWorkbench')
     return
   }
   // 严格匹配 display_path(已解码的项目路径)
   const target = projects.value.find(p => p.display_path === arg)
   if (!target) {
-    slashError.value = '路径未发现'
+    slashError.value = t('session.slashPathNotFound')
     return
   }
   if (target.sessions.length === 0) {
-    slashError.value = '该项目暂无会话'
+    slashError.value = t('session.slashNoSessions')
     return
   }
   selectSession(target.sessions[0].id)
@@ -873,7 +876,7 @@ async function onReload() {
 <template>
   <!-- 空态 -->
   <div v-if="!currentSession" class="h-full flex items-center justify-center">
-    <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? '会话不存在或已删除' : '从左侧选择会话' }}</p>
+    <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? $t('session.notExist') : $t('archive.selectSession') }}</p>
   </div>
 
   <div v-else class="h-full flex flex-col">
@@ -905,7 +908,7 @@ async function onReload() {
 
     <!-- 加载态 -->
     <div v-if="loading" class="flex-1 flex items-center justify-center">
-      <p class="text-muted-foreground text-sm">加载对话中...</p>
+      <p class="text-muted-foreground text-sm">{{ $t('session.loadingChat') }}</p>
     </div>
 
     <!-- 错误态 -->
@@ -916,7 +919,7 @@ async function onReload() {
     <!-- 无记录(草稿会话给引导文案) -->
     <div v-else-if="messages.length === 0 && !stream.streaming && !showHelpCard" class="flex-1 flex items-center justify-center">
       <p class="text-muted-foreground text-sm">
-        {{ effectiveSessionId && draftCwd(effectiveSessionId) ? '新会话 — 输入第一条消息开始对话' : '无对话记录' }}
+        {{ effectiveSessionId && draftCwd(effectiveSessionId) ? $t('session.draftGuide') : $t('session.noRecords') }}
       </p>
     </div>
 
@@ -951,7 +954,7 @@ async function onReload() {
             <div class="flex gap-3">
               <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
-                <div class="text-xs font-medium mb-1 text-primary">你</div>
+                <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
                 <MsgClamp>
                   <MessageBlock
                     v-for="(block, bi) in contentBlocks(group.user as any)"
@@ -980,7 +983,7 @@ async function onReload() {
               <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
               <div class="min-w-0 flex-1">
                 <div class="text-xs font-medium mb-1 text-claude">
-                  Claude
+                  {{ $t('session.claude') }}
                   <span v-if="(resp as any).message?.model" class="text-muted-foreground font-normal">
                     ({{ shortModel((resp as any).message.model) }})
                   </span>
@@ -1026,7 +1029,7 @@ async function onReload() {
           <div class="flex gap-3">
             <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
             <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
-              <div class="text-xs font-medium mb-1 text-primary">你</div>
+              <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
               <MsgClamp>
                 <div class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
               </MsgClamp>
@@ -1037,7 +1040,7 @@ async function onReload() {
         <div v-for="turn in stream.streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
           <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
           <div class="min-w-0 flex-1">
-            <div class="text-xs font-medium mb-1 text-claude">Claude</div>
+            <div class="text-xs font-medium mb-1 text-claude">{{ $t('session.claude') }}</div>
             <TransitionGroup name="block-fade" tag="div" appear>
               <MessageBlock
                 v-for="(block, i) in filterConsumedResults(turn.content)"
@@ -1051,7 +1054,7 @@ async function onReload() {
 
         <div v-if="stream.streaming && stream.streamingTurns.length === 0" class="flex gap-3">
           <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
-          <div class="text-xs text-muted-foreground">思考中...</div>
+          <div class="text-xs text-muted-foreground">{{ $t('session.thinking') }}</div>
         </div>
       </div>
 
@@ -1074,7 +1077,7 @@ async function onReload() {
           @click="resumeFollow"
         >
           <span class="i-carbon-arrow-down w-3 h-3" />
-          回到底部
+          {{ $t('session.backToBottom') }}
         </button>
       </div>
     </div>
@@ -1101,7 +1104,7 @@ async function onReload() {
       <!-- 外部运行跟随提示:CLI 进程在应用外继续跑,期间禁发(同 session 双进程会冲突) -->
       <div v-if="externalRunning" class="mb-1 text-xs text-muted-foreground flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-claude animate-pulse shrink-0" />
-        会话正在后台运行,实时跟随中(进程结束后可继续输入)
+        {{ $t('session.externalRunning') }}
       </div>
 
       <SlashCommandPanel
@@ -1138,7 +1141,7 @@ async function onReload() {
           ref="textareaRef"
           v-model="inputText"
           :disabled="externalRunning"
-          :placeholder="externalRunning ? '会话在后台运行中…' : '输入消息… (Shift+Enter 换行,/ 触发命令补全)'"
+          :placeholder="externalRunning ? $t('session.externalRunningPlaceholder') : $t('session.inputPlaceholder')"
           rows="1"
           class="flex-1 px-3 py-2 text-sm rounded-md bg-popover border border-border
                  text-foreground placeholder-muted-foreground resize-none
@@ -1155,7 +1158,7 @@ async function onReload() {
           class="px-3 py-2 text-xs rounded-md bg-accent text-accent-foreground hover:shadow-paper transition-shadow shrink-0"
           @click="onStopStreaming"
         >
-          停止
+          {{ $t('common.stop') }}
         </button>
         <button
           v-else
@@ -1164,7 +1167,7 @@ async function onReload() {
                  disabled:opacity-30 disabled:cursor-not-allowed"
           @click="handleSend"
         >
-          发送
+          {{ $t('common.send') }}
         </button>
       </div>
     </div>
@@ -1175,13 +1178,13 @@ async function onReload() {
       class="px-4 py-2 border-t border-border shrink-0 flex items-center gap-2 text-xs text-muted-foreground"
     >
       <span class="i-carbon-document w-3.5 h-3.5 shrink-0" />
-      <span v-if="workbenchHome" class="truncate">正在「{{ workbenchHome.name }}」工作台运行</span>
-      <span v-else class="truncate">只读预览</span>
+      <span v-if="workbenchHome" class="truncate">{{ $t('session.runningInWorkbench', { name: workbenchHome.name }) }}</span>
+      <span v-else class="truncate">{{ $t('session.readonlyPreview') }}</span>
       <button
         class="ml-auto shrink-0 px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow"
         @click="onOpenInWorkbench"
       >
-        {{ workbenchHome ? '前往' : '在工作台打开' }}
+        {{ workbenchHome ? $t('session.goTo') : $t('session.openInWorkbench') }}
       </button>
     </div>
   </div>

@@ -51,8 +51,8 @@ const avgDepth = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-chart-histogram" title="会话深度" badge="按消息数">
-    <div v-if="loading && !distribution.length" class="text-2xs text-muted-foreground py-2">加载中…</div>
+  <HomeCard icon="i-carbon-chart-histogram" :title="$t('home.sessionDepth.title')" :badge="$t('home.sessionDepth.badge')">
+    <div v-if="loading && !distribution.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
       <div class="flex items-end gap-3 h-14 mt-1 px-2">
         <div v-for="d in distribution" :key="d.label" class="bucket">
@@ -64,7 +64,7 @@ const avgDepth = computed(() => {
         </div>
       </div>
       <div class="text-2xs text-muted-foreground mt-2.5">
-        平均每会话 <span class="text-foreground font-medium">{{ avgDepth }}</span> 条消息
+        {{ $t('home.sessionDepth.avgMessages', { avg: avgDepth }) }}
       </div>
     </template>
   </HomeCard>

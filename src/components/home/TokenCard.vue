@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { UsageStats } from '../../types'
 import { formatTokens } from '../../types'
 import HomeCard from './HomeCard.vue'
+
+const { t } = useI18n()
 
 /** Token 消耗卡（v2.2.0 FR-002）：本月总量 + 前 5 模型条形分布，其余合并「其他」 */
 const props = defineProps<{
@@ -40,7 +43,7 @@ const rows = computed(() => {
   const list = byModel.slice(0, 5).map((m) => ({ name: m.model, total: m.total }))
   const rest = byModel.slice(5)
   if (rest.length) {
-    list.push({ name: '其他', total: rest.reduce((s, m) => s + m.total, 0) })
+    list.push({ name: t('common.other'), total: rest.reduce((s, m) => s + m.total, 0) })
   }
   return list.map((r) => ({
     name: r.name,
@@ -51,10 +54,10 @@ const rows = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-meter" title="Token 消耗" badge="本月">
+  <HomeCard icon="i-carbon-meter" :title="$t('home.token.title')" :badge="$t('home.token.badge')">
     <template v-if="error">
-      <div class="py-3 text-xs text-muted-foreground">加载失败</div>
-      <button class="retry-btn" @click="emit('retry')">重试</button>
+      <div class="py-3 text-xs text-muted-foreground">{{ $t('common.loadFailed') }}</div>
+      <button class="retry-btn" @click="emit('retry')">{{ $t('common.retry') }}</button>
     </template>
     <template v-else>
       <div class="big-num">
@@ -64,8 +67,8 @@ const rows = computed(() => {
         </span>
       </div>
       <div class="mt-2.5 flex flex-col gap-1.25">
-        <div v-if="loading" class="text-2xs text-muted-foreground">统计中…</div>
-        <div v-else-if="!rows.length" class="text-2xs text-muted-foreground">本月暂无用量</div>
+        <div v-if="loading" class="text-2xs text-muted-foreground">{{ $t('home.token.counting') }}</div>
+        <div v-else-if="!rows.length" class="text-2xs text-muted-foreground">{{ $t('home.token.noUsage') }}</div>
         <div v-for="m in rows" :key="m.name" class="flex items-center gap-2 text-xs">
           <span class="w-20 text-muted-foreground font-mono text-2xs truncate" :title="m.name">{{ m.name }}</span>
           <span class="flex-1 h-1.25 rounded-sm bg-muted overflow-hidden">

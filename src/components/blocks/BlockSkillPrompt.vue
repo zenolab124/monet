@@ -16,7 +16,7 @@ const expanded = ref(false)
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
       <span class="i-carbon-play-filled-alt w-3 h-3" />
-      调用技能：{{ block.name }}
+      {{ $t('block.skillInvoke', { name: block.name }) }}
     </button>
     <div
       v-if="expanded"

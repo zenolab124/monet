@@ -11,7 +11,7 @@ defineProps<{
     <div class="flex items-center gap-1.5">
       <span class="i-carbon-plan w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">EnterPlanMode</span>
-      <span class="px-1.5 py-0.5 rounded border border-border text-muted-foreground">进入计划模式</span>
+      <span class="px-1.5 py-0.5 rounded border border-border text-muted-foreground">{{ $t('block.toolPlan.enterPlan') }}</span>
     </div>
   </div>
 </template>

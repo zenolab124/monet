@@ -52,12 +52,12 @@ const todayModels = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-calendar" title="今日概要" badge="今天">
-    <div v-if="loading && !props.usage" class="text-2xs text-muted-foreground py-2">加载中…</div>
+  <HomeCard icon="i-carbon-calendar" :title="$t('home.todaySummary.title')" :badge="$t('home.todaySummary.badge')">
+    <div v-if="loading && !props.usage" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
       <div class="flex flex-col gap-2.5 mt-0.5">
         <div class="stat-row">
-          <span class="stat-label">会话</span>
+          <span class="stat-label">{{ $t('common.sessions') }}</span>
           <span class="stat-value">{{ todaySessions }}</span>
         </div>
         <div class="stat-row">
@@ -65,7 +65,7 @@ const todayModels = computed(() => {
           <span class="stat-value">{{ formatTokens(todayTokens) }}</span>
         </div>
         <div class="stat-row">
-          <span class="stat-label">模型</span>
+          <span class="stat-label">{{ $t('common.model') }}</span>
           <span v-if="todayModels.length" class="stat-models">
             <span v-for="m in todayModels" :key="m" class="model-tag">{{ m }}</span>
           </span>

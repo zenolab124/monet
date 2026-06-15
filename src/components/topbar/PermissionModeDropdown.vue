@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 export type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'dontAsk'
 
 const props = defineProps<{
   current: PermissionMode
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   (e: 'select', mode: PermissionMode): void
@@ -18,20 +21,20 @@ interface ModeOption {
   desc: string
 }
 
-const OPTIONS: ModeOption[] = [
-  { value: 'default', label: '需审批', icon: 'i-carbon-locked', desc: '每次编辑前询问' },
-  { value: 'acceptEdits', label: '自动编辑', icon: 'i-carbon-edit', desc: '自动批准文件编辑' },
-  { value: 'plan', label: '规划模式', icon: 'i-carbon-document', desc: '先规划再编辑' },
-  { value: 'dontAsk', label: '免审批', icon: 'i-carbon-lightning', desc: '跳过所有权限检查' },
-]
+const OPTIONS = computed<ModeOption[]>(() => [
+  { value: 'default', label: t('topbar.permApproval'), icon: 'i-carbon-locked', desc: t('topbar.permApprovalDesc') },
+  { value: 'acceptEdits', label: t('topbar.permAutoEdit'), icon: 'i-carbon-edit', desc: t('topbar.permAutoEditDesc') },
+  { value: 'plan', label: t('topbar.permPlan'), icon: 'i-carbon-document', desc: t('topbar.permPlanDesc') },
+  { value: 'dontAsk', label: t('topbar.permBypass'), icon: 'i-carbon-lightning', desc: t('topbar.permBypassDesc') },
+])
 
 const open = ref(false)
 const containerRef = ref<HTMLElement>()
 const buttonRef = ref<HTMLButtonElement>()
 const focusedIndex = ref(0)
 
-const currentIndex = computed(() => OPTIONS.findIndex(o => o.value === props.current))
-const currentOption = computed(() => OPTIONS.find(o => o.value === props.current) ?? OPTIONS[0])
+const currentIndex = computed(() => OPTIONS.value.findIndex(o => o.value === props.current))
+const currentOption = computed(() => OPTIONS.value.find(o => o.value === props.current) ?? OPTIONS.value[0])
 
 function toggle() {
   open.value = !open.value
@@ -47,7 +50,7 @@ function close() {
 }
 
 function selectAt(index: number) {
-  const o = OPTIONS[index]
+  const o = OPTIONS.value[index]
   if (!o) return
   emit('select', o.value)
   close()
@@ -58,12 +61,12 @@ function onKeydown(e: KeyboardEvent) {
   switch (e.key) {
     case 'ArrowDown':
       e.preventDefault()
-      focusedIndex.value = (focusedIndex.value + 1) % OPTIONS.length
+      focusedIndex.value = (focusedIndex.value + 1) % OPTIONS.value.length
       focusListItem(focusedIndex.value)
       break
     case 'ArrowUp':
       e.preventDefault()
-      focusedIndex.value = (focusedIndex.value - 1 + OPTIONS.length) % OPTIONS.length
+      focusedIndex.value = (focusedIndex.value - 1 + OPTIONS.value.length) % OPTIONS.value.length
       focusListItem(focusedIndex.value)
       break
     case 'Enter':
@@ -103,7 +106,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
       type="button"
       class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
              transition-colors flex items-center gap-1 border border-border"
-      :title="`权限模式:${currentOption.label}`"
+      :title="$t('topbar.permTitle', { name: currentOption.label })"
       aria-haspopup="listbox"
       :aria-expanded="open"
       @click="toggle"

@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import i18n from '../locales'
 
 /**
  * 轻量确认弹窗(Promise 风格)。组件 ConfirmDialog.vue 挂在 App 根部消费此状态。
@@ -7,12 +8,12 @@ import { ref } from 'vue'
 
 const visible = ref(false)
 const message = ref('')
-const confirmLabel = ref('确认')
+const confirmLabel = ref(i18n.global.t('common.confirm'))
 
 let resolver: ((v: boolean) => void) | null = null
 
 /** 弹出确认框,resolve true=确认 / false=取消 */
-function confirm(msg: string, okLabel = '确认'): Promise<boolean> {
+function confirm(msg: string, okLabel = i18n.global.t('common.confirm')): Promise<boolean> {
   // 已有弹窗时直接取消旧的(不排队,后到优先)
   resolver?.(false)
   message.value = msg

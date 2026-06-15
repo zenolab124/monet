@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
 import { useAutomation, buildRows } from '@/composables/useAutomation'
 import { useRoutines, type RoutineDefinition, type RoutineRow } from '@/composables/useRoutines'
 import RoutineForm from '@/components/automation/RoutineForm.vue'
 
+const { t } = useI18n()
 const { activeSection } = useUiState()
 const {
   config, stats, loadingConfig, loadingStats,
@@ -69,7 +71,7 @@ async function openFile(path: string) {
   try {
     await invoke('open_hooks_config', { path })
   } catch {
-    openFailMsg.value = '打开失败'
+    openFailMsg.value = t('common.openFailed')
     clearTimeout(openFailTimer)
     openFailTimer = setTimeout(() => { openFailMsg.value = null }, 3000)
   }
@@ -113,13 +115,13 @@ async function onRunNow(r: RoutineRow) {
 
     <!-- 侧栏导航 -->
     <nav class="auto-nav">
-      <div class="auto-nav-title">自动化</div>
+      <div class="auto-nav-title">{{ $t('automation.title') }}</div>
       <button :class="['auto-nav-item', { active: autoTab === 'hooks' }]" @click="autoTab = 'hooks'">
         <span class="i-carbon-flow w-3.5 h-3.5" />Hooks
         <span class="auto-nav-count">{{ rows.length || '—' }}</span>
       </button>
       <button :class="['auto-nav-item', { active: autoTab === 'routines' }]" @click="autoTab = 'routines'">
-        <span class="i-carbon-time w-3.5 h-3.5" />定时任务
+        <span class="i-carbon-time w-3.5 h-3.5" />{{ $t('automation.scheduledTasks') }}
         <span class="auto-nav-count">{{ routineRows.length || '—' }}</span>
       </button>
     </nav>
@@ -133,19 +135,19 @@ async function onRunNow(r: RoutineRow) {
 
         <!-- 配置加载中 -->
         <div v-if="loadingConfig && !config" class="py-8 text-center text-xs text-muted-foreground">
-          加载中…
+          {{ $t('common.loading') }}
         </div>
 
         <!-- 配置加载失败 -->
         <div v-else-if="errorConfig" class="py-8 text-center">
-          <p class="text-xs text-destructive">配置加载失败</p>
-          <button class="auto-btn mt-3" @click="refresh">重试</button>
+          <p class="text-xs text-destructive">{{ $t('common.configLoadFailed') }}</p>
+          <button class="auto-btn mt-3" @click="refresh">{{ $t('common.retry') }}</button>
         </div>
 
         <!-- 空态：无任何配置 -->
         <div v-else-if="config && rows.length === 0" class="auto-empty">
-          <p class="text-sm text-muted-foreground">未配置任何 Hook</p>
-          <button class="auto-btn mt-3" @click="openGlobalConfig">打开配置</button>
+          <p class="text-sm text-muted-foreground">{{ $t('automation.noHooks') }}</p>
+          <button class="auto-btn mt-3" @click="openGlobalConfig">{{ $t('common.openConfig') }}</button>
         </div>
 
         <!-- 表格 -->
@@ -153,18 +155,18 @@ async function onRunNow(r: RoutineRow) {
           <!-- 统计整体不可用提示 -->
           <p v-if="errorStats" class="mb-2 text-xs text-muted-foreground">
             <span class="i-carbon-warning-alt w-3 h-3 inline-block align-middle mr-0.5" />
-            统计不可用
+            {{ $t('automation.statsUnavailable') }}
           </p>
 
           <div class="auto-table-wrap">
             <table class="auto-table">
               <thead>
                 <tr>
-                  <th>事件</th>
-                  <th>动作</th>
-                  <th>作用域</th>
-                  <th>近 7 天</th>
-                  <th>上次结果</th>
+                  <th>{{ $t('automation.event') }}</th>
+                  <th>{{ $t('automation.action') }}</th>
+                  <th>{{ $t('automation.scope') }}</th>
+                  <th>{{ $t('automation.last7Days') }}</th>
+                  <th>{{ $t('automation.lastResult') }}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -188,11 +190,11 @@ async function onRunNow(r: RoutineRow) {
                   <td class="text-xs">
                     <template v-if="errorStats">—</template>
                     <template v-else-if="row.statsLoading && row.runs === null">…</template>
-                    <template v-else-if="row.runs === null">7 天内无运行</template>
+                    <template v-else-if="row.runs === null">{{ $t('automation.noRunsIn7Days') }}</template>
                     <template v-else>
-                      <span>{{ row.runs }} 次</span>
-                      <span v-if="row.failures === 0" class="text-muted-foreground"> · 全部成功</span>
-                      <span v-else class="text-destructive"> · {{ row.failures }} 次失败</span>
+                      <span>{{ $t('automation.nTimes', { n: row.runs }) }}</span>
+                      <span v-if="row.failures === 0" class="text-muted-foreground"> · {{ $t('automation.allSuccess') }}</span>
+                      <span v-else class="text-destructive"> · {{ $t('automation.nFailed', { n: row.failures }) }}</span>
                     </template>
                   </td>
 
@@ -203,7 +205,7 @@ async function onRunNow(r: RoutineRow) {
                     <template v-else-if="!row.lastRun">—</template>
                     <template v-else>
                       <span :class="row.lastRun.exitCode === 0 ? 'text-success' : 'text-destructive'">
-                        {{ row.lastRun.exitCode === 0 ? '✓ 成功' : '✗ 失败' }}
+                        {{ row.lastRun.exitCode === 0 ? $t('automation.resultSuccess') : $t('automation.resultFailed') }}
                       </span>
                       <span class="text-muted-foreground"> · {{ formatTime(row.lastRun.timestamp) }}</span>
                     </template>
@@ -212,9 +214,9 @@ async function onRunNow(r: RoutineRow) {
                   <!-- 打开图标（仅项目级） -->
                   <td class="text-center">
                     <button
-                      v-if="row.scope !== '全局'"
+                      v-if="row.scope !== $t('common.global')"
                       class="auto-open-btn"
-                      title="打开配置文件"
+                      :title="$t('common.openConfigFile')"
                       @click="openFile(row.sourcePath)"
                     >
                       <span class="i-carbon-document w-3 h-3 block" />
@@ -230,33 +232,33 @@ async function onRunNow(r: RoutineRow) {
       <!-- 定时任务 -->
       <section v-show="autoTab === 'routines'">
         <div class="flex items-center gap-2 mb-2.5">
-          <h2 class="sec-title mb-0">定时任务（Routines）</h2>
+          <h2 class="sec-title mb-0">{{ $t('automation.routinesTitle') }}</h2>
           <div class="ml-auto flex items-center gap-1.5">
             <button class="auto-btn" :disabled="routinesLoading" @click="refreshRoutines">
               <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': routinesLoading }" />
             </button>
             <button class="auto-btn" @click="showRoutineForm = 'new'">
               <span class="i-carbon-add w-3 h-3" />
-              新建
+              {{ $t('automation.newRoutine') }}
             </button>
           </div>
         </div>
 
         <!-- 加载中 -->
         <div v-if="routinesLoading && !routineRows.length" class="py-8 text-center text-xs text-muted-foreground">
-          加载中…
+          {{ $t('common.loading') }}
         </div>
 
         <!-- 加载失败 -->
         <div v-else-if="routinesError" class="py-8 text-center">
-          <p class="text-xs text-destructive">加载失败</p>
-          <button class="auto-btn mt-3" @click="refreshRoutines">重试</button>
+          <p class="text-xs text-destructive">{{ $t('common.loadFailed') }}</p>
+          <button class="auto-btn mt-3" @click="refreshRoutines">{{ $t('common.retry') }}</button>
         </div>
 
         <!-- 空态 -->
         <div v-else-if="!routineRows.length && !showRoutineForm" class="auto-empty">
-          <p class="text-sm text-muted-foreground">暂无定时任务</p>
-          <p class="text-xs text-muted-foreground mt-1">创建后，CC Space 运行期间将按计划自动执行 Claude 指令</p>
+          <p class="text-sm text-muted-foreground">{{ $t('automation.noRoutines') }}</p>
+          <p class="text-xs text-muted-foreground mt-1">{{ $t('automation.routinesHint') }}</p>
         </div>
 
         <!-- 表格 -->
@@ -264,11 +266,11 @@ async function onRunNow(r: RoutineRow) {
           <table class="auto-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>时间计划</th>
-                <th>指令</th>
-                <th>状态</th>
-                <th>上次执行</th>
+                <th>{{ $t('automation.routineColumns.name') }}</th>
+                <th>{{ $t('automation.routineColumns.schedule') }}</th>
+                <th>{{ $t('automation.routineColumns.command') }}</th>
+                <th>{{ $t('automation.routineColumns.status') }}</th>
+                <th>{{ $t('automation.routineColumns.lastRun') }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -283,9 +285,9 @@ async function onRunNow(r: RoutineRow) {
                   <span class="truncate-cmd" :title="r.prompt">{{ r.prompt }}</span>
                 </td>
                 <td class="text-xs">
-                  <span v-if="r.isRunning" class="text-accent">运行中…</span>
-                  <span v-else-if="r.enabled" class="text-success">已启用</span>
-                  <span v-else class="text-muted-foreground">已暂停</span>
+                  <span v-if="r.isRunning" class="text-accent">{{ $t('common.running') }}</span>
+                  <span v-else-if="r.enabled" class="text-success">{{ $t('common.enabled') }}</span>
+                  <span v-else class="text-muted-foreground">{{ $t('common.paused') }}</span>
                 </td>
                 <td class="text-xs">
                   <template v-if="!r.lastExecution">—</template>
@@ -299,23 +301,23 @@ async function onRunNow(r: RoutineRow) {
                 <td>
                   <div class="flex items-center gap-0.5">
                     <button
-                      class="auto-open-btn" :title="r.enabled ? '暂停' : '启用'"
+                      class="auto-open-btn" :title="r.enabled ? $t('automation.pause') : $t('automation.enable')"
                       @click="onToggleRoutine(r)"
                     >
                       <span class="w-3 h-3 block" :class="r.enabled ? 'i-carbon-pause' : 'i-carbon-play'" />
                     </button>
-                    <button class="auto-open-btn" title="编辑" @click="showRoutineForm = r">
+                    <button class="auto-open-btn" :title="$t('common.edit')" @click="showRoutineForm = r">
                       <span class="i-carbon-edit w-3 h-3 block" />
                     </button>
                     <button
-                      class="auto-open-btn" title="立即运行"
+                      class="auto-open-btn" :title="$t('automation.runNow')"
                       :disabled="r.isRunning"
                       @click="onRunNow(r)"
                     >
                       <span class="i-carbon-flash w-3 h-3 block" />
                     </button>
                     <button
-                      class="auto-open-btn" title="删除"
+                      class="auto-open-btn" :title="$t('common.delete')"
                       :disabled="deletingId === r.id"
                       @click="onDeleteRoutine(r)"
                     >

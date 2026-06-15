@@ -57,6 +57,6 @@ function iconClasses(status: string): string {
         </span>
       </li>
     </ul>
-    <div v-if="todos.length === 0" class="text-muted-foreground">（无待办项）</div>
+    <div v-if="todos.length === 0" class="text-muted-foreground">{{ $t('block.toolTodo.empty') }}</div>
   </div>
 </template>

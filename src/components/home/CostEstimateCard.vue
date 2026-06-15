@@ -66,12 +66,12 @@ function formatUSD(n: number): string {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-currency-dollar" title="费用估算" badge="本月">
-    <div v-if="loading && !estimate" class="text-2xs text-muted-foreground py-2">统计中…</div>
+  <HomeCard icon="i-carbon-currency-dollar" :title="$t('home.costEstimate.title')" :badge="$t('home.costEstimate.badge')">
+    <div v-if="loading && !estimate" class="text-2xs text-muted-foreground py-2">{{ $t('home.costEstimate.counting') }}</div>
     <template v-else-if="estimate">
-      <div class="big-num">{{ formatUSD(estimate.totalCost) }}<small>估算</small></div>
+      <div class="big-num">{{ formatUSD(estimate.totalCost) }}<small>{{ $t('home.costEstimate.estimate') }}</small></div>
       <div class="mt-2.5 flex flex-col gap-1.25">
-        <div v-if="!estimate.rows.length" class="text-2xs text-muted-foreground">本月暂无用量</div>
+        <div v-if="!estimate.rows.length" class="text-2xs text-muted-foreground">{{ $t('home.costEstimate.noUsage') }}</div>
         <div v-for="m in estimate.rows" :key="m.name" class="flex items-center gap-2 text-xs">
           <span class="w-20 text-muted-foreground font-mono text-2xs truncate" :title="m.name">{{ m.name }}</span>
           <span class="flex-1 h-1.25 rounded-sm bg-muted overflow-hidden">
@@ -80,9 +80,9 @@ function formatUSD(n: number): string {
           <span class="w-12 text-right tabular-nums text-muted-foreground text-2xs">{{ formatUSD(m.cost) }}</span>
         </div>
       </div>
-      <div class="text-2xs text-muted-foreground mt-2">按官方定价粗估 · 不含折扣</div>
+      <div class="text-2xs text-muted-foreground mt-2">{{ $t('home.costEstimate.disclaimer') }}</div>
     </template>
-    <div v-else class="text-2xs text-muted-foreground py-2">暂无数据</div>
+    <div v-else class="text-2xs text-muted-foreground py-2">{{ $t('common.noData') }}</div>
   </HomeCard>
 </template>
 

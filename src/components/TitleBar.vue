@@ -1,15 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useUiState, type AppSection } from '@/composables/useUiState'
 
+const { t } = useI18n()
 const { activeSection } = useUiState()
 
-const sectionTitles: Partial<Record<AppSection, string>> = {
-  sessions: '档案',
-  workshop: '工坊',
-  automation: '自动化',
-  home: '总览',
-  settings: '设置',
-}
+const sectionTitles = computed<Partial<Record<AppSection, string>>>(() => ({
+  sessions: t('titlebar.archive'),
+  workshop: t('titlebar.workshop'),
+  automation: t('titlebar.automation'),
+  home: t('titlebar.overview'),
+  settings: t('titlebar.settings'),
+}))
 </script>
 
 <template>

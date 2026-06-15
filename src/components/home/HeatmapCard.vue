@@ -67,10 +67,10 @@ const rows = computed<Cell[][]>(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-grid" title="活跃热力" badge="近 16 周" wide>
+  <HomeCard icon="i-carbon-grid" :title="$t('home.heatmap.title')" :badge="$t('home.heatmap.badge')" wide>
     <template v-if="error">
-      <div class="py-3 text-xs text-muted-foreground">加载失败</div>
-      <button class="retry-btn" @click="emit('retry')">重试</button>
+      <div class="py-3 text-xs text-muted-foreground">{{ $t('common.loadFailed') }}</div>
+      <button class="retry-btn" @click="emit('retry')">{{ $t('common.retry') }}</button>
     </template>
     <template v-else>
       <div class="flex flex-col gap-0.75 overflow-x-auto">
@@ -89,9 +89,9 @@ const rows = computed<Cell[][]>(() => {
         </div>
       </div>
       <div class="flex items-center justify-end gap-1 mt-2 text-2xs text-muted-foreground">
-        少
+        {{ $t('home.heatmap.less') }}
         <span class="hm-cell sm" /><span class="hm-cell sm l1" /><span class="hm-cell sm l2" /><span class="hm-cell sm l3" /><span class="hm-cell sm l4" />
-        多
+        {{ $t('home.heatmap.more') }}
       </div>
     </template>
   </HomeCard>

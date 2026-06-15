@@ -131,14 +131,14 @@ const positionStyle = computed(() => {
     :class="position ? 'fixed z-50' : 'absolute z-50'"
     :style="positionStyle"
     role="listbox"
-    aria-label="斜杠命令补全"
+    :aria-label="$t('slash.panel')"
   >
     <!-- 空状态 -->
     <div
       v-if="filtered.length === 0"
       class="px-3 py-2 text-xs text-muted-foreground"
     >
-      无匹配，Enter 发送原文
+      {{ $t('slash.noMatch') }}
     </div>
 
     <!-- 命令列表 -->
@@ -169,9 +169,9 @@ const positionStyle = computed(() => {
       v-if="filtered.length > 0"
       class="px-3 py-1 border-t border-border text-2xs text-muted-foreground flex items-center gap-3"
     >
-      <span><kbd class="kbd">↑↓</kbd> 移动</span>
-      <span><kbd class="kbd">Enter</kbd> 选择</span>
-      <span><kbd class="kbd">Esc</kbd> 关闭</span>
+      <span><kbd class="kbd">↑↓</kbd> {{ $t('slash.move') }}</span>
+      <span><kbd class="kbd">Enter</kbd> {{ $t('slash.select') }}</span>
+      <span><kbd class="kbd">Esc</kbd> {{ $t('common.close') }}</span>
     </div>
   </div>
 </template>

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Project } from '../../types'
 import HomeCard from './HomeCard.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   projects: Project[]
@@ -30,22 +33,22 @@ function projectName(path: string): string {
 
 function timeAgo(ts: number, now: number): string {
   const diff = Math.floor(now - ts)
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}天前`
-  return `${Math.floor(diff / 604800)}周前`
+  if (diff < 60) return t('time.justNow')
+  if (diff < 3600) return t('time.minutesAgo', { n: Math.floor(diff / 60) })
+  if (diff < 86400) return t('time.hoursAgo', { n: Math.floor(diff / 3600) })
+  if (diff < 604800) return t('time.daysAgo', { n: Math.floor(diff / 86400) })
+  return t('time.weeksAgo', { n: Math.floor(diff / 604800) })
 }
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-folder" title="项目活跃" badge="全部">
-    <div v-if="loading && !rows.length" class="text-2xs text-muted-foreground py-2">加载中…</div>
-    <div v-else-if="!rows.length" class="text-2xs text-muted-foreground py-2">暂无项目</div>
+  <HomeCard icon="i-carbon-folder" :title="$t('home.projectActivity.title')" :badge="$t('home.projectActivity.badge')">
+    <div v-if="loading && !rows.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
+    <div v-else-if="!rows.length" class="text-2xs text-muted-foreground py-2">{{ $t('home.projectActivity.noProjects') }}</div>
     <div v-else class="flex flex-col gap-1.5">
       <div v-for="r in rows" :key="r.id" class="flex items-center gap-2 text-xs">
         <span class="flex-1 min-w-0 truncate" :title="r.path">{{ r.name }}</span>
-        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums">{{ r.sessions }} 会话</span>
+        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums">{{ $t('home.projectActivity.nSessions', { count: r.sessions }) }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground tabular-nums w-14 text-right">{{ r.recency }}</span>
       </div>
     </div>

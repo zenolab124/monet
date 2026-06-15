@@ -1,3 +1,5 @@
+import i18n from '../locales'
+
 /**
  * 图片校验工具:MIME + magic bytes 双层校验。
  * PRD FR-005 校验依据:不靠扩展名(扩展名可伪造,粘贴板图片无扩展名)。
@@ -53,7 +55,7 @@ export function validateImage(
     return {
       ok: false,
       mime: null,
-      reason: '图片头与声明类型不符',
+      reason: i18n.global.t('image.mimeHeaderMismatch'),
     }
   }
 
@@ -65,24 +67,24 @@ export function validateImage(
 
   // 失败:给出拒绝原因
   if (hintedMime === 'image/svg+xml') {
-    return { ok: false, mime: null, reason: '不支持 svg 格式' }
+    return { ok: false, mime: null, reason: i18n.global.t('image.noSvg') }
   }
   if (hintedMime.startsWith('video/')) {
-    return { ok: false, mime: null, reason: '仅支持图片' }
+    return { ok: false, mime: null, reason: i18n.global.t('image.imageOnly') }
   }
   if (hintedMime.startsWith('audio/')) {
-    return { ok: false, mime: null, reason: '仅支持图片' }
+    return { ok: false, mime: null, reason: i18n.global.t('image.imageOnly') }
   }
   if (hintedMime === 'application/pdf') {
-    return { ok: false, mime: null, reason: '不支持 PDF' }
+    return { ok: false, mime: null, reason: i18n.global.t('image.noPdf') }
   }
   if (hintedMime === 'image/heic' || hintedMime === 'image/heif') {
-    return { ok: false, mime: null, reason: '不支持 heic 格式' }
+    return { ok: false, mime: null, reason: i18n.global.t('image.noHeic') }
   }
   if (hintedMime === 'image/bmp' || hintedMime === 'image/tiff') {
-    return { ok: false, mime: null, reason: `不支持 ${hintedMime.replace('image/', '')} 格式` }
+    return { ok: false, mime: null, reason: i18n.global.t('image.unsupportedFormat', { format: hintedMime.replace('image/', '') }) }
   }
-  return { ok: false, mime: null, reason: '不支持的文件类型' }
+  return { ok: false, mime: null, reason: i18n.global.t('image.unsupportedType') }
 }
 
 /** 判断 MIME 是否在白名单 */

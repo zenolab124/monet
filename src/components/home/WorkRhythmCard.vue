@@ -31,28 +31,28 @@ const peakHour = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-time" title="作息节奏" badge="全部会话">
-    <div v-if="loading && !hours.length" class="text-2xs text-muted-foreground py-2">加载中…</div>
+  <HomeCard icon="i-carbon-time" :title="$t('home.workRhythm.title')" :badge="$t('home.workRhythm.badge')">
+    <div v-if="loading && !hours.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
       <div class="flex items-end gap-px h-12 mt-1">
         <div
           v-for="h in hours"
           :key="h.hour"
           class="bar-col"
-          :title="`${h.hour}:00 · ${h.count} 会话`"
+          :title="$t('home.workRhythm.barTitle', { hour: h.hour, count: h.count })"
         >
           <div class="bar" :class="h.hour === peakHour ? 'peak' : ''" :style="{ height: `${Math.max(h.pct, 2)}%` }" />
         </div>
       </div>
       <div class="flex justify-between mt-1 text-2xs text-muted-foreground tabular-nums">
-        <span>0时</span>
-        <span>6时</span>
-        <span>12时</span>
-        <span>18时</span>
-        <span>24时</span>
+        <span>{{ $t('home.workRhythm.hour0') }}</span>
+        <span>{{ $t('home.workRhythm.hour6') }}</span>
+        <span>{{ $t('home.workRhythm.hour12') }}</span>
+        <span>{{ $t('home.workRhythm.hour18') }}</span>
+        <span>{{ $t('home.workRhythm.hour24') }}</span>
       </div>
       <div v-if="peakHour !== null" class="text-2xs text-muted-foreground mt-1.5">
-        高产时段 <span class="text-foreground font-medium">{{ peakHour }}:00–{{ peakHour + 1 }}:00</span>
+        {{ $t('home.workRhythm.peakHour', { start: peakHour, end: peakHour + 1 }) }}
       </div>
     </template>
   </HomeCard>

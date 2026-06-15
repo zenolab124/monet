@@ -33,7 +33,7 @@ const renderedHtml = computed(() =>
       class="text-xs text-primary hover:text-primary/80 ml-1"
       @click="expanded = !expanded"
     >
-      {{ expanded ? '收起' : `…展开全部（${Math.round(block.text.length / 1024)}KB）` }}
+      {{ expanded ? $t('common.collapse') : $t('common.expandAll', { size: Math.round(block.text.length / 1024) }) }}
     </button>
   </div>
 </template>

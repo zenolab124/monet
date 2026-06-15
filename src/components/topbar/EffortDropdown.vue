@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { EffortLevel, EffortSetting } from '@/composables/useSessionSettings'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 
@@ -7,6 +8,8 @@ const props = defineProps<{
   /** null = 本会话未设置(按应用默认行为发送);'ultracode' = 超档(经 --settings 注入) */
   current: EffortSetting
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   (e: 'select', effort: EffortSetting): void
@@ -53,7 +56,7 @@ const cliDefaultLabel = computed(() => {
 const currentLabel = computed(() => {
   const o = OPTIONS.find(o => o.value === props.current)
   if (o) return o.label
-  return cliDefaultLabel.value ? `默认 · ${cliDefaultLabel.value}` : '默认'
+  return cliDefaultLabel.value ? t('topbar.effortFollow', { name: cliDefaultLabel.value }) : t('topbar.effortDefault')
 })
 
 function toggle() {
@@ -133,7 +136,7 @@ onUnmounted(() => {
       type="button"
       class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
              transition-colors flex items-center gap-1 border border-border"
-      :title="`努力等级:${currentLabel}`"
+      :title="$t('topbar.effortTitle', { name: currentLabel })"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
       @click="toggle"

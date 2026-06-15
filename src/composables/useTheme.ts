@@ -1,4 +1,5 @@
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
+import i18n from '../locales'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
@@ -44,11 +45,11 @@ function cycleTheme() {
   mode.value = order[(idx + 1) % order.length]
 }
 
-const themeLabel: Record<ThemeMode, string> = {
-  system: '跟随系统',
-  light: '亮色模式',
-  dark: '暗色模式',
-}
+const themeLabel = computed<Record<ThemeMode, string>>(() => ({
+  system: i18n.global.t('theme.system'),
+  light: i18n.global.t('theme.light'),
+  dark: i18n.global.t('theme.dark'),
+}))
 
 const themeIcon: Record<ThemeMode, string> = {
   system: 'i-carbon-screen',

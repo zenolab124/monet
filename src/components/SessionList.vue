@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions, type SortOrder, type TimeRange } from '@/composables/useSessions'
 import { useSessionMeta } from '@/composables/useSessionMeta'
@@ -13,6 +14,7 @@ import {
 } from '@/types'
 import type { SessionSummary } from '@/types'
 
+const { t } = useI18n()
 const { getMeta } = useSessionMeta()
 
 const { filteredSessions, sessionStats, loadProjects } = useProjects()
@@ -29,18 +31,18 @@ const {
 const sortedSessions = computed(() => filterAndSort(filteredSessions.value))
 const filterOptions = computed(() => extractFilterOptions(filteredSessions.value))
 
-const sortLabels: Record<SortOrder, string> = {
-  lastModified: '最近修改',
-  tokenUsage: 'Token 消耗',
-  messageCount: '消息数量',
-}
+const sortLabels = computed<Record<SortOrder, string>>(() => ({
+  lastModified: t('archive.sortRecent'),
+  tokenUsage: t('archive.sortTokens'),
+  messageCount: t('archive.sortMessages'),
+}))
 
-const timeLabels: Record<TimeRange, string> = {
-  all: '全部',
-  today: '今天',
-  thisWeek: '本周',
-  thisMonth: '本月',
-}
+const timeLabels = computed<Record<TimeRange, string>>(() => ({
+  all: t('common.all'),
+  today: t('archive.filterToday'),
+  thisWeek: t('archive.filterWeek'),
+  thisMonth: t('archive.filterMonth'),
+}))
 
 // 筛选下拉
 const showBranchDropdown = ref(false)
@@ -70,7 +72,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
 
   if (session.cwd) {
     items.push({
-      text: '在终端恢复',
+      text: t('archive.resumeInTerminal'),
       action: async () => {
         // 带上该会话已存的渠道(resolve 跟随默认),终端恢复不静默回落官方
         await refreshChannels()
@@ -81,7 +83,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
   }
 
   items.push({
-    text: '删除会话',
+    text: t('archive.deleteSession'),
     action: async () => {
       const { projects } = useProjects()
       const project = projects.value.find(p => p.sessions.some(s => s.id === session.id))
@@ -92,8 +94,8 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       if (home) {
         const { confirm } = useConfirm()
         const ok = await confirm(
-          `该会话在「${home.tab.name}」工作台中,删除将一并移出`,
-          '删除',
+          t('archive.deleteSessionInWorkbench', { tabName: home.tab.name }),
+          t('common.delete'),
         )
         if (!ok) return
         removeSession(session.id)
@@ -120,7 +122,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
     <div class="px-3 py-2 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
         <span class="text-sm font-semibold text-foreground truncate">{{ sessionStats.sessionCount }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">会话</span>
+        <span class="text-xs text-muted-foreground shrink-0">{{ $t('archive.sessionLabel') }}</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
@@ -130,12 +132,12 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       <span class="w-px h-3 bg-divider shrink-0" />
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
         <span class="text-sm font-semibold text-foreground truncate">{{ formatBytes(sessionStats.totalSize) }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">磁盘</span>
+        <span class="text-xs text-muted-foreground shrink-0">{{ $t('archive.diskLabel') }}</span>
       </div>
       <span class="w-px h-3 bg-divider shrink-0" />
       <div class="flex-1 min-w-0 flex items-baseline gap-1 justify-center">
         <span class="text-sm font-semibold text-foreground truncate">{{ sessionStats.activeDays }}</span>
-        <span class="text-xs text-muted-foreground shrink-0">活跃</span>
+        <span class="text-xs text-muted-foreground shrink-0">{{ $t('archive.activeLabel') }}</span>
       </div>
     </div>
 
@@ -153,7 +155,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       <span class="flex-1" />
       <button
         class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        title="刷新列表"
+        :title="$t('archive.refreshList')"
         @click="loadProjects"
       >
         <span class="i-carbon-renew w-3.5 h-3.5" />
@@ -189,7 +191,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
           class="px-2 py-0.5 text-xs rounded text-muted-foreground hover:text-foreground flex items-center gap-0.5"
           @click.stop="showBranchDropdown = !showBranchDropdown; showModelDropdown = false"
         >
-          分支 <span class="i-carbon-chevron-down w-3 h-3" />
+          {{ $t('archive.filterBranch') }} <span class="i-carbon-chevron-down w-3 h-3" />
         </button>
         <div
           v-if="showBranchDropdown && filterOptions.branches.length"
@@ -220,7 +222,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
           class="px-2 py-0.5 text-xs rounded text-muted-foreground hover:text-foreground flex items-center gap-0.5"
           @click.stop="showModelDropdown = !showModelDropdown; showBranchDropdown = false"
         >
-          模型 <span class="i-carbon-chevron-down w-3 h-3" />
+          {{ $t('archive.filterModel') }} <span class="i-carbon-chevron-down w-3 h-3" />
         </button>
         <div
           v-if="showModelDropdown && filterOptions.models.length"
@@ -241,8 +243,8 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
     <!-- 会话列表 -->
     <div class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain p-2 flex flex-col gap-1">
       <div v-if="sortedSessions.length === 0" class="px-3 py-8 text-center">
-        <p class="text-muted-foreground text-xs">没有找到会话</p>
-        <p class="text-muted-foreground text-xs mt-1">尝试调整筛选条件</p>
+        <p class="text-muted-foreground text-xs">{{ $t('archive.noSessions') }}</p>
+        <p class="text-muted-foreground text-xs mt-1">{{ $t('archive.adjustFilter') }}</p>
       </div>
 
       <div

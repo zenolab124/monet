@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useSessionStream, useStreaming } from '@/composables/useStreaming'
@@ -10,6 +11,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import { displayTitle, formatTokens, relativeTime } from '@/types'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 
+const { t } = useI18n()
 const { getMeta } = useSessionMeta()
 
 /**
@@ -52,7 +54,7 @@ const draft = computed(() => {
 
 const title = computed(() =>
   summary.value ? displayTitle(summary.value.summary, getMeta(props.sessionId)?.title)
-  : draft.value ? '新会话'
+  : draft.value ? t('session.newSessionTitle')
   : props.sessionId.slice(0, 8),
 )
 
@@ -84,9 +86,9 @@ onUnmounted(() => {
 const permSummary = computed(() => {
   const p = headPerm.value
   if (!p) return ''
-  if (p.toolName === 'AskUserQuestion') return 'Claude 在提问'
-  if (p.toolName === 'ExitPlanMode') return '计划待批准'
-  if (p.toolName === 'EnterPlanMode') return '请求进入计划模式'
+  if (p.toolName === 'AskUserQuestion') return t('workbench.monitor.claudeAsking')
+  if (p.toolName === 'ExitPlanMode') return t('workbench.monitor.planApproval')
+  if (p.toolName === 'EnterPlanMode') return t('workbench.monitor.enterPlanMode')
   for (const k of ['file_path', 'command', 'url', 'pattern']) {
     const v = p.input[k]
     if (typeof v === 'string' && v) return `${p.toolName} · ${v.split('\n')[0]}`
@@ -107,7 +109,7 @@ const canRetry = computed(() => status.value.key === 'error' && !!stream.value.l
 const durationText = computed(() => {
   if (stream.value.streaming && stream.value.startedAt) {
     const mins = Math.floor((now.value - stream.value.startedAt) / 60_000)
-    return mins < 1 ? '刚开始' : `${mins} 分钟`
+    return mins < 1 ? t('time.justStarted') : t('time.nMinutes', { n: mins })
   }
   return summary.value ? relativeTime(summary.value.summary.last_modified) : ''
 })
@@ -125,14 +127,14 @@ const tokenText = computed(() => {
 function onCardClick() {
   const result = expandSession(activeTab.value.id, props.sessionId)
   if (result.collapsedSessionIds.length > 0) {
-    notifyTransient(`已收起:${result.collapsedSessionIds.map(sessionTitle).join('、')}`)
+    notifyTransient(t('workbench.monitor.collapsed', { names: result.collapsedSessionIds.map(sessionTitle).join('、') }))
   }
 }
 
 /** ×:退出工作台。流式中需确认(退出≠终止,流在后台继续直至落盘) */
 async function onClose() {
   if (stream.value.streaming) {
-    const ok = await confirm('任务仍在进行,移出后仅通过通知提醒。确认移出工作台?', '移出')
+    const ok = await confirm(t('workbench.monitor.removeConfirm'), t('common.removeBrief'))
     if (!ok) return
   }
   removeSession(props.sessionId)
@@ -200,10 +202,10 @@ function onDragEnd() {
       <span
         v-if="expanded"
         class="px-1 text-[9.5px] border border-primary text-primary rounded-sm shrink-0"
-      >已展开</span>
+      >{{ $t('workbench.monitor.expanded') }}</span>
       <button
         class="ml-auto w-4 h-4 grid place-items-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-muted shrink-0"
-        title="退出工作台"
+        :title="$t('workbench.monitor.exitWorkbench')"
         @click.stop="onClose"
       >
         <span class="i-carbon-close w-3 h-3" />
@@ -233,7 +235,7 @@ function onDragEnd() {
         </div>
       </template>
       <div v-else class="truncate">
-        {{ stream.streaming ? '正在启动…' : '暂无实时输出' }}<span v-if="stream.streaming" class="tail-caret" />
+        {{ stream.streaming ? $t('workbench.monitor.starting') : $t('workbench.monitor.noOutput') }}<span v-if="stream.streaming" class="tail-caret" />
       </div>
     </div>
 
@@ -249,16 +251,16 @@ function onDragEnd() {
         v-if="headPermInteractive"
         class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
         @click.stop="onCardClick"
-      >去回答</button>
+      >{{ $t('workbench.monitor.goAnswer') }}</button>
       <template v-else>
         <button
           class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
           @click.stop="onAllow"
-        >允许</button>
+        >{{ $t('common.allow') }}</button>
         <button
           class="px-2 py-0.5 text-[10.5px] rounded border border-border text-muted-foreground shrink-0"
           @click.stop="onDeny"
-        >拒</button>
+        >{{ $t('common.denyBrief') }}</button>
       </template>
     </div>
 
@@ -268,11 +270,11 @@ function onDragEnd() {
       class="mx-2.5 mb-1.5 px-2 py-1 border border-border rounded bg-popover flex items-center gap-1.5 text-[11px] decision-destructive"
       @click.stop
     >
-      <span class="flex-1 min-w-0 truncate text-muted-foreground">任务已停住</span>
+      <span class="flex-1 min-w-0 truncate text-muted-foreground">{{ $t('workbench.monitor.taskStopped') }}</span>
       <button
         class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
         @click.stop="onRetry"
-      >重试</button>
+      >{{ $t('common.retry') }}</button>
     </div>
 
     <!-- meta 行:项目名 + 持续/最后活动时间 + token -->

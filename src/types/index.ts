@@ -1,3 +1,5 @@
+import i18n from '../locales'
+
 // 与 Rust 端数据模型对应的 TypeScript 类型
 
 export interface TokenUsage {
@@ -174,18 +176,18 @@ export function relativeTime(timestamp: string | number): string {
   const hours = Math.floor(minutes / 60)
   const days = Math.floor(hours / 24)
 
-  if (seconds < 60) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  if (hours < 24) return `${hours} 小时前`
-  if (days === 1) return '昨天'
-  if (days < 30) return `${days} 天前`
+  if (seconds < 60) return i18n.global.t('time.justNow')
+  if (minutes < 60) return i18n.global.t('time.minutesAgo', { n: minutes })
+  if (hours < 24) return i18n.global.t('time.hoursAgo', { n: hours })
+  if (days === 1) return i18n.global.t('time.yesterday')
+  if (days < 30) return i18n.global.t('time.daysAgo', { n: days })
   return date.toLocaleDateString('zh-CN')
 }
 
 export function shortModel(model: string | null): string {
   if (!model) return ''
   // CLI 本地合成的占位消息(API Error 等),非真实模型响应
-  if (model === '<synthetic>') return '系统'
+  if (model === '<synthetic>') return i18n.global.t('session.system')
   if (model.includes('fable')) return 'Fable'
   if (model.includes('opus')) return 'Opus'
   if (model.includes('sonnet-4-5') || model.includes('sonnet-4.5')) return 'Sonnet 4.5'
@@ -202,7 +204,7 @@ export function displayTitle(s: SessionSummary, metaTitle?: string): string {
     const text = s.first_user_message.slice(0, 60)
     return text.length < s.first_user_message.length ? text + '…' : text
   }
-  return '无标题会话'
+  return i18n.global.t('session.noTitleSession')
 }
 
 /** 短 UUID（前 8 位）*/

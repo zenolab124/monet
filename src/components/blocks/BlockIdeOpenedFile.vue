@@ -20,6 +20,6 @@ const fileName = computed(() => {
 <template>
   <div class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
     <span class="i-carbon-document w-3 h-3 shrink-0" />
-    <span>打开了 <span class="text-muted-foreground" :title="filePath">{{ fileName }}</span></span>
+    <span>{{ $t('block.openedFile', { name: fileName }) }}</span>
   </div>
 </template>

@@ -37,7 +37,7 @@ const tooltip = computed(() => {
     <img
       :src="dataUrl"
       class="w-full h-full object-cover block"
-      alt="待发送图片"
+      :alt="$t('image.pending')"
       draggable="false"
     />
     <!-- 删除按钮:hover 显示 -->
@@ -48,8 +48,8 @@ const tooltip = computed(() => {
              flex items-center justify-center
              opacity-0 group-hover:opacity-100 focus:opacity-100
              transition-opacity"
-      title="移除"
-      aria-label="移除图片"
+      :title="$t('image.remove')"
+      :aria-label="$t('image.removeAria')"
       @click="emit('remove')"
     >
       <span class="i-carbon-close w-3 h-3" />

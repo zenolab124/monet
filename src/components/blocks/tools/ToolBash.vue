@@ -47,15 +47,15 @@ async function copyText(text: string, target: 'in' | 'out') {
       <span class="i-carbon-terminal w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium shrink-0">Bash</span>
       <span v-if="description" class="text-muted-foreground truncate" :title="description">{{ description }}</span>
-      <span v-if="runInBackground" class="ml-auto px-1.5 py-0.5 rounded border border-border text-muted-foreground shrink-0">后台</span>
+      <span v-if="runInBackground" class="ml-auto px-1.5 py-0.5 rounded border border-border text-muted-foreground shrink-0">{{ $t('block.toolBash.background') }}</span>
     </div>
 
     <div v-if="command" class="group mt-1.5 flex items-center gap-1.5">
-      <span class="text-muted-foreground/60 shrink-0 font-mono text-2xs">输入</span>
+      <span class="text-muted-foreground/60 shrink-0 font-mono text-2xs">{{ $t('common.input') }}</span>
       <code class="flex-1 truncate font-mono text-foreground" :title="command">{{ command }}</code>
       <button
         class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-        title="复制命令"
+        :title="$t('block.toolBash.copyCommand')"
         @click="copyText(command, 'in')"
       >
         <span v-if="copiedIn" class="i-carbon-checkmark w-3 h-3 text-primary" />
@@ -67,7 +67,7 @@ async function copyText(text: string, target: 'in' | 'out') {
       <span
         class="shrink-0 font-mono text-2xs mt-px"
         :class="result?.is_error ? 'text-destructive/60' : 'text-muted-foreground/60'"
-      >输出</span>
+      >{{ $t('common.output') }}</span>
       <pre
         class="flex-1 min-w-0 font-mono whitespace-pre-wrap break-all cursor-pointer select-text out-clamp"
         :class="[
@@ -78,7 +78,7 @@ async function copyText(text: string, target: 'in' | 'out') {
       >{{ resultText }}</pre>
       <button
         class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-px"
-        title="复制输出"
+        :title="$t('block.toolBash.copyOutput')"
         @click.stop="copyText(resultText, 'out')"
       >
         <span v-if="copiedOut" class="i-carbon-checkmark w-3 h-3 text-primary" />

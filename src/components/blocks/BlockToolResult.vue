@@ -29,8 +29,8 @@ const preview = computed(() => fullText.value.slice(0, 80))
       @click="expanded = !expanded"
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
-      → 结果
-      <span v-if="block.is_error" class="text-destructive">（错误）</span>
+      {{ $t('block.toolResult') }}
+      <span v-if="block.is_error" class="text-destructive">{{ $t('block.toolResultError') }}</span>
       <span v-if="!expanded" class="text-muted-foreground font-normal truncate max-w-48">
         {{ preview }}{{ fullText.length > 80 ? '…' : '' }}
       </span>

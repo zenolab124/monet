@@ -14,7 +14,7 @@ defineEmits<{ (e: 'update:modelValue', v: WorkshopCategory): void }>()
 
 <template>
   <aside class="ws-nav shrink-0 border-r border-border">
-    <div class="ws-pane-title text-muted-foreground">工坊</div>
+    <div class="ws-pane-title text-muted-foreground">{{ $t('workshop.title') }}</div>
     <div class="ws-list flex flex-col gap-0.5">
       <button
         v-for="item in items"

@@ -19,6 +19,7 @@ mod metadata;
 mod routines;
 mod workshop;
 mod cli_settings;
+mod translate;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -111,6 +112,10 @@ pub fn run() {
             cli_settings::get_full_cli_settings,
             cli_settings::update_cli_settings,
             cli_settings::refresh_settings_schema,
+            translate::translate_locale,
+            translate::parse_language_intent,
+            translate::list_external_locales,
+            translate::delete_external_locale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

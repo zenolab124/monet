@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { formatBytes } from '@/types'
 import { relativeTime } from '@/types'
 
+const { t } = useI18n()
 const {
   projects,
   selectedProjectIds,
@@ -33,12 +35,12 @@ function projectName(displayPath: string) {
   <div class="h-full flex flex-col" @contextmenu.prevent>
     <!-- 标题 -->
     <div class="px-3 py-2 text-xs font-semibold text-muted-foreground tracking-wide">
-      项目
+      {{ $t('archive.projects') }}
     </div>
 
     <!-- 加载态 -->
     <div v-if="loading" class="px-3 py-8 text-center text-muted-foreground text-xs">
-      正在加载项目...
+      {{ $t('archive.loadingProjects') }}
     </div>
 
     <!-- 错误态 -->
@@ -48,8 +50,8 @@ function projectName(displayPath: string) {
 
     <!-- 空态 -->
     <div v-else-if="projects.length === 0" class="px-3 py-8 text-center">
-      <p class="text-muted-foreground text-xs">未发现任何项目</p>
-      <p class="text-muted-foreground text-xs mt-1">请确认 ~/.claude/projects 目录存在</p>
+      <p class="text-muted-foreground text-xs">{{ $t('archive.noProjects') }}</p>
+      <p class="text-muted-foreground text-xs mt-1">{{ $t('archive.checkProjectsDir') }}</p>
     </div>
 
     <!-- 项目列表 -->
@@ -72,7 +74,7 @@ function projectName(displayPath: string) {
             {{ projectName(project.display_path) }}
           </div>
           <div class="text-xs text-muted-foreground flex gap-2 mt-0.5">
-            <span>{{ project.session_count }} 个会话</span>
+            <span>{{ $t('archive.sessionCount', { count: project.session_count }) }}</span>
             <span v-if="project.last_active">{{ relativeTime(project.last_active) }}</span>
           </div>
         </div>
@@ -81,8 +83,8 @@ function projectName(displayPath: string) {
 
     <!-- 底部统计 -->
     <div class="px-3 py-2 border-t border-border text-xs text-muted-foreground flex gap-3">
-      <span>{{ sidebarStats.projectCount }} 个项目</span>
-      <span>{{ sidebarStats.sessionCount }} 个会话</span>
+      <span>{{ $t('archive.projectStats', { projects: sidebarStats.projectCount }) }}</span>
+      <span>{{ $t('archive.sessionStats', { sessions: sidebarStats.sessionCount }) }}</span>
       <span>{{ formatBytes(sidebarStats.totalSize) }}</span>
     </div>
   </div>

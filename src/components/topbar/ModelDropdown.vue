@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   MODELS,
   inferModel,
@@ -14,6 +15,8 @@ const props = defineProps<{
   /** 禁用(顾问模式下主模型锁定为 Sonnet,不可改) */
   disabled?: boolean
 }>()
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   (e: 'select', modelId: string): void
@@ -43,7 +46,7 @@ const cliDefaultModelLabel = computed(() => {
 const currentLabel = computed(() => {
   if (currentModel.value) return currentModel.value.label
   if (props.current) return props.current
-  return cliDefaultModelLabel.value ? `默认 · ${cliDefaultModelLabel.value}` : '默认'
+  return cliDefaultModelLabel.value ? t('topbar.modelFollow', { name: cliDefaultModelLabel.value }) : t('topbar.modelDefault')
 })
 
 /**
@@ -154,7 +157,7 @@ onUnmounted(() => {
       class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
              transition-colors flex items-center gap-1 border border-border
              disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-      :title="disabled ? '顾问模式下主模型锁定为 Sonnet' : `模型:${currentLabel}`"
+      :title="disabled ? $t('topbar.modelAdvisorLocked') : $t('topbar.modelTitle', { name: currentLabel })"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
       @click="toggle"

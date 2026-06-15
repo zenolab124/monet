@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Menu } from '@tauri-apps/api/menu'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
@@ -11,6 +12,7 @@ import MonitorCard from './MonitorCard.vue'
  * 工作台左列(FR-003):当前 tab 全部会话的监控卡竖排(加入顺序,状态变化不重排)。
  * 底部「＋」格:从档案馆选择 / 新建会话(FR-002 进入口)。
  */
+const { t } = useI18n()
 const { activeTab, createDraftSession } = useWorkbench()
 const { projects } = useProjects()
 const { switchSection } = useUiState()
@@ -21,7 +23,7 @@ const expandedSet = computed(() => new Set(activeTab.value.columns.map(c => c.se
 const hint = computed(() => {
   const n = activeTab.value.sessionIds.length
   const m = activeTab.value.columns.length
-  return n === 0 ? null : `${n} 个会话 · ${m} 个已展开`
+  return n === 0 ? null : t('workbench.rail.hint', { n, m })
 })
 
 /** ＋ 菜单:从档案馆选择 / 新建会话(子菜单按项目,应用内直开草稿卡,首条消息落盘) */
@@ -31,19 +33,19 @@ async function onAddClick() {
     text: p.display_path.split('/').pop() || p.display_path,
     action: () => {
       createDraftSession(p.display_path)
-      notifyTransient('新会话已就绪', '输入第一条消息开始对话')
+      notifyTransient(t('workbench.rail.newSessionReady'), t('workbench.rail.newSessionHint'))
     },
   }))
   const menu = await Menu.new({
     items: [
       {
         id: 'from-archive',
-        text: '从档案馆选择',
+        text: t('workbench.rail.fromArchive'),
         action: () => switchSection('sessions'),
       },
       {
         id: 'new-session',
-        text: '新建会话',
+        text: t('workbench.rail.newSession'),
         enabled: projectItems.length > 0,
         items: projectItems,
       },
@@ -72,7 +74,7 @@ async function onAddClick() {
         v-if="activeTab.sessionIds.length === 0"
         class="px-2 py-6 text-center text-xs text-muted-foreground leading-relaxed"
       >
-        从档案馆打开会话，<br />或点击下方 ＋ 新建
+        {{ $t('workbench.rail.empty') }}
       </div>
     </div>
 
@@ -83,7 +85,7 @@ async function onAddClick() {
       @click="onAddClick"
     >
       <span class="text-sm">＋</span>
-      <span>打开会话 / 新任务</span>
+      <span>{{ $t('workbench.rail.openSession') }}</span>
     </button>
   </aside>
 </template>

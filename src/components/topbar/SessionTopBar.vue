@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
 import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
@@ -62,6 +63,7 @@ const emit = defineEmits<{
   (e: 'deleted'): void
 }>()
 
+const { t } = useI18n()
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
 
@@ -77,10 +79,10 @@ const advisorDisabled = computed(() => !!props.resolvedChannelId)
 
 /** 顾问开关 title 文案 */
 const advisorTitle = computed(() => {
-  if (advisorDisabled.value) return '顾问仅在官方渠道可用(当前为第三方渠道)'
+  if (advisorDisabled.value) return t('topbar.advisorDisabled')
   return props.selectedAdvisor
-    ? '顾问模式:开启(主 Sonnet + Fable 顾问)'
-    : '开启顾问模式(主 Sonnet + Fable 顾问)'
+    ? t('topbar.advisorEnabled')
+    : t('topbar.advisorEnable')
 })
 
 function onAdvisorToggle() {
@@ -170,9 +172,9 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 async function copySessionId() {
   try {
     await navigator.clipboard.writeText(props.sessionId)
-    notifyTransient('会话 ID 已复制')
+    notifyTransient(t('topbar.sessionIdCopied'))
   } catch {
-    notifyTransient('复制失败', '请检查剪贴板权限')
+    notifyTransient(t('topbar.copyFailed'), t('topbar.checkClipboard'))
   }
   menuOpen.value = false
 }
@@ -193,7 +195,7 @@ async function openInTerminal() {
       channel: props.resolvedChannelId,
     })
   } catch (e) {
-    notifyTransient('终端打开失败', String(e))
+    notifyTransient(t('topbar.terminalFailed'), String(e))
   }
 }
 
@@ -203,19 +205,19 @@ async function openInVscode() {
   try {
     await invoke('resume_in_vscode', { cwd: props.cwd })
   } catch (e) {
-    notifyTransient('VS Code 打开失败', String(e))
+    notifyTransient(t('topbar.vscodeFailed'), String(e))
   }
 }
 
 async function onDelete() {
   menuOpen.value = false
-  const ok = await confirm('删除该会话的全部记录?此操作不可恢复。', '删除')
+  const ok = await confirm(t('archive.deleteSessionConfirm'), t('common.delete'))
   if (!ok) return
   try {
     await invoke('delete_session', { projectId: props.projectId, sessionId: props.sessionId })
     emit('deleted')
   } catch (e) {
-    notifyTransient('删除失败', String(e))
+    notifyTransient(t('topbar.deleteFailed'), String(e))
   }
 }
 
@@ -290,7 +292,7 @@ function onPermissionModeChange(mode: PermissionMode) {
       @click="onAdvisorToggle"
     >
       <span class="i-carbon-idea w-3.5 h-3.5" />
-      <span>顾问</span>
+      <span>{{ $t('topbar.advisor') }}</span>
     </button>
 
     <div class="ml-auto" />
@@ -300,7 +302,7 @@ function onPermissionModeChange(mode: PermissionMode) {
       <button
         type="button"
         class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        title="会话信息与操作"
+        :title="$t('topbar.sessionMenu')"
         :aria-expanded="menuOpen"
         @click="menuOpen = !menuOpen"
       >
@@ -347,7 +349,7 @@ function onPermissionModeChange(mode: PermissionMode) {
             @click="onAdvisorToggle"
           >
             <span class="i-carbon-idea w-3.5 h-3.5" />
-            <span>顾问模式</span>
+            <span>{{ $t('topbar.advisorMode') }}</span>
           </button>
         </div>
 
@@ -355,7 +357,7 @@ function onPermissionModeChange(mode: PermissionMode) {
         <div class="px-3 py-1.5 text-xs text-muted-foreground flex flex-col gap-1 border-b border-border">
           <button
             class="flex items-center gap-1.5 hover:text-foreground transition-colors text-left"
-            title="复制完整会话 ID"
+            :title="$t('topbar.copySessionId')"
             @click="copySessionId"
           >
             <span class="font-mono">{{ shortIdValue }}</span>
@@ -371,16 +373,16 @@ function onPermissionModeChange(mode: PermissionMode) {
         <!-- 操作 -->
         <div class="py-1 flex flex-col">
           <button class="menu-item" @click="onReload">
-            <span class="i-carbon-renew w-3.5 h-3.5" />刷新会话
+            <span class="i-carbon-renew w-3.5 h-3.5" />{{ $t('topbar.refreshSession') }}
           </button>
           <button v-if="cwd" class="menu-item" @click="openInTerminal">
-            <span class="i-carbon-terminal w-3.5 h-3.5" />在终端打开
+            <span class="i-carbon-terminal w-3.5 h-3.5" />{{ $t('topbar.openInTerminal') }}
           </button>
           <button v-if="cwd" class="menu-item" @click="openInVscode">
-            <span class="i-carbon-code w-3.5 h-3.5" />在 VS Code 打开
+            <span class="i-carbon-code w-3.5 h-3.5" />{{ $t('topbar.openInVscode') }}
           </button>
           <button class="menu-item text-destructive hover:bg-destructive/10" @click="onDelete">
-            <span class="i-carbon-trash-can w-3.5 h-3.5" />删除会话
+            <span class="i-carbon-trash-can w-3.5 h-3.5" />{{ $t('topbar.deleteSession') }}
           </button>
         </div>
       </div>

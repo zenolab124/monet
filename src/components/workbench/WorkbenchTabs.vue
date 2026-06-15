@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Menu } from '@tauri-apps/api/menu'
 import { useWorkbench, type WorkbenchTab } from '@/composables/useWorkbench'
 import { useConfirm } from '@/composables/useConfirm'
@@ -9,6 +10,7 @@ import { useConfirm } from '@/composables/useConfirm'
  * 同时是卡片拖拽的跨台移动落点(FR-005 ②)。
  * 溢出时横向滚动,不换行、不下拉收纳。
  */
+const { t } = useI18n()
 const { state, activeTab, setActiveTab, createTab, renameTab, closeTab, reorderTabs, moveSessionToTab } = useWorkbench()
 const { confirm } = useConfirm()
 
@@ -46,7 +48,7 @@ function cancelRename() {
 async function requestClose(tab: WorkbenchTab) {
   if (state.value.tabs.length <= 1) return
   if (tab.sessionIds.length > 0) {
-    const ok = await confirm(`${tab.sessionIds.length} 个会话将退出工作台`, '关闭')
+    const ok = await confirm(t('workbench.closeConfirm', { count: tab.sessionIds.length }), t('common.close'))
     if (!ok) return
   }
   closeTab(tab.id)
@@ -60,12 +62,12 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
     items: [
       {
         id: 'rename',
-        text: '重命名',
+        text: t('workbench.rename'),
         action: () => startRename(tab),
       },
       {
         id: 'close',
-        text: '关闭',
+        text: t('common.close'),
         enabled: state.value.tabs.length > 1,
         action: () => void requestClose(tab),
       },
@@ -185,7 +187,7 @@ function onTabDrop(e: DragEvent, index: number, tab: WorkbenchTab) {
 
     <button
       class="wb-tab add shrink-0"
-      title="新建工作台"
+      :title="$t('workbench.newTab')"
       @click="createTab()"
     >＋</button>
 

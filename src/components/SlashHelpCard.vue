@@ -20,8 +20,8 @@ defineProps<{
     <!-- 头部 -->
     <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
       <span class="i-carbon-help w-3.5 h-3.5 shrink-0" />
-      <span>斜杠命令</span>
-      <span class="text-muted-foreground font-normal">（共 {{ commands.length }} 条）</span>
+      <span>{{ $t('slash.title') }}</span>
+      <span class="text-muted-foreground font-normal">{{ $t('slash.totalCount', { count: commands.length }) }}</span>
     </div>
 
     <!-- 命令列表 -->
@@ -42,23 +42,23 @@ defineProps<{
         <span
           v-if="cmd.category === 'pass'"
           class="ml-auto px-1.5 py-0.5 rounded text-2xs text-muted-foreground border border-border shrink-0"
-          title="影响下次发送（透传给 CLI）"
+          :title="$t('slash.passThroughTitle')"
         >
-          透传
+          {{ $t('slash.passThrough') }}
         </span>
         <span
           v-else
           class="ml-auto px-1.5 py-0.5 rounded text-2xs text-muted-foreground border border-border shrink-0"
-          title="前端原生处理"
+          :title="$t('slash.nativeTitle')"
         >
-          原生
+          {{ $t('slash.native') }}
         </span>
       </li>
     </ul>
 
     <!-- 底部说明 -->
     <div class="mt-2 pt-2 border-t border-border text-2xs text-muted-foreground">
-      其它斜杠输入（如 <span class="font-mono">/init</span>、<span class="font-mono">/compact</span>）按普通文本发送给 CLI 处理。
+      {{ $t('slash.footer') }}
     </div>
   </div>
 </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import TitleBar from '@/components/TitleBar.vue'
 import TitleBarTools from '@/components/TitleBarTools.vue'
 import ActivityBar from '@/components/ActivityBar.vue'
@@ -25,6 +26,7 @@ const { projects, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 const { activeSection } = useUiState()
 const { pruneDrafts } = useWorkbench()
+const { t } = useI18n()
 
 // 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉
 watch(projects, (list) => {
@@ -53,7 +55,7 @@ onMounted(async () => {
   await useRoutines().initRoutineListener()
   // 工作台持久化损坏回退提示(NFR-002)
   if (stateWasReset) {
-    useNotifications().notifyTransient('工作台状态已重置')
+    useNotifications().notifyTransient(t('workbench.stateReset'))
   }
 })
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))

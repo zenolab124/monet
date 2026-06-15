@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { SchemaDiagnosis } from '../../types'
 import HomeCard from './HomeCard.vue'
 
@@ -15,6 +16,8 @@ const props = defineProps<{
   scannedAt: Date | null
 }>()
 
+const { t } = useI18n()
+
 const emit = defineEmits<{ retry: [] }>()
 
 const rows = computed(() => {
@@ -23,34 +26,34 @@ const rows = computed(() => {
   const unknown = Object.keys(props.diag.record_types.unknown).length
   const generic = Object.keys(props.diag.tools.generic_undeclared).length
   return [
-    { ok: true, label: '已支持记录类型', count: `${supported} 种` },
-    { ok: unknown === 0, label: '未识别记录类型（挂起观察）', count: `${unknown} 种` },
-    { ok: generic === 0, label: 'Generic 兜底工具', count: `${generic} 个` },
+    { ok: true, label: t('home.diagnosis.supportedTypes'), count: `${supported} 种` }, // TODO: i18n
+    { ok: unknown === 0, label: t('home.diagnosis.unknownTypes'), count: `${unknown} 种` }, // TODO: i18n
+    { ok: generic === 0, label: t('home.diagnosis.genericTools'), count: `${generic} 个` }, // TODO: i18n
   ]
 })
 
 /** 加载态三行占位（计数位「…」） */
-const placeholderRows = [
-  { ok: true, label: '已支持记录类型', count: '…' },
-  { ok: true, label: '未识别记录类型（挂起观察）', count: '…' },
-  { ok: true, label: 'Generic 兜底工具', count: '…' },
-]
+const placeholderRows = computed(() => [
+  { ok: true, label: t('home.diagnosis.supportedTypes'), count: '…' },
+  { ok: true, label: t('home.diagnosis.unknownTypes'), count: '…' },
+  { ok: true, label: t('home.diagnosis.genericTools'), count: '…' },
+])
 
 const footer = computed(() => {
-  if (props.loading) return '扫描中…'
+  if (props.loading) return t('home.diagnosis.scanning')
   if (!props.diag || !props.scannedAt) return ''
   const d = props.scannedAt
   const pad = (n: number) => String(n).padStart(2, '0')
   const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  return `上次扫描 ${stamp} · ${props.diag.scanned_files} 个会话文件`
+  return t('home.diagnosis.footer', { stamp, count: props.diag.scanned_files })
 })
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-activity" title="兼容性诊断" badge="schema-probe">
+  <HomeCard icon="i-carbon-activity" :title="$t('home.diagnosis.title')" badge="schema-probe">
     <template v-if="error">
-      <div class="py-3 text-xs text-muted-foreground">加载失败</div>
-      <button class="retry-btn" @click="emit('retry')">重试</button>
+      <div class="py-3 text-xs text-muted-foreground">{{ $t('common.loadFailed') }}</div>
+      <button class="retry-btn" @click="emit('retry')">{{ $t('common.retry') }}</button>
     </template>
     <template v-else>
       <div

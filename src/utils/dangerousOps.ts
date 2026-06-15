@@ -1,3 +1,5 @@
+import i18n from '../locales'
+
 /**
  * 危险工具识别(FR-003)
  *
@@ -66,7 +68,7 @@ export function checkDangerous(
       if (re.test(cmd)) {
         return {
           level: 'danger',
-          reason: `Bash 命令命中危险规则: ${re.source}`,
+          reason: i18n.global.t('danger.bashRule', { rule: re.source }),
         }
       }
     }
@@ -84,7 +86,7 @@ export function checkDangerous(
       if (path.startsWith(prefix)) {
         return {
           level: 'danger',
-          reason: `写入路径在敏感目录: ${prefix}`,
+          reason: i18n.global.t('danger.sensitivePath', { prefix }),
         }
       }
     }

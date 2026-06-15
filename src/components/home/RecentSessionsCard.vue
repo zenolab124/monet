@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Project } from '../../types'
 import HomeCard from './HomeCard.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   projects: Project[]
@@ -20,11 +23,11 @@ const recent = computed(() => {
 
 function timeAgo(ts: number): string {
   const diff = Math.floor(Date.now() / 1000) - ts
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 604800) return `${Math.floor(diff / 86400)} 天前`
-  return `${Math.floor(diff / 604800)} 周前`
+  if (diff < 60) return t('time.justNow')
+  if (diff < 3600) return t('time.minutesAgo', { n: Math.floor(diff / 60) })
+  if (diff < 86400) return t('time.hoursAgo', { n: Math.floor(diff / 3600) })
+  if (diff < 604800) return t('time.daysAgo', { n: Math.floor(diff / 86400) })
+  return t('time.weeksAgo', { n: Math.floor(diff / 604800) })
 }
 
 function projectName(path: string): string {
@@ -34,9 +37,9 @@ function projectName(path: string): string {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-recently-viewed" title="最近会话" badge="全部项目" wide>
-    <div v-if="loading && !recent.length" class="text-2xs text-muted-foreground py-2">加载中…</div>
-    <div v-else-if="!recent.length" class="text-2xs text-muted-foreground py-2">暂无会话</div>
+  <HomeCard icon="i-carbon-recently-viewed" :title="$t('home.recentSessions.title')" :badge="$t('home.recentSessions.badge')" wide>
+    <div v-if="loading && !recent.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
+    <div v-else-if="!recent.length" class="text-2xs text-muted-foreground py-2">{{ $t('home.recentSessions.noSessions') }}</div>
     <div v-else class="flex flex-col">
       <button
         v-for="s in recent"
@@ -44,7 +47,7 @@ function projectName(path: string): string {
         class="session-row"
         @click="emit('go-session', s.id)"
       >
-        <span class="flex-1 min-w-0 truncate text-xs">{{ s.title || s.first_user_message || '(无标题)' }}</span>
+        <span class="flex-1 min-w-0 truncate text-xs">{{ s.title || s.first_user_message || $t('archive.noTitle') }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground font-mono">{{ projectName(s.projectPath) }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground tabular-nums w-16 text-right">{{ timeAgo(s.last_modified) }}</span>
       </button>

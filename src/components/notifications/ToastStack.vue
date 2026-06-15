@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useNotifications, requestKindLabel, type PersistentToast } from '@/composables/useNotifications'
 import { usePermissionRequests, isInteractiveTool } from '@/composables/usePermissionRequests'
 
@@ -8,6 +9,7 @@ import { usePermissionRequests, isInteractiveTool } from '@/composables/usePermi
  * 持久型(权限请求/出错停住)处理前不消失,同屏上限 3 条,超出折叠为汇总条;
  * 瞬态型 5 秒自动消失。与左列决策条同源(权限队列/错误事件集),任一处处理同步消失。
  */
+const { t } = useI18n()
 const { transients, persistentToasts, toastsExpanded, dismissError, goToSession, retryFromToast } = useNotifications()
 const { respondRequest } = usePermissionRequests()
 
@@ -21,26 +23,26 @@ const foldedCount = computed(() =>
   Math.max(0, persistentToasts.value.length - PERSISTENT_LIMIT),
 )
 
-async function onAllow(t: PersistentToast) {
-  if (t.kind === 'permission') await respondRequest(t.request.requestId, 'allow_once')
+async function onAllow(toast: PersistentToast) {
+  if (toast.kind === 'permission') await respondRequest(toast.request.requestId, 'allow_once')
 }
 
-async function onDeny(t: PersistentToast) {
-  if (t.kind === 'permission') await respondRequest(t.request.requestId, 'deny')
+async function onDeny(toast: PersistentToast) {
+  if (toast.kind === 'permission') await respondRequest(toast.request.requestId, 'deny')
 }
 
 /** 交互工具(提问/计划)不提供就地允许/拒绝——必须去会话里作答 */
-function needsSession(t: PersistentToast): boolean {
-  return t.kind === 'permission' && isInteractiveTool(t.request.toolName)
+function needsSession(toast: PersistentToast): boolean {
+  return toast.kind === 'permission' && isInteractiveTool(toast.request.toolName)
 }
 
-function toastLabel(t: PersistentToast): string {
-  return t.kind === 'permission' ? requestKindLabel(t.request.toolName) : '出错停住'
+function toastLabel(toast: PersistentToast): string {
+  return toast.kind === 'permission' ? requestKindLabel(toast.request.toolName) : t('notification.errorStopped')
 }
 
-function toastIcon(t: PersistentToast): string {
-  if (t.kind === 'error') return 'i-carbon-warning text-destructive'
-  switch (t.request.toolName) {
+function toastIcon(toast: PersistentToast): string {
+  if (toast.kind === 'error') return 'i-carbon-warning text-destructive'
+  switch (toast.request.toolName) {
     case 'AskUserQuestion': return 'i-carbon-help text-accent'
     case 'ExitPlanMode':
     case 'EnterPlanMode': return 'i-carbon-task-approved text-accent'
@@ -81,7 +83,7 @@ function toastIcon(t: PersistentToast): string {
           <button
             v-if="t.kind === 'error'"
             class="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
-            title="忽略"
+            :title="$t('common.ignore')"
             @click="dismissError(t.sessionId)"
           >
             <span class="i-carbon-close w-3.5 h-3.5 block" />
@@ -96,12 +98,12 @@ function toastIcon(t: PersistentToast): string {
           <template v-if="t.kind === 'permission'">
             <!-- 提问/计划类:就地无法作答,「去会话」提为主操作 -->
             <template v-if="needsSession(t)">
-              <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="goToSession(t.sessionId)">去会话回答</button>
+              <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="goToSession(t.sessionId)">{{ $t('notification.goToSession') }}</button>
             </template>
             <template v-else>
-              <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="onAllow(t)">允许</button>
-              <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="onDeny(t)">拒绝</button>
-              <button class="ml-auto px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">去会话</button>
+              <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="onAllow(t)">{{ $t('common.allow') }}</button>
+              <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="onDeny(t)">{{ $t('common.deny') }}</button>
+              <button class="ml-auto px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">{{ $t('notification.goToSessionBrief') }}</button>
             </template>
           </template>
           <template v-else>
@@ -109,8 +111,8 @@ function toastIcon(t: PersistentToast): string {
               v-if="t.canRetry"
               class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground"
               @click="retryFromToast(t.sessionId)"
-            >重试</button>
-            <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">去会话</button>
+            >{{ $t('common.retry') }}</button>
+            <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">{{ $t('notification.goToSessionBrief') }}</button>
           </template>
         </div>
       </div>
@@ -122,14 +124,14 @@ function toastIcon(t: PersistentToast): string {
       class="pointer-events-auto bg-popover border border-border rounded shadow-paper px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground text-left"
       @click="toastsExpanded = true"
     >
-      还有 {{ foldedCount }} 件需要处理
+      {{ $t('notification.foldedCount', { count: foldedCount }) }}
     </button>
     <button
       v-else-if="toastsExpanded && persistentToasts.length > PERSISTENT_LIMIT"
       class="pointer-events-auto bg-popover border border-border rounded shadow-paper px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground text-left"
       @click="toastsExpanded = false"
     >
-      收起列表
+      {{ $t('notification.collapseList') }}
     </button>
   </div>
 </template>

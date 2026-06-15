@@ -61,21 +61,21 @@ const activeDays = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-fire" title="连续活跃" badge="近 16 周">
-    <div v-if="loading" class="text-2xs text-muted-foreground py-2">统计中…</div>
+  <HomeCard icon="i-carbon-fire" :title="$t('home.streak.title')" :badge="$t('home.streak.badge')">
+    <div v-if="loading" class="text-2xs text-muted-foreground py-2">{{ $t('home.streak.counting') }}</div>
     <template v-else>
       <div class="flex gap-6 mt-0.5">
         <div class="streak-stat">
           <div class="streak-num">{{ streaks.current }}</div>
-          <div class="streak-label">当前连续天</div>
+          <div class="streak-label">{{ $t('home.streak.currentStreak') }}</div>
         </div>
         <div class="streak-stat">
           <div class="streak-num best">{{ streaks.longest }}</div>
-          <div class="streak-label">最长记录</div>
+          <div class="streak-label">{{ $t('home.streak.longestStreak') }}</div>
         </div>
         <div class="streak-stat">
           <div class="streak-num">{{ activeDays }}</div>
-          <div class="streak-label">活跃天数</div>
+          <div class="streak-label">{{ $t('home.streak.activeDays') }}</div>
         </div>
       </div>
     </template>

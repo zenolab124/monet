@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   useChannels,
   refreshChannels,
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   (e: 'select', channelId: string | null): void
 }>()
 
+const { t } = useI18n()
 const { channels, defaultChannelId } = useChannels()
 const { switchSection } = useUiState()
 
@@ -31,8 +33,8 @@ interface ChannelOption {
 
 /** 选项:跟随默认 + 官方 + 配置文件里的全部渠道 */
 const options = computed<ChannelOption[]>(() => [
-  { value: FOLLOW, label: `默认 · ${channelDisplayName(defaultChannelId.value)}` },
-  { value: OFFICIAL_CHANNEL_ID, label: '官方' },
+  { value: FOLLOW, label: t('topbar.channelFollow', { name: channelDisplayName(defaultChannelId.value) }) },
+  { value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') },
   ...channels.value.map(c => ({ value: c.id, label: c.name })),
 ])
 
@@ -42,7 +44,7 @@ const currentIndex = computed(() =>
 
 /** 按钮展示标签:跟随默认时显示「默认 · 真值」,免去用户猜默认指向 */
 const currentLabel = computed(() => {
-  if (!props.current) return `默认 · ${channelDisplayName(defaultChannelId.value)}`
+  if (!props.current) return t('topbar.channelFollow', { name: channelDisplayName(defaultChannelId.value) })
   return channelDisplayName(props.current)
 })
 
@@ -136,7 +138,7 @@ onUnmounted(() => {
       type="button"
       class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
              transition-colors flex items-center gap-1 border border-border"
-      :title="`渠道:${currentLabel}`"
+      :title="$t('topbar.channelTitle', { name: currentLabel })"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
       @click="toggle"
@@ -177,7 +179,7 @@ onUnmounted(() => {
         @click="openSettings"
       >
         <span class="i-carbon-settings w-3 h-3 shrink-0" />
-        <span class="flex-1">管理渠道…</span>
+        <span class="flex-1">{{ $t('topbar.manageChannels') }}</span>
       </li>
     </ul>
   </div>

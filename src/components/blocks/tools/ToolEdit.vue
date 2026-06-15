@@ -40,7 +40,7 @@ const expanded = ref(false)
       <span class="i-carbon-edit w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">Edit</span>
       <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ displayName }}</span>
-      <span v-if="replaceAll" class="ml-1 px-1.5 py-0.5 rounded border border-accent/50 text-accent text-2xs shrink-0">全部替换</span>
+      <span v-if="replaceAll" class="ml-1 px-1.5 py-0.5 rounded border border-accent/50 text-accent text-2xs shrink-0">{{ $t('block.toolEdit.replaceAll') }}</span>
     </button>
     <div v-if="expanded && (oldString || newString)" class="mt-2 grid grid-cols-2 gap-1.5">
       <pre v-if="oldString" class="rounded bg-destructive/10 border border-destructive/20 px-2 py-1 text-destructive whitespace-pre-wrap break-all font-mono overflow-auto max-h-48">- {{ oldString }}</pre>

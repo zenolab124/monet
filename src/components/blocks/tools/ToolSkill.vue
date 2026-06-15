@@ -27,7 +27,7 @@ const args = computed(() => {
       <span class="text-foreground font-medium">Skill</span>
       <code v-if="skillName" class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono">{{ skillName }}</code>
       <span v-if="args" class="font-mono text-muted-foreground truncate" :title="args">{{ args }}</span>
-      <span class="ml-auto text-muted-foreground">加载中…</span>
+      <span class="ml-auto text-muted-foreground">{{ $t('block.toolSkill.loading') }}</span>
     </div>
   </div>
 </template>

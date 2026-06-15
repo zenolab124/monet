@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import i18n from '../locales'
 
 export interface SchemaProperty {
   type?: string | string[]
@@ -29,21 +30,21 @@ interface SchemaResponse {
   hasSchema: boolean
 }
 
-const GROUPS: Record<string, string[]> = {
-  '模型与推理': [
+const GROUP_KEYS: Record<string, string[]> = {
+  'modelAndReasoning': [
     'model', 'effortLevel', 'alwaysThinkingEnabled', 'fastMode',
     'fastModePerSessionOptIn', 'availableModels', 'enforceAvailableModels',
     'modelOverrides', 'fallbackModel',
   ],
-  '语言与输出': [
+  'languageAndOutput': [
     'language', 'outputStyle',
   ],
-  '权限': [
+  'permissions': [
     'permissions', 'allowManagedPermissionRulesOnly',
     'autoMode', 'useAutoModeDuringPlan',
     'skipDangerousModePermissionPrompt',
   ],
-  '界面与显示': [
+  'uiAndDisplay': [
     'showThinkingSummaries', 'showTurnDuration', 'showClearContextOnPlanAccept',
     'spinnerTipsEnabled', 'spinnerTipsOverride', 'spinnerVerbs',
     'prefersReducedMotion', 'feedbackSurveyRate',
@@ -51,20 +52,20 @@ const GROUPS: Record<string, string[]> = {
     'statusLine', 'subagentStatusLine',
     'voiceEnabled', 'teammateMode',
   ],
-  '文件与内存': [
+  'fileAndMemory': [
     'autoMemoryEnabled', 'autoMemoryDirectory',
     'cleanupPeriodDays', 'respectGitignore', 'plansDirectory',
     'claudeMdExcludes',
   ],
-  'Git 与归属': [
+  'gitAndAttribution': [
     'attribution', 'includeCoAuthoredBy', 'includeGitInstructions',
     'prUrlTemplate',
   ],
-  'Hooks 与自动化': [
+  'hooksAndAutomation': [
     'hooks', 'disableAllHooks', 'allowManagedHooksOnly',
     'allowedHttpHookUrls', 'httpHookAllowedEnvVars',
   ],
-  'MCP 与插件': [
+  'mcpAndPlugins': [
     'enableAllProjectMcpServers', 'enabledMcpjsonServers', 'disabledMcpjsonServers',
     'allowedMcpServers', 'deniedMcpServers', 'allowManagedMcpServersOnly',
     'enabledPlugins', 'pluginConfigs', 'blockedMarketplaces',
@@ -73,22 +74,22 @@ const GROUPS: Record<string, string[]> = {
     'skippedMarketplaces', 'skippedPlugins',
     'channelsEnabled',
   ],
-  'Skills 与工作流': [
+  'skillsAndWorkflows': [
     'disableBundledSkills', 'disableSkillShellExecution', 'disableWorkflows',
     'skillOverrides', 'maxSkillDescriptionChars', 'skillListingBudgetFraction',
     'strictPluginOnlyCustomization',
   ],
-  '认证与凭证': [
+  'authAndCredentials': [
     'apiKeyHelper', 'forceLoginMethod', 'forceLoginOrgUUID',
     'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper',
   ],
-  '环境变量': ['env'],
-  '沙箱': ['sandbox', 'worktree'],
-  '更新与版本': [
+  'envVars': ['env'],
+  'sandbox': ['sandbox', 'worktree'],
+  'updateAndVersion': [
     'autoUpdatesChannel', 'minimumVersion',
     'disableDeepLinkRegistration',
   ],
-  '高级': [
+  'advanced': [
     'agent', 'skipWebFetchPreflight', 'disableAgentView',
     'fileSuggestion', 'defaultShell', 'companyAnnouncements',
     'forceRemoteSettingsRefresh', 'parentSettingsBehavior',
@@ -96,13 +97,19 @@ const GROUPS: Record<string, string[]> = {
   ],
 }
 
-const knownGrouped = new Set(Object.values(GROUPS).flat())
+function groupLabel(groupKey: string): string {
+  const key = `settings.cliGroups.${groupKey}`
+  const result = i18n.global.t(key)
+  return result !== key ? result : groupKey
+}
+
+const knownGrouped = new Set(Object.values(GROUP_KEYS).flat())
 
 function getGroup(key: string): string {
-  for (const [group, keys] of Object.entries(GROUPS)) {
-    if (keys.includes(key)) return group
+  for (const [group, keys] of Object.entries(GROUP_KEYS)) {
+    if (keys.includes(key)) return groupLabel(group)
   }
-  return '其他'
+  return groupLabel('other')
 }
 
 interface FieldTranslation {
@@ -173,7 +180,7 @@ export function useCliSettings() {
 
     for (const key of Object.keys(settings.value)) {
       if (seen.has(key) || key === '$schema') continue
-      const group = knownGrouped.has(key) ? getGroup(key) : '未收录'
+      const group = knownGrouped.has(key) ? getGroup(key) : groupLabel('uncategorized')
       if (!result[group]) result[group] = []
       result[group].push({
         key,
@@ -188,7 +195,7 @@ export function useCliSettings() {
   })
 
   const groupOrder = computed(() => {
-    const order = Object.keys(GROUPS)
+    const order = Object.keys(GROUP_KEYS).map(groupLabel)
     const extra = Object.keys(groups.value).filter(g => !order.includes(g))
     return [...order.filter(g => groups.value[g]?.length), ...extra]
   })

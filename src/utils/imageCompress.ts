@@ -1,3 +1,5 @@
+import i18n from '../locales'
+
 /**
  * 图片压缩工具:
  * - >5MB → 用 Canvas 重绘为 JPEG quality=80,目标 ≤1MB
@@ -47,7 +49,7 @@ export async function compressIfNeeded(
         ok: false,
         blob: null,
         mime: 'image/jpeg',
-        reason: '图片过大,请手动缩小',
+        reason: i18n.global.t('image.tooLarge'),
       }
     }
     return { ok: true, blob: compressed, mime: 'image/jpeg', reason: null }
@@ -56,7 +58,7 @@ export async function compressIfNeeded(
       ok: false,
       blob: null,
       mime,
-      reason: `图片压缩失败: ${(e as Error).message || String(e)}`,
+      reason: i18n.global.t('image.compressFailed', { error: (e as Error).message || String(e) }),
     }
   }
 }

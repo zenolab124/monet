@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
 import { useSessions } from '@/composables/useSessions'
 import { useHomeStats } from '@/composables/useHomeStats'
 import { useAutomation } from '@/composables/useAutomation'
 
+const { t } = useI18n()
 const { activeSection, sidebarsCollapsed, toggleSidebars } = useUiState()
 
 // --- 档案馆搜索 ---
@@ -41,7 +43,7 @@ async function openGlobalConfig() {
   try {
     await invoke('open_hooks_config', { path })
   } catch {
-    openFailMsg.value = '打开失败'
+    openFailMsg.value = t('common.openFailed')
     clearTimeout(openFailTimer)
     openFailTimer = setTimeout(() => { openFailMsg.value = null }, 3000)
   }
@@ -53,7 +55,7 @@ async function openGlobalConfig() {
   <template v-if="activeSection === 'sessions'">
     <button
       class="p-1.5 rounded-md hover:bg-muted transition-colors"
-      :title="sidebarsCollapsed ? '显示侧栏' : '隐藏侧栏'"
+      :title="sidebarsCollapsed ? $t('titlebar.toggleSidebar') : $t('titlebar.hideSidebar')"
       @click="toggleSidebars"
     >
       <span
@@ -66,7 +68,7 @@ async function openGlobalConfig() {
         ref="searchRef"
         v-model="localQuery"
         type="text"
-        placeholder="搜索会话… (⌘F)"
+        :placeholder="$t('titlebar.searchSessions')"
         class="w-48 pl-7 pr-2 py-1 text-xs rounded-md bg-popover border border-border
                text-foreground placeholder-muted-foreground
                focus:outline-none focus:border-ring transition-colors"
@@ -75,17 +77,17 @@ async function openGlobalConfig() {
   </template>
 
   <!-- 首页 -->
-  <button v-if="activeSection === 'home'" class="tb-btn" :disabled="homeRefreshing" title="重新统计" @click="homeRefresh">
+  <button v-if="activeSection === 'home'" class="tb-btn" :disabled="homeRefreshing" :title="$t('titlebar.recalculate')" @click="homeRefresh">
     <span class="i-carbon-renew w-3.5 h-3.5" :class="{ 'animate-spin': homeRefreshing }" />
   </button>
 
   <!-- 自动化 -->
   <template v-if="activeSection === 'automation'">
     <span v-if="openFailMsg" class="text-xs text-destructive">{{ openFailMsg }}</span>
-    <button class="tb-btn" :disabled="!autoConfig" @click="openGlobalConfig">打开配置</button>
+    <button class="tb-btn" :disabled="!autoConfig" @click="openGlobalConfig">{{ $t('common.openConfig') }}</button>
     <button class="tb-btn" :disabled="autoLoading" @click="autoRefresh">
       <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': autoLoading }" />
-      刷新
+      {{ $t('common.refresh') }}
     </button>
   </template>
 </template>

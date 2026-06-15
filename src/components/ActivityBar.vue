@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useUiState, type AppSection } from '@/composables/useUiState'
 import { useTheme } from '@/composables/useTheme'
 import { useNotifications } from '@/composables/useNotifications'
 
+const { t } = useI18n()
 const { activeSection, switchSection } = useUiState()
 const { mode, cycleTheme, themeLabel, themeIcon } = useTheme()
 const { badgeCount } = useNotifications()
@@ -16,14 +18,14 @@ interface DomainItem {
   section?: AppSection
 }
 
-const topDomains: DomainItem[] = [
-  { key: 'workbench', icon: 'i-carbon-workspace', label: '工作台', section: 'workbench' },
-  { key: 'sessions', icon: 'i-carbon-chat', label: '档案', section: 'sessions' },
-  { key: 'search', icon: 'i-carbon-search', label: '搜索' },
-  { key: 'workshop', icon: 'i-carbon-tools', label: '工坊', section: 'workshop' },
-  { key: 'automation', icon: 'i-carbon-bot', label: '自动化', section: 'automation' },
-  { key: 'home', icon: 'i-carbon-home', label: '首页', section: 'home' },
-]
+const topDomains = computed<DomainItem[]>(() => [
+  { key: 'workbench', icon: 'i-carbon-workspace', label: t('activity.workbench'), section: 'workbench' },
+  { key: 'sessions', icon: 'i-carbon-chat', label: t('activity.archive'), section: 'sessions' },
+  { key: 'search', icon: 'i-carbon-search', label: t('activity.search') },
+  { key: 'workshop', icon: 'i-carbon-tools', label: t('activity.workshop'), section: 'workshop' },
+  { key: 'automation', icon: 'i-carbon-bot', label: t('activity.automation'), section: 'automation' },
+  { key: 'home', icon: 'i-carbon-home', label: t('activity.home'), section: 'home' },
+])
 
 function onItemClick(item: DomainItem) {
   if (item.section) switchSection(item.section)
@@ -49,7 +51,7 @@ const badgeText = computed(() => {
       :class="item.section
         ? { active: activeSection === item.section }
         : 'ab-disabled'"
-      :title="item.section ? item.label : `${item.label}（即将推出）`"
+      :title="item.section ? item.label : $t('activity.comingSoon', { label: item.label })"
       :disabled="!item.section"
       @click="onItemClick(item)"
     >
@@ -71,7 +73,7 @@ const badgeText = computed(() => {
     <button
       class="ab-item"
       :class="{ active: activeSection === 'settings' }"
-      title="设置"
+      :title="$t('activity.settings')"
       @click="switchSection('settings')"
     >
       <span class="i-carbon-settings w-4.5 h-4.5 block" />

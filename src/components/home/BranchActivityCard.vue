@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Project } from '../../types'
 import HomeCard from './HomeCard.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   projects: Project[]
@@ -34,23 +37,23 @@ const rows = computed(() => {
 
 function timeAgo(ts: number): string {
   const diff = Math.floor(Date.now() / 1000) - ts
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}天前`
-  return `${Math.floor(diff / 604800)}周前`
+  if (diff < 60) return t('time.justNow')
+  if (diff < 3600) return t('time.minutesAgo', { n: Math.floor(diff / 60) })
+  if (diff < 86400) return t('time.hoursAgo', { n: Math.floor(diff / 3600) })
+  if (diff < 604800) return t('time.daysAgo', { n: Math.floor(diff / 86400) })
+  return t('time.weeksAgo', { n: Math.floor(diff / 604800) })
 }
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-branch" title="分支活跃" badge="按最近活跃">
-    <div v-if="loading && !rows.length" class="text-2xs text-muted-foreground py-2">加载中…</div>
-    <div v-else-if="!rows.length" class="text-2xs text-muted-foreground py-2">暂无分支数据</div>
+  <HomeCard icon="i-carbon-branch" :title="$t('home.branchActivity.title')" :badge="$t('home.branchActivity.badge')">
+    <div v-if="loading && !rows.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
+    <div v-else-if="!rows.length" class="text-2xs text-muted-foreground py-2">{{ $t('home.branchActivity.noBranches') }}</div>
     <div v-else class="flex flex-col">
       <div v-for="r in rows" :key="r.branch" class="branch-row">
         <span class="i-carbon-branch w-3 h-3 text-muted-foreground shrink-0" />
         <span class="flex-1 min-w-0 truncate text-xs font-mono" :title="r.branch">{{ r.branch }}</span>
-        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums">{{ r.count }} 会话</span>
+        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums">{{ $t('home.branchActivity.nSessions', { count: r.count }) }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground tabular-nums w-14 text-right">{{ r.recency }}</span>
       </div>
     </div>

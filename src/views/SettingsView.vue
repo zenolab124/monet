@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   useChannels,
   refreshChannels,
@@ -9,18 +10,46 @@ import {
 import { useUiState } from '@/composables/useUiState'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
+import { useLocale } from '@/composables/useLocale'
 import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 
+const { t } = useI18n()
 const { channels, defaultChannelId, deleteChannel, setDefaultChannel, revealChannelsDir } =
   useChannels()
 const { activeSection } = useUiState()
 const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
+const {
+  locale, availableLocales, switchLocale,
+  translating, translateError, parseLanguageIntent, translateLocale, deleteLocale, isBuiltin,
+} = useLocale()
+
+const showTranslateForm = ref(false)
+const customLangInput = ref('')
+
+async function onCustomTranslate() {
+  const input = customLangInput.value.trim()
+  if (!input) return
+  const intent = await parseLanguageIntent(input)
+  if (!intent || intent.error) {
+    translateError.value = intent?.error || t('settings.langNotRecognized')
+    return
+  }
+  if (intent.code in availableLocales.value) {
+    switchLocale(intent.code)
+    return
+  }
+  const ok = await translateLocale(intent.code, intent.name, intent.native)
+  if (ok) {
+    customLangInput.value = ''
+    notifyTransient(t('settings.translateSuccess'))
+  }
+}
 
 type Tab = 'general' | 'channels' | 'models' | 'claude-code' | 'lab' | 'diag'
 const activeTab = ref<Tab>('general')
@@ -48,16 +77,16 @@ watch(activeSection, (s) => {
 
 async function onDelete(ch: ChannelInfo) {
   const ok = await confirm(
-    `删除渠道「${ch.name}」?将删除 channels/${ch.id}.json 文件，不可恢复。`,
-    '删除',
+    t('settings.deleteChannelConfirm', { name: ch.name, id: ch.id }),
+    t('common.delete'),
   )
   if (!ok) return
   try {
     await deleteChannel(ch.id)
     if (editing.value !== 'new' && editing.value?.id === ch.id) editing.value = null
-    notifyTransient('渠道已删除')
+    notifyTransient(t('settings.channelDeleted'))
   } catch (e) {
-    notifyTransient('删除失败', String(e))
+    notifyTransient(t('settings.deleteFailed'), String(e))
   }
 }
 
@@ -66,7 +95,7 @@ async function onDefaultChange(e: Event) {
   try {
     await setDefaultChannel(value === OFFICIAL_CHANNEL_ID ? null : value)
   } catch (err) {
-    notifyTransient('设置默认渠道失败', String(err))
+    notifyTransient(t('settings.setDefaultFailed'), String(err))
     await refreshChannels()
   }
 }
@@ -75,13 +104,13 @@ async function onReveal() {
   try {
     await revealChannelsDir()
   } catch (e) {
-    notifyTransient('打开目录失败', String(e))
+    notifyTransient(t('settings.openDirFailed'), String(e))
   }
 }
 
 function onSaved() {
   editing.value = null
-  notifyTransient('渠道已保存')
+  notifyTransient(t('settings.channelSaved'))
 }
 </script>
 
@@ -91,92 +120,163 @@ function onSaved() {
     <!-- 侧栏导航 -->
     <nav class="side-nav">
       <h1 class="side-title">
-        <span class="i-carbon-settings w-4 h-4 opacity-70" />设置
+        <span class="i-carbon-settings w-4 h-4 opacity-70" />{{ $t('settings.title') }}
       </h1>
       <button :class="['side-item', { active: activeTab === 'general' }]" @click="activeTab = 'general'">
-        <span class="i-carbon-settings-adjust w-3.5 h-3.5" />常规
+        <span class="i-carbon-settings-adjust w-3.5 h-3.5" />{{ $t('settings.general') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'channels' }]" @click="activeTab = 'channels'">
-        <span class="i-carbon-connect w-3.5 h-3.5" />渠道
+        <span class="i-carbon-connect w-3.5 h-3.5" />{{ $t('settings.channels') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'models' }]" @click="activeTab = 'models'">
-        <span class="i-carbon-bot w-3.5 h-3.5" />模型
+        <span class="i-carbon-bot w-3.5 h-3.5" />{{ $t('settings.models') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'claude-code' }]" @click="activeTab = 'claude-code'">
         <span class="i-carbon-json w-3.5 h-3.5" />Claude Code
       </button>
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
-        <span class="i-carbon-chemistry w-3.5 h-3.5" />实验室
+        <span class="i-carbon-chemistry w-3.5 h-3.5" />{{ $t('settings.lab') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'diag' }]" @click="activeTab = 'diag'">
-        <span class="i-carbon-debug w-3.5 h-3.5" />诊断
+        <span class="i-carbon-debug w-3.5 h-3.5" />{{ $t('settings.diagnostics') }}
       </button>
     </nav>
 
     <!-- 内容区 -->
     <div class="flex-1 min-w-0 overflow-y-auto">
-      <div class="px-6 py-5 max-w-2xl">
+      <div class="settings-body">
 
         <!-- ====== 常规 ====== -->
         <section v-show="activeTab === 'general'">
-          <h2 class="section-title">常规</h2>
-
-          <div class="setting-row">
-            <div class="setting-label">
-              默认努力等级
-              <div class="setting-hint">无 per-session 记录的会话发送档位</div>
-            </div>
-            <select v-model="defaultEffort" class="ctrl-select">
-              <option value="cli">跟随 CLI</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="xhigh">xHigh</option>
-              <option value="max">Max</option>
-              <option value="ultracode">Ultracode</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-label">
-              Remote Control
-              <div class="setting-hint">新会话自动启用远程操控</div>
-            </div>
-            <div class="flex items-center gap-2.5">
-              <button
-                :class="['toggle-track', { on: rcEnabled }]"
-                @click="rcEnabled = !rcEnabled"
+          <h2 class="section-title">{{ $t('settings.general') }}</h2>
+          <div class="settings-grid">
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.language') }}</div>
+              <select
+                :value="locale"
+                class="ctrl-select w-full"
+                @change="switchLocale(($event.target as HTMLSelectElement).value)"
               >
-                <span class="toggle-knob" />
-              </button>
-              <span class="text-[11px] text-muted-foreground">登录同账号设备可见</span>
+                <option
+                  v-for="(meta, code) in availableLocales"
+                  :key="code"
+                  :value="code"
+                >
+                  {{ meta.nativeLabel }}
+                </option>
+              </select>
+              <!-- AI 翻译 -->
+              <div class="translate-zone">
+                <div
+                  v-for="(meta, code) in availableLocales"
+                  :key="code"
+                  class="flex items-center gap-2 text-xs"
+                >
+                  <template v-if="!isBuiltin(String(code))">
+                    <span class="font-medium">{{ meta.nativeLabel }}</span>
+                    <span class="text-muted-foreground">({{ code }})</span>
+                    <button
+                      class="ml-auto p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                      :title="$t('common.delete')"
+                      @click="deleteLocale(String(code))"
+                    >
+                      <span class="i-carbon-close w-3 h-3" />
+                    </button>
+                  </template>
+                </div>
+                <button
+                  v-if="!showTranslateForm"
+                  class="text-xs text-primary hover:underline"
+                  @click="showTranslateForm = true"
+                >
+                  {{ $t('settings.addLanguage') }}
+                </button>
+                <div v-if="showTranslateForm" class="translate-form">
+                  <div class="flex gap-2">
+                    <input
+                      v-model="customLangInput"
+                      class="ctrl-input flex-1"
+                      :placeholder="$t('settings.customLangPlaceholder')"
+                      :disabled="translating"
+                      @keydown.enter="onCustomTranslate"
+                    />
+                    <button
+                      class="px-2 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper disabled:opacity-50 transition"
+                      :disabled="translating || !customLangInput.trim()"
+                      @click="onCustomTranslate"
+                    >
+                      {{ $t('settings.startTranslate') }}
+                    </button>
+                    <button
+                      class="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      :disabled="translating"
+                      @click="showTranslateForm = false"
+                    >
+                      {{ $t('common.cancel') }}
+                    </button>
+                  </div>
+                  <p v-if="translating" class="text-[11px] text-muted-foreground mt-1.5">
+                    <span class="i-carbon-rotate inline-block w-3 h-3 animate-spin mr-1" />{{ $t('settings.translating') }}
+                  </p>
+                  <p v-if="translateError" class="text-[11px] text-destructive mt-1">{{ translateError }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.defaultEffort') }}</div>
+              <select v-model="defaultEffort" class="ctrl-select w-full">
+                <option value="cli">{{ $t('settings.followCli') }}</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">xHigh</option>
+                <option value="max">Max</option>
+                <option value="ultracode">Ultracode</option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.defaultEffortHint') }}</div>
+            </div>
+
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.remoteControl') }}</div>
+              <div class="flex items-center gap-2.5">
+                <button
+                  :class="['toggle-track', { on: rcEnabled }]"
+                  @click="rcEnabled = !rcEnabled"
+                >
+                  <span class="toggle-knob" />
+                </button>
+                <span class="text-[11px] text-muted-foreground">{{ $t('settings.remoteControlSub') }}</span>
+              </div>
+              <div class="setting-hint">{{ $t('settings.remoteControlHint') }}</div>
             </div>
           </div>
         </section>
 
         <!-- ====== 渠道 ====== -->
         <section v-show="activeTab === 'channels'">
-          <h2 class="section-title">渠道</h2>
+          <h2 class="section-title">{{ $t('settings.channels') }}</h2>
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-            每个渠道是一份标准 Claude Code settings 格式的 JSON 文件，发送消息时经
-            <span class="font-mono">--settings</span> 注入。
-            高级 env 可直接手编文件，本页改动不会抹掉手编字段。
+            {{ $t('settings.channelDesc1') }}
+            <span class="font-mono">--settings</span> {{ $t('settings.channelDesc2') }}
           </p>
 
-          <div class="setting-row" style="border-top:none; padding-top:0;">
-            <div class="setting-label">默认渠道</div>
-            <select
-              :value="defaultChannelId ?? OFFICIAL_CHANNEL_ID"
-              class="ctrl-select"
-              @change="onDefaultChange"
-            >
-              <option :value="OFFICIAL_CHANNEL_ID">官方 (不注入，沿用登录态)</option>
-              <option v-for="c in channels" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
+          <div class="settings-grid">
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.defaultChannel') }}</div>
+              <select
+                :value="defaultChannelId ?? OFFICIAL_CHANNEL_ID"
+                class="ctrl-select w-full"
+                @change="onDefaultChange"
+              >
+                <option :value="OFFICIAL_CHANNEL_ID">{{ $t('settings.officialChannel') }}</option>
+                <option v-for="c in channels" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+            </div>
           </div>
 
           <!-- 渠道列表 -->
-          <div class="flex flex-col gap-2 mb-3">
+          <div class="settings-grid mt-3">
             <div
               v-for="c in channels"
               :key="c.id"
@@ -186,30 +286,30 @@ function onSaved() {
                 <div class="flex items-center gap-1.5 text-xs">
                   <span class="font-medium truncate">{{ c.name }}</span>
                   <span class="text-muted-foreground font-mono">{{ c.id }}</span>
-                  <span v-if="c.isDefault" class="channel-chip">默认</span>
-                  <span v-if="!c.valid" class="channel-chip text-destructive border-destructive">JSON 解析失败</span>
+                  <span v-if="c.isDefault" class="channel-chip">{{ $t('settings.defaultBadge') }}</span>
+                  <span v-if="!c.valid" class="channel-chip text-destructive border-destructive">{{ $t('settings.jsonParseFailed') }}</span>
                 </div>
                 <div class="text-[11px] text-muted-foreground truncate mt-0.5 font-mono">
-                  {{ c.baseUrl ?? '(未配置 ANTHROPIC_BASE_URL)' }}
-                  <span v-if="c.authTokenMasked" class="ml-1.5">token {{ c.authTokenMasked }}</span>
+                  {{ c.baseUrl ?? $t('settings.noBaseUrl') }}
+                  <span v-if="c.authTokenMasked" class="ml-1.5">{{ $t('settings.tokenPrefix') }}{{ c.authTokenMasked }}</span>
                 </div>
                 <div v-if="c.extraEnvKeys.length || c.note" class="text-[11px] text-muted-foreground truncate mt-0.5">
                   <span v-if="c.note">{{ c.note }}</span>
                   <span v-if="c.extraEnvKeys.length" :class="{ 'ml-1.5': c.note }">
-                    高级 env: {{ c.extraEnvKeys.join('、') }}
+                    {{ $t('settings.advancedEnvPrefix') }}{{ c.extraEnvKeys.join('、') }}
                   </span>
                 </div>
               </div>
               <button
                 class="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="编辑"
+                :title="$t('common.edit')"
                 @click="editing = c"
               >
                 <span class="i-carbon-edit w-3.5 h-3.5" />
               </button>
               <button
                 class="shrink-0 p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                title="删除"
+                :title="$t('common.delete')"
                 @click="onDelete(c)"
               >
                 <span class="i-carbon-trash-can w-3.5 h-3.5" />
@@ -217,7 +317,7 @@ function onSaved() {
             </div>
 
             <p v-if="channels.length === 0" class="text-xs text-muted-foreground py-2">
-              尚无渠道。新增后即可在会话顶栏按会话切换。
+              {{ $t('settings.noChannels') }}
             </p>
           </div>
 
@@ -225,64 +325,65 @@ function onSaved() {
             v-if="editing"
             :key="editing === 'new' ? '__new__' : editing.id"
             :channel="editing === 'new' ? null : editing"
-            class="mb-3"
+            class="mt-3"
             @saved="onSaved"
             @cancel="editing = null"
           />
 
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 mt-3">
             <button
               v-if="!editing"
               class="px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow"
               @click="editing = 'new'"
             >
-              + 新增渠道
+              {{ $t('settings.addChannel') }}
             </button>
             <button
               class="px-2.5 py-1 text-xs rounded-md text-muted-foreground border border-border hover:text-foreground hover:bg-muted transition-colors"
               @click="onReveal"
             >
-              打开配置目录
+              {{ $t('common.openConfigDir') }}
             </button>
           </div>
         </section>
 
         <!-- ====== 模型 ====== -->
         <section v-show="activeTab === 'models'">
-          <h2 class="section-title">模型</h2>
-
-          <!-- 顾问模式 -->
-          <div class="sub-card">
-            <h3 class="sub-card-title">顾问模式</h3>
-            <div class="setting-row" style="border-top:none; padding-top:0;">
-              <div class="setting-label">主模型</div>
-              <select v-model="advisorMain" class="ctrl-select">
-                <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-                <option value="claude-haiku-4-5">claude-haiku-4-5</option>
-              </select>
+          <h2 class="section-title">{{ $t('settings.models') }}</h2>
+          <div class="settings-grid">
+            <!-- 顾问模式 -->
+            <div class="sub-card">
+              <h3 class="sub-card-title">{{ $t('settings.advisorMode') }}</h3>
+              <div class="setting-cell mb-2">
+                <div class="setting-label">{{ $t('settings.primaryModel') }}</div>
+                <select v-model="advisorMain" class="ctrl-select w-full">
+                  <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+                  <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+                </select>
+              </div>
+              <div class="setting-cell">
+                <div class="setting-label">{{ $t('settings.advisorModel') }}</div>
+                <select v-model="advisorModel" class="ctrl-select w-full">
+                  <option value="claude-fable-5">claude-fable-5</option>
+                  <option value="claude-opus-4-8">claude-opus-4-8</option>
+                  <option value="claude-opus-4-6">claude-opus-4-6</option>
+                </select>
+              </div>
+              <p class="text-[11px] text-accent mt-2">{{ $t('settings.advisorWarning') }}</p>
             </div>
-            <div class="setting-row">
-              <div class="setting-label">顾问模型</div>
-              <select v-model="advisorModel" class="ctrl-select">
-                <option value="claude-fable-5">claude-fable-5</option>
-                <option value="claude-opus-4-8">claude-opus-4-8</option>
-                <option value="claude-opus-4-6">claude-opus-4-6</option>
-              </select>
-            </div>
-            <p class="text-[11px] text-accent mt-1">⚠ 顾问等级须 ≥ 主模型 · 仅官方渠道生效</p>
-          </div>
 
-          <!-- 模型可见性 -->
-          <div class="sub-card">
-            <h3 class="sub-card-title">模型可见性</h3>
-            <label class="checkbox-row">
-              <input v-model="hideCreditsModels" type="checkbox" />
-              <span>隐藏需 usage credits 的 1M 档位</span>
-            </label>
-            <label class="checkbox-row">
-              <input v-model="autoDetectModels" type="checkbox" />
-              <span>自动探测可用性（选到不可用档位后置灰）</span>
-            </label>
+            <!-- 模型可见性 -->
+            <div class="sub-card">
+              <h3 class="sub-card-title">{{ $t('settings.modelVisibility') }}</h3>
+              <label class="checkbox-row">
+                <input v-model="hideCreditsModels" type="checkbox" />
+                <span>{{ $t('settings.hide1mModels') }}</span>
+              </label>
+              <label class="checkbox-row">
+                <input v-model="autoDetectModels" type="checkbox" />
+                <span>{{ $t('settings.autoDetect') }}</span>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -293,9 +394,9 @@ function onSaved() {
 
         <!-- ====== 实验室 ====== -->
         <section v-show="activeTab === 'lab'">
-          <h2 class="section-title">实验室</h2>
+          <h2 class="section-title">{{ $t('settings.lab') }}</h2>
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-            验证 Tauri webview 中 iframe + postMessage 双向通信链路。
+            {{ $t('settings.labDesc') }}
           </p>
           <div class="iframe-zone">
             <span class="iframe-badge">IFRAME</span>
@@ -305,9 +406,9 @@ function onSaved() {
 
         <!-- ====== 诊断 ====== -->
         <section v-show="activeTab === 'diag'">
-          <h2 class="section-title">诊断</h2>
+          <h2 class="section-title">{{ $t('settings.diagnostics') }}</h2>
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-            扫描所有会话文件，检查记录类型和工具的解析覆盖率。
+            {{ $t('settings.diagDesc') }}
           </p>
           <DiagnosisCard
             :diag="diag"
@@ -369,6 +470,11 @@ function onSaved() {
   box-shadow: var(--shadow-paper);
 }
 
+/* 内容体 */
+.settings-body {
+  padding: 20px;
+}
+
 /* 分区标题 */
 .section-title {
   font-size: 13px;
@@ -376,18 +482,20 @@ function onSaved() {
   margin-bottom: 14px;
 }
 
-/* 设置行 */
-.setting-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 10px 0;
+/* 双列网格 */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
-.setting-row + .setting-row {
-  border-top: 1px solid var(--border);
+
+/* 设置单元：label 在上，控件在下 */
+.setting-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .setting-label {
-  flex: 0 0 130px;
   font-size: 12px;
   font-weight: 500;
 }
@@ -395,7 +503,6 @@ function onSaved() {
   font-size: 11px;
   color: var(--muted-foreground);
   font-weight: 400;
-  margin-top: 2px;
 }
 
 /* 下拉控件 */
@@ -407,11 +514,37 @@ function onSaved() {
   border: 1px solid var(--border);
   background: var(--popover);
   color: var(--foreground);
-  max-width: 240px;
 }
 .ctrl-select:focus {
   outline: none;
   border-color: var(--ring);
+}
+.ctrl-input {
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--foreground);
+}
+.ctrl-input:focus {
+  outline: none;
+  border-color: var(--ring);
+}
+
+/* AI 翻译区 */
+.translate-zone {
+  padding: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.translate-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--card);
 }
 
 /* 开关 */

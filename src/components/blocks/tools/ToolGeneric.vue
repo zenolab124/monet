@@ -138,7 +138,7 @@ function renderMd(text: string) {
           class="mt-1 text-muted-foreground hover:text-foreground"
           @click="toggleLongText(f.key)"
         >
-          {{ longTextExpanded[f.key] ? '收起' : `…展开全部（${Math.round(f.value.length / 1024)}KB）` }}
+          {{ longTextExpanded[f.key] ? $t('common.collapse') : $t('common.expandAll', { size: Math.round(f.value.length / 1024) }) }}
         </button>
       </div>
     </template>
@@ -150,7 +150,7 @@ function renderMd(text: string) {
         @click="otherExpanded = !otherExpanded"
       >
         <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': otherExpanded }" />
-        其它字段
+        {{ $t('block.toolGeneric.otherFields') }}
       </button>
       <pre v-if="otherExpanded" class="mt-1 rounded bg-muted px-2 py-1 text-muted-foreground whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ otherJson }}</pre>
     </div>

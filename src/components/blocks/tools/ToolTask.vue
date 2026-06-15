@@ -48,7 +48,7 @@ const promptPreview = computed(() => {
       class="mt-1 text-muted-foreground hover:text-foreground"
       @click="expanded = !expanded"
     >
-      {{ expanded ? '收起' : '展开' }}
+      {{ expanded ? $t('block.toolTask.collapse') : $t('block.toolTask.expand') }}
     </button>
   </div>
 </template>

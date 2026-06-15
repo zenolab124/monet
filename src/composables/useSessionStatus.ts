@@ -1,4 +1,5 @@
 import { computed, type Ref, type ComputedRef } from 'vue'
+import i18n from '../locales'
 import { useSessionStream } from './useStreaming'
 import { queueForSession } from './usePermissionRequests'
 import { useNotifications } from './useNotifications'
@@ -28,13 +29,19 @@ export interface SessionStatus {
   edge: 'accent' | 'destructive' | null
 }
 
-const STATUS_META: Record<SessionStatusKey, Omit<SessionStatus, 'key'>> = {
-  streaming: { label: '流式输出', dotClass: 'bg-primary', pulse: true, edge: null },
-  workflow: { label: 'Workflow', dotClass: 'bg-primary', pulse: true, edge: null },
-  waiting_tool: { label: '等待工具', dotClass: 'bg-primary', pulse: true, edge: null },
-  waiting_permission: { label: '等待权限', dotClass: 'bg-accent', pulse: false, edge: 'accent' },
-  error: { label: '出错停住', dotClass: 'bg-destructive', pulse: false, edge: 'destructive' },
-  idle: { label: '空闲', dotClass: 'bg-border', pulse: false, edge: null },
+const STATUS_META_STATIC: Record<SessionStatusKey, { dotClass: string; pulse: boolean; edge: 'accent' | 'destructive' | null; labelKey: string }> = {
+  streaming: { dotClass: 'bg-primary', pulse: true, edge: null, labelKey: 'session.streaming' },
+  workflow: { dotClass: 'bg-primary', pulse: true, edge: null, labelKey: '' },
+  waiting_tool: { dotClass: 'bg-primary', pulse: true, edge: null, labelKey: 'session.waitingTool' },
+  waiting_permission: { dotClass: 'bg-accent', pulse: false, edge: 'accent', labelKey: 'session.waitingPermission' },
+  error: { dotClass: 'bg-destructive', pulse: false, edge: 'destructive', labelKey: 'session.error' },
+  idle: { dotClass: 'bg-border', pulse: false, edge: null, labelKey: 'session.idle' },
+}
+
+function getStatusMeta(key: SessionStatusKey): Omit<SessionStatus, 'key'> {
+  const meta = STATUS_META_STATIC[key]
+  const label = meta.labelKey ? i18n.global.t(meta.labelKey) : 'Workflow'
+  return { label, dotClass: meta.dotClass, pulse: meta.pulse, edge: meta.edge }
 }
 
 export function useSessionStatus(
@@ -60,6 +67,6 @@ export function useSessionStatus(
       else if (tool) key = 'waiting_tool'
       else key = 'streaming'
     }
-    return { key, ...STATUS_META[key] }
+    return { key, ...getStatusMeta(key) }
   })
 }

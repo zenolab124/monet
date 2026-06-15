@@ -13,6 +13,7 @@
  */
 
 import { MODELS, MODEL_ALIASES } from '@/utils/modelContext'
+import i18n from '../locales'
 
 /** 命令分类 */
 export type SlashCommandCategory = 'native' | 'pass'
@@ -32,40 +33,44 @@ export interface SlashCommand {
 }
 
 /** 本版命令清单（仅 5 条，PRD L234-243） */
-export const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    name: 'new',
-    hint: '在当前项目目录开新会话（新建一个 pane，不 resume）',
-    hasArg: false,
-    category: 'native',
-  },
-  {
-    name: 'clear',
-    hint: '清空当前 pane 的流式渲染区（不影响磁盘 jsonl）',
-    hasArg: false,
-    category: 'native',
-  },
-  {
-    name: 'cd',
-    hint: '跳转到另一个项目目录的会话列表',
-    hasArg: true,
-    argHint: '<path>',
-    category: 'native',
-  },
-  {
-    name: 'help',
-    hint: '在当前 pane 渲染本地帮助卡片',
-    hasArg: false,
-    category: 'native',
-  },
-  {
-    name: 'model',
-    hint: '切换当前会话的模型（fable / opus / sonnet / haiku 或完整 ID）',
-    hasArg: true,
-    argHint: '<name>',
-    category: 'pass',
-  },
-]
+export function getSlashCommands(): SlashCommand[] {
+  return [
+    {
+      name: 'new',
+      hint: i18n.global.t('slash.hintNew'),
+      hasArg: false,
+      category: 'native',
+    },
+    {
+      name: 'clear',
+      hint: i18n.global.t('slash.hintClear'),
+      hasArg: false,
+      category: 'native',
+    },
+    {
+      name: 'cd',
+      hint: i18n.global.t('slash.hintCd'),
+      hasArg: true,
+      argHint: '<path>',
+      category: 'native',
+    },
+    {
+      name: 'help',
+      hint: i18n.global.t('slash.hintHelp'),
+      hasArg: false,
+      category: 'native',
+    },
+    {
+      name: 'model',
+      hint: i18n.global.t('slash.hintModel'),
+      hasArg: true,
+      argHint: '<name>',
+      category: 'pass',
+    },
+  ]
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = getSlashCommands()
 
 /** 合法 /model 参数 = 模型清单完整 ID + 短别名（单源派生自 modelContext） */
 const KNOWN_MODELS = new Set([
@@ -106,8 +111,9 @@ export function shouldTriggerPanel(input: string, cursorPos: number): boolean {
 export function filterCommands(input: string): SlashCommand[] {
   if (!input.startsWith('/')) return []
   const prefix = input.slice(1).toLowerCase()
-  if (prefix === '') return [...SLASH_COMMANDS]
-  return SLASH_COMMANDS.filter((c) => c.name.startsWith(prefix))
+  const commands = getSlashCommands()
+  if (prefix === '') return commands
+  return commands.filter((c) => c.name.startsWith(prefix))
 }
 
 /** 解析结果 */
@@ -139,7 +145,7 @@ export function parseCommand(input: string): ParsedCommand {
   const name = (spaceIdx === -1 ? body : body.slice(0, spaceIdx)).toLowerCase()
   const arg = spaceIdx === -1 ? '' : body.slice(spaceIdx + 1).trim()
 
-  const cmd = SLASH_COMMANDS.find((c) => c.name === name)
+  const cmd = getSlashCommands().find((c) => c.name === name)
   if (!cmd) {
     return { kind: 'unknown', raw }
   }
@@ -150,14 +156,14 @@ export function parseCommand(input: string): ParsedCommand {
       return {
         kind: 'invalid',
         cmd,
-        reason: '请提供模型名，可选 fable / opus / sonnet / haiku 或完整 ID',
+        reason: i18n.global.t('slash.errorModelRequired'),
       }
     }
     if (!KNOWN_MODELS.has(arg.toLowerCase())) {
       return {
         kind: 'invalid',
         cmd,
-        reason: '未知模型，可选 fable / opus / sonnet / haiku 或完整 ID',
+        reason: i18n.global.t('slash.errorModelUnknown'),
       }
     }
     // 短别名展开为完整 ID 再持久化:UI 选中态与 --model 传参统一用完整 ID
@@ -169,7 +175,7 @@ export function parseCommand(input: string): ParsedCommand {
       return {
         kind: 'invalid',
         cmd,
-        reason: '请提供目标项目路径',
+        reason: i18n.global.t('slash.errorCdRequired'),
       }
     }
     return { kind: 'native', cmd, arg }

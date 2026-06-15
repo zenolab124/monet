@@ -18,6 +18,7 @@
  * 由父组件控制是否挂载(基于 usePermissionRequests().current)。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { resolveTool } from './blocks/tools'
 import {
   isInteractiveTool,
@@ -25,6 +26,8 @@ import {
   type PermissionDecision,
 } from '@/composables/usePermissionRequests'
 import { getHint } from '@/composables/usePermissionHints'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   request: PermissionRequest
@@ -101,7 +104,7 @@ function onKeydown(e: KeyboardEvent) {
     class="permission-card rounded-md border bg-popover shadow-paper-lifted"
     :class="isDanger ? 'border-accent/60 ring-1 ring-accent/25' : 'border-border'"
     role="alertdialog"
-    :aria-label="isDanger ? '高风险权限请求' : '权限请求'"
+    :aria-label="isDanger ? t('permission.highRisk') : t('permission.title')"
   >
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-2 border-b border-border">
@@ -114,7 +117,7 @@ function onKeydown(e: KeyboardEvent) {
 
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-1.5 flex-wrap">
-          <span class="text-xs text-muted-foreground">权限请求</span>
+          <span class="text-xs text-muted-foreground">{{ $t('permission.title') }}</span>
           <span class="text-sm font-medium text-foreground truncate" :title="request.toolName">
             {{ request.toolName }}
           </span>
@@ -122,7 +125,7 @@ function onKeydown(e: KeyboardEvent) {
             v-if="isDanger"
             class="px-1.5 py-0.5 rounded border border-accent/50 text-accent text-2xs font-medium shrink-0"
           >
-            高风险操作
+            {{ $t('permission.highRiskBadge') }}
           </span>
         </div>
         <div
@@ -141,7 +144,7 @@ function onKeydown(e: KeyboardEvent) {
       class="hint-bar flex items-start gap-1.5 mx-3 mt-1.5 px-2 py-1.5 rounded border border-border/60 bg-muted/40"
     >
       <span class="i-carbon-sparkle w-3.5 h-3.5 text-primary/60 shrink-0 mt-px" aria-hidden="true" />
-      <span v-if="hint.loading" class="text-2xs text-muted-foreground italic">分析中…</span>
+      <span v-if="hint.loading" class="text-2xs text-muted-foreground italic">{{ $t('permission.analyzing') }}</span>
       <span v-else class="text-2xs text-foreground/80 leading-relaxed">{{ hint.text }}</span>
     </div>
 
@@ -164,7 +167,7 @@ function onKeydown(e: KeyboardEvent) {
         @click="decide('allow_once')"
       >
         <span class="i-carbon-checkmark w-3.5 h-3.5" aria-hidden="true" />
-        允许一次
+        {{ $t('permission.allowOnce') }}
       </button>
 
       <button
@@ -172,11 +175,11 @@ function onKeydown(e: KeyboardEvent) {
         ref="allowSessionBtn"
         type="button"
         class="btn btn-warn"
-        title="本会话内同一工具+同一关键参数自动放行,直到流式结束或会话切换"
+        :title="$t('permission.allowSessionHint')"
         @click="decide('allow_session')"
       >
         <span class="i-carbon-time w-3.5 h-3.5" aria-hidden="true" />
-        允许此会话
+        {{ $t('permission.allowSession') }}
       </button>
 
       <div class="flex-1" />
@@ -188,7 +191,7 @@ function onKeydown(e: KeyboardEvent) {
         @click="decide('deny')"
       >
         <span class="i-carbon-close w-3.5 h-3.5" aria-hidden="true" />
-        拒绝
+        {{ $t('common.deny') }}
       </button>
     </div>
   </div>

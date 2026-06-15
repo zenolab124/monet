@@ -44,12 +44,12 @@ const sizeKb = computed(() => Math.round(content.value.length / 1024))
       <span class="i-carbon-document-add w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">Write</span>
       <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ displayName }}</span>
-      <span v-if="content" class="text-muted-foreground ml-1">（{{ content.length }} 字符）</span>
+      <span v-if="content" class="text-muted-foreground ml-1">{{ $t('block.toolWrite.chars', { length: content.length }) }}</span>
     </button>
     <div v-if="expanded" class="mt-2">
       <pre class="rounded bg-muted px-2 py-1 text-muted-foreground whitespace-pre-wrap break-all font-mono max-h-96 overflow-y-auto">{{ displayContent }}</pre>
       <div v-if="isLarge" class="mt-1 text-muted-foreground">
-        已截断显示前 {{ Math.round(TRUNCATE_LEN / 1024) }}KB（共 {{ sizeKb }}KB）
+        {{ $t('block.toolWrite.truncated', { truncateKB: Math.round(TRUNCATE_LEN / 1024), totalKB: sizeKb }) }}
       </div>
     </div>
   </div>

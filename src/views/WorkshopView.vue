@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import AssetList from '@/components/workshop/AssetList.vue'
 import McpList from '@/components/workshop/McpList.vue'
@@ -12,6 +13,7 @@ import { useUiState } from '@/composables/useUiState'
  * 左子导航 + 右列表，版式对齐 layout-lab.html 工坊区；无启停、无新建、无详情。
  */
 
+const { t } = useI18n()
 const { activeSection } = useUiState()
 const { assets, loading, error, ensureLoaded, refresh, retry, probeStates, probeMcpServers } = useWorkshop()
 
@@ -23,15 +25,15 @@ const navItems: { key: WorkshopCategory; icon: string; label: string }[] = [
   { key: 'skills', icon: 'i-carbon-star', label: 'Skills' },
   { key: 'commands', icon: 'i-carbon-terminal', label: 'Commands' },
   { key: 'agents', icon: 'i-carbon-bot', label: 'Subagents' },
-  { key: 'mcp', icon: 'i-carbon-plug', label: 'MCP 服务器' },
+  { key: 'mcp', icon: 'i-carbon-plug', label: t('workshop.mcpServers') },
 ]
 
 /** 页头文案（MCP 的「打开目录」改为「打开配置」，FR-006） */
 const headConfig: Record<WorkshopCategory, { title: string; sub: string; openLabel: string }> = {
-  skills: { title: 'Skills', sub: '~/.claude/skills + 项目级', openLabel: '打开目录' },
-  commands: { title: 'Commands', sub: '~/.claude/commands + 项目级', openLabel: '打开目录' },
-  agents: { title: 'Subagents', sub: '~/.claude/agents + 项目级', openLabel: '打开目录' },
-  mcp: { title: 'MCP 服务器', sub: '~/.claude.json + 项目级 .mcp.json', openLabel: '打开配置' },
+  skills: { title: 'Skills', sub: t('workshop.subSkills'), openLabel: t('workshop.openDir') },
+  commands: { title: 'Commands', sub: t('workshop.subCommands'), openLabel: t('workshop.openDir') },
+  agents: { title: 'Subagents', sub: t('workshop.subAgents'), openLabel: t('workshop.openDir') },
+  mcp: { title: t('workshop.mcpServers'), sub: t('workshop.subMcp'), openLabel: t('common.openConfig') },
 }
 const head = computed(() => headConfig[category.value])
 
@@ -55,11 +57,11 @@ const currentList = computed(() => {
   const a = assets.value
   switch (category.value) {
     case 'skills':
-      return { icon: 'i-carbon-star', items: a?.skills ?? [], empty: '未发现任何 Skills', hint: '全局目录 ~/.claude/skills/' }
+      return { icon: 'i-carbon-star', items: a?.skills ?? [], empty: t('workshop.noSkills'), hint: t('workshop.hintSkills') }
     case 'commands':
-      return { icon: 'i-carbon-terminal', items: a?.commands ?? [], empty: '未发现任何 Commands', hint: '全局目录 ~/.claude/commands/' }
+      return { icon: 'i-carbon-terminal', items: a?.commands ?? [], empty: t('workshop.noCommands'), hint: t('workshop.hintCommands') }
     case 'agents':
-      return { icon: 'i-carbon-bot', items: a?.agents ?? [], empty: '未发现任何 Subagents', hint: '全局目录 ~/.claude/agents/' }
+      return { icon: 'i-carbon-bot', items: a?.agents ?? [], empty: t('workshop.noSubagents'), hint: t('workshop.hintSubagents') }
     case 'mcp':
       return null
   }
@@ -106,23 +108,23 @@ async function openDir() {
           <h2 class="text-base font-semibold">{{ head.title }}</h2>
           <span class="text-xs text-muted-foreground">{{ head.sub }}</span>
           <div class="ml-auto flex items-center gap-1.5">
-            <span v-if="openFailed" class="text-xs text-destructive">打开失败</span>
+            <span v-if="openFailed" class="text-xs text-destructive">{{ $t('common.openFailed') }}</span>
             <button class="ws-btn" @click="openDir">{{ head.openLabel }}</button>
             <button class="ws-btn" :disabled="loading" @click="refresh">
               <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': loading }" />
-              刷新
+              {{ $t('common.refresh') }}
             </button>
           </div>
         </div>
 
         <!-- 错误态：四个子导航仍可切换，壳不白屏（FR-002 错误路径） -->
         <div v-if="error" class="py-8 text-center">
-          <p class="text-xs text-destructive">加载失败</p>
-          <button class="ws-btn mt-3" @click="retry">重试</button>
+          <p class="text-xs text-destructive">{{ $t('common.loadFailed') }}</p>
+          <button class="ws-btn mt-3" @click="retry">{{ $t('common.retry') }}</button>
         </div>
         <!-- 加载态 -->
         <div v-else-if="!assets" class="py-8 text-center text-xs text-muted-foreground">
-          加载中…
+          {{ $t('common.loading') }}
         </div>
         <!-- 列表 -->
         <template v-else>

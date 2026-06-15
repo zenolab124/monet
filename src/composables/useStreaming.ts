@@ -5,6 +5,7 @@ import type { ContentBlock } from '@/types'
 import { triggerTitleGeneration } from './useSessionMeta'
 import type { EffortSetting } from './useSessionSettings'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
+import i18n from '../locales'
 
 export interface SendOptions {
   model?: string
@@ -419,7 +420,7 @@ export async function initStreamListeners(): Promise<void> {
           ;(entry.turn.content as ContentBlock[])[payload.index] = payload.content_block
           // 新块到达:之前等待执行的工具已经返回(开始下一段输出)
           if (payload.content_block.type === 'tool_use') {
-            const name = (payload.content_block as { name?: string }).name ?? '工具'
+            const name = (payload.content_block as { name?: string }).name ?? i18n.global.t('block.tool')
             state.activeTool = name
           } else {
             state.activeTool = null
@@ -487,7 +488,7 @@ export async function initStreamListeners(): Promise<void> {
           }
           // 工具块结束 = CLI 即将执行该工具:尾部工具行补目标摘要,状态转「等待工具」
           if (block?.type === 'tool_use') {
-            const name = (block as { name?: string }).name ?? '工具'
+            const name = (block as { name?: string }).name ?? i18n.global.t('block.tool')
             const target = toolTarget((block as { input?: Record<string, unknown> }).input)
             state.activeTool = target ? `${name} · ${target}` : name
             markTailDirty(sid)
@@ -547,7 +548,7 @@ export async function initStreamListeners(): Promise<void> {
         markTailDirty(sid)
         break
       case 'error':
-        state.streamError = payload.message || '未知错误'
+        state.streamError = payload.message || i18n.global.t('common.unknownError')
         markTailDirty(sid)
         break
     }

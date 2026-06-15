@@ -53,7 +53,7 @@ const capacityText = computed(() => formatTokens(props.capacity))
   <div
     class="inline-flex items-center gap-2"
     :class="{ 'min-w-32': !compact }"
-    :title="`已用 ${usedText} / 总容量 ${capacityText} (${percent}%)`"
+    :title="$t('topbar.contextUsage', { used: usedText, capacity: capacityText, percent })"
   >
     <!-- 进度条 -->
     <div
@@ -76,7 +76,7 @@ const capacityText = computed(() => formatTokens(props.capacity))
       </span>
       <span v-if="level === 2" class="text-xs text-destructive flex items-center gap-1">
         <span class="i-carbon-warning-alt w-3 h-3" />
-        上下文将满
+        {{ $t('topbar.contextNearFull') }}
       </span>
     </template>
   </div>

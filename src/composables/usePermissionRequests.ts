@@ -18,6 +18,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { checkDangerous, type DangerousFlag } from '@/utils/dangerousOps'
 import { requestHint, clearHint } from './usePermissionHints'
+import i18n from '../locales'
 
 /** 队列中的单条权限请求(已扩展前端字段) */
 export interface PermissionRequest {
@@ -212,7 +213,7 @@ export async function respondRequest(
     await invoke('respond_permission', {
       requestId: req.requestId,
       allow: decision !== 'deny',
-      message: decision === 'deny' ? (extra?.message ?? '用户拒绝') : null,
+      message: decision === 'deny' ? (extra?.message ?? i18n.global.t('common.userDenied')) : null,
       updatedInput: decision !== 'deny' ? (extra?.updatedInput ?? null) : null,
     })
   } catch (_) {
@@ -234,7 +235,7 @@ export async function denyAllForSession(sessionId: string): Promise<void> {
       await invoke('respond_permission', {
         requestId: req.requestId,
         allow: false,
-        message: '流式已中断',
+        message: i18n.global.t('session.streamInterrupted'),
       })
     } catch (_) {
       // ignore

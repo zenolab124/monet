@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench, type WorkbenchColumn } from '@/composables/useWorkbench'
@@ -23,6 +24,7 @@ const props = defineProps<{
   index: number
 }>()
 
+const { t } = useI18n()
 const { projects } = useProjects()
 const { collapseColumn, removeSession, draftCwd } = useWorkbench()
 const { confirm } = useConfirm()
@@ -45,9 +47,9 @@ async function onToggleRC() {
       enabled: enabling,
     })
     stream.value.rcActive = enabling
-    notifyTransient(enabling ? 'Remote Control 已开启' : 'Remote Control 已关闭')
+    notifyTransient(enabling ? t('workbench.column.rcOpened') : t('workbench.column.rcClosed'))
   } catch (e) {
-    notifyTransient('Remote Control 操作失败', String(e))
+    notifyTransient(t('workbench.column.rcFailed'), String(e))
   } finally {
     rcLoading.value = false
   }
@@ -62,7 +64,7 @@ const title = computed(() => {
     const s = p.sessions.find(s => s.id === props.column.sessionId)
     if (s) return displayTitle(s, getMeta(s.id)?.title)
   }
-  if (draftCwd(props.column.sessionId)) return '新会话'
+  if (draftCwd(props.column.sessionId)) return t('session.newSessionTitle')
   return props.column.sessionId.slice(0, 8)
 })
 
@@ -74,7 +76,7 @@ function onCollapse() {
 /** 关闭 = 退出工作台(行为同左列 ×,FR-002):流式中需确认 */
 async function onClose() {
   if (stream.value.streaming) {
-    const ok = await confirm('任务仍在进行,移出后仅通过通知提醒。确认移出工作台?', '移出')
+    const ok = await confirm(t('workbench.monitor.removeConfirm'), t('common.removeBrief'))
     if (!ok) return
   }
   removeSession(props.column.sessionId)
@@ -116,21 +118,21 @@ function onDragEnd() {
         :disabled="rcLoading"
         class="col-head-btn disabled:opacity-40"
         :class="stream.rcActive ? 'border-primary! text-primary!' : ''"
-        :title="stream.rcActive ? 'Remote Control 已开启（点击关闭）' : '开启 Remote Control'"
+        :title="stream.rcActive ? $t('workbench.column.rcEnabled') : $t('workbench.column.rcEnable')"
         @click.stop="onToggleRC"
       >
         <span class="i-carbon-remote-connection w-3 h-3" />
       </button>
       <button
         class="col-head-btn"
-        title="收起回左列"
+        :title="$t('workbench.column.collapseToRail')"
         @click="onCollapse"
       >
         <span class="i-carbon-chevron-left w-3 h-3" />
       </button>
       <button
         class="col-head-btn hover:text-destructive!"
-        title="关闭(退出工作台)"
+        :title="$t('workbench.column.closeExit')"
         @click="onClose"
       >
         <span class="i-carbon-close w-3 h-3" />

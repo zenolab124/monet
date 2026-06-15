@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const logs = ref<string[]>([])
 const iframeRef = ref<HTMLIFrameElement>()
 
-function log(direction: '收到' | '发出', type: string, data: unknown) {
+function log(direction: string, type: string, data: unknown) {
   const line = `[${direction}] ${type}: ${JSON.stringify(data)}`
   logs.value = [...logs.value.slice(-19), line]
 }
@@ -13,7 +16,7 @@ function onMessage(e: MessageEvent) {
   if (e.data?.source !== 'agent-iframe') return
   const { type, payload } = e.data
 
-  log('收到', type, payload)
+  log(t('agentDemo.received'), type, payload)
 
   if (type === 'ping') {
     postToIframe('pong', { echo: payload.ts, hostTs: Date.now() })
@@ -32,7 +35,7 @@ function handleToolRequest(tool: string, args: Record<string, unknown>): unknown
 }
 
 function postToIframe(type: string, payload: unknown) {
-  log('发出', type, payload)
+  log(t('agentDemo.sent'), type, payload)
   iframeRef.value?.contentWindow?.postMessage({ source: 'host', type, payload }, '*')
 }
 
@@ -55,15 +58,15 @@ const iframeSrc = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <div style="font-weight:600; margin-bottom:8px;">Agent iframe 沙箱</div>
+  <div style="font-weight:600; margin-bottom:8px;">${t('agentDemo.iframeTitle')}</div>
   <div class="actions">
-    <button onclick="ping()">Ping 宿主</button>
-    <button onclick="callTool('get_time')">请求时间</button>
+    <button onclick="ping()">${t('agentDemo.pingHost')}</button>
+    <button onclick="callTool('get_time')">${t('agentDemo.requestTime')}</button>
     <select onchange="if(this.value){action(this.value);this.selectedIndex=0}">
-      <option value="">选择方案...</option>
-      <option value="方案A">方案 A</option>
-      <option value="方案B">方案 B</option>
-      <option value="方案C">方案 C</option>
+      <option value="">${t('agentDemo.selectPlan')}</option>
+      <option value="方案A">${t('agentDemo.planA')}</option>
+      <option value="方案B">${t('agentDemo.planB')}</option>
+      <option value="方案C">${t('agentDemo.planC')}</option>
     </select>
   </div>
   <div class="log" id="log"></div>
@@ -98,10 +101,10 @@ const iframeSrc = `<!DOCTYPE html>
       style="height: 200px;"
     />
     <div class="border-t border-border px-3 py-2">
-      <div class="text-[11px] text-muted-foreground mb-1 font-medium">宿主日志</div>
+      <div class="text-[11px] text-muted-foreground mb-1 font-medium">{{ $t('agentDemo.hostLog') }}</div>
       <div class="font-mono text-[11px] text-foreground/70 max-h-30 overflow-y-auto whitespace-pre-wrap break-all">
         <div v-for="(line, i) in logs" :key="i">{{ line }}</div>
-        <div v-if="!logs.length" class="text-muted-foreground">等待 iframe 消息...</div>
+        <div v-if="!logs.length" class="text-muted-foreground">{{ $t('agentDemo.waitingIframe') }}</div>
       </div>
     </div>
   </div>

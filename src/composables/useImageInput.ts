@@ -9,6 +9,7 @@
  */
 
 import { ref, computed, watch, onBeforeUnmount, type Ref } from 'vue'
+import i18n from '../locales'
 import {
   validateImage,
   readMagicProbe,
@@ -113,7 +114,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
   async function addFile(file: File | Blob): Promise<boolean> {
     // 容量预检查
     if (!canAddMore.value) {
-      lastError.value = { kind: 'limit', message: '单次最多 5 张' }
+      lastError.value = { kind: 'limit', message: i18n.global.t('image.maxCount') }
       return false
     }
 
@@ -125,7 +126,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
     } catch (e) {
       lastError.value = {
         kind: 'read',
-        message: `读取文件头失败: ${(e as Error).message || String(e)}`,
+        message: i18n.global.t('image.readFailed', { error: (e as Error).message || String(e) }),
       }
       return false
     }
@@ -135,7 +136,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
     if (!validated.ok || !validated.mime) {
       lastError.value = {
         kind: 'validate',
-        message: validated.reason ?? '不支持的文件类型',
+        message: validated.reason ?? i18n.global.t('image.unsupportedType'),
       }
       return false
     }
@@ -145,7 +146,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
     if (!compressed.ok || !compressed.blob) {
       lastError.value = {
         kind: 'compress',
-        message: compressed.reason ?? '图片处理失败',
+        message: compressed.reason ?? i18n.global.t('image.processFailed'),
       }
       return false
     }
@@ -157,7 +158,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
     } catch (e) {
       lastError.value = {
         kind: 'read',
-        message: `生成缩略图失败: ${(e as Error).message || String(e)}`,
+        message: i18n.global.t('image.thumbnailFailed', { error: (e as Error).message || String(e) }),
       }
       return false
     }
@@ -183,7 +184,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
     const list = Array.from(files)
     if (list.length > remainingSlots.value) {
       rejected += list.length - remainingSlots.value
-      lastError.value = { kind: 'limit', message: '单次最多 5 张' }
+      lastError.value = { kind: 'limit', message: i18n.global.t('image.maxCount') }
     }
     const acceptable = list.slice(0, remainingSlots.value)
     for (const f of acceptable) {

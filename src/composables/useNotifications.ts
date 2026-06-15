@@ -1,4 +1,5 @@
 import { ref, computed, watch } from 'vue'
+import i18n from '../locales'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
@@ -105,7 +106,7 @@ function sessionTitle(sessionId: string): string {
     const s = p.sessions.find(s => s.id === sessionId)
     if (s) return displayTitle(s, getMeta(sessionId)?.title)
   }
-  if (useWorkbench().draftCwd(sessionId)) return '新会话'
+  if (useWorkbench().draftCwd(sessionId)) return i18n.global.t('session.newSessionTitle')
   return sessionId.slice(0, 8)
 }
 
@@ -122,10 +123,10 @@ function sessionCwd(sessionId: string): string | null {
 /** 持久 toast / 系统通知的类型标签：交互工具按真实语义命名，不再一律「权限请求」 */
 export function requestKindLabel(toolName: string): string {
   switch (toolName) {
-    case 'AskUserQuestion': return 'Claude 在提问'
-    case 'ExitPlanMode': return '计划待批准'
-    case 'EnterPlanMode': return '请求进入计划模式'
-    default: return '权限请求'
+    case 'AskUserQuestion': return i18n.global.t('notification.claudeAsking')
+    case 'ExitPlanMode': return i18n.global.t('notification.planApproval')
+    case 'EnterPlanMode': return i18n.global.t('notification.enterPlanMode')
+    default: return i18n.global.t('notification.permissionRequest')
   }
 }
 
@@ -137,15 +138,15 @@ function permissionSub(req: PermissionRequest): string {
     const first = Array.isArray(qs) && typeof (qs[0] as any)?.question === 'string'
       ? (qs[0] as any).question as string
       : ''
-    const tail = Array.isArray(qs) && qs.length > 1 ? ` 等 ${qs.length} 问` : ''
-    return first ? `${first.length > 40 ? first.slice(0, 40) + '…' : first}${tail}` : '待回答'
+    const tail = Array.isArray(qs) && qs.length > 1 ? ` ${i18n.global.t('notification.nQuestions', { n: qs.length })}` : ''
+    return first ? `${first.length > 40 ? first.slice(0, 40) + '…' : first}${tail}` : i18n.global.t('notification.waitingAnswer')
   }
   if (req.toolName === 'ExitPlanMode') {
     const plan = typeof input.plan === 'string' ? input.plan.split('\n')[0].replace(/^#+\s*/, '') : ''
-    return plan ? (plan.length > 48 ? plan.slice(0, 48) + '…' : plan) : '计划已就绪'
+    return plan ? (plan.length > 48 ? plan.slice(0, 48) + '…' : plan) : i18n.global.t('notification.planReady')
   }
   if (req.toolName === 'EnterPlanMode') {
-    return '批准后进入只读规划阶段'
+    return i18n.global.t('notification.enterPlanDesc')
   }
   for (const k of ['file_path', 'command', 'url', 'pattern']) {
     const v = input[k]
@@ -240,7 +241,7 @@ function goToSession(sessionId: string) {
     collapsed = openSession(sessionId).collapsedSessionIds
   }
   if (collapsed.length > 0) {
-    notifyTransient(`已收起:${collapsed.map(sessionTitle).join('、')}`)
+    notifyTransient(i18n.global.t('notification.collapsed', { names: collapsed.map(sessionTitle).join('、') }))
   }
   switchSection('workbench')
   // 错误事件已被注意:同步解除其 toast(左列卡状态仍如实反映)
@@ -261,17 +262,17 @@ export async function initNotificationLayer(): Promise<void> {
   onStreamFinished((sessionId, hasError) => {
     const title = sessionTitle(sessionId)
     if (hasError) {
-      const err = getStream(sessionId).streamError ?? '流式出错'
+      const err = getStream(sessionId).streamError ?? i18n.global.t('notification.streamError')
       upsertErrorEvent(sessionId, err, 'stream')
-      void maybeNotifySystem('出错停住', `${title} · ${err.slice(0, 60)}`)
+      void maybeNotifySystem(i18n.global.t('notification.errorStopped'), `${title} · ${err.slice(0, 60)}`)
     } else {
       const { activeSection } = useUiState()
       const visible =
         activeSection.value === 'workbench' && isSessionVisibleInWorkbench(sessionId)
       if (!visible) {
-        notifyTransient(`任务完成:${title}`)
+        notifyTransient(i18n.global.t('notification.taskComplete', { title }))
       }
-      void maybeNotifySystem('任务完成', title)
+      void maybeNotifySystem(i18n.global.t('notification.taskCompleteTitle'), title)
     }
   })
 
@@ -301,8 +302,8 @@ export async function initNotificationLayer(): Promise<void> {
       const { sessionId, content } = e.payload
       // 工作台内会话的出错由流式链路处理,不走本通道(链路互斥,防重复通知)
       if (findSession(sessionId)) return
-      upsertErrorEvent(sessionId, content || 'API 错误', 'external')
-      void maybeNotifySystem('出错停住', `${sessionTitle(sessionId)} · ${(content || '').slice(0, 60)}`)
+      upsertErrorEvent(sessionId, content || i18n.global.t('notification.apiError'), 'external')
+      void maybeNotifySystem(i18n.global.t('notification.errorStopped'), `${sessionTitle(sessionId)} · ${(content || '').slice(0, 60)}`)
     },
   )
 }

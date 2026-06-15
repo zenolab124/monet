@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import i18n from '../locales'
 
 /**
  * 多渠道(profile):~/.claude/cc-space/channels/<id>.json,Rust 层单源读写。
@@ -43,7 +44,7 @@ export async function refreshChannels(): Promise<void> {
 
 /** 渠道显示名:官方/未配置兜底;清单外 id(文件已删)显示原 id */
 export function channelDisplayName(id: string | null): string {
-  if (!id || id === OFFICIAL_CHANNEL_ID) return '官方'
+  if (!id || id === OFFICIAL_CHANNEL_ID) return i18n.global.t('channel.official')
   return channels.value.find(c => c.id === id)?.name ?? id
 }
 

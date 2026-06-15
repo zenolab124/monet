@@ -1,0 +1,276 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+use serde_json::{json, Value};
+
+use crate::streaming::{enhanced_path, find_claude};
+
+fn locales_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("cc-space")
+        .join("locales")
+}
+
+fn get_default_channel_credentials() -> Option<(String, String)> {
+    let settings_path = dirs::home_dir()?
+        .join(".claude")
+        .join("cc-space")
+        .join("settings.json");
+    let text = fs::read_to_string(settings_path).ok()?;
+    let root: Value = serde_json::from_str(&text).ok()?;
+    let id = root.get("defaultChannelId")?.as_str()?;
+    if id.is_empty() || id == "official" {
+        return None;
+    }
+    let ch_path = crate::channels::channel_file_path(id);
+    let ch_text = fs::read_to_string(ch_path).ok()?;
+    let ch_root: Value = serde_json::from_str(&ch_text).ok()?;
+    let env = ch_root.get("env")?.as_object()?;
+    let base_url = env
+        .get("ANTHROPIC_BASE_URL")
+        .and_then(|v| v.as_str())?
+        .to_string();
+    let token = env
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .or_else(|| env.get("ANTHROPIC_API_KEY"))
+        .and_then(|v| v.as_str())?
+        .to_string();
+    Some((base_url, token))
+}
+
+fn build_translate_prompt(source_json: &str, target_lang: &str, target_native: &str) -> String {
+    format!(
+        "Translate the following JSON locale file from Chinese (zh-CN) to {target_lang} ({target_native}).\n\n\
+        Rules:\n\
+        - Translate ONLY the string values, keep all keys exactly the same\n\
+        - Keep {{variable}} placeholders like {{count}}, {{name}}, {{n}} unchanged\n\
+        - Keep technical terms (Claude, API, JSON, MCP, Tauri, JSONL, CLI, Token, Remote Control, etc.) unchanged\n\
+        - Keep symbols like ✓, ✗, ⚠, ▲, ▼, → unchanged\n\
+        - Output ONLY valid JSON — no markdown fences, no explanation\n\
+        - The translation should feel natural in {target_lang}\n\n\
+        Source JSON:\n{source_json}"
+    )
+}
+
+fn strip_markdown_fence(text: &str) -> &str {
+    let t = text.trim();
+    if let Some(rest) = t.strip_prefix("```json") {
+        rest.trim().strip_suffix("```").unwrap_or(rest.trim())
+    } else if let Some(rest) = t.strip_prefix("```") {
+        rest.trim().strip_suffix("```").unwrap_or(rest.trim())
+    } else {
+        t
+    }
+}
+
+fn translate_via_http(
+    base_url: &str,
+    token: &str,
+    source_json: &str,
+    target_lang: &str,
+    target_native: &str,
+) -> Result<String, String> {
+    let prompt = build_translate_prompt(source_json, target_lang, target_native);
+    let client = reqwest::blocking::Client::new();
+    let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+    let body = json!({
+        "model": "claude-sonnet-4-6-20250514",
+        "max_tokens": 16000,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let resp = client
+        .post(&url)
+        .header("x-api-key", token)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(120))
+        .send()
+        .map_err(|e| format!("API 请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body_text = resp.text().unwrap_or_default();
+        return Err(format!("API {} — {}", status, body_text));
+    }
+
+    let resp_json: Value = resp.json().map_err(|e| format!("响应解析失败: {}", e))?;
+    resp_json
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "API 响应格式异常".to_string())
+}
+
+fn translate_via_cli(
+    source_json: &str,
+    target_lang: &str,
+    target_native: &str,
+) -> Result<String, String> {
+    let prompt = build_translate_prompt(source_json, target_lang, target_native);
+    let (executable, prefix_args) = find_claude();
+    let mut args = prefix_args;
+    args.extend([
+        "-p".to_string(),
+        "--model".to_string(),
+        "claude-sonnet-4-6-20250514".to_string(),
+        "--output-format".to_string(),
+        "text".to_string(),
+    ]);
+
+    eprintln!(
+        "[translate] via CLI: {} {:?}",
+        executable,
+        args.iter().take(4).collect::<Vec<_>>()
+    );
+
+    let output = Command::new(&executable)
+        .args(&args)
+        .env("PATH", enhanced_path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(prompt.as_bytes());
+            }
+            drop(child.stdin.take());
+            child.wait_with_output()
+        })
+        .map_err(|e| format!("CLI 启动失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("CLI 退出 {}: {}", output.status, stderr));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn save_locale(
+    lang_code: &str,
+    target_lang: &str,
+    target_native: &str,
+    translated: &Value,
+) -> Result<String, String> {
+    let dir = locales_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
+
+    let pretty =
+        serde_json::to_string_pretty(translated).map_err(|e| format!("序列化失败: {}", e))?;
+    fs::write(dir.join(format!("{}.json", lang_code)), &pretty)
+        .map_err(|e| format!("写入失败: {}", e))?;
+
+    let meta = json!({ "code": lang_code, "label": target_lang, "nativeLabel": target_native });
+    let meta_str = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+    fs::write(dir.join(format!("{}.meta.json", lang_code)), &meta_str)
+        .map_err(|e| format!("写入失败: {}", e))?;
+
+    Ok(pretty)
+}
+
+#[tauri::command]
+pub async fn translate_locale(
+    source_json: String,
+    target_lang: String,
+    target_native: String,
+    lang_code: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        eprintln!(
+            "[translate] target={} ({}) code={}",
+            target_lang, target_native, lang_code
+        );
+
+        let raw = match get_default_channel_credentials() {
+            Some((base_url, token)) => {
+                eprintln!("[translate] 走 HTTP 渠道");
+                translate_via_http(&base_url, &token, &source_json, &target_lang, &target_native)?
+            }
+            None => {
+                eprintln!("[translate] 走 CLI（官方渠道）");
+                translate_via_cli(&source_json, &target_lang, &target_native)?
+            }
+        };
+
+        let clean = strip_markdown_fence(&raw);
+        let translated: Value =
+            serde_json::from_str(clean).map_err(|e| format!("翻译结果不是有效 JSON: {}", e))?;
+
+        save_locale(&lang_code, &target_lang, &target_native, &translated)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn parse_language_intent(user_input: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let prompt = format!(
+            "【角色：语言识别器】用户想添加一种界面语言。根据输入识别目标语言。\
+            输出纯 JSON（不要 markdown），格式：\
+            {{\"code\":\"ja-JP\",\"name\":\"Japanese\",\"native\":\"日本語\"}}\n\n\
+            规则：code 用 IETF 格式（如 ja-JP, ko-KR, fr-FR）。\
+            如果无法识别，输出 {{\"error\":\"无法识别\"}}\n\n\
+            用户输入：{}",
+            user_input
+        );
+        let result = crate::agent::request_blocking_pub(&prompt)?;
+        let clean = strip_markdown_fence(&result);
+        serde_json::from_str(clean).map_err(|e| format!("解析失败: {}", e))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn list_external_locales() -> Result<Vec<Value>, String> {
+    let dir = locales_dir();
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut result = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".meta.json") {
+            continue;
+        }
+        let code = name.trim_end_matches(".meta.json");
+        let meta: Value = fs::read_to_string(entry.path())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        let messages: Value = fs::read_to_string(dir.join(format!("{}.json", code)))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(json!({}));
+
+        result.push(json!({
+            "code": code,
+            "label": meta.get("label").and_then(|v| v.as_str()).unwrap_or(code),
+            "nativeLabel": meta.get("nativeLabel").and_then(|v| v.as_str()).unwrap_or(code),
+            "messages": messages,
+        }));
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn delete_external_locale(code: String) -> Result<(), String> {
+    let dir = locales_dir();
+    let _ = fs::remove_file(dir.join(format!("{}.json", code)));
+    let _ = fs::remove_file(dir.join(format!("{}.meta.json", code)));
+    Ok(())
+}
