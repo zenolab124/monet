@@ -113,7 +113,7 @@ watch(focusColumnRequest, async (req) => {
 <template>
   <div
     ref="containerRef"
-    class="flex-1 min-w-0 h-full flex flex-row p-2.5"
+    class="flex-1 min-w-0 h-full flex flex-row p-2.5 gap-2.5"
     :class="{ 'drop-target-highlight': isDropTarget }"
   >
     <!-- 空态(FR-004) -->
@@ -124,48 +124,31 @@ watch(focusColumnRequest, async (req) => {
       {{ $t('workbench.columns.empty') }}
     </div>
 
-    <template v-for="(col, i) in activeTab.columns" :key="col.id">
-      <SortableColumn
-        :tab-id="activeTab.id"
-        :index="i"
-        :flex="activeTab.columnSizes[i]"
-        :class="{
-          'no-transition': dragging,
-          'focus-ring': flashIndex === i,
-        }"
-      >
-        <template #default="{ isDragging: colDragging }">
-          <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" />
-        </template>
-      </SortableColumn>
-
-      <!-- 列间隙 10px:拖拽分隔命中区 9px 居中其内 -->
-      <div v-if="i < activeTab.columns.length - 1" class="shrink-0 relative w-2.5">
+    <SortableColumn
+      v-for="(col, i) in activeTab.columns"
+      :key="col.id"
+      :tab-id="activeTab.id"
+      :index="i"
+      :flex="activeTab.columnSizes[i]"
+    >
+      <template #default="{ isDragging: colDragging }">
+        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" />
+        <!-- 列间 resize 手柄（绝对定位在右边界，不参与 flex 布局） -->
         <div
-          class="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-9px cursor-col-resize z-10"
+          v-if="i < activeTab.columns.length - 1"
+          class="absolute top-0 bottom-0 -right-[7px] w-[14px] cursor-col-resize z-20"
+          @pointerdown.stop
           @mousedown="onDividerMouseDown($event, i)"
         />
-      </div>
-    </template>
+      </template>
+    </SortableColumn>
   </div>
 </template>
 
 <style scoped>
-.wb-col {
-  transition: flex 200ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-.wb-col.no-transition {
-  transition: none;
-}
-/* dnd-kit: session 拖入右区时的容器高亮 */
 .drop-target-highlight {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
   border-radius: 6px;
-}
-/* 幂等展开聚焦闪烁 */
-.wb-col.focus-ring > :first-child {
-  outline: 2px solid var(--ring);
-  outline-offset: -1px;
 }
 </style>

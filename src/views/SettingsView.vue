@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import { DragDropProvider } from '@dnd-kit/vue'
 import { move } from '@dnd-kit/helpers'
@@ -36,6 +37,29 @@ const {
   translating, translateError, parseLanguageIntent, translateLocale, deleteLocale, isBuiltin,
 } = useLocale()
 
+const agentToggles = ref<Record<string, boolean>>({})
+const agentKeys = [
+  { key: 'title', label: 'settings.agentTitle', desc: 'settings.agentTitleDesc' },
+  { key: 'permission_hint', label: 'settings.agentPermissionHint', desc: 'settings.agentPermissionHintDesc' },
+  { key: 'settings_explain', label: 'settings.agentSettingsExplain', desc: 'settings.agentSettingsExplainDesc' },
+  { key: 'cron_parse', label: 'settings.agentCronParse', desc: 'settings.agentCronParseDesc' },
+  { key: 'translate', label: 'settings.agentTranslate', desc: 'settings.agentTranslateDesc' },
+]
+
+async function loadAgentToggles() {
+  agentToggles.value = await invoke<Record<string, boolean>>('get_agent_toggles')
+}
+
+function isAgentEnabled(key: string) {
+  return agentToggles.value[key] ?? true
+}
+
+async function toggleAgent(key: string) {
+  const next = !isAgentEnabled(key)
+  agentToggles.value = { ...agentToggles.value, [key]: next }
+  await invoke('set_agent_toggle', { key, enabled: next })
+}
+
 const showTranslateForm = ref(false)
 const customLangInput = ref('')
 
@@ -58,7 +82,7 @@ async function onCustomTranslate() {
   }
 }
 
-type Tab = 'general' | 'channels' | 'models' | 'claude-code' | 'lab' | 'diag'
+type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'lab' | 'diag'
 const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
@@ -73,7 +97,7 @@ const advisorModel = ref('claude-fable-5')
 const hideCreditsModels = ref(false)
 const autoDetectModels = ref(false)
 
-onMounted(() => refreshChannels())
+onMounted(() => { refreshChannels(); loadAgentToggles() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -167,6 +191,9 @@ function onSaved() {
       </button>
       <button :class="['side-item', { active: activeTab === 'models' }]" @click="activeTab = 'models'">
         <span class="i-carbon-bot w-3.5 h-3.5" />{{ $t('settings.models') }}
+      </button>
+      <button :class="['side-item', { active: activeTab === 'agent' }]" @click="activeTab = 'agent'">
+        <span class="i-carbon-machine-learning w-3.5 h-3.5" />{{ $t('settings.agent') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'claude-code' }]" @click="activeTab = 'claude-code'">
         <span class="i-carbon-json w-3.5 h-3.5" />Claude Code
@@ -507,6 +534,28 @@ function onSaved() {
           </div>
         </section>
 
+        <!-- ====== Agent ====== -->
+        <section v-show="activeTab === 'agent'">
+          <h2 class="section-title">{{ $t('settings.agent') }}</h2>
+          <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
+            {{ $t('settings.agentDesc') }}
+          </p>
+          <div class="settings-grid">
+            <div v-for="a in agentKeys" :key="a.key" class="agent-item">
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-medium">{{ $t(a.label) }}</div>
+                <div class="text-[11px] text-muted-foreground mt-0.5">{{ $t(a.desc) }}</div>
+              </div>
+              <button
+                :class="['form-toggle', { on: isAgentEnabled(a.key) }]"
+                @click="toggleAgent(a.key)"
+              >
+                <span class="form-toggle-knob" />
+              </button>
+            </div>
+          </div>
+        </section>
+
         <!-- ====== Claude Code 配置 ====== -->
         <section v-show="activeTab === 'claude-code'">
           <ClaudeCodeSettings />
@@ -730,6 +779,16 @@ function onSaved() {
   color: var(--foreground);
   background: var(--muted);
 }
+.agent-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
 /* 渠道标签 */
 .channel-chip {
   padding: 0 4px;

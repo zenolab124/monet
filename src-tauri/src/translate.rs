@@ -179,6 +179,9 @@ pub async fn translate_locale(
     target_native: String,
     lang_code: String,
 ) -> Result<String, String> {
+    if !crate::channels::is_agent_enabled("translate") {
+        return Err("agent.translate 已禁用".to_string());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         eprintln!("[translate] target={} ({}) code={}", target_lang, target_native, lang_code);
 

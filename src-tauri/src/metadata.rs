@@ -215,6 +215,9 @@ pub async fn translate_settings_fields(fields_json: String) -> Result<String, St
 
 #[tauri::command]
 pub async fn parse_natural_schedule(text: String) -> Result<String, String> {
+    if !crate::channels::is_agent_enabled("cron_parse") {
+        return Err("agent.cron_parse 已禁用".to_string());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         crate::agent::parse_cron(&text)
     })

@@ -16,9 +16,23 @@ const { isDragging } = useSortable({
 <template>
   <div
     ref="el"
-    class="min-w-0 h-full relative wb-col touch-none"
+    class="sortable-col"
+    :class="{ 'sortable-col-dragging': isDragging }"
     :style="{ flex: `${flex} 1 0%` }"
   >
     <slot :is-dragging="isDragging" />
   </div>
 </template>
+
+<style scoped>
+.sortable-col {
+  min-width: 0;
+  height: 100%;
+  position: relative;
+  touch-action: none;
+  transition: flex 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.sortable-col-dragging {
+  opacity: 0.4;
+}
+</style>
