@@ -238,17 +238,17 @@ async function onRemove(key: string) {
             <!-- boolean -->
             <template v-if="fieldType(f) === 'boolean'">
               <button
-                :class="['toggle-track', { on: !!f.value }]"
+                :class="['form-toggle', { on: !!f.value }]"
                 @click="onToggle(f)"
               >
-                <span class="toggle-knob" />
+                <span class="form-toggle-knob" />
               </button>
             </template>
 
             <!-- enum / select -->
             <template v-else-if="fieldType(f) === 'enum'">
               <select
-                class="ctrl-select"
+                class="form-select form-select-sm max-w-[220px]"
                 :value="f.value ?? '__unset__'"
                 @change="onEnumChange(f, $event)"
               >
@@ -263,7 +263,7 @@ async function onRemove(key: string) {
             <template v-else-if="fieldType(f) === 'integer' || fieldType(f) === 'number'">
               <input
                 type="number"
-                class="ctrl-input w-24"
+                class="form-input form-input-sm font-mono w-24"
                 :value="f.value ?? ''"
                 :placeholder="f.schema?.default != null ? String(f.schema.default) : ''"
                 :min="f.schema?.minimum"
@@ -276,7 +276,7 @@ async function onRemove(key: string) {
             <template v-else-if="fieldType(f) === 'string' && !f.schema?.properties">
               <input
                 type="text"
-                class="ctrl-input"
+                class="form-input form-input-sm font-mono max-w-[220px]"
                 :value="f.value ?? ''"
                 :placeholder="f.schema?.default != null ? String(f.schema.default) : ''"
                 @blur="onStringBlur(f, $event)"
@@ -286,7 +286,7 @@ async function onRemove(key: string) {
             <!-- object / array / complex -->
             <template v-else>
               <textarea
-                class="ctrl-textarea"
+                class="form-textarea form-textarea-sm font-mono w-[220px]"
                 :value="displayValue(f.value)"
                 rows="3"
                 spellcheck="false"
@@ -317,7 +317,7 @@ async function onRemove(key: string) {
           <input
             v-model="addingKey"
             type="text"
-            class="ctrl-input w-full"
+            class="form-input form-input-sm font-mono w-full"
             placeholder="camelCase key"
           />
         </div>
@@ -326,7 +326,7 @@ async function onRemove(key: string) {
           <input
             v-model="addingValue"
             type="text"
-            class="ctrl-input w-full"
+            class="form-input form-input-sm font-mono w-full"
             placeholder="true / &quot;text&quot; / {}"
           />
         </div>
@@ -411,64 +411,6 @@ async function onRemove(key: string) {
   color: var(--accent);
   border-radius: 3px;
 }
-
-.ctrl-input {
-  padding: 4px 8px;
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--popover);
-  color: var(--foreground);
-  max-width: 220px;
-}
-.ctrl-input:focus { outline: none; border-color: var(--ring); }
-
-.ctrl-textarea {
-  padding: 4px 8px;
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--popover);
-  color: var(--foreground);
-  width: 220px;
-  resize: vertical;
-  min-height: 48px;
-}
-.ctrl-textarea:focus { outline: none; border-color: var(--ring); }
-
-.ctrl-select {
-  padding: 4px 8px;
-  font-size: 11px;
-  font-family: inherit;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--popover);
-  color: var(--foreground);
-  max-width: 220px;
-}
-.ctrl-select:focus { outline: none; border-color: var(--ring); }
-
-.toggle-track {
-  position: relative;
-  width: 36px; height: 20px;
-  border-radius: 10px;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.2s;
-  flex-shrink: 0;
-}
-.toggle-track.on { background: var(--primary); border-color: var(--primary); }
-.toggle-knob {
-  display: block; width: 14px; height: 14px;
-  border-radius: 50%; background: white;
-  position: absolute; top: 2px; left: 2px;
-  transition: transform 0.2s;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
-}
-.toggle-track.on .toggle-knob { transform: translateX(16px); }
 
 .remove-btn {
   padding: 3px;

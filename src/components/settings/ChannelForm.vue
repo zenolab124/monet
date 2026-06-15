@@ -149,21 +149,4 @@ async function onSave() {
   font-size: 11px;
   color: var(--muted-foreground);
 }
-.form-input {
-  padding: 6px 8px;
-  font-size: 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--background);
-  color: var(--foreground);
-  transition: border-color 0.15s;
-}
-.form-input:focus {
-  outline: none;
-  border-color: var(--ring);
-}
-.form-input::placeholder {
-  color: var(--muted-foreground);
-  opacity: 0.6;
-}
 </style>

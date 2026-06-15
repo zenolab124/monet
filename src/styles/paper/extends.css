@@ -33,3 +33,116 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
+
+/* === 表单元素（全局统一，组件不再 scoped 重复定义） === */
+
+.form-input,
+.form-select,
+.form-textarea {
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--foreground);
+  transition: border-color 0.15s;
+}
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: var(--ring);
+}
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+.form-input:disabled,
+.form-select:disabled,
+.form-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.form-textarea {
+  resize: vertical;
+  min-height: 48px;
+}
+
+/* 紧凑变体（ClaudeCodeSettings 等密集表格用） */
+.form-input-sm,
+.form-select-sm,
+.form-textarea-sm {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+/* 开关 */
+.form-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.form-toggle.on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.form-toggle-knob {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.form-toggle.on .form-toggle-knob {
+  transform: translateX(16px);
+}
+
+/* 小号开关 */
+.form-toggle-sm {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.form-toggle-sm.on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.form-toggle-sm .form-toggle-knob {
+  width: 10px;
+  height: 10px;
+}
+.form-toggle-sm.on .form-toggle-knob {
+  transform: translateX(12px);
+}
+
+/* 复选框行 */
+.form-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.form-checkbox-row input[type="checkbox"] {
+  accent-color: var(--primary);
+}

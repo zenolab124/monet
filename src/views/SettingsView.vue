@@ -189,7 +189,7 @@ function onSaved() {
               <div class="setting-label">{{ $t('settings.language') }}</div>
               <select
                 :value="locale"
-                class="ctrl-select w-full"
+                class="form-select w-full"
                 @change="switchLocale(($event.target as HTMLSelectElement).value)"
               >
                 <option
@@ -230,7 +230,7 @@ function onSaved() {
                   <div class="flex gap-2">
                     <input
                       v-model="customLangInput"
-                      class="ctrl-input flex-1"
+                      class="form-input flex-1"
                       :placeholder="$t('settings.customLangPlaceholder')"
                       :disabled="translating"
                       @keydown.enter="onCustomTranslate"
@@ -260,7 +260,7 @@ function onSaved() {
 
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.defaultEffort') }}</div>
-              <select v-model="defaultEffort" class="ctrl-select w-full">
+              <select v-model="defaultEffort" class="form-select w-full">
                 <option value="cli">{{ $t('settings.followCli') }}</option>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -276,10 +276,10 @@ function onSaved() {
               <div class="setting-label">{{ $t('settings.remoteControl') }}</div>
               <div class="flex items-center gap-2.5">
                 <button
-                  :class="['toggle-track', { on: rcEnabled }]"
+                  :class="['form-toggle', { on: rcEnabled }]"
                   @click="rcEnabled = !rcEnabled"
                 >
-                  <span class="toggle-knob" />
+                  <span class="form-toggle-knob" />
                 </button>
                 <span class="text-[11px] text-muted-foreground">{{ $t('settings.remoteControlSub') }}</span>
               </div>
@@ -316,11 +316,11 @@ function onSaved() {
                       <span class="truncate font-medium text-xs">{{ channelById(stripPrefix(pid)).name }}</span>
                       <div class="chain-actions">
                         <button
-                          :class="['toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
+                          :class="['form-toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
                           @pointerdown.stop
                           @click="setChannelEnabled(stripPrefix(pid), !channelById(stripPrefix(pid)).enabled)"
                         >
-                          <span class="toggle-sm-knob" />
+                          <span class="form-toggle-knob" />
                         </button>
                         <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
                           <button class="chain-action" :title="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
@@ -357,11 +357,11 @@ function onSaved() {
                       <span class="truncate font-medium text-xs">{{ channelById(stripPrefix(pid)).name }}</span>
                       <div class="chain-actions">
                         <button
-                          :class="['toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
+                          :class="['form-toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
                           @pointerdown.stop
                           @click="setChannelEnabled(stripPrefix(pid), !channelById(stripPrefix(pid)).enabled)"
                         >
-                          <span class="toggle-sm-knob" />
+                          <span class="form-toggle-knob" />
                         </button>
                         <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
                           <button class="chain-action" :title="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
@@ -418,14 +418,14 @@ function onSaved() {
               <h3 class="sub-card-title">{{ $t('settings.advisorMode') }}</h3>
               <div class="setting-cell mb-2">
                 <div class="setting-label">{{ $t('settings.primaryModel') }}</div>
-                <select v-model="advisorMain" class="ctrl-select w-full">
+                <select v-model="advisorMain" class="form-select w-full">
                   <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
                   <option value="claude-haiku-4-5">claude-haiku-4-5</option>
                 </select>
               </div>
               <div class="setting-cell">
                 <div class="setting-label">{{ $t('settings.advisorModel') }}</div>
-                <select v-model="advisorModel" class="ctrl-select w-full">
+                <select v-model="advisorModel" class="form-select w-full">
                   <option value="claude-fable-5">claude-fable-5</option>
                   <option value="claude-opus-4-8">claude-opus-4-8</option>
                   <option value="claude-opus-4-6">claude-opus-4-6</option>
@@ -437,11 +437,11 @@ function onSaved() {
             <!-- 模型可见性 -->
             <div class="sub-card">
               <h3 class="sub-card-title">{{ $t('settings.modelVisibility') }}</h3>
-              <label class="checkbox-row">
+              <label class="form-checkbox-row">
                 <input v-model="hideCreditsModels" type="checkbox" />
                 <span>{{ $t('settings.hide1mModels') }}</span>
               </label>
-              <label class="checkbox-row">
+              <label class="form-checkbox-row">
                 <input v-model="autoDetectModels" type="checkbox" />
                 <span>{{ $t('settings.autoDetect') }}</span>
               </label>
@@ -567,34 +567,6 @@ function onSaved() {
   font-weight: 400;
 }
 
-/* 下拉控件 */
-.ctrl-select {
-  padding: 5px 8px;
-  font-size: 12px;
-  font-family: inherit;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--popover);
-  color: var(--foreground);
-}
-.ctrl-select:focus {
-  outline: none;
-  border-color: var(--ring);
-}
-.ctrl-input {
-  padding: 5px 8px;
-  font-size: 12px;
-  font-family: inherit;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--popover);
-  color: var(--foreground);
-}
-.ctrl-input:focus {
-  outline: none;
-  border-color: var(--ring);
-}
-
 /* AI 翻译区 */
 .translate-zone {
   padding: 8px 0 4px;
@@ -609,38 +581,6 @@ function onSaved() {
   background: var(--card);
 }
 
-/* 开关 */
-.toggle-track {
-  position: relative;
-  width: 36px;
-  height: 20px;
-  border-radius: 10px;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.2s;
-  flex-shrink: 0;
-}
-.toggle-track.on {
-  background: var(--primary);
-  border-color: var(--primary);
-}
-.toggle-knob {
-  display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: white;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: transform 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-.toggle-track.on .toggle-knob {
-  transform: translateX(16px);
-}
-
 /* 子卡片 */
 .sub-card {
   border: 1px solid var(--border);
@@ -653,19 +593,6 @@ function onSaved() {
   font-size: 12px;
   font-weight: 500;
   margin-bottom: 10px;
-}
-
-/* 复选框行 */
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12px;
-  cursor: pointer;
-}
-.checkbox-row input[type="checkbox"] {
-  accent-color: var(--primary);
 }
 
 /* iframe 标识 */
@@ -745,38 +672,6 @@ function onSaved() {
   color: var(--foreground);
   background: var(--muted);
 }
-/* 小号开关 */
-.toggle-sm {
-  position: relative;
-  width: 28px;
-  height: 16px;
-  border-radius: 8px;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.2s;
-  flex-shrink: 0;
-}
-.toggle-sm.on {
-  background: var(--primary);
-  border-color: var(--primary);
-}
-.toggle-sm-knob {
-  display: block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: white;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: transform 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-.toggle-sm.on .toggle-sm-knob {
-  transform: translateX(12px);
-}
-
 /* 渠道标签 */
 .channel-chip {
   padding: 0 4px;
