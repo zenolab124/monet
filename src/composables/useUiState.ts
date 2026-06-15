@@ -25,10 +25,12 @@ function loadState(): UiState {
         activeSection: validSections.includes(parsed.activeSection)
           ? parsed.activeSection
           : 'sessions',
+        projectSidebarWidth: parsed.projectSidebarWidth ?? 224,
+        sessionListWidth: parsed.sessionListWidth ?? 288,
       }
     }
   } catch (_) {}
-  return { sidebarsCollapsed: false, activeSection: 'sessions' }
+  return { sidebarsCollapsed: false, activeSection: 'sessions', projectSidebarWidth: 224, sessionListWidth: 288 }
 }
 
 const initial = loadState()
@@ -39,12 +41,16 @@ const sidebarsCollapsed = ref<boolean>(initial.sidebarsCollapsed)
 // 当前区域（重启恢复）
 const activeSection = ref<AppSection>(initial.activeSection)
 
+// 面板宽度
+const projectSidebarWidth = ref(initial.projectSidebarWidth)
+const sessionListWidth = ref(initial.sessionListWidth)
+
 // 持久化
-watch([sidebarsCollapsed, activeSection], ([collapsed, section]) => {
+watch([sidebarsCollapsed, activeSection, projectSidebarWidth, sessionListWidth], ([collapsed, section, pw, sw]) => {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ sidebarsCollapsed: collapsed, activeSection: section }),
+      JSON.stringify({ sidebarsCollapsed: collapsed, activeSection: section, projectSidebarWidth: pw, sessionListWidth: sw }),
     )
   } catch (_) {}
 })
@@ -63,5 +69,7 @@ export function useUiState() {
     toggleSidebars,
     activeSection,
     switchSection,
+    projectSidebarWidth,
+    sessionListWidth,
   }
 }

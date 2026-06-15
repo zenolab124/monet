@@ -1,4 +1,5 @@
 import { ref, computed, watch } from 'vue'
+import { shortModel } from '@/types'
 import type { SessionSummary } from '@/types'
 
 export type SortOrder = 'lastModified' | 'tokenUsage' | 'messageCount'
@@ -6,7 +7,6 @@ export type TimeRange = 'all' | 'today' | 'thisWeek' | 'thisMonth'
 
 const selectedSessionId = ref<string | null>(null)
 const sortOrder = ref<SortOrder>('lastModified')
-const selectedBranch = ref<string | null>(null)
 const selectedTimeRange = ref<TimeRange>('all')
 const selectedModel = ref<string | null>(null)
 const searchQuery = ref('')
@@ -32,11 +32,6 @@ function filterAndSort(sessions: SessionSummary[]): SessionSummary[] {
     })
   }
 
-  // 分支过滤
-  if (selectedBranch.value) {
-    result = result.filter(s => s.git_branch === selectedBranch.value)
-  }
-
   // 时间范围过滤
   if (selectedTimeRange.value !== 'all') {
     const now = Date.now()
@@ -48,9 +43,9 @@ function filterAndSort(sessions: SessionSummary[]): SessionSummary[] {
     result = result.filter(s => s.last_modified * 1000 >= cutoff)
   }
 
-  // 模型过滤
+  // 模型过滤（按 shortModel 匹配）
   if (selectedModel.value) {
-    result = result.filter(s => s.model === selectedModel.value)
+    result = result.filter(s => shortModel(s.model) === selectedModel.value)
   }
 
   // 排序
@@ -70,14 +65,12 @@ function filterAndSort(sessions: SessionSummary[]): SessionSummary[] {
 
 /** 从会话列表中提取可用的筛选选项 */
 function extractFilterOptions(sessions: SessionSummary[]) {
-  const branches = new Set<string>()
   const models = new Set<string>()
   for (const s of sessions) {
-    if (s.git_branch) branches.add(s.git_branch)
-    if (s.model) models.add(s.model)
+    const m = shortModel(s.model)
+    if (m) models.add(m)
   }
   return {
-    branches: [...branches].sort(),
     models: [...models].sort(),
   }
 }
@@ -90,7 +83,6 @@ export function useSessions() {
   return {
     selectedSessionId,
     sortOrder,
-    selectedBranch,
     selectedTimeRange,
     selectedModel,
     searchQuery,

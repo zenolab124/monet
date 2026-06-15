@@ -21,11 +21,12 @@ import { initStreamListeners } from '@/composables/useStreaming'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
 import { useRoutines } from '@/composables/useRoutines'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
+import { DragDropProvider } from '@dnd-kit/vue'
 
 const { projects, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 const { activeSection } = useUiState()
-const { pruneDrafts } = useWorkbench()
+const { state, activeTab, pruneDrafts, reorderTabs, moveSessionToTab, reorderColumns, expandSession } = useWorkbench()
 const { t } = useI18n()
 
 // 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉
@@ -46,6 +47,53 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+function onWorkbenchDragEnd(event: any) {
+  if (event.canceled) return
+  const source = event.operation?.source
+  const target = event.operation?.target
+  if (!source || !target) return
+
+  const sourceId = String(source.id ?? '')
+  const targetId = String(target.id ?? '')
+
+  // Tab reorder (both start with "tab:")
+  if (sourceId.startsWith('tab:') && targetId.startsWith('tab:')) {
+    const fromIdx = state.value.tabs.findIndex(t => t.id === sourceId.slice(4))
+    const toIdx = state.value.tabs.findIndex(t => t.id === targetId.slice(4))
+    if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+      reorderTabs(fromIdx, toIdx > fromIdx ? toIdx : toIdx)
+    }
+    return
+  }
+
+  // Session dropped on tab
+  if (sourceId.startsWith('session:') && targetId.startsWith('tab:')) {
+    moveSessionToTab(sourceId.slice(8), targetId.slice(4))
+    return
+  }
+
+  // Column reorder (both start with "col:")
+  if (sourceId.startsWith('col:') && targetId.startsWith('col:')) {
+    // col:{tabId}:{index}
+    const [, tabId, fromStr] = sourceId.split(':')
+    const [, , toStr] = targetId.split(':')
+    const from = parseInt(fromStr)
+    const to = parseInt(toStr)
+    if (!isNaN(from) && !isNaN(to) && from !== to) {
+      reorderColumns(tabId, from, to > from ? to : to)
+    }
+    return
+  }
+
+  // Session dropped on column area
+  if (sourceId.startsWith('session:') && targetId.startsWith('col-zone:')) {
+    const tabId = targetId.slice(9)
+    const sessionId = sourceId.slice(8)
+    expandSession(tabId, sessionId)
+    return
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   // 全局事件监听:整个 app 生命周期各注册一次
@@ -63,25 +111,27 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <div class="h-screen w-screen flex flex-col bg-background text-foreground" @contextmenu.prevent>
-    <TitleBar>
-      <template #leading>
-        <WorkbenchTabs v-if="activeSection === 'workbench'" />
-      </template>
-      <template #trailing>
-        <TitleBarTools />
-      </template>
-    </TitleBar>
-    <div class="flex-1 flex min-h-0">
-      <ActivityBar />
-      <WorkbenchView v-show="activeSection === 'workbench'" class="flex-1 min-w-0" />
-      <SessionsView v-show="activeSection === 'sessions'" class="flex-1 min-w-0" />
-      <WorkshopView v-show="activeSection === 'workshop'" class="flex-1 min-w-0" />
-      <AutomationView v-show="activeSection === 'automation'" class="flex-1 min-w-0" />
-      <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
-      <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
-    </div>
+    <DragDropProvider @drag-end="onWorkbenchDragEnd">
+      <TitleBar>
+        <template #leading>
+          <WorkbenchTabs v-if="activeSection === 'workbench'" />
+        </template>
+        <template #trailing>
+          <TitleBarTools />
+        </template>
+      </TitleBar>
+      <div class="flex-1 flex min-h-0">
+        <ActivityBar />
+        <WorkbenchView v-show="activeSection === 'workbench'" class="flex-1 min-w-0" />
+        <SessionsView v-show="activeSection === 'sessions'" class="flex-1 min-w-0" />
+        <WorkshopView v-show="activeSection === 'workshop'" class="flex-1 min-w-0" />
+        <AutomationView v-show="activeSection === 'automation'" class="flex-1 min-w-0" />
+        <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
+        <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
+      </div>
 
-    <ToastStack />
-    <ConfirmDialog />
+      <ToastStack />
+      <ConfirmDialog />
+    </DragDropProvider>
   </div>
 </template>

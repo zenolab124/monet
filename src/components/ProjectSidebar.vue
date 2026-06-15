@@ -72,9 +72,8 @@ function projectTokens(project: typeof projects.value[number]) {
       >
       <div v-if="i > 0" class="ml-6 mr-2.5 border-t border-border/30" />
       <button
-        class="w-full text-left px-2.5 py-2 flex items-start gap-2 rounded-md transition-colors
-               hover:bg-muted group"
-        :class="{ 'bg-card shadow-paper': isSelected(project.id) }"
+        class="w-full text-left px-2.5 py-2 flex items-start gap-2 rounded-md transition-colors group"
+        :class="isSelected(project.id) ? 'bg-card shadow-paper' : 'hover:bg-muted'"
         @click="toggleProject(project.id)"
       >
         <!-- 选中指示 -->

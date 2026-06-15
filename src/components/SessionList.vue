@@ -21,7 +21,6 @@ const { filteredSessions, sessionStats, loadProjects } = useProjects()
 const {
   selectedSessionId,
   sortOrder,
-  selectedBranch,
   selectedTimeRange,
   selectedModel,
   filterAndSort,
@@ -45,13 +44,8 @@ const timeLabels = computed<Record<TimeRange, string>>(() => ({
 }))
 
 // 筛选下拉
-const showBranchDropdown = ref(false)
 const showModelDropdown = ref(false)
 
-function pickBranch(branch: string) {
-  selectedBranch.value = branch
-  showBranchDropdown.value = false
-}
 function pickModel(model: string) {
   selectedModel.value = model
   showModelDropdown.value = false
@@ -172,37 +166,6 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
 
       <span class="text-border">|</span>
 
-      <!-- 分支下拉 -->
-      <div class="relative">
-        <button
-          v-if="selectedBranch"
-          class="px-2 py-0.5 text-xs rounded bg-secondary text-foreground flex items-center gap-1"
-          @click="selectedBranch = null"
-        >
-          {{ selectedBranch }} ×
-        </button>
-        <button
-          v-else
-          class="px-2 py-0.5 text-xs rounded text-muted-foreground hover:text-foreground flex items-center gap-0.5"
-          @click.stop="showBranchDropdown = !showBranchDropdown; showModelDropdown = false"
-        >
-          {{ $t('archive.filterBranch') }} <span class="i-carbon-chevron-down w-3 h-3" />
-        </button>
-        <div
-          v-if="showBranchDropdown && filterOptions.branches.length"
-          class="absolute top-full left-0 mt-1 z-10 bg-card border border-border rounded-md shadow-paper-lifted py-1 min-w-32 max-h-48 overflow-y-auto"
-        >
-          <button
-            v-for="branch in filterOptions.branches"
-            :key="branch"
-            class="w-full text-left px-3 py-1 text-xs hover:bg-muted text-muted-foreground truncate"
-            @click="pickBranch(branch)"
-          >
-            {{ branch }}
-          </button>
-        </div>
-      </div>
-
       <!-- 模型下拉 -->
       <div class="relative">
         <button
@@ -210,12 +173,12 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
           class="px-2 py-0.5 text-xs rounded bg-secondary text-foreground flex items-center gap-1"
           @click="selectedModel = null"
         >
-          {{ shortModel(selectedModel) }} ×
+          {{ selectedModel }} ×
         </button>
         <button
           v-else
           class="px-2 py-0.5 text-xs rounded text-muted-foreground hover:text-foreground flex items-center gap-0.5"
-          @click.stop="showModelDropdown = !showModelDropdown; showBranchDropdown = false"
+          @click.stop="showModelDropdown = !showModelDropdown"
         >
           {{ $t('archive.filterModel') }} <span class="i-carbon-chevron-down w-3 h-3" />
         </button>
@@ -229,7 +192,7 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
             class="w-full text-left px-3 py-1 text-xs hover:bg-muted text-muted-foreground truncate"
             @click="pickModel(model)"
           >
-            {{ shortModel(model) }}
+            {{ model }}
           </button>
         </div>
       </div>
@@ -248,8 +211,8 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       >
       <div v-if="i > 0" class="mx-3 border-t border-border/30" />
       <div
-        class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors hover:bg-muted cursor-pointer group relative shrink-0"
-        :class="{ 'bg-card border-border shadow-paper': selectedSessionId === session.id }"
+        class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors cursor-pointer group relative shrink-0"
+        :class="selectedSessionId === session.id ? 'bg-card border-border shadow-paper' : 'hover:bg-muted'"
         @click="selectSession(session.id)"
         @contextmenu="onContextMenu($event, session)"
       >

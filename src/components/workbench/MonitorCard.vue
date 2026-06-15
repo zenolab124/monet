@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useDraggable } from '@dnd-kit/vue'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
@@ -157,33 +158,21 @@ async function onRetry() {
 
 // --- 拖拽(FR-005:拖至 tab 跨台移动 / 拖至右区展开定位) ---
 
-const dragging = ref(false)
-
-function onDragStart(e: DragEvent) {
-  if (!e.dataTransfer) return
-  e.dataTransfer.setData('text/cc-session', props.sessionId)
-  e.dataTransfer.effectAllowed = 'move'
-  dragging.value = true
-}
-
-function onDragEnd() {
-  dragging.value = false
-}
+const cardEl = ref<HTMLElement>()
+const { isDragging } = useDraggable({ id: computed(() => 'session:' + props.sessionId), element: cardEl })
 </script>
 
 <template>
   <div
+    ref="cardEl"
     class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-pointer transition-shadow"
     :class="{
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
-      'shadow-paper-lifted': dragging,
+      'shadow-paper-lifted': isDragging,
       'flash-once': flashSessionId === sessionId,
     }"
-    draggable="true"
     @click="onCardClick"
-    @dragstart="onDragStart"
-    @dragend="onDragEnd"
   >
     <!-- 状态行 -->
     <div class="px-2.5 pt-2 flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
@@ -206,6 +195,7 @@ function onDragEnd() {
       <button
         class="ml-auto w-4 h-4 grid place-items-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-muted shrink-0"
         :title="$t('workbench.monitor.exitWorkbench')"
+        @pointerdown.stop
         @click.stop="onClose"
       >
         <span class="i-carbon-close w-3 h-3" />
@@ -250,15 +240,18 @@ function onDragEnd() {
       <button
         v-if="headPermInteractive"
         class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
+        @pointerdown.stop
         @click.stop="onCardClick"
       >{{ $t('workbench.monitor.goAnswer') }}</button>
       <template v-else>
         <button
           class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
+          @pointerdown.stop
           @click.stop="onAllow"
         >{{ $t('common.allow') }}</button>
         <button
           class="px-2 py-0.5 text-[10.5px] rounded border border-border text-muted-foreground shrink-0"
+          @pointerdown.stop
           @click.stop="onDeny"
         >{{ $t('common.denyBrief') }}</button>
       </template>
@@ -273,6 +266,7 @@ function onDragEnd() {
       <span class="flex-1 min-w-0 truncate text-muted-foreground">{{ $t('workbench.monitor.taskStopped') }}</span>
       <button
         class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
+        @pointerdown.stop
         @click.stop="onRetry"
       >{{ $t('common.retry') }}</button>
     </div>

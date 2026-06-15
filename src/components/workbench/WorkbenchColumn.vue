@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useSortable } from '@dnd-kit/vue/sortable'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
@@ -83,31 +84,24 @@ async function onClose() {
 }
 
 // 列头拖拽(同容器内列重排)
-const dragging = ref(false)
-
-function onDragStart(e: DragEvent) {
-  if (!e.dataTransfer) return
-  e.dataTransfer.setData('text/cc-column', String(props.index))
-  e.dataTransfer.effectAllowed = 'move'
-  dragging.value = true
-}
-
-function onDragEnd() {
-  dragging.value = false
-}
+const headerEl = ref<HTMLElement>()
+const { isDragging } = useSortable({
+  id: computed(() => 'col:' + props.tabId + ':' + props.index),
+  index: () => props.index,
+  group: 'columns',
+  element: headerEl,
+})
 </script>
 
 <template>
   <div
     class="h-full flex flex-col bg-card border border-border rounded overflow-hidden"
-    :class="dragging ? 'shadow-paper-lifted' : 'shadow-paper'"
+    :class="isDragging ? 'shadow-paper-lifted' : 'shadow-paper'"
   >
     <!-- 列头 -->
     <div
+      ref="headerEl"
       class="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border cursor-grab active:cursor-grabbing"
-      draggable="true"
-      @dragstart="onDragStart"
-      @dragend="onDragEnd"
     >
       <span
         class="w-1.5 h-1.5 rounded-full shrink-0"
@@ -119,6 +113,7 @@ function onDragEnd() {
         class="col-head-btn disabled:opacity-40"
         :class="stream.rcActive ? 'border-primary! text-primary!' : ''"
         :title="stream.rcActive ? $t('workbench.column.rcEnabled') : $t('workbench.column.rcEnable')"
+        @pointerdown.stop
         @click.stop="onToggleRC"
       >
         <span class="i-carbon-remote-connection w-3 h-3" />
@@ -126,6 +121,7 @@ function onDragEnd() {
       <button
         class="col-head-btn"
         :title="$t('workbench.column.collapseToRail')"
+        @pointerdown.stop
         @click="onCollapse"
       >
         <span class="i-carbon-chevron-left w-3 h-3" />
@@ -133,6 +129,7 @@ function onDragEnd() {
       <button
         class="col-head-btn hover:text-destructive!"
         :title="$t('workbench.column.closeExit')"
+        @pointerdown.stop
         @click="onClose"
       >
         <span class="i-carbon-close w-3 h-3" />

@@ -201,10 +201,7 @@ export function shortModel(model: string | null): string {
 export function displayTitle(s: SessionSummary, metaTitle?: string): string {
   if (metaTitle) return metaTitle
   if (s.title) return s.title
-  if (s.first_user_message) {
-    const text = s.first_user_message.slice(0, 60)
-    return text.length < s.first_user_message.length ? text + '…' : text
-  }
+  if (s.first_user_message) return s.first_user_message
   return i18n.global.t('session.noTitleSession')
 }
 
