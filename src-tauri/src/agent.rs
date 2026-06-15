@@ -359,6 +359,60 @@ pub fn translate_settings(fields_json: &str) -> Result<String, String> {
     request_blocking(&prompt)
 }
 
+/// 生成会话标签
+pub fn generate_tags(snippet: &str, current_tags: Option<&[String]>) -> Result<String, String> {
+    let prompt = match current_tags {
+        Some(tags) if !tags.is_empty() => format!(
+            "【角色：标签生成器】根据对话内容为这个编程会话打标签。\n\
+            当前标签：{}\n\n\
+            规则：\n\
+            - 输出 1-3 个标签，用逗号分隔\n\
+            - 标签用中文，2-4 个字，如：新功能、Bug修复、重构、配置、调研、文档、测试、性能优化、样式调整、部署\n\
+            - 如果当前标签仍然准确，原样输出\n\
+            - 只输出标签本身，不要其他内容\n\n\
+            对话内容：\n{}",
+            tags.join(", "), snippet
+        ),
+        _ => format!(
+            "【角色：标签生成器】根据对话内容为这个编程会话打标签。\n\n\
+            规则：\n\
+            - 输出 1-3 个标签，用逗号分隔\n\
+            - 标签用中文，2-4 个字，如：新功能、Bug修复、重构、配置、调研、文档、测试、性能优化、样式调整、部署\n\
+            - 只输出标签本身，不要其他内容\n\n\
+            对话内容：\n{}",
+            snippet
+        ),
+    };
+    request_blocking(&prompt)
+}
+
+/// 生成会话摘要
+pub fn generate_summary(snippet: &str, current_summary: Option<&str>) -> Result<String, String> {
+    let prompt = match current_summary {
+        Some(summary) => format!(
+            "【角色：摘要生成器】根据对话内容生成简短摘要。\n\
+            当前摘要：{}\n\n\
+            规则：\n\
+            - 2-3 句话概括这个会话做了什么\n\
+            - 突出关键改动和结论，不要复述过程\n\
+            - 如果当前摘要仍然准确，原样输出\n\
+            - 只输出摘要本身\n\n\
+            对话内容：\n{}",
+            summary, snippet
+        ),
+        None => format!(
+            "【角色：摘要生成器】根据对话内容生成简短摘要。\n\n\
+            规则：\n\
+            - 2-3 句话概括这个会话做了什么\n\
+            - 突出关键改动和结论，不要复述过程\n\
+            - 只输出摘要本身\n\n\
+            对话内容：\n{}",
+            snippet
+        ),
+    };
+    request_blocking(&prompt)
+}
+
 /// 自然语言转 cron 表达式
 pub fn parse_cron(text: &str) -> Result<String, String> {
     let prompt = format!(

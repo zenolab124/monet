@@ -113,7 +113,9 @@
     "deleteSession": "删除会话",
     "deleteSessionConfirm": "删除该会话的全部记录?此操作不可恢复。",
     "deleteSessionInWorkbench": "该会话在「{tabName}」工作台中，删除将一并移出",
-    "noTitle": "(无标题)"
+    "noTitle": "(无标题)",
+    "generateSummary": "生成摘要",
+    "generatingSummary": "正在生成…"
   },
   "session": {
     "notExist": "会话不存在或已删除",
@@ -397,6 +399,10 @@
     "agentSettingsExplainDesc": "用大白话解读 Claude Code 配置项的含义",
     "agentCronParse": "Cron 解析",
     "agentCronParseDesc": "自然语言转 cron 表达式",
+    "agentTags": "自动标签",
+    "agentTagsDesc": "根据对话内容自动生成和修订会话标签",
+    "agentSummary": "会话摘要",
+    "agentSummaryDesc": "自动生成 2-3 句话的会话摘要，方便回顾",
     "agentTranslate": "AI 翻译",
     "agentTranslateDesc": "将界面翻译为用户自定义的新语言",
     "labDesc": "验证 Tauri webview 中 iframe + postMessage 双向通信链路。",

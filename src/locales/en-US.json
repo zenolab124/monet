@@ -113,7 +113,9 @@
     "deleteSession": "Delete session",
     "deleteSessionConfirm": "Delete all records of this session? This cannot be undone.",
     "deleteSessionInWorkbench": "This session is in workbench \"{tabName}\", deleting will also remove it",
-    "noTitle": "(Untitled)"
+    "noTitle": "(Untitled)",
+    "generateSummary": "Generate summary",
+    "generatingSummary": "Generating…"
   },
   "session": {
     "notExist": "Session does not exist or has been deleted",
@@ -397,6 +399,10 @@
     "agentSettingsExplainDesc": "Plain-language explanation of Claude Code config fields",
     "agentCronParse": "Cron Parse",
     "agentCronParseDesc": "Convert natural language to cron expressions",
+    "agentTags": "Auto Tags",
+    "agentTagsDesc": "Auto-generate and revise session tags from conversation content",
+    "agentSummary": "Session Summary",
+    "agentSummaryDesc": "Auto-generate 2-3 sentence session summaries for quick review",
     "agentTranslate": "AI Translate",
     "agentTranslateDesc": "Translate the UI into user-defined languages",
     "labDesc": "Verify iframe + postMessage bidirectional communication in Tauri webview.",

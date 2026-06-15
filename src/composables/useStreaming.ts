@@ -2,7 +2,7 @@ import { reactive, computed, ref, type Ref, type ComputedRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ContentBlock } from '@/types'
-import { triggerTitleGeneration } from './useSessionMeta'
+import { triggerMetaGeneration } from './useSessionMeta'
 import type { EffortSetting } from './useSessionSettings'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import i18n from '../locales'
@@ -612,7 +612,7 @@ async function sendMessage(
   state.activeTool = null
   state.tail = []
   state.lastSent = { cwd, message, opts }
-  triggerTitleGeneration(sessionId, cwd)
+  triggerMetaGeneration(sessionId, cwd)
 
   try {
     await invoke('start_streaming', {

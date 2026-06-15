@@ -8,6 +8,7 @@ export interface SessionMeta {
   tags?: string[]
   starred?: boolean
   titleManual?: boolean
+  summary?: string
 }
 
 const metaMap = ref<Record<string, SessionMeta>>({})
@@ -24,16 +25,16 @@ function cwdToProjectId(cwd: string): string {
   return cwd.replace(/\//g, '-')
 }
 
-function shouldRefreshTitle(sessionId: string): boolean {
+function shouldRefresh(sessionId: string, manualKey?: keyof SessionMeta): boolean {
   const meta = metaMap.value[sessionId]
-  if (meta?.titleManual) return false
+  if (manualKey && meta?.[manualKey]) return false
   const turn = turnCounts.get(sessionId) ?? 1
   if (turn <= 5) return true
   return turn % 5 === 0
 }
 
 async function refreshTitle(projectId: string, sessionId: string) {
-  if (!shouldRefreshTitle(sessionId)) return
+  if (!shouldRefresh(sessionId, 'titleManual')) return
   if (titleGenerating.value.has(sessionId)) return
   titleGenerating.value = new Set([...titleGenerating.value, sessionId])
   try {
@@ -51,11 +52,34 @@ async function refreshTitle(projectId: string, sessionId: string) {
   }
 }
 
-/** 用户发送消息后调用——异步生成/修订标题，不阻塞发送流程 */
-export function triggerTitleGeneration(sessionId: string, cwd: string) {
+async function refreshTags(projectId: string, sessionId: string) {
+  if (!shouldRefresh(sessionId)) return
+  try {
+    const tags = await invoke<string[]>('generate_tags', { projectId, sessionId })
+    metaMap.value = { ...metaMap.value, [sessionId]: { ...metaMap.value[sessionId], tags } }
+  } catch (e) {
+    console.warn('[meta] 标签生成失败:', sessionId, e)
+  }
+}
+
+async function refreshSummary(projectId: string, sessionId: string) {
+  if (!shouldRefresh(sessionId)) return
+  try {
+    const summary = await invoke<string>('generate_summary', { projectId, sessionId })
+    metaMap.value = { ...metaMap.value, [sessionId]: { ...metaMap.value[sessionId], summary } }
+  } catch (e) {
+    console.warn('[meta] 摘要生成失败:', sessionId, e)
+  }
+}
+
+/** 用户发送消息后调用——异步生成/修订标题、标签、摘要，不阻塞发送流程 */
+export function triggerMetaGeneration(sessionId: string, cwd: string) {
   const turn = (turnCounts.get(sessionId) ?? 0) + 1
   turnCounts.set(sessionId, turn)
-  refreshTitle(cwdToProjectId(cwd), sessionId)
+  const projectId = cwdToProjectId(cwd)
+  refreshTitle(projectId, sessionId)
+  refreshTags(projectId, sessionId)
+  refreshSummary(projectId, sessionId)
 }
 
 export function useSessionMeta() {

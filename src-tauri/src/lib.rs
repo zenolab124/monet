@@ -105,6 +105,8 @@ pub fn run() {
             metadata::get_all_meta,
             metadata::update_meta,
             metadata::generate_title,
+            metadata::generate_tags,
+            metadata::generate_summary,
             metadata::generate_permission_hint,
             metadata::parse_natural_schedule,
             metadata::translate_settings_fields,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { useDraggable } from '@dnd-kit/vue'
+import { useSortable } from '@dnd-kit/vue/sortable'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
@@ -21,6 +21,7 @@ const { getMeta } = useSessionMeta()
  */
 const props = defineProps<{
   sessionId: string
+  index: number
   expanded: boolean
 }>()
 
@@ -159,13 +160,20 @@ async function onRetry() {
 // --- 拖拽(FR-005:拖至 tab 跨台移动 / 拖至右区展开定位) ---
 
 const cardEl = ref<HTMLElement>()
-const { isDragging } = useDraggable({ id: computed(() => 'session:' + props.sessionId), element: cardEl })
+const handleEl = ref<HTMLElement>()
+const { isDragging } = useSortable({
+  id: computed(() => 'session:' + props.sessionId),
+  index: () => props.index,
+  group: 'monitor-cards',
+  element: cardEl,
+  handle: handleEl,
+})
 </script>
 
 <template>
   <div
     ref="cardEl"
-    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-pointer transition-shadow touch-none"
+    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-pointer transition-shadow"
     :class="{
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
@@ -174,7 +182,8 @@ const { isDragging } = useDraggable({ id: computed(() => 'session:' + props.sess
     }"
     @click="onCardClick"
   >
-    <!-- 状态行 -->
+    <!-- 拖拽区：状态行 + 标题 -->
+    <div ref="handleEl" class="cursor-grab active:cursor-grabbing touch-none">
     <div class="px-2.5 pt-2 flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
       <span
         class="w-1.5 h-1.5 rounded-full shrink-0"
@@ -204,6 +213,7 @@ const { isDragging } = useDraggable({ id: computed(() => 'session:' + props.sess
 
     <!-- 标题 -->
     <div class="px-2.5 mt-0.5 text-xs font-semibold truncate">{{ title }}</div>
+    </div><!-- /handle -->
 
     <!-- 尾部区:最近输出末 2-3 行(150ms 节流;流式中末行带光标) -->
     <div class="mx-2.5 my-1.5 px-2 py-1.5 bg-background border border-border rounded text-[11px] leading-relaxed text-muted-foreground min-h-9">

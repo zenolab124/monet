@@ -272,6 +272,15 @@ function reorderTabs(fromIndex: number, toIndex: number) {
   tabs.splice(toIndex, 0, moved)
 }
 
+function reorderSessions(tabId: string, fromIndex: number, toIndex: number) {
+  const tab = state.value.tabs.find(t => t.id === tabId)
+  if (!tab) return
+  const n = tab.sessionIds.length
+  if (fromIndex < 0 || fromIndex >= n || toIndex < 0 || toIndex >= n || fromIndex === toIndex) return
+  const [moved] = tab.sessionIds.splice(fromIndex, 1)
+  tab.sessionIds.splice(toIndex, 0, moved)
+}
+
 // ---- 会话进出与展开(FR-002/004) ----
 
 export type OpenResult =
@@ -453,6 +462,7 @@ export function useWorkbench() {
     closeTab,
     setActiveTab,
     reorderTabs,
+    reorderSessions,
     openSession,
     createDraftSession,
     draftCwd,

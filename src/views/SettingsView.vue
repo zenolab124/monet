@@ -43,6 +43,8 @@ const agentKeys = [
   { key: 'permission_hint', label: 'settings.agentPermissionHint', desc: 'settings.agentPermissionHintDesc' },
   { key: 'settings_explain', label: 'settings.agentSettingsExplain', desc: 'settings.agentSettingsExplainDesc' },
   { key: 'cron_parse', label: 'settings.agentCronParse', desc: 'settings.agentCronParseDesc' },
+  { key: 'tags', label: 'settings.agentTags', desc: 'settings.agentTagsDesc' },
+  { key: 'summary', label: 'settings.agentSummary', desc: 'settings.agentSummaryDesc' },
   { key: 'translate', label: 'settings.agentTranslate', desc: 'settings.agentTranslateDesc' },
 ]
 

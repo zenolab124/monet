@@ -26,6 +26,8 @@ pub struct SessionMeta {
     pub starred: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title_manual: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 fn meta_path() -> PathBuf {
@@ -92,6 +94,9 @@ pub fn update_meta(session_id: String, patch: SessionMeta) -> Result<SessionMeta
         }
         if let Some(v) = patch.title_manual {
             entry.title_manual = Some(v);
+        }
+        if let Some(v) = patch.summary {
+            entry.summary = Some(v);
         }
         let result = entry.clone();
         save(store);
@@ -211,6 +216,73 @@ pub async fn translate_settings_fields(fields_json: String) -> Result<String, St
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn generate_tags(
+    project_id: String,
+    session_id: String,
+) -> Result<Vec<String>, String> {
+    if !crate::channels::is_agent_enabled("tags") {
+        return Err("agent.tags 已禁用".to_string());
+    }
+    let sid = session_id.clone();
+    let pid = project_id.clone();
+    let current_tags = with_store(|store| {
+        store.get(&sid).and_then(|m| m.tags.clone())
+    });
+
+    let tags = tauri::async_runtime::spawn_blocking(move || {
+        let (snippet, _) = extract_conversation_snippet(&pid, &sid)
+            .ok_or_else(|| "会话无内容".to_string())?;
+        let raw = crate::agent::generate_tags(&snippet, current_tags.as_deref())?;
+        let tags: Vec<String> = raw.split(['，', ','])
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        Ok::<_, String>(tags)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    with_store(|store| {
+        let entry = store.entry(session_id).or_default();
+        entry.tags = Some(tags.clone());
+        save(store);
+    });
+
+    Ok(tags)
+}
+
+#[tauri::command]
+pub async fn generate_summary(
+    project_id: String,
+    session_id: String,
+) -> Result<String, String> {
+    if !crate::channels::is_agent_enabled("summary") {
+        return Err("agent.summary 已禁用".to_string());
+    }
+    let sid = session_id.clone();
+    let pid = project_id.clone();
+    let current_summary = with_store(|store| {
+        store.get(&sid).and_then(|m| m.summary.clone())
+    });
+
+    let summary = tauri::async_runtime::spawn_blocking(move || {
+        let (snippet, _) = extract_conversation_snippet(&pid, &sid)
+            .ok_or_else(|| "会话无内容".to_string())?;
+        crate::agent::generate_summary(&snippet, current_summary.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    with_store(|store| {
+        let entry = store.entry(session_id).or_default();
+        entry.summary = Some(summary.clone());
+        save(store);
+    });
+
+    Ok(summary)
 }
 
 #[tauri::command]

@@ -26,7 +26,7 @@ import { DragDropProvider } from '@dnd-kit/vue'
 const { projects, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 const { activeSection } = useUiState()
-const { state, activeTab, pruneDrafts, reorderTabs, moveSessionToTab, reorderColumns, expandSession } = useWorkbench()
+const { state, activeTab, pruneDrafts, reorderTabs, reorderSessions, moveSessionToTab, reorderColumns, expandSession } = useWorkbench()
 const { t } = useI18n()
 
 // 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉
@@ -62,6 +62,19 @@ function onWorkbenchDragEnd(event: any) {
     const toIdx = state.value.tabs.findIndex(t => t.id === targetId.slice(4))
     if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
       reorderTabs(fromIdx, toIdx > fromIdx ? toIdx : toIdx)
+    }
+    return
+  }
+
+  // Monitor card reorder (both are session: in same group)
+  if (sourceId.startsWith('session:') && targetId.startsWith('session:')) {
+    const fromSid = sourceId.slice(8)
+    const toSid = targetId.slice(8)
+    const tab = activeTab.value
+    const fromIdx = tab.sessionIds.indexOf(fromSid)
+    const toIdx = tab.sessionIds.indexOf(toSid)
+    if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+      reorderSessions(tab.id, fromIdx, toIdx)
     }
     return
   }
