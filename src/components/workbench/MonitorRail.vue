@@ -62,11 +62,10 @@ async function onAddClick() {
     <!-- 卡片滚动区:卡片不压缩(shrink-0),超出即滚;＋格固定在滚动区外永远可见 -->
     <div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
       <MonitorCard
-        v-for="(sid, idx) in activeTab.sessionIds"
+        v-for="sid in activeTab.sessionIds"
         :key="sid"
         class="shrink-0"
         :session-id="sid"
-        :index="idx"
         :expanded="expandedSet.has(sid)"
       />
 

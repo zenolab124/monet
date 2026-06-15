@@ -33,6 +33,10 @@ fn spawn_agent() -> Result<AgentProcess, String> {
         "--effort".to_string(),
         "low".to_string(),
         "--verbose".to_string(),
+        "--settings".to_string(),
+        serde_json::json!({
+            "outputStyle": "你是 CC Space 内置工具 Agent。严格只输出 prompt 要求的结果本身，不要有开场白、解释、结尾语、markdown 格式或任何额外内容。"
+        }).to_string(),
     ]);
 
     eprintln!("[agent-service] args: {:?}", args);

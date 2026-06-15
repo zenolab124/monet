@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { useSortable } from '@dnd-kit/vue/sortable'
+import { useDraggable } from '@dnd-kit/vue'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
@@ -21,7 +21,6 @@ const { getMeta } = useSessionMeta()
  */
 const props = defineProps<{
   sessionId: string
-  index: number
   expanded: boolean
 }>()
 
@@ -161,10 +160,8 @@ async function onRetry() {
 
 const cardEl = ref<HTMLElement>()
 const handleEl = ref<HTMLElement>()
-const { isDragging } = useSortable({
+const { isDragging } = useDraggable({
   id: computed(() => 'session:' + props.sessionId),
-  index: () => props.index,
-  group: 'monitor-cards',
   element: cardEl,
   handle: handleEl,
 })
@@ -173,7 +170,7 @@ const { isDragging } = useSortable({
 <template>
   <div
     ref="cardEl"
-    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-pointer transition-shadow"
+    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-default transition-shadow"
     :class="{
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
