@@ -24,6 +24,8 @@ pub struct SessionMeta {
     pub tags: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub starred: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_manual: Option<bool>,
 }
 
 fn meta_path() -> PathBuf {
@@ -88,6 +90,9 @@ pub fn update_meta(session_id: String, patch: SessionMeta) -> Result<SessionMeta
         if let Some(v) = patch.starred {
             entry.starred = Some(v);
         }
+        if let Some(v) = patch.title_manual {
+            entry.title_manual = Some(v);
+        }
         let result = entry.clone();
         save(store);
         Ok(result)
@@ -103,7 +108,7 @@ pub fn agent_cwd() -> PathBuf {
     p
 }
 
-fn extract_conversation_snippet(project_id: &str, session_id: &str) -> Option<String> {
+fn extract_conversation_snippet(project_id: &str, session_id: &str) -> Option<(String, usize)> {
     let path = projects_dir()
         .join(project_id)
         .join(format!("{}.jsonl", session_id));
@@ -128,34 +133,46 @@ fn extract_conversation_snippet(project_id: &str, session_id: &str) -> Option<St
                     }
                 };
                 if !text.is_empty() {
-                    let truncated: String = text.chars().take(200).collect();
+                    let truncated: String = text.chars().take(100).collect();
                     lines.push(truncated);
                 }
             }
-        }
-        if lines.len() >= 5 {
-            break;
         }
     }
 
     if lines.is_empty() {
         return None;
     }
-    Some(lines.join("\n"))
+    let count = lines.len();
+    Some((lines.join("\n"), count))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleResult {
+    pub title: String,
+    pub turn_count: usize,
 }
 
 #[tauri::command]
 pub async fn generate_title(
     project_id: String,
     session_id: String,
-) -> Result<String, String> {
+) -> Result<TitleResult, String> {
+    if !crate::channels::is_agent_enabled("title") {
+        return Err("agent.title 已禁用".to_string());
+    }
     let sid = session_id.clone();
     let pid = project_id.clone();
+    let current_title = with_store(|store| {
+        store.get(&sid).and_then(|m| m.title.clone())
+    });
 
-    let title = tauri::async_runtime::spawn_blocking(move || {
-        let snippet = extract_conversation_snippet(&pid, &sid)
+    let (title, turn_count) = tauri::async_runtime::spawn_blocking(move || {
+        let (snippet, count) = extract_conversation_snippet(&pid, &sid)
             .ok_or_else(|| "会话无内容".to_string())?;
-        crate::agent::generate_title(&snippet)
+        let title = crate::agent::generate_title(&snippet, current_title.as_deref())?;
+        Ok::<_, String>((title, count))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -166,7 +183,7 @@ pub async fn generate_title(
         save(store);
     });
 
-    Ok(title)
+    Ok(TitleResult { title, turn_count })
 }
 
 #[tauri::command]
@@ -174,6 +191,9 @@ pub async fn generate_permission_hint(
     tool_name: String,
     input_json: String,
 ) -> Result<String, String> {
+    if !crate::channels::is_agent_enabled("permission_hint") {
+        return Err("agent.permission_hint 已禁用".to_string());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         crate::agent::permission_hint(&tool_name, &input_json)
     })
@@ -183,6 +203,9 @@ pub async fn generate_permission_hint(
 
 #[tauri::command]
 pub async fn translate_settings_fields(fields_json: String) -> Result<String, String> {
+    if !crate::channels::is_agent_enabled("settings_explain") {
+        return Err("agent.settings_explain 已禁用".to_string());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         crate::agent::translate_settings(&fields_json)
     })

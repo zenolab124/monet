@@ -88,14 +88,10 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
       :tab-id="tab.id"
       :index="i"
     >
-      <template #default="{ isDragging, isDropTarget }">
-        <button
+      <template #default>
+        <div
           class="wb-tab"
-          :class="{
-            active: tab.id === activeTab.id,
-            'opacity-40': isDragging,
-            'ring-1 ring-primary': isDropTarget,
-          }"
+          :class="{ active: tab.id === activeTab.id }"
           @click="setActiveTab(tab.id)"
           @dblclick="startRename(tab)"
           @contextmenu="onContextMenu($event, tab)"
@@ -116,7 +112,7 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
             <span class="truncate max-w-36">{{ tab.name }}</span>
             <span v-if="tab.sessionIds.length > 0" class="text-[10px] text-muted-foreground">{{ tab.sessionIds.length }}</span>
           </template>
-        </button>
+        </div>
       </template>
     </SortableTab>
 

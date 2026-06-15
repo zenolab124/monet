@@ -5,6 +5,7 @@ import { useDroppable } from '@dnd-kit/vue'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
+import SortableColumn from './SortableColumn.vue'
 
 /**
  * 右区多列布局(FR-004):浮起纸方案——四周边距与列间隙均 10px,
@@ -124,16 +125,19 @@ watch(focusColumnRequest, async (req) => {
     </div>
 
     <template v-for="(col, i) in activeTab.columns" :key="col.id">
-      <div
-        class="min-w-0 h-full relative wb-col"
+      <SortableColumn
+        :tab-id="activeTab.id"
+        :index="i"
+        :flex="activeTab.columnSizes[i]"
         :class="{
           'no-transition': dragging,
           'focus-ring': flashIndex === i,
         }"
-        :style="{ flex: `${activeTab.columnSizes[i]} 1 0%` }"
       >
-        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" />
-      </div>
+        <template #default="{ isDragging: colDragging }">
+          <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" />
+        </template>
+      </SortableColumn>
 
       <!-- 列间隙 10px:拖拽分隔命中区 9px 居中其内 -->
       <div v-if="i < activeTab.columns.length - 1" class="shrink-0 relative w-2.5">

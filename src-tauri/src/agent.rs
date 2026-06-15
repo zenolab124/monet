@@ -322,12 +322,24 @@ pub fn permission_hint(tool_name: &str, input_json: &str) -> Result<String, Stri
     request_blocking(&prompt)
 }
 
-/// 生成会话标题
-pub fn generate_title(snippet: &str) -> Result<String, String> {
-    let prompt = format!(
-        "【角色：标题生成器】根据对话内容生成一个10字以内的中文标题。只输出标题本身，不要加引号、标点或任何其他内容。\n\n对话内容：\n{}",
-        snippet
-    );
+/// 生成或修订会话标题
+pub fn generate_title(snippet: &str, current_title: Option<&str>) -> Result<String, String> {
+    let prompt = match current_title {
+        Some(title) => format!(
+            "【角色：标题生成器】根据对话内容判断当前标题是否仍然准确。\n\
+            当前标题：{}\n\n\
+            规则：\n\
+            - 如果当前标题仍能概括对话主题，原样输出当前标题\n\
+            - 如果对话主题已明显偏移，生成新的10字以内中文标题\n\
+            - 只输出标题本身，不要加引号、标点或任何其他内容\n\n\
+            对话内容：\n{}",
+            title, snippet
+        ),
+        None => format!(
+            "【角色：标题生成器】根据对话内容生成一个10字以内的中文标题。只输出标题本身，不要加引号、标点或任何其他内容。\n\n对话内容：\n{}",
+            snippet
+        ),
+    };
     request_blocking(&prompt)
 }
 

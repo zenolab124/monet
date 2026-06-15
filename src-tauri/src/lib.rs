@@ -97,6 +97,8 @@ pub fn run() {
             channels::set_session_chain,
             channels::set_agent_chain,
             channels::get_channel_token,
+            channels::get_agent_toggles,
+            channels::set_agent_toggle,
             channels::reveal_channels_dir,
             channels::probe_channel,
             commands::open_in_default_app,

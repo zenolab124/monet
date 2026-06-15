@@ -10,12 +10,35 @@ const { isDragging, isDropTarget } = useSortable({
   index: () => props.index,
   group: 'tabs',
   element: el,
-  accept: ['tabs', 'session-cards'],
 })
 </script>
 
 <template>
-  <div ref="el" :class="{ 'opacity-40': isDragging, 'ring-1 ring-primary': isDropTarget }" style="display: contents">
+  <div
+    ref="el"
+    class="sortable-tab"
+    :class="{ 'sortable-tab-dragging': isDragging, 'sortable-tab-target': isDropTarget }"
+  >
     <slot :is-dragging="isDragging" :is-drop-target="isDropTarget" />
   </div>
 </template>
+
+<style scoped>
+.sortable-tab {
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+}
+.sortable-tab:active {
+  cursor: grabbing;
+}
+.sortable-tab-dragging {
+  opacity: 0.3;
+}
+.sortable-tab-target {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+</style>

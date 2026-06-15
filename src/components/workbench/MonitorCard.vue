@@ -165,11 +165,11 @@ const { isDragging } = useDraggable({ id: computed(() => 'session:' + props.sess
 <template>
   <div
     ref="cardEl"
-    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-pointer transition-shadow"
+    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-pointer transition-shadow touch-none"
     :class="{
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
-      'shadow-paper-lifted': isDragging,
+      'shadow-paper-lifted opacity-40': isDragging,
       'flash-once': flashSessionId === sessionId,
     }"
     @click="onCardClick"

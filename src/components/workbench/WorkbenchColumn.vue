@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useSortable } from '@dnd-kit/vue/sortable'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
@@ -83,25 +82,17 @@ async function onClose() {
   removeSession(props.column.sessionId)
 }
 
-// 列头拖拽(同容器内列重排)
-const headerEl = ref<HTMLElement>()
-const { isDragging } = useSortable({
-  id: computed(() => 'col:' + props.tabId + ':' + props.index),
-  index: () => props.index,
-  group: 'columns',
-  element: headerEl,
-})
+const isDragging = defineModel<boolean>('dragging', { default: false })
 </script>
 
 <template>
   <div
     class="h-full flex flex-col bg-card border border-border rounded overflow-hidden"
-    :class="isDragging ? 'shadow-paper-lifted' : 'shadow-paper'"
+    :class="isDragging ? 'shadow-paper-lifted opacity-50' : 'shadow-paper'"
   >
     <!-- 列头 -->
     <div
-      ref="headerEl"
-      class="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border cursor-grab active:cursor-grabbing"
+      class="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border cursor-grab active:cursor-grabbing touch-none"
     >
       <span
         class="w-1.5 h-1.5 rounded-full shrink-0"

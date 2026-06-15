@@ -92,6 +92,7 @@ pub struct AppSettings {
     pub session_chain: Vec<String>,
     pub agent_chain: Vec<String>,
     pub channels: BTreeMap<String, ChannelMeta>,
+    pub agent_toggles: BTreeMap<String, bool>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -497,6 +498,22 @@ pub fn set_agent_chain(chain: Vec<String>) -> Result<(), String> {
     let mut settings = load_app_settings();
     settings.agent_chain = chain;
     save_app_settings(&settings)
+}
+
+#[tauri::command]
+pub fn get_agent_toggles() -> BTreeMap<String, bool> {
+    load_app_settings().agent_toggles
+}
+
+#[tauri::command]
+pub fn set_agent_toggle(key: String, enabled: bool) -> Result<(), String> {
+    let mut settings = load_app_settings();
+    settings.agent_toggles.insert(key, enabled);
+    save_app_settings(&settings)
+}
+
+pub fn is_agent_enabled(key: &str) -> bool {
+    load_app_settings().agent_toggles.get(key).copied().unwrap_or(true)
 }
 
 #[tauri::command]
