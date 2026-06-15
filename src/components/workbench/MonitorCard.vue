@@ -160,6 +160,7 @@ async function onRetry() {
 
 const cardEl = ref<HTMLElement>()
 const handleEl = ref<HTMLElement>()
+const dropZoneEl = ref<HTMLElement>()
 const { isDragging } = useDraggable({
   id: computed(() => 'session:' + props.sessionId),
   element: cardEl,
@@ -167,23 +168,24 @@ const { isDragging } = useDraggable({
 })
 const { isDropTarget } = useDroppable({
   id: computed(() => 'session-drop:' + props.sessionId),
-  element: cardEl,
+  element: dropZoneEl,
 })
 </script>
 
 <template>
   <div
     ref="cardEl"
-    class="monitor-card bg-card border border-border rounded shadow-paper overflow-hidden cursor-default transition-shadow"
+    class="monitor-card relative bg-card border border-border rounded shadow-paper overflow-hidden cursor-default transition-shadow"
     :class="{
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
       'shadow-paper-lifted opacity-40': isDragging,
-      'ring-2 ring-primary': isDropTarget,
+      'card-drop-target': isDropTarget,
       'flash-once': flashSessionId === sessionId,
     }"
     @click="onCardClick"
   >
+    <div ref="dropZoneEl" class="absolute inset-0 z-0 pointer-events-none" />
     <!-- 拖拽区：状态行 + 标题 -->
     <div ref="handleEl" class="cursor-grab active:cursor-grabbing touch-none">
     <div class="px-2.5 pt-2 flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
@@ -300,8 +302,18 @@ const { isDropTarget } = useDroppable({
 </template>
 
 <style scoped>
+.monitor-card {
+  transition: box-shadow 0.15s, margin-top 0.2s ease, opacity 0.15s;
+}
 .monitor-card:hover {
   box-shadow: var(--shadow-paper-lifted);
+}
+.card-drop-target {
+  margin-top: 48px;
+  box-shadow: var(--shadow-paper-lifted);
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: var(--radius);
 }
 /* 状态左边框(3px 语义色) */
 .edge-accent {
