@@ -66,10 +66,10 @@ function onWorkbenchDragEnd(event: any) {
     return
   }
 
-  // Monitor card reorder (both are session: in same group)
-  if (sourceId.startsWith('session:') && targetId.startsWith('session:')) {
+  // Monitor card reorder: session dragged onto another session's droppable
+  if (sourceId.startsWith('session:') && targetId.startsWith('session-drop:')) {
     const fromSid = sourceId.slice(8)
-    const toSid = targetId.slice(8)
+    const toSid = targetId.slice(13)
     const tab = activeTab.value
     const fromIdx = tab.sessionIds.indexOf(fromSid)
     const toIdx = tab.sessionIds.indexOf(toSid)

@@ -575,6 +575,9 @@ function finishStream(sessionId: string) {
   markTailDirty(sessionId)
   // 注意:不清 streamingTurns / pendingUserMessage——SessionDetail 在 reload 拿到
   // jsonl 落账后同 batch 清,避免窗口期空白闪烁;无详情挂载的会话等下次发送时重置。
+  if (state.lastSent) {
+    triggerMetaGeneration(sessionId, state.lastSent.cwd)
+  }
   const hasError = !!state.streamError
   finishedCallbacks.forEach(cb => {
     try {
@@ -612,8 +615,6 @@ async function sendMessage(
   state.activeTool = null
   state.tail = []
   state.lastSent = { cwd, message, opts }
-  triggerMetaGeneration(sessionId, cwd)
-
   try {
     await invoke('start_streaming', {
       sessionId,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { useDraggable } from '@dnd-kit/vue'
+import { useDraggable, useDroppable } from '@dnd-kit/vue'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
@@ -165,6 +165,10 @@ const { isDragging } = useDraggable({
   element: cardEl,
   handle: handleEl,
 })
+const { isDropTarget } = useDroppable({
+  id: computed(() => 'session-drop:' + props.sessionId),
+  element: cardEl,
+})
 </script>
 
 <template>
@@ -175,6 +179,7 @@ const { isDragging } = useDraggable({
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
       'shadow-paper-lifted opacity-40': isDragging,
+      'ring-2 ring-primary': isDropTarget,
       'flash-once': flashSessionId === sessionId,
     }"
     @click="onCardClick"
@@ -277,6 +282,13 @@ const { isDragging } = useDraggable({
         @click.stop="onRetry"
       >{{ $t('common.retry') }}</button>
     </div>
+
+    <!-- 摘要 -->
+    <div
+      v-if="getMeta(sessionId)?.summary"
+      v-tooltip="getMeta(sessionId)!.summary"
+      class="mx-2.5 mb-1 text-[10.5px] text-muted-foreground/60 line-clamp-2 leading-relaxed"
+    >{{ getMeta(sessionId)!.summary }}</div>
 
     <!-- meta 行:项目名 + 持续/最后活动时间 + token -->
     <div class="px-2.5 pb-2 flex items-center gap-2.5 text-[10px] text-muted-foreground tabular-nums">

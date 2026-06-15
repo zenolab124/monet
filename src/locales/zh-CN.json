@@ -115,6 +115,7 @@
     "deleteSessionInWorkbench": "该会话在「{tabName}」工作台中，删除将一并移出",
     "noTitle": "(无标题)",
     "generateSummary": "生成摘要",
+    "refreshSummary": "刷新摘要",
     "generatingSummary": "正在生成…"
   },
   "session": {

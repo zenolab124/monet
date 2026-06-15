@@ -17,27 +17,6 @@ import type { SessionSummary } from '@/types'
 const { t } = useI18n()
 const { getMeta } = useSessionMeta()
 
-const summaryGenerating = ref<Set<string>>(new Set())
-
-async function onGenerateSummary(e: MouseEvent, session: SessionSummary) {
-  e.stopPropagation()
-  if (summaryGenerating.value.has(session.id)) return
-  const project = useProjects().projects.value.find(p => p.sessions.some(s => s.id === session.id))
-  if (!project) return
-  summaryGenerating.value = new Set([...summaryGenerating.value, session.id])
-  try {
-    const summary = await invoke<string>('generate_summary', { projectId: project.id, sessionId: session.id })
-    const { updateMeta } = useSessionMeta()
-    await updateMeta(session.id, { summary } as any)
-  } catch (e) {
-    console.warn('[meta] 摘要生成失败:', e)
-  } finally {
-    const next = new Set(summaryGenerating.value)
-    next.delete(session.id)
-    summaryGenerating.value = next
-  }
-}
-
 const { filteredSessions, sessionStats, loadProjects } = useProjects()
 const {
   selectedSessionId,
@@ -249,20 +228,10 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
           <span v-if="session.model">·</span>
           <span v-if="session.model" class="text-muted-foreground">{{ shortModel(session.model) }}</span>
         </div>
-        <!-- 摘要 -->
-        <div v-if="getMeta(session.id)?.summary" class="text-[11px] text-muted-foreground/70 mt-1 line-clamp-2 leading-relaxed">
+        <!-- 摘要（仅展示） -->
+        <div v-if="getMeta(session.id)?.summary" v-tooltip="getMeta(session.id)!.summary" class="text-[11px] text-muted-foreground/70 mt-1 line-clamp-2 leading-relaxed">
           {{ getMeta(session.id)!.summary }}
         </div>
-        <!-- 生成摘要按钮 -->
-        <button
-          v-else
-          class="mt-1 text-[11px] text-muted-foreground/50 hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1"
-          @click="onGenerateSummary($event, session)"
-        >
-          <span v-if="summaryGenerating.has(session.id)" class="i-carbon-renew w-3 h-3 animate-spin" />
-          <span v-else class="i-carbon-text-short-paragraph w-3 h-3" />
-          {{ summaryGenerating.has(session.id) ? $t('archive.generatingSummary') : $t('archive.generateSummary') }}
-        </button>
       </div>
       </template>
     </div>

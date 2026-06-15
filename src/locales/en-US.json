@@ -115,6 +115,7 @@
     "deleteSessionInWorkbench": "This session is in workbench \"{tabName}\", deleting will also remove it",
     "noTitle": "(Untitled)",
     "generateSummary": "Generate summary",
+    "refreshSummary": "Refresh summary",
     "generatingSummary": "Generating…"
   },
   "session": {

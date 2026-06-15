@@ -26,6 +26,7 @@ import {
   parseCommand,
   type SlashCommand,
 } from '@/composables/useSlashCommands'
+import { useSessionMeta } from '@/composables/useSessionMeta'
 import { shortId, shortModel } from '@/types'
 import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
@@ -324,6 +325,28 @@ const workbenchHome = computed(() => {
 function onOpenInWorkbench() {
   const sid = effectiveSessionId.value
   if (sid) goToSession(sid)
+}
+
+const { getMeta, updateMeta } = useSessionMeta()
+const summaryGenerating = ref(false)
+
+const currentSummary = computed(() => {
+  const sid = effectiveSessionId.value
+  return sid ? getMeta(sid)?.summary : undefined
+})
+
+async function onGenerateSummary() {
+  const cs = currentSession.value
+  if (!cs || summaryGenerating.value) return
+  summaryGenerating.value = true
+  try {
+    const summary = await invoke<string>('generate_summary', { projectId: cs.projectId, sessionId: cs.summary.id })
+    await updateMeta(cs.summary.id, { summary } as any)
+  } catch (e) {
+    console.warn('[meta] 摘要生成失败:', e)
+  } finally {
+    summaryGenerating.value = false
+  }
 }
 
 /**
@@ -1180,6 +1203,15 @@ async function onReload() {
       <span class="i-carbon-document w-3.5 h-3.5 shrink-0" />
       <span v-if="workbenchHome" class="truncate">{{ $t('session.runningInWorkbench', { name: workbenchHome.name }) }}</span>
       <span v-else class="truncate">{{ $t('session.readonlyPreview') }}</span>
+      <button
+        class="shrink-0 px-2.5 py-1 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
+        :disabled="summaryGenerating"
+        @click="onGenerateSummary"
+      >
+        <span v-if="summaryGenerating" class="i-carbon-renew w-3 h-3 animate-spin" />
+        <span v-else class="i-carbon-text-short-paragraph w-3 h-3" />
+        {{ currentSummary ? $t('archive.refreshSummary') : $t('archive.generateSummary') }}
+      </button>
       <button
         class="ml-auto shrink-0 px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow"
         @click="onOpenInWorkbench"
