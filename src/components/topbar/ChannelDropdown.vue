@@ -19,7 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { channels, defaultChannelId } = useChannels()
+const { channels, sessionChain } = useChannels()
 const { switchSection } = useUiState()
 
 /** 「跟随默认」在选项列表中的占位值(null 不能做 v-for key)。
@@ -31,12 +31,29 @@ interface ChannelOption {
   label: string
 }
 
-/** 选项:跟随默认 + 官方 + 配置文件里的全部渠道 */
-const options = computed<ChannelOption[]>(() => [
-  { value: FOLLOW, label: t('topbar.channelFollow', { name: channelDisplayName(defaultChannelId.value) }) },
-  { value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') },
-  ...channels.value.map(c => ({ value: c.id, label: c.name })),
-])
+function chainFirstName(): string {
+  for (const id of sessionChain.value) {
+    if (id === OFFICIAL_CHANNEL_ID) return channelDisplayName(null)
+    const ch = channels.value.find(c => c.id === id)
+    if (ch?.enabled) return ch.name
+  }
+  return channelDisplayName(null)
+}
+
+const options = computed<ChannelOption[]>(() => {
+  const result: ChannelOption[] = [
+    { value: FOLLOW, label: t('topbar.channelFollow', { name: chainFirstName() }) },
+  ]
+  for (const id of sessionChain.value) {
+    if (id === OFFICIAL_CHANNEL_ID) {
+      result.push({ value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') })
+    } else {
+      const ch = channels.value.find(c => c.id === id)
+      if (ch?.enabled) result.push({ value: id, label: ch.name })
+    }
+  }
+  return result
+})
 
 const currentIndex = computed(() =>
   options.value.findIndex(o => o.value === (props.current ?? FOLLOW)),
@@ -44,7 +61,7 @@ const currentIndex = computed(() =>
 
 /** 按钮展示标签:跟随默认时显示「默认 · 真值」,免去用户猜默认指向 */
 const currentLabel = computed(() => {
-  if (!props.current) return t('topbar.channelFollow', { name: channelDisplayName(defaultChannelId.value) })
+  if (!props.current) return t('topbar.channelFollow', { name: chainFirstName() })
   return channelDisplayName(props.current)
 })
 

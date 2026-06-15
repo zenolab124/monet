@@ -32,6 +32,8 @@
     "vue-tsc": "^3.2.6"
   },
   "dependencies": {
+    "@dnd-kit/helpers": "^0.5.0",
+    "@dnd-kit/vue": "^0.5.0",
     "@shikijs/markdown-it": "^4.0.2",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-notification": "^2.3.3",

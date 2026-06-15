@@ -113,9 +113,30 @@ fn write_line(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
         .map_err(|e| format!("agent stdin 写入失败: {}", e))
 }
 
-/// 向 AgentService 发送请求，阻塞等待响应文本。
-/// prompt 中包含角色指令 + 实际内容（不用 system prompt，一个进程服务多种角色）。
+/// Agent 服务的公开入口——经 fallback 链调度
 pub(crate) fn request_blocking_pub(prompt: &str) -> Result<String, String> {
+    request_with_fallback(prompt, "claude-haiku-4-5-20251001", 2048)
+}
+
+fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<String, String> {
+    let chain = crate::channels::resolve_agent_chain();
+    if chain.is_empty() {
+        return request_via_cli(prompt);
+    }
+    crate::channels::try_agent_chain(&chain, |cred| {
+        if cred.is_official {
+            request_via_cli(prompt)
+        } else {
+            crate::translate::http_call_messages(
+                cred.base_url.as_deref().unwrap(),
+                cred.token.as_deref().unwrap(),
+                prompt, model, max_tokens,
+            )
+        }
+    })
+}
+
+fn request_via_cli(prompt: &str) -> Result<String, String> {
     request_blocking(prompt)
 }
 

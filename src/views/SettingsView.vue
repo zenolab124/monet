@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { DragDropProvider } from '@dnd-kit/vue'
+import { move } from '@dnd-kit/helpers'
+import SortableChainItem from '@/components/settings/SortableChainItem.vue'
 import {
   useChannels,
   refreshChannels,
@@ -18,8 +21,10 @@ import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 
 const { t } = useI18n()
-const { channels, defaultChannelId, deleteChannel, setDefaultChannel, revealChannelsDir } =
-  useChannels()
+const {
+  channels, sessionChain, agentChain,
+  deleteChannel, setChannelEnabled, setSessionChain, setAgentChain, revealChannelsDir,
+} = useChannels()
 const { activeSection } = useUiState()
 const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
 const { confirm } = useConfirm()
@@ -90,13 +95,43 @@ async function onDelete(ch: ChannelInfo) {
   }
 }
 
-async function onDefaultChange(e: Event) {
-  const value = (e.target as HTMLSelectElement).value
-  try {
-    await setDefaultChannel(value === OFFICIAL_CHANNEL_ID ? null : value)
-  } catch (err) {
-    notifyTransient(t('settings.setDefaultFailed'), String(err))
-    await refreshChannels()
+// ---- 渠道链拖拽排序（@dnd-kit/vue） ----
+function channelById(id: string): ChannelInfo {
+  return channels.value.find(c => c.id === id) || {
+    id, name: id === OFFICIAL_CHANNEL_ID ? t('channel.official') : id,
+    enabled: true, valid: true, note: null, baseUrl: null,
+    authTokenMasked: null, extraEnvKeys: [],
+  } as ChannelInfo
+}
+
+const sessionPrefixed = ref<string[]>([])
+const agentPrefixed = ref<string[]>([])
+
+watch(sessionChain, (ids) => { sessionPrefixed.value = ids.map(id => `session:${id}`) }, { immediate: true })
+watch(agentChain, (ids) => { agentPrefixed.value = ids.map(id => `agent:${id}`) }, { immediate: true })
+
+function stripPrefix(prefixedId: string): string {
+  const idx = prefixedId.indexOf(':')
+  return idx >= 0 ? prefixedId.slice(idx + 1) : prefixedId
+}
+
+function onDragEnd(event: any) {
+  const chainMap: Record<string, string[]> = {
+    session: [...sessionPrefixed.value],
+    agent: [...agentPrefixed.value],
+  }
+  const updated = move(chainMap, event)
+
+  const newSession = (updated.session ?? []).map(stripPrefix)
+  const newAgent = (updated.agent ?? []).map(stripPrefix)
+
+  if (JSON.stringify(newSession) !== JSON.stringify(sessionChain.value)) {
+    sessionChain.value = newSession
+    setSessionChain(newSession)
+  }
+  if (JSON.stringify(newAgent) !== JSON.stringify(agentChain.value)) {
+    agentChain.value = newAgent
+    setAgentChain(newAgent)
   }
 }
 
@@ -261,65 +296,92 @@ function onSaved() {
             <span class="font-mono">--settings</span> {{ $t('settings.channelDesc2') }}
           </p>
 
+          <!-- 双列 chain -->
+          <DragDropProvider @drag-end="onDragEnd">
           <div class="settings-grid">
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.defaultChannel') }}</div>
-              <select
-                :value="defaultChannelId ?? OFFICIAL_CHANNEL_ID"
-                class="ctrl-select w-full"
-                @change="onDefaultChange"
-              >
-                <option :value="OFFICIAL_CHANNEL_ID">{{ $t('settings.officialChannel') }}</option>
-                <option v-for="c in channels" :key="c.id" :value="c.id">{{ c.name }}</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- 渠道列表 -->
-          <div class="settings-grid mt-3">
-            <div
-              v-for="c in channels"
-              :key="c.id"
-              class="rounded-md border border-border bg-card px-3 py-2 flex items-center gap-3"
-            >
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1.5 text-xs">
-                  <span class="font-medium truncate">{{ c.name }}</span>
-                  <span class="text-muted-foreground font-mono">{{ c.id }}</span>
-                  <span v-if="c.isDefault" class="channel-chip">{{ $t('settings.defaultBadge') }}</span>
-                  <span v-if="!c.valid" class="channel-chip text-destructive border-destructive">{{ $t('settings.jsonParseFailed') }}</span>
-                </div>
-                <div class="text-[11px] text-muted-foreground truncate mt-0.5 font-mono">
-                  {{ c.baseUrl ?? $t('settings.noBaseUrl') }}
-                  <span v-if="c.authTokenMasked" class="ml-1.5">{{ $t('settings.tokenPrefix') }}{{ c.authTokenMasked }}</span>
-                </div>
-                <div v-if="c.extraEnvKeys.length || c.note" class="text-[11px] text-muted-foreground truncate mt-0.5">
-                  <span v-if="c.note">{{ c.note }}</span>
-                  <span v-if="c.extraEnvKeys.length" :class="{ 'ml-1.5': c.note }">
-                    {{ $t('settings.advancedEnvPrefix') }}{{ c.extraEnvKeys.join('、') }}
-                  </span>
-                </div>
+            <!-- 会话链 -->
+            <div>
+              <div class="chain-title">{{ $t('settings.sessionChain') }}</div>
+              <div class="chain-hint">{{ $t('settings.sessionChainHint') }}</div>
+              <div class="chain-list">
+                <SortableChainItem
+                  v-for="(pid, idx) in sessionPrefixed"
+                  :key="pid"
+                  :id="pid"
+                  :index="idx"
+                  group="session"
+                >
+                  <div class="chain-content">
+                    <div class="chain-row-1">
+                      <span class="truncate font-medium text-xs">{{ channelById(stripPrefix(pid)).name }}</span>
+                      <div class="chain-actions">
+                        <button
+                          :class="['toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
+                          @pointerdown.stop
+                          @click="setChannelEnabled(stripPrefix(pid), !channelById(stripPrefix(pid)).enabled)"
+                        >
+                          <span class="toggle-sm-knob" />
+                        </button>
+                        <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
+                          <button class="chain-action" :title="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
+                          <button class="chain-action text-destructive!" :title="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
+                        </template>
+                      </div>
+                    </div>
+                    <div v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID" class="chain-row-2">
+                      <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
+                      <span v-if="channelById(stripPrefix(pid)).authTokenMasked" class="ml-auto shrink-0">{{ channelById(stripPrefix(pid)).authTokenMasked }}</span>
+                    </div>
+                    <div v-else class="chain-row-2">
+                      <span class="text-muted-foreground/60 italic">OAuth</span>
+                    </div>
+                  </div>
+                </SortableChainItem>
               </div>
-              <button
-                class="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                :title="$t('common.edit')"
-                @click="editing = c"
-              >
-                <span class="i-carbon-edit w-3.5 h-3.5" />
-              </button>
-              <button
-                class="shrink-0 p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                :title="$t('common.delete')"
-                @click="onDelete(c)"
-              >
-                <span class="i-carbon-trash-can w-3.5 h-3.5" />
-              </button>
             </div>
 
-            <p v-if="channels.length === 0" class="text-xs text-muted-foreground py-2">
-              {{ $t('settings.noChannels') }}
-            </p>
+            <!-- Agent 链 -->
+            <div>
+              <div class="chain-title">{{ $t('settings.agentChain') }}</div>
+              <div class="chain-hint">{{ $t('settings.agentChainHint') }}</div>
+              <div class="chain-list">
+                <SortableChainItem
+                  v-for="(pid, idx) in agentPrefixed"
+                  :key="pid"
+                  :id="pid"
+                  :index="idx"
+                  group="agent"
+                >
+                  <div class="chain-content">
+                    <div class="chain-row-1">
+                      <span class="truncate font-medium text-xs">{{ channelById(stripPrefix(pid)).name }}</span>
+                      <div class="chain-actions">
+                        <button
+                          :class="['toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
+                          @pointerdown.stop
+                          @click="setChannelEnabled(stripPrefix(pid), !channelById(stripPrefix(pid)).enabled)"
+                        >
+                          <span class="toggle-sm-knob" />
+                        </button>
+                        <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
+                          <button class="chain-action" :title="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
+                          <button class="chain-action text-destructive!" :title="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
+                        </template>
+                      </div>
+                    </div>
+                    <div v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID" class="chain-row-2">
+                      <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
+                      <span v-if="channelById(stripPrefix(pid)).authTokenMasked" class="ml-auto shrink-0">{{ channelById(stripPrefix(pid)).authTokenMasked }}</span>
+                    </div>
+                    <div v-else class="chain-row-2">
+                      <span class="text-muted-foreground/60 italic">OAuth</span>
+                    </div>
+                  </div>
+                </SortableChainItem>
+              </div>
+            </div>
           </div>
+          </DragDropProvider>
 
           <ChannelForm
             v-if="editing"
@@ -625,6 +687,94 @@ function onSaved() {
   color: var(--accent-foreground);
   border-radius: 0 0 0 var(--radius);
   letter-spacing: 0.04em;
+}
+
+/* 渠道链 */
+.chain-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.chain-hint {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+}
+.chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chain-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chain-row-1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chain-row-2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.chain-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.chain-action {
+  padding: 2px;
+  color: var(--muted-foreground);
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+  border: none;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.chain-action:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+/* 小号开关 */
+.toggle-sm {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-sm.on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.toggle-sm-knob {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: white;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.toggle-sm.on .toggle-sm-knob {
+  transform: translateX(12px);
 }
 
 /* 渠道标签 */

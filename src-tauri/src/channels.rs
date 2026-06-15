@@ -1,6 +1,6 @@
 //! 多渠道(profile)配置域:`~/.claude/cc-space/`
 //!
-//! - `settings.json`        应用设置:defaultChannelId + 渠道展示元数据(以文件名 stem 为 key)
+//! - `settings.json`        应用设置:sessionChain/agentChain + 渠道展示元数据
 //! - `channels/<id>.json`   纯净 Claude Code settings 格式(顶层 env 块等),
 //!                          终端可直接 `claude --settings <路径>` 复用同一渠道
 //! - `runtime/<sid>-<ns>.json` per-spawn 合成产物(渠道内容 + 防御空值 + ultracode),
@@ -16,17 +16,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-/// 保留 id:语义为「官方/零注入」,不允许作为渠道文件名
+/// 保留 id:语义为「官方/零注入」。参与链排序,不对应 channels/ 下的文件
 pub const OFFICIAL_ID: &str = "official";
 
-/// 注入渠道时无条件压制的认证/路由残留键:
-/// - 继承环境层:spawn 前 env_remove(防父进程/shell 残留)
-/// - settings 层:runtime 文件 env 块以空串占位(实测 CLI 的 settings env 会反向覆盖
-///   进程环境变量,空串在 JS 侧按 falsy 处理等效于未设置)
-/// 防止用户残留的官方 ANTHROPIC_API_KEY 以 x-api-key 头泄漏给第三方主机,
-/// 或 Bedrock/Vertex 开关(认证优先级第一)劫持渠道路由。
-/// 注意 ANTHROPIC_AUTH_TOKEN 不在此列——它是渠道自身的凭据载体,仅在渠道未提供时
-/// 才条件性压制(见 prepare_injection),否则会清掉渠道要用的 token。
+/// 注入渠道时无条件压制的认证/路由残留键
 pub const DEFENSE_ENV_KEYS: [&str; 4] = [
     "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_USE_BEDROCK",
@@ -53,18 +46,16 @@ fn settings_path() -> PathBuf {
     cc_space_dir().join("settings.json")
 }
 
-/// 渠道文件路径(id 必须先过 validate_id)
 pub fn channel_file_path(id: &str) -> PathBuf {
     channels_dir().join(format!("{}.json", id))
 }
 
-/// 渠道 id 即文件名 stem:限定字符集防路径穿越;'official' 保留
 pub fn validate_id(id: &str) -> Result<(), String> {
     if id.is_empty() || id.len() > 64 {
         return Err("渠道 ID 须为 1-64 个字符".to_string());
     }
     if id == OFFICIAL_ID {
-        return Err("official 为保留 ID(语义为官方渠道)".to_string());
+        return Err("official 为保留 ID".to_string());
     }
     if !id
         .chars()
@@ -77,31 +68,106 @@ pub fn validate_id(id: &str) -> Result<(), String> {
 
 // ---- 应用设置(settings.json) ----
 
-/// 渠道展示元数据。flatten 保留手编未知字段,save 不抹除
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ChannelMeta {
     pub name: Option<String>,
     pub note: Option<String>,
+    pub enabled: Option<bool>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
-/// `~/.claude/cc-space/settings.json`:渠道域之外的未来设置项经 flatten 原样保留
+impl ChannelMeta {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+}
+
 #[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    #[serde(skip_serializing)]
     pub default_channel_id: Option<String>,
+    pub session_chain: Vec<String>,
+    pub agent_chain: Vec<String>,
     pub channels: BTreeMap<String, ChannelMeta>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
-fn load_app_settings() -> AppSettings {
-    fs::read_to_string(settings_path())
+pub(crate) fn load_app_settings() -> AppSettings {
+    let mut settings: AppSettings = fs::read_to_string(settings_path())
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // 迁移：旧 defaultChannelId → sessionChain/agentChain
+    if settings.session_chain.is_empty() && settings.default_channel_id.is_some() {
+        let old_default = settings.default_channel_id.take().unwrap();
+        let mut file_ids = scan_channel_ids();
+
+        let mut chain = Vec::new();
+        if old_default != OFFICIAL_ID && file_ids.contains(&old_default) {
+            chain.push(old_default.clone());
+            file_ids.retain(|id| id != &old_default);
+        }
+        chain.push(OFFICIAL_ID.to_string());
+        chain.extend(file_ids);
+
+        settings.session_chain = chain.clone();
+        settings.agent_chain = chain;
+        let _ = save_app_settings(&settings);
+    }
+
+    // 首次使用：给默认链
+    if settings.session_chain.is_empty() {
+        settings.session_chain = vec![OFFICIAL_ID.to_string()];
+    }
+    if settings.agent_chain.is_empty() {
+        settings.agent_chain = vec![OFFICIAL_ID.to_string()];
+    }
+
+    // 修复：去重 + 补齐未入链的文件渠道
+    fn dedup(chain: &mut Vec<String>) {
+        let mut seen = std::collections::HashSet::new();
+        chain.retain(|id| seen.insert(id.clone()));
+    }
+    dedup(&mut settings.session_chain);
+    dedup(&mut settings.agent_chain);
+
+    let file_ids = scan_channel_ids();
+    let all_ids = std::iter::once(OFFICIAL_ID.to_string()).chain(file_ids.into_iter());
+    for id in all_ids {
+        if !settings.session_chain.contains(&id) {
+            settings.session_chain.push(id.clone());
+        }
+        if !settings.agent_chain.contains(&id) {
+            settings.agent_chain.push(id);
+        }
+    }
+
+    settings
+}
+
+fn scan_channel_ids() -> Vec<String> {
+    let mut ids = Vec::new();
+    if let Ok(entries) = fs::read_dir(channels_dir()) {
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        files.sort();
+        for path in files {
+            if let Some(id) = path.file_stem().and_then(|s| s.to_str()).map(String::from) {
+                if validate_id(&id).is_ok() {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    ids
 }
 
 fn save_app_settings(settings: &AppSettings) -> Result<(), String> {
@@ -121,7 +187,6 @@ fn write_json_0600(path: &Path, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// token 掩码:仅首尾各 4 字符,短 token 全掩
 fn mask_token(token: &str) -> String {
     let chars: Vec<char> = token.chars().collect();
     if chars.len() >= 12 {
@@ -133,9 +198,112 @@ fn mask_token(token: &str) -> String {
     }
 }
 
+// ---- 链解析(内部 API) ----
+
+/// 从会话链解析第一个可用渠道 ID。
+/// override_id 非空时直接使用(per-session 覆盖)。
+/// 返回 None 表示走官方态(零注入)。
+pub fn resolve_session_channel(override_id: Option<&str>) -> Option<String> {
+    if let Some(id) = override_id {
+        if id == OFFICIAL_ID { return None; }
+        return Some(id.to_string());
+    }
+    let settings = load_app_settings();
+    for id in &settings.session_chain {
+        if id == OFFICIAL_ID { return None; }
+        let meta = settings.channels.get(id);
+        if meta.map_or(true, |m| m.is_enabled()) && channel_file_path(id).is_file() {
+            return Some(id.clone());
+        }
+    }
+    None
+}
+
+pub struct AgentChannelCredentials {
+    pub id: String,
+    pub is_official: bool,
+    pub base_url: Option<String>,
+    pub token: Option<String>,
+}
+
+pub fn resolve_agent_chain() -> Vec<AgentChannelCredentials> {
+    let settings = load_app_settings();
+    let mut result = Vec::new();
+    for id in &settings.agent_chain {
+        let meta = settings.channels.get(id);
+        if !meta.map_or(true, |m| m.is_enabled()) { continue; }
+        if id == OFFICIAL_ID {
+            result.push(AgentChannelCredentials {
+                id: id.clone(), is_official: true,
+                base_url: None, token: None,
+            });
+            continue;
+        }
+        if let Some((base_url, token)) = read_channel_credentials(id) {
+            result.push(AgentChannelCredentials {
+                id: id.clone(), is_official: false,
+                base_url: Some(base_url), token: Some(token),
+            });
+        }
+    }
+    result
+}
+
+pub(crate) fn read_channel_credentials(id: &str) -> Option<(String, String)> {
+    let text = fs::read_to_string(channel_file_path(id)).ok()?;
+    let root: Value = serde_json::from_str(&text).ok()?;
+    let env = root.get("env")?.as_object()?;
+    let base_url = env.get("ANTHROPIC_BASE_URL")?.as_str()?.to_string();
+    let token = env
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .or_else(|| env.get("ANTHROPIC_API_KEY"))
+        .and_then(|v| v.as_str())?
+        .to_string();
+    Some((base_url, token))
+}
+
+// ---- Fallback 执行器 ----
+
+pub fn is_retryable_error(e: &str) -> bool {
+    e.contains("connect") || e.contains("timeout") || e.contains("timed out")
+        || e.contains("API 5") || e.contains(" 500") || e.contains(" 502") || e.contains(" 503")
+        || e.contains("429") || e.contains("Too Many Requests")
+        || e.contains("connection") || e.contains("Connection")
+}
+
+pub fn is_auth_error(e: &str) -> bool {
+    e.contains("401") || e.contains("403")
+        || e.contains("Unauthorized") || e.contains("Forbidden")
+}
+
+pub fn try_agent_chain<F, T>(chain: &[AgentChannelCredentials], mut f: F) -> Result<T, String>
+where
+    F: FnMut(&AgentChannelCredentials) -> Result<T, String>,
+{
+    let mut last_err = "Agent chain 为空".to_string();
+    for cred in chain {
+        match f(cred) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                if is_auth_error(&e) {
+                    eprintln!("[fallback] 跳过渠道 {} (auth error): {}", cred.id, e);
+                    last_err = e;
+                    continue;
+                }
+                if is_retryable_error(&e) {
+                    eprintln!("[fallback] 渠道 {} 失败, fallback: {}", cred.id, e);
+                    last_err = e;
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Err(format!("所有渠道均失败。最后错误: {}", last_err))
+}
+
 // ---- 前端命令 ----
 
-/// 渠道的前端视图:不含任何敏感原值
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelView {
@@ -144,97 +312,101 @@ pub struct ChannelView {
     pub note: Option<String>,
     pub base_url: Option<String>,
     pub auth_token_masked: Option<String>,
-    /// env 块中 BASE_URL/AUTH_TOKEN 之外的键名(仅键,不含值):提示该渠道有高级配置
     pub extra_env_keys: Vec<String>,
-    /// 文件 JSON 是否可解析(false 时设置页提示手动修复)
     pub valid: bool,
-    pub is_default: bool,
+    pub enabled: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelListResult {
     pub channels: Vec<ChannelView>,
-    pub default_channel_id: Option<String>,
+    pub session_chain: Vec<String>,
+    pub agent_chain: Vec<String>,
 }
 
-/// 列出全部渠道(扫描 channels/*.json + 合并元数据)。用时重读,文件即事实源
+fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
+    if id == OFFICIAL_ID {
+        return ChannelView {
+            id: OFFICIAL_ID.to_string(),
+            name: meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "Official".to_string()),
+            note: meta.note.clone().filter(|s| !s.is_empty()),
+            base_url: None,
+            auth_token_masked: None,
+            extra_env_keys: vec![],
+            valid: true,
+            enabled: meta.is_enabled(),
+        };
+    }
+    let path = channel_file_path(id);
+    let parsed: Option<Value> = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let valid = parsed.is_some();
+    let env = parsed
+        .as_ref()
+        .and_then(|v| v.get("env"))
+        .and_then(|v| v.as_object());
+    let base_url = env
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let token = env
+        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+        .and_then(|v| v.as_str())
+        .filter(|t| !t.is_empty());
+    let extra_env_keys = env
+        .map(|e| {
+            e.keys()
+                .filter(|k| k.as_str() != "ANTHROPIC_BASE_URL" && k.as_str() != "ANTHROPIC_AUTH_TOKEN")
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    ChannelView {
+        name: meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| id.to_string()),
+        note: meta.note.clone().filter(|s| !s.is_empty()),
+        base_url,
+        auth_token_masked: token.map(mask_token),
+        extra_env_keys,
+        valid,
+        enabled: meta.is_enabled(),
+        id: id.to_string(),
+    }
+}
+
 #[tauri::command]
 pub fn list_channels() -> ChannelListResult {
     let settings = load_app_settings();
+
+    // 收集所有渠道 ID（文件 + official）
+    let file_ids = scan_channel_ids();
+    let mut seen = std::collections::HashSet::new();
     let mut channels = Vec::new();
-    if let Ok(entries) = fs::read_dir(channels_dir()) {
-        let mut files: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "json"))
-            .collect();
-        files.sort();
-        for path in files {
-            let Some(id) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
-                continue;
-            };
-            // 跳过过不了 validate_id 的文件(official.json、含非法字符的 stem):
-            // 它们列出来也不可保存/删除/注入,徒增困惑
-            if validate_id(&id).is_err() {
-                continue;
-            }
-            let meta = settings.channels.get(&id).cloned().unwrap_or_default();
-            let parsed: Option<Value> = fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok());
-            let valid = parsed.is_some();
-            let env = parsed
-                .as_ref()
-                .and_then(|v| v.get("env"))
-                .and_then(|v| v.as_object());
-            let base_url = env
-                .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            let token = env
-                .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
-                .and_then(|v| v.as_str())
-                .filter(|t| !t.is_empty());
-            let extra_env_keys = env
-                .map(|e| {
-                    e.keys()
-                        .filter(|k| {
-                            k.as_str() != "ANTHROPIC_BASE_URL" && k.as_str() != "ANTHROPIC_AUTH_TOKEN"
-                        })
-                        .cloned()
-                        .collect()
-                })
-                .unwrap_or_default();
-            channels.push(ChannelView {
-                name: meta
-                    .name
-                    .clone()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| id.clone()),
-                note: meta.note.clone().filter(|s| !s.is_empty()),
-                base_url,
-                auth_token_masked: token.map(mask_token),
-                extra_env_keys,
-                valid,
-                is_default: settings.default_channel_id.as_deref() == Some(id.as_str()),
-                id,
-            });
+
+    // 按 session_chain 顺序优先
+    for id in settings.session_chain.iter().chain(settings.agent_chain.iter()) {
+        if !seen.insert(id.clone()) { continue; }
+        let meta = settings.channels.get(id).cloned().unwrap_or_default();
+        if id == OFFICIAL_ID || file_ids.contains(id) {
+            channels.push(build_channel_view(id, &meta));
         }
     }
-    // 悬空默认(手删了渠道文件但 settings.json 仍指向它):视为未设默认,
-    // 否则前端下拉/设置页 select 绑一个无对应选项的 id 会显示空白
-    let default_channel_id = settings
-        .default_channel_id
-        .filter(|id| channels.iter().any(|c| &c.id == id));
+    // 追加未入链的文件渠道
+    for id in &file_ids {
+        if seen.insert(id.clone()) {
+            let meta = settings.channels.get(id).cloned().unwrap_or_default();
+            channels.push(build_channel_view(id, &meta));
+        }
+    }
+
     ChannelListResult {
         channels,
-        default_channel_id,
+        session_chain: settings.session_chain,
+        agent_chain: settings.agent_chain,
     }
 }
 
-/// 新建/编辑渠道。编辑时 auth_token 传空 = 保持不变;只更新表单覆盖的 env 键,
-/// 用户手编的其他字段(model/permissions/额外 env)原样保留
 #[tauri::command]
 pub fn save_channel(
     id: String,
@@ -251,15 +423,9 @@ pub fn save_channel(
     fs::create_dir_all(channels_dir()).map_err(|e| e.to_string())?;
     let path = channel_file_path(&id);
 
-    // 文件已存在但 JSON 损坏时报错而非按空对象重建——否则会静默丢弃用户手编的
-    // model/permissions/额外 env 等全部字段。文件不存在(新建)才用空对象起步。
     let mut root: Value = match fs::read_to_string(&path) {
         Ok(s) => serde_json::from_str(&s).map_err(|e| {
-            format!(
-                "渠道文件已存在但 JSON 解析失败,请先手动修复后重试({}): {}",
-                path.display(),
-                e
-            )
+            format!("渠道文件已存在但 JSON 解析失败,请先手动修复后重试({}): {}", path.display(), e)
         })?,
         Err(_) => json!({}),
     };
@@ -269,10 +435,7 @@ pub fn save_channel(
     let env = obj.entry("env").or_insert_with(|| json!({}));
     let env_obj = env.as_object_mut().ok_or("渠道文件 env 字段不是对象")?;
     env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(base_url));
-    let token = auth_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty());
+    let token = auth_token.as_deref().map(str::trim).filter(|t| !t.is_empty());
     if let Some(t) = token {
         env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), json!(t));
     } else if env_obj
@@ -286,13 +449,20 @@ pub fn save_channel(
     write_json_0600(&path, &root)?;
 
     let mut settings = load_app_settings();
-    let meta = settings.channels.entry(id).or_default();
+    let meta = settings.channels.entry(id.clone()).or_default();
     meta.name = Some(name.trim().to_string()).filter(|s| !s.is_empty());
     meta.note = note.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+    // 新渠道自动追加到两条链末尾
+    if !settings.session_chain.contains(&id) {
+        settings.session_chain.push(id.clone());
+    }
+    if !settings.agent_chain.contains(&id) {
+        settings.agent_chain.push(id.clone());
+    }
     save_app_settings(&settings)
 }
 
-/// 删除渠道文件与元数据;若为默认渠道则一并清除默认指向
 #[tauri::command]
 pub fn delete_channel(id: String) -> Result<(), String> {
     validate_id(&id)?;
@@ -302,27 +472,33 @@ pub fn delete_channel(id: String) -> Result<(), String> {
     }
     let mut settings = load_app_settings();
     settings.channels.remove(&id);
-    if settings.default_channel_id.as_deref() == Some(id.as_str()) {
-        settings.default_channel_id = None;
-    }
+    settings.session_chain.retain(|x| x != &id);
+    settings.agent_chain.retain(|x| x != &id);
     save_app_settings(&settings)
 }
 
-/// 设置默认渠道。None = 官方(零注入)
 #[tauri::command]
-pub fn set_default_channel(id: Option<String>) -> Result<(), String> {
-    if let Some(ref i) = id {
-        validate_id(i)?;
-        if !channel_file_path(i).is_file() {
-            return Err(format!("渠道配置不存在: {}", i));
-        }
-    }
+pub fn set_channel_enabled(id: String, enabled: bool) -> Result<(), String> {
     let mut settings = load_app_settings();
-    settings.default_channel_id = id;
+    let meta = settings.channels.entry(id).or_default();
+    meta.enabled = Some(enabled);
     save_app_settings(&settings)
 }
 
-/// 在 Finder/资源管理器中打开渠道配置目录(高级 env 手编入口)
+#[tauri::command]
+pub fn set_session_chain(chain: Vec<String>) -> Result<(), String> {
+    let mut settings = load_app_settings();
+    settings.session_chain = chain;
+    save_app_settings(&settings)
+}
+
+#[tauri::command]
+pub fn set_agent_chain(chain: Vec<String>) -> Result<(), String> {
+    let mut settings = load_app_settings();
+    settings.agent_chain = chain;
+    save_app_settings(&settings)
+}
+
 #[tauri::command]
 pub fn reveal_channels_dir() -> Result<(), String> {
     let dir = channels_dir();
@@ -342,38 +518,22 @@ pub fn reveal_channels_dir() -> Result<(), String> {
 
 // ---- spawn 注入(streaming.rs 消费) ----
 
-/// 渠道注入产物
 pub struct ChannelInjection {
-    /// 传给 `--settings` 的 runtime 文件路径(argv 只见路径,token 不可见于 ps)
     pub settings_arg: String,
-    /// 渠道 env 块的真实键值:spawn env 双保险注入,堵 --settings 启动期个别请求
-    /// 未合并命令行设置的缝隙(实测 7 之 1)
     pub env: Vec<(String, String)>,
-    /// 需从继承环境移除的键(spawn 前 env_remove):DEFENSE_ENV_KEYS 固定项 +
-    /// 渠道自身未提供 ANTHROPIC_AUTH_TOKEN 时条件性加入它(防继承的官方 token 发往第三方)
     pub clear_env: Vec<String>,
-    /// 进程结束后清理用
     pub runtime_path: PathBuf,
 }
 
-/// 顾问模式注入的顾问模型(经 settings 下发——/advisor 命令只接受 opus/sonnet,
-/// 填不了 fable,必须走 advisorModel 字段)。未来可在设置页全局配置(见 settings-backlog 第 3 条)
 const ADVISOR_MODEL: &str = "claude-fable-5";
-/// 顾问功能默认灰度隐藏,该 env flag 强制点亮;远期 CLI 放开灰度后可去掉
 const ADVISOR_ENABLE_ENV: &str = "CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL";
 
-/// 读渠道文件(可选) → 合并防御空值、ultracode、顾问配置 → 写 per-spawn runtime 文件(0600)。
-/// `channel_id=None` 时从空配置起步(纯顾问/ultracode 注入,官方渠道态)。
-/// 三类注入(渠道 / ultracode / 顾问)全无时返回 `None`(无需 `--settings`)。
-/// `--settings` 只能出现一次,故三者必须合并进同一文件。
-/// 文件名带纳秒后缀:同会话连发时旧 turn 退出清理不会误删新 turn 的文件
 pub fn prepare_injection(
     channel_id: Option<&str>,
     session_id: &str,
     ultracode: bool,
     advisor: bool,
 ) -> Result<Option<ChannelInjection>, String> {
-    // 三类注入全无 → 不产出合成文件,调用方不附加 --settings
     if channel_id.is_none() && !ultracode && !advisor {
         return Ok(None);
     }
@@ -390,17 +550,14 @@ pub fn prepare_injection(
     };
     let obj = root.as_object_mut().ok_or_else(|| match channel_id {
         Some(id) => format!("渠道配置顶层不是 JSON 对象: {}", id),
-        None => "顾问注入配置顶层不是 JSON 对象".to_string(),
+        None => "注入配置顶层不是 JSON 对象".to_string(),
     })?;
 
     let mut env_pairs = Vec::new();
     let mut clear_env: Vec<String> = Vec::new();
     {
         let env = obj.entry("env").or_insert_with(|| json!({}));
-        let env_obj = env
-            .as_object_mut()
-            .ok_or("注入配置 env 字段不是对象")?;
-        // 顾问 env flag 先于收集插入 → 与渠道 env 同等待遇做 spawn 双注入(堵 --settings 启动期缝隙)
+        let env_obj = env.as_object_mut().ok_or("注入配置 env 字段不是对象")?;
         if advisor {
             env_obj.insert(ADVISOR_ENABLE_ENV.to_string(), json!("1"));
         }
@@ -409,11 +566,8 @@ pub fn prepare_injection(
                 env_pairs.push((k.clone(), s.to_string()));
             }
         }
-        // 渠道在场才压制认证残留(防第三方劫持);纯顾问/ultracode 为官方态无需占位
         if channel_id.is_some() {
             clear_env.extend(DEFENSE_ENV_KEYS.iter().map(|s| s.to_string()));
-            // 渠道未提供非空 AUTH_TOKEN(手编漏填/用其他鉴权)时一并压制:
-            // 否则继承环境残留的官方 ANTHROPIC_AUTH_TOKEN 会随 Bearer 头发往第三方 base_url
             let channel_has_token = env_obj
                 .get("ANTHROPIC_AUTH_TOKEN")
                 .and_then(|v| v.as_str())
@@ -448,12 +602,10 @@ pub fn prepare_injection(
     }))
 }
 
-/// 进程结束后删除本 turn 的 runtime 文件(含 token 副本,不留盘)
 pub fn cleanup_runtime_file(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
-/// 应用启动兜底:清空 runtime 目录(上次异常退出的残留)
 pub fn cleanup_runtime_dir() {
     if let Ok(entries) = fs::read_dir(runtime_dir()) {
         for entry in entries.filter_map(|e| e.ok()) {
