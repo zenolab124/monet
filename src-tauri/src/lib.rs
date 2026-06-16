@@ -102,6 +102,7 @@ pub fn run() {
             channels::reveal_channels_dir,
             channels::probe_channel,
             commands::open_in_default_app,
+            commands::read_local_image,
             metadata::get_all_meta,
             metadata::update_meta,
             metadata::generate_title,

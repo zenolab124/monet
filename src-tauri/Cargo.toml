@@ -49,4 +49,5 @@ serde_yaml = "0.9"
 reqwest = { version = "0.13.2", default-features = false, features = ["native-tls", "blocking", "json"] }
 tauri-plugin-window-state = "2.4.1"
 cron = "0.15"
+base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }

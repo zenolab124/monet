@@ -14,6 +14,7 @@ import ToolExitPlanMode from './ToolExitPlanMode.vue'
 import ToolEnterPlanMode from './ToolEnterPlanMode.vue'
 import ToolAskUserQuestion from './ToolAskUserQuestion.vue'
 import ToolSkill from './ToolSkill.vue'
+import ToolSendUserFile from './ToolSendUserFile.vue'
 import ToolMcp from './ToolMcp.vue'
 import ToolGeneric from './ToolGeneric.vue'
 
@@ -27,6 +28,7 @@ export const TOOL_MAP: Record<string, Component> = {
   Task: ToolTask, Agent: ToolTask,
   ExitPlanMode: ToolExitPlanMode, EnterPlanMode: ToolEnterPlanMode,
   AskUserQuestion: ToolAskUserQuestion, Skill: ToolSkill,
+  SendUserFile: ToolSendUserFile,
 }
 
 export { ToolMcp, ToolGeneric }

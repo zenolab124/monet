@@ -437,6 +437,8 @@
       "sourceSchema": "From schema declaration, reliable",
       "sourceExtracted": "Extracted from CLI source code, reliable",
       "onlyConfigured": "Show configured only",
+      "configure": "Configure",
+      "selectEditor": "Select a complex field to edit",
       "refreshSchema": "Refresh Schema",
       "searchPlaceholder": "Search settings (key, name, description…)",
       "notSet": "— Not set —",
@@ -463,6 +465,16 @@
       "advanced": "Advanced",
       "other": "Other",
       "uncategorized": "Uncategorized"
+    },
+    "permissions": {
+      "defaultMode": "Default permission mode",
+      "disableBypass": "Disable bypass mode",
+      "disableAuto": "Disable auto mode",
+      "allow": "Allow",
+      "deny": "Deny",
+      "ask": "Ask",
+      "additionalDirs": "Additional directories",
+      "empty": "No rules"
     }
   },
   "notification": {
@@ -643,6 +655,11 @@
       "title": "Ask User",
       "multiSelect": "(Multiple)",
       "customAnswer": "Custom answer"
+    },
+    "toolSendFile": {
+      "title": "Send File",
+      "openFile": "Open file",
+      "revealInFinder": "Reveal in Finder"
     }
   },
   "image": {

@@ -210,6 +210,7 @@ pub struct CliSettings {
     pub model: Option<String>,
     pub effort_level: Option<String>,
     pub ultracode: bool,
+    pub permission_mode: Option<String>,
 }
 
 /// 读取 CLI settings.json 的模型/努力默认值。
@@ -230,6 +231,11 @@ pub fn get_cli_settings() -> CliSettings {
             .and_then(|v| v.as_str())
             .map(String::from)
     };
+    let perm_mode = json.as_ref()
+        .and_then(|j| j.get("permissions"))
+        .and_then(|p| p.get("defaultMode"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
     CliSettings {
         model: get_str("model"),
         effort_level: get_str("effortLevel"),
@@ -238,6 +244,7 @@ pub fn get_cli_settings() -> CliSettings {
             .and_then(|j| j.get("ultracode"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        permission_mode: perm_mode,
     }
 }
 
@@ -314,6 +321,61 @@ pub fn open_in_default_app(path: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"];
+const MAX_IMAGE_SIZE: u64 = 50 * 1024 * 1024;
+
+#[derive(serde::Serialize)]
+pub struct LocalImage {
+    pub data: String,
+    pub mime_type: String,
+}
+
+#[tauri::command]
+pub fn read_local_image(path: String) -> Result<LocalImage, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(format!("文件不存在: {}", path));
+    }
+
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("不支持的图片格式: {}", ext));
+    }
+
+    let meta = fs::metadata(&p).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_IMAGE_SIZE {
+        return Err(format!(
+            "图片过大: {:.1}MB（上限 {}MB）",
+            meta.len() as f64 / 1_048_576.0,
+            MAX_IMAGE_SIZE / 1_048_576
+        ));
+    }
+
+    let mime_type = match ext.as_str() {
+        "svg" => "image/svg+xml",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    }
+    .to_string();
+
+    let bytes = fs::read(&p).map_err(|e| e.to_string())?;
+    let data = STANDARD.encode(&bytes);
+
+    Ok(LocalImage { data, mime_type })
 }
 
 fn session_path(project_id: &str, session_id: &str) -> PathBuf {

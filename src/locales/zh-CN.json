@@ -437,6 +437,8 @@
       "sourceSchema": "来自 schema 声明，可靠",
       "sourceExtracted": "从 CLI 源码提取，较可靠",
       "onlyConfigured": "只显示已配置项",
+      "configure": "配置",
+      "selectEditor": "选择左侧复杂配置项以编辑",
       "refreshSchema": "刷新 Schema",
       "searchPlaceholder": "搜索配置项（key、中文名、说明…）",
       "notSet": "— 未设置 —",
@@ -463,6 +465,16 @@
       "advanced": "高级",
       "other": "其他",
       "uncategorized": "未收录"
+    },
+    "permissions": {
+      "defaultMode": "默认权限模式",
+      "disableBypass": "禁用 bypass 模式",
+      "disableAuto": "禁用 auto 模式",
+      "allow": "允许",
+      "deny": "拒绝",
+      "ask": "需确认",
+      "additionalDirs": "附加目录",
+      "empty": "无规则"
     }
   },
   "notification": {
@@ -531,13 +543,17 @@
     "modelAdvisorLocked": "顾问模式下主模型锁定为 Sonnet",
     "modelTitle": "模型:{name}",
     "permApproval": "需审批",
-    "permApprovalDesc": "每次编辑前询问",
+    "permApprovalDesc": "每次工具调用前询问",
     "permAutoEdit": "自动编辑",
-    "permAutoEditDesc": "自动批准文件编辑",
+    "permAutoEditDesc": "自动批准文件编辑，其他仍问",
     "permPlan": "规划模式",
-    "permPlanDesc": "先规划再编辑",
-    "permBypass": "免审批",
+    "permPlanDesc": "只读，不做修改",
+    "permAuto": "自动模式",
+    "permAutoDesc": "AI 评估安全性后自动批准",
+    "permBypass": "跳过权限",
     "permBypassDesc": "跳过所有权限检查",
+    "permDontAsk": "自动拒绝",
+    "permDontAskDesc": "拒绝未在 allow 里的操作",
     "permTitle": "权限模式:{name}",
     "advisorDisabled": "顾问仅在官方渠道可用（当前为第三方渠道）",
     "advisorEnabled": "顾问模式：开启（主 Sonnet + Fable 顾问）",
@@ -643,6 +659,11 @@
       "title": "询问用户",
       "multiSelect": "（可多选）",
       "customAnswer": "自定义回答"
+    },
+    "toolSendFile": {
+      "title": "发送文件",
+      "openFile": "打开文件",
+      "revealInFinder": "在访达中显示"
     }
   },
   "image": {
