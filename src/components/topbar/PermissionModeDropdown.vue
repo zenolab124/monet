@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-export type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'dontAsk'
+export type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'dontAsk'
 
 const props = defineProps<{
   current: PermissionMode
@@ -25,7 +25,9 @@ const OPTIONS = computed<ModeOption[]>(() => [
   { value: 'default', label: t('topbar.permApproval'), icon: 'i-carbon-locked', desc: t('topbar.permApprovalDesc') },
   { value: 'acceptEdits', label: t('topbar.permAutoEdit'), icon: 'i-carbon-edit', desc: t('topbar.permAutoEditDesc') },
   { value: 'plan', label: t('topbar.permPlan'), icon: 'i-carbon-document', desc: t('topbar.permPlanDesc') },
-  { value: 'dontAsk', label: t('topbar.permBypass'), icon: 'i-carbon-lightning', desc: t('topbar.permBypassDesc') },
+  { value: 'auto', label: t('topbar.permAuto'), icon: 'i-carbon-lightning', desc: t('topbar.permAutoDesc') },
+  { value: 'bypassPermissions', label: t('topbar.permBypass'), icon: 'i-carbon-unlocked', desc: t('topbar.permBypassDesc') },
+  { value: 'dontAsk', label: t('topbar.permDontAsk'), icon: 'i-carbon-close-outline', desc: t('topbar.permDontAskDesc') },
 ])
 
 const open = ref(false)

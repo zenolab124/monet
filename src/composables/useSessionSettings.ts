@@ -1,4 +1,5 @@
 import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
+import { useCliDefaults } from './useCliDefaults'
 
 /**
  * 会话级设置(模型/努力等级/渠道)按 sessionId 持久化到 localStorage。
@@ -26,7 +27,7 @@ export interface ChannelMark {
   at: number
 }
 
-export type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'dontAsk'
+export type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'dontAsk'
 
 export interface SessionSettings {
   /** null 表示未设置(回退使用 session 自带 model 字段) */
@@ -45,7 +46,16 @@ export interface SessionSettings {
 // effort 为 null = 本会话未设置 → 按应用默认行为发送。应用默认当前实现为「不传
 // --effort,由 CLI 自行决定」;将来由设置页配置(可选值含跟随 CLI/具体档位,见
 // docs/settings-backlog.md),「跟随 CLI/默认值」不出现在会话级选项中
-const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'plan', 'acceptEdits', 'dontAsk']
+const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'plan', 'acceptEdits', 'auto', 'bypassPermissions', 'dontAsk']
+
+function getDefaultPermissionMode(): PermissionMode {
+  const { cliDefaults } = useCliDefaults()
+  const mode = cliDefaults.value.permission_mode
+  if (mode && VALID_PERMISSION_MODES.includes(mode as PermissionMode)) {
+    return mode as PermissionMode
+  }
+  return 'default'
+}
 
 export const DEFAULT_SETTINGS: SessionSettings = {
   modelId: null,
@@ -90,7 +100,7 @@ function sanitizeMarks(raw: unknown): ChannelMark[] {
 function loadFromStorage(sid: string): SessionSettings {
   try {
     const raw = localStorage.getItem(storageKey(sid))
-    if (!raw) return structuredClone(DEFAULT_SETTINGS)
+    if (!raw) return { ...structuredClone(DEFAULT_SETTINGS), permissionMode: getDefaultPermissionMode() }
     const parsed = JSON.parse(raw) as Partial<SessionSettings>
     const effort: EffortSetting = parsed.effort && VALID_STORED.includes(parsed.effort)
       ? parsed.effort
@@ -104,7 +114,7 @@ function loadFromStorage(sid: string): SessionSettings {
     const permissionMode: PermissionMode =
       typeof parsed.permissionMode === 'string' && VALID_PERMISSION_MODES.includes(parsed.permissionMode as PermissionMode)
         ? parsed.permissionMode as PermissionMode
-        : 'default'
+        : getDefaultPermissionMode()
     return {
       modelId,
       effort,
@@ -114,7 +124,7 @@ function loadFromStorage(sid: string): SessionSettings {
       permissionMode,
     }
   } catch (_) {
-    return structuredClone(DEFAULT_SETTINGS)
+    return { ...structuredClone(DEFAULT_SETTINGS), permissionMode: getDefaultPermissionMode() }
   }
 }
 

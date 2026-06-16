@@ -11,15 +11,13 @@ import { invoke } from '@tauri-apps/api/core'
  */
 
 export interface CliSettings {
-  /** settings.json 的 model 字段(可能是别名如 "sonnet";无字段为 null) */
   model: string | null
-  /** settings.json 的 effortLevel 字段(无字段为 null,CLI 按模型自定默认) */
   effort_level: string | null
-  /** settings.json 的 ultracode 全局开关(true 时默认行为即 Ultracode) */
   ultracode: boolean
+  permission_mode: string | null
 }
 
-const cliDefaults = ref<CliSettings>({ model: null, effort_level: null, ultracode: false })
+const cliDefaults = ref<CliSettings>({ model: null, effort_level: null, ultracode: false, permission_mode: null })
 
 export async function refreshCliDefaults(): Promise<void> {
   try {

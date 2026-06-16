@@ -3,11 +3,12 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCliSettings, type SettingsField, type SchemaProperty } from '@/composables/useCliSettings'
 import { useUiState } from '@/composables/useUiState'
+import PermissionsEditor from './PermissionsEditor.vue'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
 const {
-  hasSchema, loading, translating, extracting, groups, groupOrder,
+  hasSchema, loading, translating, extracting, settings, groups, groupOrder,
   load, updateField, removeField, refreshSchema,
   translateMissing, extractMissingDefaults, getTranslation, getDefault,
 } = useCliSettings()
@@ -21,6 +22,24 @@ const configuredCount = computed(() =>
   Object.values(groups.value).flat().filter(f => f.value !== undefined).length,
 )
 const activeGroup = ref('')
+const activeEditor = ref<string | null>(null)
+const isNarrow = ref(false)
+const NARROW_THRESHOLD = 900
+
+function checkWidth() {
+  const el = document.querySelector('.cli-root')
+  isNarrow.value = (el?.clientWidth ?? window.innerWidth) < NARROW_THRESHOLD
+}
+
+const COMPLEX_FIELDS = new Set(['permissions'])
+
+function hasEditor(key: string): boolean {
+  return COMPLEX_FIELDS.has(key)
+}
+
+function openEditor(key: string) {
+  activeEditor.value = activeEditor.value === key ? null : key
+}
 
 const contentRef = ref<HTMLElement | null>(null)
 const groupEls = ref<Record<string, HTMLElement>>({})
@@ -78,6 +97,8 @@ function setupObserver() {
   }
 }
 
+let resizeObs: ResizeObserver | null = null
+
 onMounted(async () => {
   await load()
   translateMissing()
@@ -87,6 +108,12 @@ onMounted(async () => {
     activeGroup.value = filteredGroupOrder.value[0]
   }
   setupObserver()
+  checkWidth()
+  const root = document.querySelector('.cli-root')
+  if (root) {
+    resizeObs = new ResizeObserver(checkWidth)
+    resizeObs.observe(root)
+  }
 })
 
 watch(activeSection, async (s) => {
@@ -102,7 +129,7 @@ watch(filteredGroupOrder, async () => {
   setupObserver()
 })
 
-onBeforeUnmount(() => { observer?.disconnect() })
+onBeforeUnmount(() => { observer?.disconnect(); resizeObs?.disconnect() })
 
 function scrollToGroup(g: string) {
   activeGroup.value = g
@@ -277,167 +304,223 @@ async function onRemove(key: string) {
       {{ $t('common.noMatch') }}
     </div>
 
-    <!-- 主体：侧边栏 + 平铺内容 -->
+    <!-- 主体：左区（滚动）+ 右区（不滚动） -->
     <div v-else class="cli-body">
-      <nav class="cli-nav">
-        <button
-          v-for="g in filteredGroupOrder"
-          :key="g"
-          :class="['cli-nav-item', { active: activeGroup === g }]"
-          @click="scrollToGroup(g)"
-        >
-          <span class="truncate">{{ g }}</span>
-          <span class="cli-nav-count">{{ filteredGroups[g]?.length ?? 0 }}</span>
-        </button>
-      </nav>
+      <div class="cli-left">
+        <nav class="cli-nav">
+          <button
+            v-for="g in filteredGroupOrder"
+            :key="g"
+            :class="['cli-nav-item', { active: activeGroup === g }]"
+            @click="scrollToGroup(g)"
+          >
+            <span class="truncate">{{ g }}</span>
+            <span class="cli-nav-count">{{ filteredGroups[g]?.length ?? 0 }}</span>
+          </button>
+        </nav>
 
-      <div ref="contentRef" class="cli-content">
-        <section
-          v-for="g in filteredGroupOrder"
-          :key="g"
-          :ref="(el) => setGroupRef(g, el)"
-          :data-group="g"
-          class="group-section"
-        >
-          <h3 class="group-title">{{ g }}</h3>
+        <div ref="contentRef" class="cli-content">
+          <section
+            v-for="g in filteredGroupOrder"
+            :key="g"
+            :ref="(el) => setGroupRef(g, el)"
+            :data-group="g"
+            class="group-section"
+          >
+            <h3 class="group-title">{{ g }}</h3>
 
-          <div v-for="f in filteredGroups[g]" :key="f.key" class="field-row">
-            <div class="field-meta">
-              <div class="flex items-center gap-1.5">
-                <template v-if="getTranslation(f.key)">
-                  <span class="text-[11.5px] font-medium">{{ getTranslation(f.key)!.name }}</span>
-                  <span class="font-mono text-[10px] text-muted-foreground">{{ f.key }}</span>
-                </template>
-                <template v-else>
-                  <span class="font-mono text-[11px] font-medium">{{ f.key }}</span>
-                </template>
-                <span v-if="f.source === 'custom'" class="custom-badge">{{ $t('settings.cliConfig.custom') }}</span>
-                <span v-if="savingKeys.has(f.key)" class="text-[10px] text-accent">{{ $t('common.saving') }}</span>
+            <div v-for="f in filteredGroups[g]" :key="f.key" class="field-row">
+              <div class="field-meta">
+                <div class="flex items-center gap-1.5">
+                  <template v-if="getTranslation(f.key)">
+                    <span class="text-[11.5px] font-medium">{{ getTranslation(f.key)!.name }}</span>
+                    <span class="font-mono text-[10px] text-muted-foreground">{{ f.key }}</span>
+                  </template>
+                  <template v-else>
+                    <span class="font-mono text-[11px] font-medium">{{ f.key }}</span>
+                  </template>
+                  <span v-if="f.source === 'custom'" class="custom-badge">{{ $t('settings.cliConfig.custom') }}</span>
+                  <span v-if="savingKeys.has(f.key)" class="text-[10px] text-accent">{{ $t('common.saving') }}</span>
+                </div>
+                <div class="text-[10.5px] text-muted-foreground mt-0.5 leading-snug">
+                  <template v-if="getTranslation(f.key)?.desc">
+                    {{ getTranslation(f.key)!.desc }}
+                  </template>
+                  <template v-else-if="f.schema?.description">
+                    {{ shortDesc(f.schema.description) }}
+                  </template>
+                </div>
               </div>
-              <div class="text-[10.5px] text-muted-foreground mt-0.5 leading-snug">
-                <template v-if="getTranslation(f.key)?.desc">
-                  {{ getTranslation(f.key)!.desc }}
+
+              <div class="field-control">
+                <!-- 有专用编辑器的复杂字段 -->
+                <template v-if="hasEditor(f.key)">
+                  <button
+                    :class="['editor-btn', { active: activeEditor === f.key }]"
+                    @click="openEditor(f.key)"
+                  >
+                    <span class="i-carbon-settings-adjust w-3 h-3" />
+                    {{ $t('settings.cliConfig.configure') }}
+                  </button>
                 </template>
-                <template v-else-if="f.schema?.description">
-                  {{ shortDesc(f.schema.description) }}
+
+                <!-- boolean -->
+                <template v-else-if="fieldType(f) === 'boolean'">
+                  <span
+                    v-if="!isSet(f) && getDefault(f.key)"
+                    :class="['source-badge', getDefault(f.key)!.source === 'schema' ? 'source-schema' : 'source-extracted']"
+                    :title="getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.sourceSchema') : $t('settings.cliConfig.sourceExtracted')"
+                  >{{ getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.default') : $t('settings.cliConfig.extracted') }}</span>
+                  <button
+                    :class="['form-toggle', { on: effectiveBool(f) }]"
+                    @click="onToggle(f)"
+                  >
+                    <span class="form-toggle-knob" />
+                  </button>
                 </template>
+
+                <!-- enum / select -->
+                <template v-else-if="fieldType(f) === 'enum'">
+                  <select
+                    class="form-select form-select-sm max-w-[220px]"
+                    :value="f.value ?? '__unset__'"
+                    @change="onEnumChange(f, $event)"
+                  >
+                    <option value="__unset__">
+                      {{ getDefault(f.key)
+                        ? `${getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.default') : $t('settings.cliConfig.extracted')}: ${getDefault(f.key)!.value}`
+                        : $t('settings.cliConfig.notSet') }}
+                    </option>
+                    <option v-for="opt in f.schema?.enum" :key="String(opt)" :value="opt">
+                      {{ opt }}
+                    </option>
+                  </select>
+                </template>
+
+                <!-- integer / number -->
+                <template v-else-if="fieldType(f) === 'integer' || fieldType(f) === 'number'">
+                  <input
+                    type="number"
+                    class="form-input form-input-sm font-mono w-24"
+                    :value="f.value ?? ''"
+                    :placeholder="getDefault(f.key) ? String(getDefault(f.key)!.value) : ''"
+                    :min="f.schema?.minimum"
+                    :max="f.schema?.maximum"
+                    @blur="onNumberBlur(f, $event)"
+                  />
+                </template>
+
+                <!-- string (simple) -->
+                <template v-else-if="fieldType(f) === 'string' && !f.schema?.properties">
+                  <input
+                    type="text"
+                    class="form-input form-input-sm font-mono max-w-[220px]"
+                    :value="f.value ?? ''"
+                    :placeholder="getDefault(f.key) ? String(getDefault(f.key)!.value) : ''"
+                    @blur="onStringBlur(f, $event)"
+                  />
+                </template>
+
+                <!-- object / array / complex -->
+                <template v-else>
+                  <textarea
+                    class="form-textarea form-textarea-sm font-mono w-[220px]"
+                    :value="displayValue(f.value)"
+                    rows="3"
+                    spellcheck="false"
+                    @blur="onJsonBlur(f, $event)"
+                  />
+                </template>
+
+                <!-- 删除按钮 -->
+                <button
+                  v-if="isSet(f)"
+                  class="remove-btn"
+                  :title="$t('settings.cliConfig.removeField')"
+                  @click="onRemove(f.key)"
+                >
+                  <span class="i-carbon-close w-3 h-3" />
+                </button>
               </div>
             </div>
+          </section>
 
-            <div class="field-control">
-              <!-- boolean -->
-              <template v-if="fieldType(f) === 'boolean'">
-                <span
-                  v-if="!isSet(f) && getDefault(f.key)"
-                  :class="['source-badge', getDefault(f.key)!.source === 'schema' ? 'source-schema' : 'source-extracted']"
-                  :title="getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.sourceSchema') : $t('settings.cliConfig.sourceExtracted')"
-                >{{ getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.default') : $t('settings.cliConfig.extracted') }}</span>
-                <button
-                  :class="['form-toggle', { on: effectiveBool(f) }]"
-                  @click="onToggle(f)"
-                >
-                  <span class="form-toggle-knob" />
-                </button>
-              </template>
-
-              <!-- enum / select -->
-              <template v-else-if="fieldType(f) === 'enum'">
-                <select
-                  class="form-select form-select-sm max-w-[220px]"
-                  :value="f.value ?? '__unset__'"
-                  @change="onEnumChange(f, $event)"
-                >
-                  <option value="__unset__">
-                    {{ getDefault(f.key)
-                      ? `${getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.default') : $t('settings.cliConfig.extracted')}: ${getDefault(f.key)!.value}`
-                      : $t('settings.cliConfig.notSet') }}
-                  </option>
-                  <option v-for="opt in f.schema?.enum" :key="String(opt)" :value="opt">
-                    {{ opt }}
-                  </option>
-                </select>
-              </template>
-
-              <!-- integer / number -->
-              <template v-else-if="fieldType(f) === 'integer' || fieldType(f) === 'number'">
+          <!-- 新增自定义字段 -->
+          <div class="add-section">
+            <h3 class="text-[11px] font-medium text-muted-foreground mb-2">{{ $t('settings.cliConfig.addConfig') }}</h3>
+            <div class="flex gap-2 items-end">
+              <div class="flex-1 min-w-0">
+                <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldName') }}</label>
                 <input
-                  type="number"
-                  class="form-input form-input-sm font-mono w-24"
-                  :value="f.value ?? ''"
-                  :placeholder="getDefault(f.key) ? String(getDefault(f.key)!.value) : ''"
-                  :min="f.schema?.minimum"
-                  :max="f.schema?.maximum"
-                  @blur="onNumberBlur(f, $event)"
-                />
-              </template>
-
-              <!-- string (simple) -->
-              <template v-else-if="fieldType(f) === 'string' && !f.schema?.properties">
-                <input
+                  v-model="addingKey"
                   type="text"
-                  class="form-input form-input-sm font-mono max-w-[220px]"
-                  :value="f.value ?? ''"
-                  :placeholder="getDefault(f.key) ? String(getDefault(f.key)!.value) : ''"
-                  @blur="onStringBlur(f, $event)"
+                  class="form-input form-input-sm font-mono w-full"
+                  placeholder="camelCase key"
                 />
-              </template>
-
-              <!-- object / array / complex -->
-              <template v-else>
-                <textarea
-                  class="form-textarea form-textarea-sm font-mono w-[220px]"
-                  :value="displayValue(f.value)"
-                  rows="3"
-                  spellcheck="false"
-                  @blur="onJsonBlur(f, $event)"
+              </div>
+              <div class="flex-1 min-w-0">
+                <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldValue') }}</label>
+                <input
+                  v-model="addingValue"
+                  type="text"
+                  class="form-input form-input-sm font-mono w-full"
+                  placeholder="true / &quot;text&quot; / {}"
                 />
-              </template>
-
-              <!-- 删除按钮（仅已设置的值） -->
+              </div>
               <button
-                v-if="isSet(f)"
-                class="remove-btn"
-                :title="$t('settings.cliConfig.removeField')"
-                @click="onRemove(f.key)"
+                class="px-2.5 py-[5px] text-xs rounded bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0"
+                :disabled="!addingKey.trim()"
+                @click="onAddCustom"
               >
-                <span class="i-carbon-close w-3 h-3" />
+                {{ $t('common.add') }}
               </button>
             </div>
           </div>
-        </section>
-
-        <!-- 新增自定义字段 -->
-        <div class="add-section">
-          <h3 class="text-[11px] font-medium text-muted-foreground mb-2">{{ $t('settings.cliConfig.addConfig') }}</h3>
-          <div class="flex gap-2 items-end">
-            <div class="flex-1 min-w-0">
-              <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldName') }}</label>
-              <input
-                v-model="addingKey"
-                type="text"
-                class="form-input form-input-sm font-mono w-full"
-                placeholder="camelCase key"
-              />
-            </div>
-            <div class="flex-1 min-w-0">
-              <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldValue') }}</label>
-              <input
-                v-model="addingValue"
-                type="text"
-                class="form-input form-input-sm font-mono w-full"
-                placeholder="true / &quot;text&quot; / {}"
-              />
-            </div>
-            <button
-              class="px-2.5 py-[5px] text-xs rounded bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0"
-              :disabled="!addingKey.trim()"
-              @click="onAddCustom"
-            >
-              {{ $t('common.add') }}
-            </button>
-          </div>
         </div>
       </div>
+
+      <!-- 右区：宽屏常驻 / 窄屏悬浮 -->
+      <div v-if="!isNarrow" class="cli-detail">
+        <template v-if="activeEditor">
+          <div class="cli-detail-header">
+            <span class="font-medium text-[12px]">{{ getTranslation(activeEditor)?.name ?? activeEditor }}</span>
+            <span class="font-mono text-[10px] text-muted-foreground ml-1.5">{{ activeEditor }}</span>
+            <button class="cli-detail-close" @click="activeEditor = null">
+              <span class="i-carbon-close w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="cli-detail-body">
+            <PermissionsEditor
+              v-if="activeEditor === 'permissions'"
+              :value="settings[activeEditor]"
+              @update="val => updateField(activeEditor!, val)"
+            />
+          </div>
+        </template>
+        <div v-else class="cli-detail-empty">
+          <span class="i-carbon-settings-adjust w-5 h-5 text-muted-foreground/15" />
+          <p class="text-[11px] text-muted-foreground/30">{{ $t('settings.cliConfig.selectEditor') }}</p>
+        </div>
+      </div>
+
+      <Transition name="detail-float">
+        <div v-if="isNarrow && activeEditor" class="cli-detail-float">
+          <div class="cli-detail-header">
+            <span class="font-medium text-[12px]">{{ getTranslation(activeEditor)?.name ?? activeEditor }}</span>
+            <span class="font-mono text-[10px] text-muted-foreground ml-1.5">{{ activeEditor }}</span>
+            <button class="cli-detail-close" @click="activeEditor = null">
+              <span class="i-carbon-close w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div class="cli-detail-body">
+            <PermissionsEditor
+              v-if="activeEditor === 'permissions'"
+              :value="settings[activeEditor]"
+              @update="val => updateField(activeEditor!, val)"
+            />
+          </div>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
@@ -446,10 +529,13 @@ async function onRemove(key: string) {
 .cli-root {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 .cli-header {
-  margin-bottom: 10px;
+  flex-shrink: 0;
+  padding-bottom: 10px;
 }
 
 .search-bar {
@@ -474,10 +560,21 @@ async function onRemove(key: string) {
 }
 .search-input::placeholder { color: var(--muted-foreground); }
 
-/* 主体：侧边栏 + 内容 */
+/* 主体：不滚动，左右子区各自管滚动 */
 .cli-body {
+  position: relative;
   display: flex;
-  gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左区：独立滚动 */
+.cli-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow-y: auto;
 }
 
 /* 分组导航 */
@@ -489,8 +586,6 @@ async function onRemove(key: string) {
   align-self: flex-start;
   padding-right: 8px;
   border-right: 1px solid var(--border);
-  max-height: calc(100vh - 160px);
-  overflow-y: auto;
 }
 
 .cli-nav-item {
@@ -530,7 +625,97 @@ async function onRemove(key: string) {
 .cli-content {
   flex: 1;
   min-width: 0;
-  padding-left: 14px;
+  padding: 0 20px 20px 16px;
+}
+
+/* 右区：常驻 detail 面板 */
+.cli-detail {
+  width: 400px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+}
+
+/* 窄屏悬浮 detail 面板 */
+.cli-detail-float {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(400px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-paper), 0 8px 32px hsl(var(--foreground) / 0.1);
+  z-index: 10;
+}
+.detail-float-enter-active,
+.detail-float-leave-active {
+  transition: opacity 0.15s, transform 0.15s;
+}
+.detail-float-enter-from,
+.detail-float-leave-to {
+  opacity: 0;
+  transform: translateX(12px);
+}
+
+.cli-detail-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.cli-detail-close {
+  margin-left: auto;
+  padding: 4px;
+  color: var(--muted-foreground);
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: color 0.15s, background 0.15s;
+}
+.cli-detail-close:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.cli-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+.cli-detail-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.editor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.editor-btn:hover { color: var(--foreground); border-color: var(--ring); }
+.editor-btn.active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: hsl(var(--primary) / 0.06);
 }
 
 .filter-chip {

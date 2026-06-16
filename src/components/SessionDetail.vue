@@ -625,6 +625,7 @@ async function handleSend() {
     channel: resolvedChannelId.value,
     advisor,
     images,
+    permissionMode: settings.value.permissionMode,
   })
 }
 

@@ -20,6 +20,7 @@ export interface SendOptions {
   advisor?: boolean
   /** Anthropic image content blocks(base64 编码) */
   images?: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>
+  permissionMode?: string
 }
 
 export interface StreamingTurn {
@@ -639,6 +640,7 @@ async function sendMessage(
       channel: opts.channel ?? null,
       advisor: opts.advisor ?? false,
       images: opts.images?.length ? opts.images : null,
+      permissionMode: opts.permissionMode ?? null,
     })
     state.rcActive = true
   } catch (e) {

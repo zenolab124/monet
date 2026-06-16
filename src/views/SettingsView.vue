@@ -20,6 +20,7 @@ import ChannelForm from '@/components/settings/ChannelForm.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
+import { useAppDefaults } from '@/composables/useAppDefaults'
 
 const { t } = useI18n()
 const {
@@ -209,8 +210,8 @@ function onSaved() {
     </nav>
 
     <!-- 内容区 -->
-    <div class="flex-1 min-w-0 overflow-y-auto">
-      <div class="settings-body">
+    <div :class="['flex-1 min-w-0', activeTab === 'claude-code' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto']">
+      <div :class="['settings-body', { 'flex-1 min-h-0 flex flex-col': activeTab === 'claude-code' }]">
 
         <!-- ====== 常规 ====== -->
         <section v-show="activeTab === 'general'">
@@ -559,7 +560,7 @@ function onSaved() {
         </section>
 
         <!-- ====== Claude Code 配置 ====== -->
-        <section v-show="activeTab === 'claude-code'">
+        <section v-show="activeTab === 'claude-code'" class="cli-section">
           <ClaudeCodeSettings />
         </section>
 
@@ -644,6 +645,13 @@ function onSaved() {
 /* 内容体 */
 .settings-body {
   padding: 20px;
+}
+
+.cli-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 分区标题 */

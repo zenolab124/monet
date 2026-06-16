@@ -387,6 +387,7 @@ pub fn send_message(
     channel: Option<&str>,
     advisor: bool,
     images: Option<&[serde_json::Value]>,
+    permission_mode: Option<&str>,
 ) -> Result<(), String> {
     let exists = ACTIVE_PROCESSES
         .lock()
@@ -408,7 +409,6 @@ pub fn send_message(
     let mut sp = process.lock().unwrap();
     if exists {
         eprintln!("[long-lived] 复用进程 PID={} 会话={}", sp.child.id(), &session_id[..session_id.len().min(8)]);
-        // 动态切模型（复用进程时生效；新建进程已在启动参数中指定）
         if let Some(m) = model.filter(|s| !s.is_empty()) {
             sp.request_counter += 1;
             let req_id = format!("set-model-{}", sp.request_counter);
@@ -419,6 +419,17 @@ pub fn send_message(
             });
             write_stdin(&mut sp.stdin, &ctrl)?;
         }
+    }
+
+    if let Some(mode) = permission_mode.filter(|m| !m.is_empty() && *m != "default") {
+        sp.request_counter += 1;
+        let req_id = format!("set-perm-mode-{}", sp.request_counter);
+        let ctrl = json!({
+            "type": "control_request",
+            "request_id": req_id,
+            "request": {"subtype": "set_permission_mode", "permission_mode": mode}
+        });
+        let _ = write_stdin(&mut sp.stdin, &ctrl);
     }
     let mut content: Vec<serde_json::Value> = Vec::new();
     if let Some(imgs) = images {
