@@ -38,10 +38,19 @@ export interface TailLine {
  * tail/activeTool 供工作台左列监控卡消费——监控卡只订阅这两个轻量字段，
  * 不 mount 消息流组件树（NFR-001 渲染分级的结构性前提）。
  */
+export interface PendingQueueItem {
+  message: string
+  opts: SendOptions
+}
+
 export interface SessionStreamState {
   streaming: boolean
   streamingTurns: StreamingTurn[]
   pendingUserMessage: string | null
+  /** 发送时附带的图片（流式待发/发送中回显用） */
+  pendingImages: SendOptions['images'] | null
+  /** BTW 预输入队列：流式中用户发的消息暂存于此，前一轮 result 落账后再逐条发送 */
+  pendingQueue: PendingQueueItem[]
   streamError: string | null
   /** 本次流式开始时刻（监控卡持续时间显示） */
   startedAt: number | null
@@ -95,6 +104,8 @@ function createState(): SessionStreamState {
     streaming: false,
     streamingTurns: [],
     pendingUserMessage: null,
+    pendingImages: null,
+    pendingQueue: [],
     streamError: null,
     startedAt: null,
     activeTool: null,
@@ -598,18 +609,21 @@ async function sendMessage(
   opts: SendOptions = {},
 ) {
   const state = getStream(sessionId)
-  const wasStreaming = state.streaming
+
+  if (state.streaming) {
+    state.pendingQueue.push({ message, opts })
+    return
+  }
 
   // 清掉上一轮的 turn 索引、残余 pending 与尾部
   for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
   tailTextAcc.delete(sessionId)
 
-  if (!wasStreaming) {
-    state.streaming = true
-    frameWatchRetain()
-  }
+  state.streaming = true
+  frameWatchRetain()
   state.streamError = null
   state.pendingUserMessage = message
+  state.pendingImages = opts.images?.length ? opts.images : null
   state.streamingTurns = []
   state.startedAt = Date.now()
   state.activeTool = null
@@ -650,8 +664,22 @@ function clearStreamingTurns(sessionId: string) {
   for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
   state.streamingTurns = []
   state.pendingUserMessage = null
+  state.pendingImages = null
   state.streamError = null
   markTailDirty(sessionId)
+}
+
+function removePendingQueueItem(sessionId: string, index: number) {
+  const state = streams.get(sessionId)
+  if (state) state.pendingQueue.splice(index, 1)
+}
+
+/** 消费 BTW 队列队首：前一轮 reload 落账后由 SessionDetail 调用 */
+async function consumePendingQueue(sessionId: string, cwd: string) {
+  const state = streams.get(sessionId)
+  if (!state || state.streaming || state.pendingQueue.length === 0) return
+  const next = state.pendingQueue.shift()!
+  await sendMessage(sessionId, cwd, next.message, next.opts)
 }
 
 /** 中断当前回复（发 interrupt 控制消息，不杀进程；
@@ -687,6 +715,8 @@ export function useStreaming() {
     stopStreaming,
     closeSession,
     clearStreamingTurns,
+    removePendingQueueItem,
+    consumePendingQueue,
     setPermissionMode,
   }
 }

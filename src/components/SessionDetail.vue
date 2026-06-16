@@ -71,7 +71,7 @@ const { goToSession } = useNotifications()
 const detail = createSessionDetail()
 const { records, loading, error, loadRecords, reloadRecords, clearRecords } = detail
 
-const { sendMessage, stopStreaming, clearStreamingTurns, setPermissionMode } = useStreaming()
+const { sendMessage, stopStreaming, clearStreamingTurns, removePendingQueueItem, consumePendingQueue, setPermissionMode } = useStreaming()
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
@@ -742,6 +742,8 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (newRecords) records.value = newRecords
     stream.value.pendingUserMessage = null
     finishedDirty.delete(sid)
+    // records 落账完成，消费 BTW 队列队首
+    if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)
   }
 })
 
@@ -1047,14 +1049,22 @@ async function onReload() {
       </template>
 
       <!-- 流式区:pendingUserMessage + streamingTurns 包进同一容器,sticky 限于本轮 -->
-      <div v-if="stream.pendingUserMessage || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
-        <div v-if="stream.pendingUserMessage" class="user-msg-sticky">
+      <div v-if="stream.pendingUserMessage || stream.pendingImages?.length || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
+        <div v-if="stream.pendingUserMessage || stream.pendingImages?.length" class="user-msg-sticky">
           <div class="flex gap-3">
             <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
             <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
               <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
               <MsgClamp>
-                <div class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
+                <div v-if="stream.pendingImages?.length" class="flex gap-2 flex-wrap mb-1">
+                  <img
+                    v-for="(img, ii) in stream.pendingImages"
+                    :key="ii"
+                    :src="`data:${img.source.media_type};base64,${img.source.data}`"
+                    class="max-w-60 max-h-40 rounded border border-border object-contain"
+                  />
+                </div>
+                <div v-if="stream.pendingUserMessage" class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
               </MsgClamp>
             </div>
           </div>
@@ -1077,7 +1087,10 @@ async function onReload() {
 
         <div v-if="stream.streaming && stream.streamingTurns.length === 0" class="flex gap-3">
           <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
-          <div class="text-xs text-muted-foreground">{{ $t('session.thinking') }}</div>
+          <div class="text-xs text-muted-foreground flex items-center gap-1.5">
+            <span v-if="stream.pendingImages?.length" class="i-carbon-upload w-3 h-3 animate-pulse" />
+            {{ stream.pendingImages?.length ? $t('session.sending') : $t('session.thinking') }}
+          </div>
         </div>
       </div>
 
@@ -1137,6 +1150,23 @@ async function onReload() {
         @select="onSlashSelect"
         @close="onSlashClose"
       />
+
+      <div v-if="stream.pendingQueue.length" class="mb-2 flex flex-col gap-1">
+        <div
+          v-for="(item, i) in stream.pendingQueue"
+          :key="i"
+          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-muted/60 border border-border/50 text-xs group"
+        >
+          <span class="i-carbon-time w-3 h-3 text-muted-foreground shrink-0" />
+          <span class="truncate text-muted-foreground flex-1">{{ item.message }}</span>
+          <button
+            class="i-carbon-close w-3 h-3 text-muted-foreground/50 hover:text-destructive shrink-0
+                   opacity-0 group-hover:opacity-100 transition-opacity"
+            :title="$t('common.delete')"
+            @click="removePendingQueueItem(effectiveSessionId!, i)"
+          />
+        </div>
+      </div>
 
       <div v-if="imageInput.images.value.length" class="mb-2 flex gap-2 flex-wrap">
         <div

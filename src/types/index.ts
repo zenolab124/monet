@@ -56,7 +56,7 @@ export type ContentBlock =
   | { type: 'thinking'; thinking: string; signature?: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[]; is_error: boolean }
-  | { type: 'image'; source: { source_type: string; media_type: string; data_prefix: string; data_length: number } }
+  | { type: 'image'; source: { source_type: string; media_type: string; data: string } }
   | { type: 'document'; source: { source_type: string; media_type: string }; title: string | null }
   | { type: string; [key: string]: unknown }
 
