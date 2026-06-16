@@ -46,7 +46,7 @@ const cliDefaultModelLabel = computed(() => {
 const currentLabel = computed(() => {
   if (currentModel.value) return currentModel.value.label
   if (props.current) return props.current
-  return cliDefaultModelLabel.value ? t('topbar.modelFollow', { name: cliDefaultModelLabel.value }) : t('topbar.modelDefault')
+  return cliDefaultModelLabel.value ?? t('topbar.modelDefault')
 })
 
 /**

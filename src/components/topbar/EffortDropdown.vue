@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { useI18n } from 'vue-i18n'
 import type { EffortLevel, EffortSetting } from '@/composables/useSessionSettings'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
+import { useAppDefaults } from '@/composables/useAppDefaults'
 
 const props = defineProps<{
   /** null = 本会话未设置(按应用默认行为发送);'ultracode' = 超档(经 --settings 注入) */
   current: EffortSetting
 }>()
-
-const { t } = useI18n()
 
 const emit = defineEmits<{
   (e: 'select', effort: EffortSetting): void
@@ -44,19 +42,22 @@ const focusedIndex = ref(0)
 const currentIndex = computed(() => OPTIONS.findIndex(o => o.value === props.current))
 
 const { cliDefaults } = useCliDefaults()
+const { appDefaults } = useAppDefaults()
 
-/** CLI 默认行为的展示标签:ultracode 全局开关优先(其自带 xhigh),其次 effortLevel */
-const cliDefaultLabel = computed(() => {
-  if (cliDefaults.value.ultracode) return 'Ultracode'
+/** 未设置时生效的档位名:app default → CLI effort_level → null */
+const fallbackLabel = computed(() => {
+  if (appDefaults.value.effort) {
+    const o = OPTIONS.find(o => o.value === appDefaults.value.effort)
+    if (o) return o.label
+  }
   const lv = cliDefaults.value.effort_level
   return lv && lv in EFFORT_LABELS ? EFFORT_LABELS[lv as EffortLevel] : null
 })
 
-/** 未设置的会话显示「默认 · <CLI 真值>」,免去用户猜测默认对应哪一档 */
 const currentLabel = computed(() => {
   const o = OPTIONS.find(o => o.value === props.current)
   if (o) return o.label
-  return cliDefaultLabel.value ? t('topbar.effortFollow', { name: cliDefaultLabel.value }) : t('topbar.effortDefault')
+  return fallbackLabel.value ?? 'High'
 })
 
 function toggle() {

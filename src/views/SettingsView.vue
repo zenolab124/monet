@@ -90,8 +90,7 @@ const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
 
-// 常规 — 暂用本地状态，后续接持久化
-const defaultEffort = ref('cli')
+const { appDefaults, setDefaultEffort } = useAppDefaults()
 const rcEnabled = ref(true)
 
 // 模型 — 暂用本地状态
@@ -292,7 +291,11 @@ function onSaved() {
 
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.defaultEffort') }}</div>
-              <select v-model="defaultEffort" class="form-select w-full">
+              <select
+                :value="appDefaults.effort ?? 'cli'"
+                class="form-select w-full"
+                @change="setDefaultEffort(($event.target as HTMLSelectElement).value === 'cli' ? null : ($event.target as HTMLSelectElement).value as any)"
+              >
                 <option value="cli">{{ $t('settings.followCli') }}</option>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>

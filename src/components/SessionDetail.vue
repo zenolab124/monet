@@ -12,6 +12,7 @@ import {
   finishedDirty,
 } from '@/composables/useStreaming'
 import { useSessionSettings, ADVISOR_MAIN_MODEL, type ChannelMark } from '@/composables/useSessionSettings'
+import { useAppDefaults } from '@/composables/useAppDefaults'
 import {
   refreshChannels,
   resolveChannel,
@@ -191,6 +192,7 @@ async function onStopStreaming() {
 
 // --- 会话级设置(模型 / 努力等级 / 渠道) ---
 const { settings, setModel, setEffort, setChannel, setAdvisor, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
+const { appDefaults } = useAppDefaults()
 
 function onModelChange(modelId: string) {
   setModel(modelId)
@@ -621,7 +623,7 @@ async function handleSend() {
   await refreshChannels()
   await sendMessage(cs.summary.id, cs.summary.cwd, text, {
     model: advisor ? ADVISOR_MAIN_MODEL : (settings.value.modelId ?? undefined),
-    effort: settings.value.effort,
+    effort: settings.value.effort ?? appDefaults.value.effort,
     channel: resolvedChannelId.value,
     advisor,
     images,
