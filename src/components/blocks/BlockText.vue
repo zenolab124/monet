@@ -49,10 +49,6 @@ watch(() => props.streaming ? displayText.value : null, (text) => {
   }
 })
 
-watch(() => props.streaming, (s) => {
-  if (!s) { stableHtml.value = ''; stableLen.value = 0 }
-})
-
 // ---- 渐进 shiki:流式结束不同帧 burst,排队逐块上色 ----
 
 const deferredHtml = ref('')
@@ -63,12 +59,15 @@ watch(() => props.streaming, (now, was) => {
     wasStreaming.value = true
     renderMarkdownDeferred(displayText.value).then(html => {
       deferredHtml.value = html
+      stableHtml.value = ''
+      stableLen.value = 0
     })
   }
 })
 
 const renderedHtml = computed(() => {
-  if (props.streaming) {
+  const pendingShiki = wasStreaming.value && !deferredHtml.value
+  if (props.streaming || pendingShiki) {
     const text = displayText.value
     if (stableLen.value > 0) {
       const tail = text.slice(stableLen.value)
@@ -77,7 +76,7 @@ const renderedHtml = computed(() => {
     return renderMarkdownPlain(text)
   }
   if (wasStreaming.value) {
-    return deferredHtml.value || renderMarkdownPlain(displayText.value)
+    return deferredHtml.value
   }
   return renderMarkdownCached(displayText.value)
 })
