@@ -50,12 +50,14 @@ async function loadExternalLocales() {
 
 function init() {
   setLocale(locale.value)
+  invoke('set_agent_locale', { locale: locale.value }).catch(() => {})
   loadExternalLocales()
 }
 
 watch(locale, (code) => {
   localStorage.setItem(STORAGE_KEY, code)
   setLocale(code)
+  invoke('set_agent_locale', { locale: code }).catch(() => {})
 })
 
 function switchLocale(code: string) {

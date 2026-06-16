@@ -138,7 +138,7 @@ fn extract_conversation_snippet(project_id: &str, session_id: &str) -> Option<(S
                     }
                 };
                 if !text.is_empty() {
-                    let truncated: String = text.chars().take(100).collect();
+                    let truncated: String = text.chars().take(500).collect();
                     lines.push(truncated);
                 }
             }
@@ -219,6 +219,15 @@ pub async fn translate_settings_fields(fields_json: String) -> Result<String, St
 }
 
 #[tauri::command]
+pub async fn extract_settings_defaults(fields_json: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cli_settings::extract_defaults_from_binary(&fields_json)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn generate_tags(
     project_id: String,
     session_id: String,
@@ -283,6 +292,11 @@ pub async fn generate_summary(
     });
 
     Ok(summary)
+}
+
+#[tauri::command]
+pub fn set_agent_locale(locale: String) {
+    crate::agent::set_locale(&locale);
 }
 
 #[tauri::command]

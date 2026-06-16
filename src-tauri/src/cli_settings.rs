@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Mutex;
 
 use serde_json::Value;
@@ -133,4 +134,112 @@ pub fn update_cli_settings(updates: HashMap<String, Value>) -> Result<(), String
 #[tauri::command]
 pub fn refresh_settings_schema() {
     std::thread::spawn(fetch_and_cache_schema);
+}
+
+/// 定位 claude CLI 的真实二进制路径（解析 symlink）
+pub fn find_claude_binary() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let versions_dir = home.join(".local/share/claude/versions");
+    if versions_dir.is_dir() {
+        let mut versions: Vec<_> = fs::read_dir(&versions_dir)
+            .ok()?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().ok().is_some_and(|ft| ft.is_file()))
+            .collect();
+        versions.sort_by_key(|e| e.file_name());
+        if let Some(latest) = versions.last() {
+            return Some(latest.path());
+        }
+    }
+    let output = Command::new("sh")
+        .args(["-c", "readlink -f $(which claude) 2>/dev/null"])
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !path.is_empty() && PathBuf::from(&path).is_file() {
+        return Some(PathBuf::from(path));
+    }
+    None
+}
+
+/// 从 CLI 二进制中提取字段默认值（Python 读二进制 + 正则模式匹配，不经 Agent）
+/// 返回 JSON 字符串：[{key, default, confidence}]
+pub fn extract_defaults_from_binary(fields_json: &str) -> Result<String, String> {
+    let binary = find_claude_binary()
+        .ok_or_else(|| "找不到 Claude CLI 二进制".to_string())?;
+    eprintln!("[extract_defaults] binary: {}", binary.display());
+
+    let script = r#"
+import sys, json, re
+
+binary_path = sys.argv[1]
+fields = json.loads(sys.argv[2])
+
+with open(binary_path, 'rb') as f:
+    data = f.read()
+
+code_markers = [b'??', b'===', b'!==', b'return', b'void 0']
+
+results = []
+for field in fields:
+    key = field['key']
+    needle = key.encode('utf-8')
+    snippets = []
+    pos = 0
+    while len(snippets) < 5:
+        idx = data.find(needle, pos)
+        if idx == -1:
+            break
+        start = max(0, idx - 200)
+        end = min(len(data), idx + len(needle) + 200)
+        chunk = data[start:end]
+        if any(m in chunk for m in code_markers):
+            snippets.append(chunk.decode('utf-8', errors='replace'))
+        pos = idx + 1
+
+    default = None
+    confidence = 'low'
+    ek = re.escape(key)
+
+    for ctx in snippets:
+        if re.search(ek + r'===!1\)return!1;return!0', ctx):
+            default, confidence = True, 'high'; break
+        if re.search(ek + r'===!0[^0-9]', ctx):
+            default, confidence = False, 'high'; break
+        m = re.search(ek + r'\?\?(!0|true)', ctx)
+        if m:
+            default, confidence = True, 'high'; break
+        m = re.search(ek + r'\?\?(!1|false)', ctx)
+        if m:
+            default, confidence = False, 'high'; break
+        m = re.search(ek + r'\?\?"([^"]+)"', ctx)
+        if m:
+            default, confidence = m.group(1), 'high'; break
+        m = re.search(ek + r'\?\?(\d+)', ctx)
+        if m:
+            default, confidence = int(m.group(1)), 'high'; break
+        m = re.search(ek + r'!==void 0\)return[^;]+;return(!0|!1|true|false)', ctx)
+        if m:
+            val = m.group(1)
+            default, confidence = val in ('!0', 'true'), 'high'; break
+        if re.search(ek + r'!==!1', ctx):
+            default, confidence = True, 'medium'
+
+    results.append({'key': key, 'default': default, 'confidence': confidence})
+
+print(json.dumps(results))
+"#;
+
+    let output = Command::new("python3")
+        .args(["-c", script, &binary.display().to_string(), fields_json])
+        .output()
+        .map_err(|e| format!("python3 执行失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("python3 错误: {}", stderr.chars().take(300).collect::<String>()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(stdout)
 }

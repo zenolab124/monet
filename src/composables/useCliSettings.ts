@@ -118,14 +118,23 @@ interface FieldTranslation {
   desc: string
 }
 
+interface ExtractedDefault {
+  key: string
+  default: unknown
+  confidence: 'high' | 'medium' | 'low'
+}
+
 const TRANSLATIONS_STORAGE_KEY = 'cc-space:settings-translations'
+const DEFAULTS_STORAGE_KEY = 'cc-space:settings-defaults:v2'
 
 const schema = ref<Record<string, SchemaProperty>>({})
 const settings = ref<Record<string, unknown>>({})
 const translations = ref<Record<string, FieldTranslation>>({})
+const extractedDefaults = ref<Record<string, ExtractedDefault>>({})
 const hasSchema = ref(false)
 const loading = ref(false)
 const translating = ref(false)
+const extracting = ref(false)
 let loaded = false
 
 function loadCachedTranslations() {
@@ -139,7 +148,19 @@ function saveCachedTranslations() {
   localStorage.setItem(TRANSLATIONS_STORAGE_KEY, JSON.stringify(translations.value))
 }
 
+function loadCachedDefaults() {
+  try {
+    const raw = localStorage.getItem(DEFAULTS_STORAGE_KEY)
+    if (raw) extractedDefaults.value = JSON.parse(raw)
+  } catch { /* ignore */ }
+}
+
+function saveCachedDefaults() {
+  localStorage.setItem(DEFAULTS_STORAGE_KEY, JSON.stringify(extractedDefaults.value))
+}
+
 loadCachedTranslations()
+loadCachedDefaults()
 
 export function useCliSettings() {
   async function load(force = false) {
@@ -263,6 +284,53 @@ export function useCliSettings() {
     return translations.value[key] ?? null
   }
 
+  async function extractDefaultsBatch(keys: string[]): Promise<void> {
+    const batch = keys.map(k => {
+      const s = schema.value[k]
+      const t = Array.isArray(s?.type) ? s!.type[0] : s?.type
+      return {
+        key: k,
+        type: t ?? 'unknown',
+      }
+    })
+    const raw = await invoke<string>('extract_settings_defaults', {
+      fieldsJson: JSON.stringify(batch),
+    })
+    const parsed: ExtractedDefault[] = JSON.parse(raw)
+    const updated = { ...extractedDefaults.value }
+    for (const item of parsed) {
+      if (item.key && item.confidence !== undefined) {
+        updated[item.key] = item
+      }
+    }
+    extractedDefaults.value = updated
+    saveCachedDefaults()
+  }
+
+  async function extractMissingDefaults() {
+    const needExtract = Object.keys(schema.value).filter(k =>
+      schema.value[k]?.default === undefined && !extractedDefaults.value[k],
+    )
+    if (!needExtract.length) return
+
+    extracting.value = true
+    try {
+      await extractDefaultsBatch(needExtract)
+    } catch (e) {
+      console.warn('[useCliSettings] 默认值提取失败:', e)
+    } finally {
+      extracting.value = false
+    }
+  }
+
+  function getDefault(key: string): { value: unknown; source: 'schema' | 'extracted' } | null {
+    const s = schema.value[key]
+    if (s?.default !== undefined) return { value: s.default, source: 'schema' }
+    const ext = extractedDefaults.value[key]
+    if (ext && ext.confidence !== 'low') return { value: ext.default, source: 'extracted' }
+    return null
+  }
+
   async function refreshSchema() {
     await invoke('refresh_settings_schema')
     await load(true)
@@ -274,7 +342,9 @@ export function useCliSettings() {
     hasSchema,
     loading,
     translating,
+    extracting,
     translations,
+    extractedDefaults,
     groups,
     groupOrder,
     load,
@@ -282,6 +352,8 @@ export function useCliSettings() {
     removeField,
     refreshSchema,
     translateMissing,
+    extractMissingDefaults,
     getTranslation,
+    getDefault,
   }
 }

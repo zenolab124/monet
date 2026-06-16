@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCliSettings, type SettingsField, type SchemaProperty } from '@/composables/useCliSettings'
 import { useUiState } from '@/composables/useUiState'
@@ -7,20 +7,26 @@ import { useUiState } from '@/composables/useUiState'
 const { t } = useI18n()
 const { activeSection } = useUiState()
 const {
-  hasSchema, loading, translating, groups, groupOrder,
+  hasSchema, loading, translating, extracting, groups, groupOrder,
   load, updateField, removeField, refreshSchema,
-  translateMissing, getTranslation,
+  translateMissing, extractMissingDefaults, getTranslation, getDefault,
 } = useCliSettings()
 
-const expandedGroups = ref<Set<string>>(new Set())
 const addingKey = ref('')
 const addingValue = ref('')
 const savingKeys = ref<Set<string>>(new Set())
 const search = ref('')
+const onlyConfigured = ref(false)
+const configuredCount = computed(() =>
+  Object.values(groups.value).flat().filter(f => f.value !== undefined).length,
+)
+const activeGroup = ref('')
 
-function toggleGroup(g: string) {
-  if (expandedGroups.value.has(g)) expandedGroups.value.delete(g)
-  else expandedGroups.value.add(g)
+const contentRef = ref<HTMLElement | null>(null)
+const groupEls = ref<Record<string, HTMLElement>>({})
+
+function setGroupRef(g: string, el: any) {
+  if (el) groupEls.value[g] = el as HTMLElement
 }
 
 function fieldMatchesSearch(f: SettingsField, q: string): boolean {
@@ -33,12 +39,12 @@ function fieldMatchesSearch(f: SettingsField, q: string): boolean {
 
 const filteredGroups = computed(() => {
   const q = search.value.trim().toLowerCase()
-  if (!q) return groups.value
-
   const result: Record<string, SettingsField[]> = {}
   for (const [g, fields] of Object.entries(groups.value)) {
-    const matched = fields.filter(f => fieldMatchesSearch(f, q))
-    if (matched.length) result[g] = matched
+    let list = fields
+    if (onlyConfigured.value) list = list.filter(f => f.value !== undefined)
+    if (q) list = list.filter(f => fieldMatchesSearch(f, q))
+    if (list.length) result[g] = list
   }
   return result
 })
@@ -49,8 +55,60 @@ const filteredGroupOrder = computed(() => {
   return groupOrder.value.filter(g => filteredGroups.value[g]?.length)
 })
 
-onMounted(async () => { await load(); translateMissing() })
-watch(activeSection, async (s) => { if (s === 'settings') { await load(); translateMissing() } })
+let observer: IntersectionObserver | null = null
+
+function setupObserver() {
+  if (observer) observer.disconnect()
+  const root = contentRef.value?.closest('.overflow-y-auto') as HTMLElement | null
+  if (!root) return
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) {
+          const g = (e.target as HTMLElement).dataset.group
+          if (g) activeGroup.value = g
+          break
+        }
+      }
+    },
+    { root, rootMargin: '-20px 0px -70% 0px', threshold: 0 },
+  )
+  for (const el of Object.values(groupEls.value)) {
+    observer.observe(el)
+  }
+}
+
+onMounted(async () => {
+  await load()
+  translateMissing()
+  extractMissingDefaults()
+  await nextTick()
+  if (!activeGroup.value && filteredGroupOrder.value.length) {
+    activeGroup.value = filteredGroupOrder.value[0]
+  }
+  setupObserver()
+})
+
+watch(activeSection, async (s) => {
+  if (s === 'settings') {
+    await load()
+    translateMissing()
+    extractMissingDefaults()
+  }
+})
+
+watch(filteredGroupOrder, async () => {
+  await nextTick()
+  setupObserver()
+})
+
+onBeforeUnmount(() => { observer?.disconnect() })
+
+function scrollToGroup(g: string) {
+  activeGroup.value = g
+  const el = groupEls.value[g]
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 function fieldType(field: SettingsField): string {
   const s = field.schema
@@ -79,8 +137,15 @@ function shortDesc(desc?: string): string {
   return s
 }
 
+function effectiveBool(field: SettingsField): boolean {
+  if (field.value !== undefined) return !!field.value
+  const d = getDefault(field.key)
+  if (d) return !!d.value
+  return false
+}
+
 async function onToggle(field: SettingsField) {
-  const cur = field.value as boolean | undefined
+  const cur = effectiveBool(field)
   savingKeys.value.add(field.key)
   try {
     await updateField(field.key, !cur)
@@ -153,42 +218,55 @@ async function onRemove(key: string) {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-4">
-      <div>
-        <h2 class="text-[13px] font-semibold">{{ $t('settings.cliConfig.title') }}</h2>
-        <p class="text-[11px] text-muted-foreground mt-0.5">
-          {{ $t('settings.cliConfig.subtitle') }}
-          <span v-if="hasSchema" class="ml-1">{{ $t('settings.cliConfig.schemaLoaded') }}</span>
-          <span v-else class="ml-1 text-accent">{{ $t('settings.cliConfig.schemaNotReady') }}</span>
-          <span v-if="translating" class="ml-1">{{ $t('settings.cliConfig.aiTranslating') }}</span>
-        </p>
+  <div class="cli-root">
+    <!-- 顶部：标题 + 搜索 -->
+    <div class="cli-header">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <h2 class="text-[13px] font-semibold">{{ $t('settings.cliConfig.title') }}</h2>
+          <p class="text-[11px] text-muted-foreground mt-0.5">
+            {{ $t('settings.cliConfig.subtitle') }}
+            <span v-if="hasSchema" class="ml-1">{{ $t('settings.cliConfig.schemaLoaded') }}</span>
+            <span v-else class="ml-1 text-accent">{{ $t('settings.cliConfig.schemaNotReady') }}</span>
+            <span v-if="translating" class="ml-1">{{ $t('settings.cliConfig.aiTranslating') }}</span>
+            <span v-if="extracting" class="ml-1">{{ $t('settings.cliConfig.aiExtracting') }}</span>
+          </p>
+        </div>
       </div>
-      <button
-        class="px-2 py-1 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        :disabled="loading"
-        @click="refreshSchema"
-      >
-        <span class="i-carbon-renew w-3 h-3 mr-1" :class="{ 'animate-spin': loading }" />{{ $t('settings.cliConfig.refreshSchema') }}
-      </button>
-    </div>
-
-    <!-- 搜索框 -->
-    <div class="search-bar">
-      <span class="i-carbon-search w-3.5 h-3.5 text-muted-foreground shrink-0" />
-      <input
-        v-model="search"
-        type="text"
-        class="search-input"
-        :placeholder="$t('settings.cliConfig.searchPlaceholder')"
-      />
-      <button
-        v-if="search"
-        class="text-muted-foreground hover:text-foreground p-0.5"
-        @click="search = ''"
-      >
-        <span class="i-carbon-close w-3 h-3" />
-      </button>
+      <div class="flex gap-2 items-center">
+        <div class="search-bar flex-1">
+          <span class="i-carbon-search w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <input
+            v-model="search"
+            type="text"
+            class="search-input"
+            :placeholder="$t('settings.cliConfig.searchPlaceholder')"
+          />
+          <button
+            v-if="search"
+            class="text-muted-foreground hover:text-foreground p-0.5"
+            @click="search = ''"
+          >
+            <span class="i-carbon-close w-3 h-3" />
+          </button>
+        </div>
+        <button
+          :class="['filter-chip', { active: onlyConfigured }]"
+          @click="onlyConfigured = !onlyConfigured"
+        >
+          <span class="i-carbon-filter w-3 h-3" />
+          {{ $t('settings.cliConfig.onlyConfigured') }}
+          <span class="filter-chip-count">{{ configuredCount }}</span>
+        </button>
+        <button
+          class="filter-chip"
+          :disabled="loading"
+          @click="refreshSchema"
+        >
+          <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': loading }" />
+          {{ $t('settings.cliConfig.refreshSchema') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="loading && !groupOrder.length" class="text-xs text-muted-foreground py-8 text-center">
@@ -199,156 +277,187 @@ async function onRemove(key: string) {
       {{ $t('common.noMatch') }}
     </div>
 
-    <!-- 分组手风琴 -->
-    <div v-for="g in filteredGroupOrder" :key="g" class="group-section">
-      <button class="group-header" @click="toggleGroup(g)">
-        <span
-          class="i-carbon-chevron-right w-3 h-3 transition-transform"
-          :class="{ 'rotate-90': expandedGroups.has(g) || !!search }"
-        />
-        <span class="font-medium">{{ g }}</span>
-        <span class="text-muted-foreground ml-auto">{{ filteredGroups[g]?.length ?? 0 }}</span>
-      </button>
+    <!-- 主体：侧边栏 + 平铺内容 -->
+    <div v-else class="cli-body">
+      <nav class="cli-nav">
+        <button
+          v-for="g in filteredGroupOrder"
+          :key="g"
+          :class="['cli-nav-item', { active: activeGroup === g }]"
+          @click="scrollToGroup(g)"
+        >
+          <span class="truncate">{{ g }}</span>
+          <span class="cli-nav-count">{{ filteredGroups[g]?.length ?? 0 }}</span>
+        </button>
+      </nav>
 
-      <div v-show="expandedGroups.has(g) || !!search" class="group-body">
-        <div v-for="f in filteredGroups[g]" :key="f.key" class="field-row">
-          <div class="field-meta">
-            <div class="flex items-center gap-1.5">
-              <template v-if="getTranslation(f.key)">
-                <span class="text-[11.5px] font-medium">{{ getTranslation(f.key)!.name }}</span>
-                <span class="font-mono text-[10px] text-muted-foreground">{{ f.key }}</span>
-              </template>
-              <template v-else>
-                <span class="font-mono text-[11px] font-medium">{{ f.key }}</span>
-              </template>
-              <span v-if="f.source === 'custom'" class="custom-badge">{{ $t('settings.cliConfig.custom') }}</span>
-              <span v-if="savingKeys.has(f.key)" class="text-[10px] text-accent">{{ $t('common.saving') }}</span>
+      <div ref="contentRef" class="cli-content">
+        <section
+          v-for="g in filteredGroupOrder"
+          :key="g"
+          :ref="(el) => setGroupRef(g, el)"
+          :data-group="g"
+          class="group-section"
+        >
+          <h3 class="group-title">{{ g }}</h3>
+
+          <div v-for="f in filteredGroups[g]" :key="f.key" class="field-row">
+            <div class="field-meta">
+              <div class="flex items-center gap-1.5">
+                <template v-if="getTranslation(f.key)">
+                  <span class="text-[11.5px] font-medium">{{ getTranslation(f.key)!.name }}</span>
+                  <span class="font-mono text-[10px] text-muted-foreground">{{ f.key }}</span>
+                </template>
+                <template v-else>
+                  <span class="font-mono text-[11px] font-medium">{{ f.key }}</span>
+                </template>
+                <span v-if="f.source === 'custom'" class="custom-badge">{{ $t('settings.cliConfig.custom') }}</span>
+                <span v-if="savingKeys.has(f.key)" class="text-[10px] text-accent">{{ $t('common.saving') }}</span>
+              </div>
+              <div class="text-[10.5px] text-muted-foreground mt-0.5 leading-snug">
+                <template v-if="getTranslation(f.key)?.desc">
+                  {{ getTranslation(f.key)!.desc }}
+                </template>
+                <template v-else-if="f.schema?.description">
+                  {{ shortDesc(f.schema.description) }}
+                </template>
+              </div>
             </div>
-            <div class="text-[10.5px] text-muted-foreground mt-0.5 leading-snug">
-              <template v-if="getTranslation(f.key)?.desc">
-                {{ getTranslation(f.key)!.desc }}
+
+            <div class="field-control">
+              <!-- boolean -->
+              <template v-if="fieldType(f) === 'boolean'">
+                <span
+                  v-if="!isSet(f) && getDefault(f.key)"
+                  :class="['source-badge', getDefault(f.key)!.source === 'schema' ? 'source-schema' : 'source-extracted']"
+                  :title="getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.sourceSchema') : $t('settings.cliConfig.sourceExtracted')"
+                >{{ getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.default') : $t('settings.cliConfig.extracted') }}</span>
+                <button
+                  :class="['form-toggle', { on: effectiveBool(f) }]"
+                  @click="onToggle(f)"
+                >
+                  <span class="form-toggle-knob" />
+                </button>
               </template>
-              <template v-else-if="f.schema?.description">
-                {{ shortDesc(f.schema.description) }}
+
+              <!-- enum / select -->
+              <template v-else-if="fieldType(f) === 'enum'">
+                <select
+                  class="form-select form-select-sm max-w-[220px]"
+                  :value="f.value ?? '__unset__'"
+                  @change="onEnumChange(f, $event)"
+                >
+                  <option value="__unset__">
+                    {{ getDefault(f.key)
+                      ? `${getDefault(f.key)!.source === 'schema' ? $t('settings.cliConfig.default') : $t('settings.cliConfig.extracted')}: ${getDefault(f.key)!.value}`
+                      : $t('settings.cliConfig.notSet') }}
+                  </option>
+                  <option v-for="opt in f.schema?.enum" :key="String(opt)" :value="opt">
+                    {{ opt }}
+                  </option>
+                </select>
               </template>
+
+              <!-- integer / number -->
+              <template v-else-if="fieldType(f) === 'integer' || fieldType(f) === 'number'">
+                <input
+                  type="number"
+                  class="form-input form-input-sm font-mono w-24"
+                  :value="f.value ?? ''"
+                  :placeholder="getDefault(f.key) ? String(getDefault(f.key)!.value) : ''"
+                  :min="f.schema?.minimum"
+                  :max="f.schema?.maximum"
+                  @blur="onNumberBlur(f, $event)"
+                />
+              </template>
+
+              <!-- string (simple) -->
+              <template v-else-if="fieldType(f) === 'string' && !f.schema?.properties">
+                <input
+                  type="text"
+                  class="form-input form-input-sm font-mono max-w-[220px]"
+                  :value="f.value ?? ''"
+                  :placeholder="getDefault(f.key) ? String(getDefault(f.key)!.value) : ''"
+                  @blur="onStringBlur(f, $event)"
+                />
+              </template>
+
+              <!-- object / array / complex -->
+              <template v-else>
+                <textarea
+                  class="form-textarea form-textarea-sm font-mono w-[220px]"
+                  :value="displayValue(f.value)"
+                  rows="3"
+                  spellcheck="false"
+                  @blur="onJsonBlur(f, $event)"
+                />
+              </template>
+
+              <!-- 删除按钮（仅已设置的值） -->
+              <button
+                v-if="isSet(f)"
+                class="remove-btn"
+                :title="$t('settings.cliConfig.removeField')"
+                @click="onRemove(f.key)"
+              >
+                <span class="i-carbon-close w-3 h-3" />
+              </button>
             </div>
           </div>
+        </section>
 
-          <div class="field-control">
-            <!-- boolean -->
-            <template v-if="fieldType(f) === 'boolean'">
-              <button
-                :class="['form-toggle', { on: !!f.value }]"
-                @click="onToggle(f)"
-              >
-                <span class="form-toggle-knob" />
-              </button>
-            </template>
-
-            <!-- enum / select -->
-            <template v-else-if="fieldType(f) === 'enum'">
-              <select
-                class="form-select form-select-sm max-w-[220px]"
-                :value="f.value ?? '__unset__'"
-                @change="onEnumChange(f, $event)"
-              >
-                <option value="__unset__">{{ $t('settings.cliConfig.notSet') }}</option>
-                <option v-for="opt in f.schema?.enum" :key="String(opt)" :value="opt">
-                  {{ opt }}
-                </option>
-              </select>
-            </template>
-
-            <!-- integer / number -->
-            <template v-else-if="fieldType(f) === 'integer' || fieldType(f) === 'number'">
+        <!-- 新增自定义字段 -->
+        <div class="add-section">
+          <h3 class="text-[11px] font-medium text-muted-foreground mb-2">{{ $t('settings.cliConfig.addConfig') }}</h3>
+          <div class="flex gap-2 items-end">
+            <div class="flex-1 min-w-0">
+              <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldName') }}</label>
               <input
-                type="number"
-                class="form-input form-input-sm font-mono w-24"
-                :value="f.value ?? ''"
-                :placeholder="f.schema?.default != null ? String(f.schema.default) : ''"
-                :min="f.schema?.minimum"
-                :max="f.schema?.maximum"
-                @blur="onNumberBlur(f, $event)"
-              />
-            </template>
-
-            <!-- string (simple) -->
-            <template v-else-if="fieldType(f) === 'string' && !f.schema?.properties">
-              <input
+                v-model="addingKey"
                 type="text"
-                class="form-input form-input-sm font-mono max-w-[220px]"
-                :value="f.value ?? ''"
-                :placeholder="f.schema?.default != null ? String(f.schema.default) : ''"
-                @blur="onStringBlur(f, $event)"
+                class="form-input form-input-sm font-mono w-full"
+                placeholder="camelCase key"
               />
-            </template>
-
-            <!-- object / array / complex -->
-            <template v-else>
-              <textarea
-                class="form-textarea form-textarea-sm font-mono w-[220px]"
-                :value="displayValue(f.value)"
-                rows="3"
-                spellcheck="false"
-                @blur="onJsonBlur(f, $event)"
+            </div>
+            <div class="flex-1 min-w-0">
+              <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldValue') }}</label>
+              <input
+                v-model="addingValue"
+                type="text"
+                class="form-input form-input-sm font-mono w-full"
+                placeholder="true / &quot;text&quot; / {}"
               />
-            </template>
-
-            <!-- 删除按钮（仅已设置的值） -->
+            </div>
             <button
-              v-if="isSet(f)"
-              class="remove-btn"
-              :title="$t('settings.cliConfig.removeField')"
-              @click="onRemove(f.key)"
+              class="px-2.5 py-[5px] text-xs rounded bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0"
+              :disabled="!addingKey.trim()"
+              @click="onAddCustom"
             >
-              <span class="i-carbon-close w-3 h-3" />
+              {{ $t('common.add') }}
             </button>
           </div>
         </div>
-      </div>
-    </div>
-
-    <!-- 新增自定义字段 -->
-    <div class="add-section">
-      <h3 class="text-[11px] font-medium text-muted-foreground mb-2">{{ $t('settings.cliConfig.addConfig') }}</h3>
-      <div class="flex gap-2 items-end">
-        <div class="flex-1 min-w-0">
-          <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldName') }}</label>
-          <input
-            v-model="addingKey"
-            type="text"
-            class="form-input form-input-sm font-mono w-full"
-            placeholder="camelCase key"
-          />
-        </div>
-        <div class="flex-1 min-w-0">
-          <label class="text-[10px] text-muted-foreground">{{ $t('settings.cliConfig.fieldValue') }}</label>
-          <input
-            v-model="addingValue"
-            type="text"
-            class="form-input form-input-sm font-mono w-full"
-            placeholder="true / &quot;text&quot; / {}"
-          />
-        </div>
-        <button
-          class="px-2.5 py-[5px] text-xs rounded bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0"
-          :disabled="!addingKey.trim()"
-          @click="onAddCustom"
-        >
-          {{ $t('common.add') }}
-        </button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.cli-root {
+  display: flex;
+  flex-direction: column;
+}
+
+.cli-header {
+  margin-bottom: 10px;
+}
+
 .search-bar {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  margin-bottom: 8px;
+  margin-top: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--popover);
@@ -365,27 +474,116 @@ async function onRemove(key: string) {
 }
 .search-input::placeholder { color: var(--muted-foreground); }
 
-.group-section {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 6px;
-  overflow: hidden;
+/* 主体：侧边栏 + 内容 */
+.cli-body {
+  display: flex;
+  gap: 0;
 }
-.group-header {
+
+/* 分组导航 */
+.cli-nav {
+  width: 120px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  padding-right: 8px;
+  border-right: 1px solid var(--border);
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+}
+
+.cli-nav-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
-  padding: 8px 12px;
-  font-size: 12px;
-  background: var(--background);
+  padding: 5px 8px;
+  font-size: 11px;
+  text-align: left;
+  color: var(--muted-foreground);
+  border-radius: var(--radius);
+  transition: all 0.15s;
+  margin-bottom: 1px;
   border: none;
+  background: none;
   cursor: pointer;
-  color: var(--foreground);
-  transition: background 0.15s;
 }
-.group-header:hover { background: var(--muted); }
-.group-body { padding: 0 12px 8px; }
+.cli-nav-item:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.cli-nav-item.active {
+  color: var(--primary);
+  font-weight: 500;
+  background: var(--card);
+  box-shadow: var(--shadow-paper);
+}
+.cli-nav-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+/* 平铺内容 */
+.cli-content {
+  flex: 1;
+  min-width: 0;
+  padding-left: 14px;
+}
+
+.filter-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  background: var(--popover);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.filter-chip:hover { color: var(--foreground); border-color: var(--ring); }
+.filter-chip.active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: hsl(var(--primary) / 0.08);
+}
+.filter-chip-count {
+  font-size: 10px;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 100px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.filter-chip.active .filter-chip-count {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.group-section {
+  margin-bottom: 20px;
+}
+.group-section:last-of-type {
+  margin-bottom: 12px;
+}
+
+.group-title {
+  font-size: 12px;
+  font-weight: 600;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
 
 .field-row {
   display: flex;
@@ -410,6 +608,23 @@ async function onRemove(key: string) {
   border: 1px solid var(--accent);
   color: var(--accent);
   border-radius: 3px;
+}
+.source-badge {
+  padding: 0 4px;
+  font-size: 9px;
+  line-height: 14px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: help;
+}
+.source-schema {
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.source-extracted {
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  opacity: 0.8;
 }
 
 .remove-btn {
