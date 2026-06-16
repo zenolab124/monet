@@ -71,3 +71,32 @@ export function renderMarkdownCached(text: string): string {
   }
   return html
 }
+
+// ---- 渐进 shiki 队列:流式结束时逐块上色,每帧处理一块,消除同帧 burst ----
+
+const deferQueue: Array<{ text: string; resolve: (html: string) => void }> = []
+let deferRunning = false
+
+function drainDeferQueue() {
+  if (deferQueue.length === 0) { deferRunning = false; return }
+  deferRunning = true
+  const { text, resolve } = deferQueue.shift()!
+  resolve(renderMarkdownCached(text))
+  if (deferQueue.length > 0) requestAnimationFrame(drainDeferQueue)
+  else deferRunning = false
+}
+
+/** 异步 shiki 渲染:缓存命中则同步返回,未命中则排队每帧处理一块 */
+export function renderMarkdownDeferred(text: string): Promise<string> {
+  const hit = htmlCache.get(text)
+  if (hit !== undefined) {
+    htmlCache.delete(text)
+    htmlCache.set(text, hit)
+    probeMd('hit', 0)
+    return Promise.resolve(hit)
+  }
+  return new Promise(resolve => {
+    deferQueue.push({ text, resolve })
+    if (!deferRunning) requestAnimationFrame(drainDeferQueue)
+  })
+}
