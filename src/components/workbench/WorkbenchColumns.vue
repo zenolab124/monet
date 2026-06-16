@@ -131,8 +131,8 @@ watch(focusColumnRequest, async (req) => {
       :index="i"
       :flex="activeTab.columnSizes[i]"
     >
-      <template #default="{ isDragging: colDragging }">
-        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" />
+      <template #default="{ isDragging: colDragging, handleRef }">
+        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" />
         <!-- 列间 resize 手柄（绝对定位在右边界，不参与 flex 布局） -->
         <div
           v-if="i < activeTab.columns.length - 1"

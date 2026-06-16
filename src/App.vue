@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TitleBar from '@/components/TitleBar.vue'
 import TitleBarTools from '@/components/TitleBarTools.vue'
@@ -21,7 +21,7 @@ import { initStreamListeners } from '@/composables/useStreaming'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
 import { useRoutines } from '@/composables/useRoutines'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
-import { DragDropProvider } from '@dnd-kit/vue'
+import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 
 const { projects, loadProjects } = useProjects()
 const { selectSession } = useSessions()
@@ -47,7 +47,43 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// --- 拖拽实时排序 ---
+const draggingSessionId = ref<string | null>(null)
+const ghostHtml = ref('')
+
+function onBeforeDragStart(event: any) {
+  const sourceId = String(event.operation?.source?.id ?? '')
+  if (sourceId.startsWith('session:')) {
+    draggingSessionId.value = sourceId.slice(8)
+    const el = event.operation?.source?.element
+    if (el instanceof HTMLElement) {
+      ghostHtml.value = el.outerHTML
+    }
+  }
+}
+
+function onWorkbenchDragOver(event: any) {
+  const source = event.operation?.source
+  const target = event.operation?.target
+  if (!source || !target) return
+  const sourceId = String(source.id ?? '')
+  const targetId = String(target.id ?? '')
+  if (sourceId.startsWith('session:') && targetId.startsWith('session-drop:')) {
+    const fromSid = sourceId.slice(8)
+    const toSid = targetId.slice(13)
+    if (fromSid === toSid) return
+    const tab = activeTab.value
+    const fromIdx = tab.sessionIds.indexOf(fromSid)
+    const toIdx = tab.sessionIds.indexOf(toSid)
+    if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
+      reorderSessions(tab.id, fromIdx, toIdx)
+    }
+  }
+}
+
 function onWorkbenchDragEnd(event: any) {
+  draggingSessionId.value = null
+  ghostHtml.value = ''
   if (event.canceled) return
   const source = event.operation?.source
   const target = event.operation?.target
@@ -63,19 +99,6 @@ function onWorkbenchDragEnd(event: any) {
     const toIdx = state.value.tabs.findIndex(t => t.id === targetId.slice(4))
     if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
       reorderTabs(fromIdx, toIdx > fromIdx ? toIdx : toIdx)
-    }
-    return
-  }
-
-  // Monitor card reorder: session dragged onto another session's droppable
-  if (sourceId.startsWith('session:') && targetId.startsWith('session-drop:')) {
-    const fromSid = sourceId.slice(8)
-    const toSid = targetId.slice(13)
-    const tab = activeTab.value
-    const fromIdx = tab.sessionIds.indexOf(fromSid)
-    const toIdx = tab.sessionIds.indexOf(toSid)
-    if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
-      reorderSessions(tab.id, fromIdx, toIdx)
     }
     return
   }
@@ -125,7 +148,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <div class="h-screen w-screen flex flex-col bg-background text-foreground" @contextmenu.prevent>
-    <DragDropProvider @drag-end="onWorkbenchDragEnd">
+    <DragDropProvider @before-drag-start="onBeforeDragStart" @drag-over="onWorkbenchDragOver" @drag-end="onWorkbenchDragEnd">
       <TitleBar>
         <template #leading>
           <WorkbenchTabs v-if="activeSection === 'workbench'" />
@@ -143,6 +166,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
         <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
       </div>
+
+      <DragOverlay :disabled="!draggingSessionId">
+        <div v-if="ghostHtml" v-html="ghostHtml" class="pointer-events-none opacity-85" />
+      </DragOverlay>
 
       <ToastStack />
       <ConfirmDialog />

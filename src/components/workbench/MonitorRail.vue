@@ -60,7 +60,11 @@ async function onAddClick() {
     <div v-if="hint" class="px-0.5 text-[10.5px] text-muted-foreground shrink-0">{{ hint }}</div>
 
     <!-- 卡片滚动区:卡片不压缩(shrink-0),超出即滚;＋格固定在滚动区外永远可见 -->
-    <div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
+    <TransitionGroup
+      tag="div"
+      name="card"
+      class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2"
+    >
       <MonitorCard
         v-for="sid in activeTab.sessionIds"
         :key="sid"
@@ -72,11 +76,12 @@ async function onAddClick() {
       <!-- 空态(FR-001) -->
       <div
         v-if="activeTab.sessionIds.length === 0"
+        key="empty-state"
         class="px-2 py-6 text-center text-xs text-muted-foreground leading-relaxed"
       >
         {{ $t('workbench.rail.empty') }}
       </div>
-    </div>
+    </TransitionGroup>
 
     <!-- ＋ 格 -->
     <button
@@ -89,3 +94,13 @@ async function onAddClick() {
     </button>
   </aside>
 </template>
+
+<style scoped>
+.card-move {
+  transition: transform 0.2s ease;
+}
+.card-leave-active {
+  position: absolute;
+  opacity: 0;
+}
+</style>

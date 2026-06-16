@@ -22,6 +22,7 @@ const props = defineProps<{
   column: WorkbenchColumn
   tabId: string
   index: number
+  handleRef?: (el: any) => void
 }>()
 
 const { t } = useI18n()
@@ -92,6 +93,7 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
   >
     <!-- 列头 -->
     <div
+      :ref="handleRef"
       class="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border cursor-grab active:cursor-grabbing touch-none"
     >
       <span

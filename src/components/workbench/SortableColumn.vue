@@ -4,13 +4,17 @@ import { useSortable } from '@dnd-kit/vue/sortable'
 
 const props = defineProps<{ tabId: string; index: number; flex: number }>()
 const el = ref<HTMLElement>()
+const handleEl = ref<HTMLElement>()
 
 const { isDragging } = useSortable({
   id: computed(() => `col:${props.tabId}:${props.index}`),
   index: () => props.index,
   group: 'columns',
   element: el,
+  handle: handleEl,
 })
+
+const setHandle = (node: any) => { handleEl.value = node }
 </script>
 
 <template>
@@ -20,7 +24,7 @@ const { isDragging } = useSortable({
     :class="{ 'sortable-col-dragging': isDragging }"
     :style="{ flex: `${flex} 1 0%` }"
   >
-    <slot :is-dragging="isDragging" />
+    <slot :is-dragging="isDragging" :handle-ref="setHandle" />
   </div>
 </template>
 
@@ -29,7 +33,6 @@ const { isDragging } = useSortable({
   min-width: 0;
   height: 100%;
   position: relative;
-  touch-action: none;
   transition: flex 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sortable-col-dragging {

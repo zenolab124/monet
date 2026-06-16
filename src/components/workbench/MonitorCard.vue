@@ -179,8 +179,8 @@ const { isDropTarget } = useDroppable({
     :class="{
       'edge-accent': status.edge === 'accent',
       'edge-destructive': status.edge === 'destructive',
-      'shadow-paper-lifted opacity-40': isDragging,
-      'card-drop-target': isDropTarget,
+      'opacity-0': isDragging,
+      'card-drop-target': isDropTarget && !isDragging,
       'flash-once': flashSessionId === sessionId,
     }"
     @click="onCardClick"
@@ -303,17 +303,27 @@ const { isDropTarget } = useDroppable({
 
 <style scoped>
 .monitor-card {
-  transition: box-shadow 0.15s, margin-top 0.2s ease, opacity 0.15s;
+  transition: box-shadow 0.15s, opacity 0.15s;
 }
 .monitor-card:hover {
   box-shadow: var(--shadow-paper-lifted);
 }
 .card-drop-target {
-  margin-top: 48px;
   box-shadow: var(--shadow-paper-lifted);
   outline: 2px solid var(--primary);
   outline-offset: -2px;
   border-radius: var(--radius);
+}
+.card-drop-target::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 1px;
+  z-index: 1;
 }
 /* 状态左边框(3px 语义色) */
 .edge-accent {
