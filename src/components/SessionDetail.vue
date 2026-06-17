@@ -716,13 +716,23 @@ watch(records, () => {
   if (followStreaming.value) scrollToBottom(true)
 })
 
-// 本会话流式结束 → 等 jsonl 落账后 reload(只在本实例正在展示该会话时发生)
+// ====== 排除法调试开关（定位闪烁根因后删除）======
+// 试法：先 SKIP_RECORDS_RELOAD=true 跑一次，看闪不闪；
+//       再换成 false，去 useStreaming 把 SKIP_STREAMING_FALSE 设 true 跑一次。
+//       哪个不闪了就是哪个的锅。
+const SKIP_RECORDS_RELOAD = false   // true = 跳过 records 更新
+
 watch(() => stream.value.streaming, async (val, oldVal) => {
   if (!val && oldVal) {
     const cs = currentSession.value
     if (!cs) return
     const sid = cs.summary.id
     console.log(`%c ========== [detail] streaming→false, wait 300ms sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
+    if (SKIP_RECORDS_RELOAD) {
+      console.log('%c ========== [detail] SKIP_RECORDS_RELOAD — 跳过 records 更新 ==========', 'color:#ef4444;font-weight:bold')
+      finishedDirty.delete(sid)
+      return
+    }
     await new Promise(r => setTimeout(r, 300))
     let newRecords: SessionRecord[] | null = null
     try {
@@ -746,10 +756,6 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     }
     if (effectiveSessionId.value !== sid) return
     console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
-    // 静默更新 records（供切走再切回、滚动查看历史时使用），
-    // 但不清 pendingUserMessage——流式区已持有完整内容,
-    // 清了会导致用户消息从流式区跳到历史区 + 历史区从零暴涨 = 闪。
-    // pendingUserMessage 在下次 sendMessage 时由 useStreaming 统一重置。
     if (newRecords) records.value = newRecords
     finishedDirty.delete(sid)
     if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)

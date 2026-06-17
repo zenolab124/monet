@@ -690,10 +690,17 @@ function finishStream(sessionId: string) {
   completeFinish(sessionId)
 }
 
+// ====== 排除法调试开关 ======
+const SKIP_STREAMING_FALSE = false  // true = 不翻 streaming=false
+
 function completeFinish(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state || !state.streaming) return
   console.log(`%c ========== [stream] completeFinish → streaming=false sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#ef4444;font-weight:bold')
+  if (SKIP_STREAMING_FALSE) {
+    console.log('%c ========== [stream] SKIP_STREAMING_FALSE — 不翻 streaming ==========', 'color:#ef4444;font-weight:bold')
+    return
+  }
   state.streaming = false
   probeFinishFlip(sessionId)
   frameWatchRelease()
