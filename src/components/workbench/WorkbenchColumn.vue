@@ -46,6 +46,7 @@ async function onToggleRC() {
       channel: null,
       advisor: false,
       enabled: enabling,
+      permissionMode: null,
     })
     stream.value.rcActive = enabling
     notifyTransient(enabling ? t('workbench.column.rcOpened') : t('workbench.column.rcClosed'))

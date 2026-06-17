@@ -12,7 +12,6 @@ import ModelDropdown from './ModelDropdown.vue'
 import ContextProgress from './ContextProgress.vue'
 import EffortDropdown from './EffortDropdown.vue'
 import ChannelDropdown from './ChannelDropdown.vue'
-import PermissionModeDropdown from './PermissionModeDropdown.vue'
 import type { PermissionMode } from '@/composables/useSessionSettings'
 
 /**
@@ -106,7 +105,7 @@ const effectiveModel = computed(() => {
 
 const { cliDefaults } = useCliDefaults()
 // 顶栏挂载即拉一次 CLI 默认值(settings.json 活文件,下拉打开时还会各自重读)
-onMounted(() => refreshCliDefaults())
+onMounted(() => refreshCliDefaults(props.cwd ?? undefined))
 
 /** 上下文容量:API 真值 → effectiveModel 容量 → 模型名推断兜底 */
 const capacity = computed(() =>
@@ -264,13 +263,6 @@ function onPermissionModeChange(mode: PermissionMode) {
       @select="onEffortChange"
     />
 
-    <!-- 权限模式 -->
-    <PermissionModeDropdown
-      v-if="showEffort"
-      :current="selectedPermissionMode"
-      @select="onPermissionModeChange"
-    />
-
     <!-- 渠道 -->
     <ChannelDropdown
       v-if="showChannel"
@@ -325,11 +317,6 @@ function onPermissionModeChange(mode: PermissionMode) {
             v-if="!showEffort"
             :current="selectedEffort"
             @select="onEffortChange"
-          />
-          <PermissionModeDropdown
-            v-if="!showEffort"
-            :current="selectedPermissionMode"
-            @select="onPermissionModeChange"
           />
           <ChannelDropdown
             v-if="!showChannel"

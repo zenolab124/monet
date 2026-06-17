@@ -11,6 +11,24 @@ use tauri::{AppHandle, Emitter};
 use crate::models::ContentBlock;
 use crate::permission::PermissionService;
 
+/// 按 Claude Code 优先级链读取 permissions.defaultMode
+/// Local (.claude/settings.local.json) > Project (.claude/settings.json) > User (~/.claude/settings.local.json) > User (~/.claude/settings.json)
+pub fn resolve_default_permission_mode(cwd: &str) -> Option<String> {
+    let read_mode = |path: PathBuf| -> Option<String> {
+        let text = std::fs::read_to_string(&path).ok()?;
+        let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+        json.get("permissions")?.get("defaultMode")?.as_str().map(String::from)
+    };
+    let cwd_path = std::path::Path::new(cwd);
+    let candidates = [
+        cwd_path.join(".claude/settings.local.json"),
+        cwd_path.join(".claude/settings.json"),
+        dirs::home_dir().map(|h| h.join(".claude/settings.local.json")).unwrap_or_default(),
+        dirs::home_dir().map(|h| h.join(".claude/settings.json")).unwrap_or_default(),
+    ];
+    candidates.into_iter().find_map(read_mode)
+}
+
 /// 长活进程会话实例（进程跨轮复用，不杀不重启）
 struct SessionProcess {
     child: Child,
@@ -160,6 +178,7 @@ fn open_session(
     effort: Option<&str>,
     channel: Option<&str>,
     advisor: bool,
+    permission_mode: Option<&str>,
 ) -> Result<(), String> {
     if !std::path::Path::new(cwd).is_dir() {
         return Err(format!("工作目录不存在: {}", cwd));
@@ -246,6 +265,14 @@ fn open_session(
     if let Some(e) = effort.filter(|s| !s.is_empty() && *s != "ultracode") {
         args.push("--effort".to_string());
         args.push(e.to_string());
+    }
+    let effective_mode = permission_mode
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| resolve_default_permission_mode(cwd));
+    if let Some(ref mode) = effective_mode {
+        args.push("--permission-mode".to_string());
+        args.push(mode.clone());
     }
 
     // 6. Spawn（stdin/stdout/stderr 全 piped）
@@ -396,7 +423,7 @@ pub fn send_message(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -421,7 +448,7 @@ pub fn send_message(
         }
     }
 
-    if let Some(mode) = permission_mode.filter(|m| !m.is_empty() && *m != "default") {
+    if let Some(mode) = permission_mode.filter(|m| !m.is_empty()) {
         sp.request_counter += 1;
         let req_id = format!("set-perm-mode-{}", sp.request_counter);
         let ctrl = json!({
@@ -458,6 +485,7 @@ pub fn toggle_remote_control(
     channel: Option<&str>,
     advisor: bool,
     enabled: bool,
+    permission_mode: Option<&str>,
 ) -> Result<(), String> {
     let exists = ACTIVE_PROCESSES
         .lock()
@@ -466,7 +494,7 @@ pub fn toggle_remote_control(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -849,6 +877,6 @@ fn decode_stream_event(
                 })
             }
         }
-        _ => None, // system, control_response, last-prompt 等忽略
+        _ => None,
     }
 }

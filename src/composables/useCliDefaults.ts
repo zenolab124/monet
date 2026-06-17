@@ -19,9 +19,9 @@ export interface CliSettings {
 
 const cliDefaults = ref<CliSettings>({ model: null, effort_level: null, ultracode: false, permission_mode: null })
 
-export async function refreshCliDefaults(): Promise<void> {
+export async function refreshCliDefaults(cwd?: string): Promise<void> {
   try {
-    cliDefaults.value = await invoke<CliSettings>('get_cli_settings')
+    cliDefaults.value = await invoke<CliSettings>('get_cli_settings', { cwd: cwd ?? null })
   } catch (_) {
     // 读取失败保留旧值:只影响「默认」标签的补充展示,不阻塞任何流程
   }

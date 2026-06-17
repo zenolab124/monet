@@ -72,7 +72,7 @@ const { goToSession } = useNotifications()
 const detail = createSessionDetail()
 const { records, loading, error, loadRecords, reloadRecords, clearRecords } = detail
 
-const { sendMessage, stopStreaming, clearStreamingTurns, removePendingQueueItem, consumePendingQueue, setPermissionMode } = useStreaming()
+const { sendMessage, stopStreaming, clearStreamingTurns, removePendingQueueItem, consumePendingQueue } = useStreaming()
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
@@ -222,10 +222,6 @@ function onAdvisorChange(advisor: boolean) {
 
 function onPermissionModeChange(mode: import('@/composables/useSessionSettings').PermissionMode) {
   persistPermissionMode(mode)
-  const sid = effectiveSessionId.value
-  if (sid) {
-    setPermissionMode(sid, mode).catch(() => {})
-  }
 }
 
 /** 当前消息流里出现的 uuid 集合:判断 mark 锚点是否还在视图内 */
@@ -399,11 +395,21 @@ const streamingMessageIds = computed(() =>
 /** 进入消息流的 system 子类型（其余 system 记录为噪音，不渲染） */
 const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
 
+/** 流式区 pendingUserMessage 对应的 user record uuid（防历史区双显） */
+const pendingUserUuid = computed(() => {
+  if (!stream.value.pendingUserMessage || !stream.value.streamingTurns.length) return null
+  for (let i = records.value.length - 1; i >= 0; i--) {
+    const r = records.value[i]
+    if (r.type === 'user') return r.uuid
+  }
+  return null
+})
+
 const messages = computed(() => {
+  const pUuid = pendingUserUuid.value
   const visible = records.value.filter(
     (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' | 'system' }> => {
       if (r.type === 'assistant') {
-        // 当前流式区还在显示这条消息时,历史区跳过(避免双显示)
         const msgId = r.message?.id
         if (msgId && streamingMessageIds.value.has(msgId)) return false
         return true
@@ -412,12 +418,13 @@ const messages = computed(() => {
         return !!r.subtype && VISIBLE_SYSTEM_SUBTYPES.has(r.subtype)
       }
       if (r.type !== 'user') return false
+      // 流式区 pendingUserMessage 还在显示时,历史区跳过对应的 user record
+      if (pUuid && r.uuid === pUuid) return false
       const content = r.message?.content
       if (!content || typeof content === 'string') return true
       return content.some((b: ContentBlock) => b.type !== 'tool_result')
     },
   )
-  // 连续 api_error（同一请求的多次重试）折叠为最后一条,末条 retryAttempt 自带累计次数
   return visible.filter((r, i) => {
     if (r.type !== 'system' || r.subtype !== 'api_error') return true
     const next = visible[i + 1]
@@ -715,7 +722,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     const cs = currentSession.value
     if (!cs) return
     const sid = cs.summary.id
-    // 等 jsonl flush 稳定(经验值 300ms),避免触发"首次 reload 没拿到 → 重试一次"的双重排
+    console.log(`%c ========== [detail] streaming→false, wait 300ms sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     await new Promise(r => setTimeout(r, 300))
     let newRecords: SessionRecord[] | null = null
     try {
@@ -724,10 +731,9 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         sessionId: sid,
       })
     } catch {
-      // ignore:走兜底分支
+      // ignore
     }
     if (!newRecords || newRecords.length === records.value.length) {
-      // 没拿到 / jsonl 还没写完,再等一次
       await new Promise(r => setTimeout(r, 400))
       try {
         newRecords = await invoke<SessionRecord[]>('get_session_records', {
@@ -738,14 +744,14 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         // ignore
       }
     }
-    // 关键:reload 后只更新 records + 清 pendingUserMessage,
-    // **不**清 streamingTurns——保留流式累积的组件实例,markdown-it+shiki 不重渲染。
-    // streamingMessageIds 继续屏蔽历史区中相同 messageId 的 assistant record(无双显示)。
     if (effectiveSessionId.value !== sid) return
+    console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
+    // 静默更新 records（供切走再切回、滚动查看历史时使用），
+    // 但不清 pendingUserMessage——流式区已持有完整内容,
+    // 清了会导致用户消息从流式区跳到历史区 + 历史区从零暴涨 = 闪。
+    // pendingUserMessage 在下次 sendMessage 时由 useStreaming 统一重置。
     if (newRecords) records.value = newRecords
-    stream.value.pendingUserMessage = null
     finishedDirty.delete(sid)
-    // records 落账完成，消费 BTW 队列队首
     if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)
   }
 })
@@ -945,7 +951,7 @@ async function onReload() {
     </div>
 
     <!-- 无记录(草稿会话给引导文案) -->
-    <div v-else-if="messages.length === 0 && !stream.streaming && !showHelpCard" class="flex-1 flex items-center justify-center">
+    <div v-else-if="messages.length === 0 && !stream.streaming && !stream.streamingTurns.length && !stream.pendingUserMessage && !showHelpCard" class="flex-1 flex items-center justify-center">
       <p class="text-muted-foreground text-sm">
         {{ effectiveSessionId && draftCwd(effectiveSessionId) ? $t('session.draftGuide') : $t('session.noRecords') }}
       </p>
@@ -1104,9 +1110,9 @@ async function onReload() {
       <!-- /help 本地帮助卡片 -->
       <SlashHelpCard v-if="showHelpCard" :commands="SLASH_COMMANDS" />
 
-      <!-- 脱离跟随提示:流式中用户上滚阅读时,贴滚动视口底部 -->
+      <!-- 回到底部:用户上滚脱离底部时,贴滚动视口底部 -->
       <div
-        v-if="stream.streaming && !followStreaming"
+        v-if="!followStreaming"
         class="sticky bottom-0 flex justify-center pointer-events-none"
       >
         <button

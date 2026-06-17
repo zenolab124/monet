@@ -160,6 +160,7 @@ pub async fn toggle_remote_control(
     channel: Option<String>,
     advisor: bool,
     enabled: bool,
+    permission_mode: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         streaming::toggle_remote_control(
@@ -171,6 +172,7 @@ pub async fn toggle_remote_control(
             channel.as_deref(),
             advisor,
             enabled,
+            permission_mode.as_deref(),
         )
     })
     .await
@@ -218,8 +220,11 @@ pub struct CliSettings {
 /// 读取 CLI settings.json 的模型/努力默认值。
 /// settings.json 是活文件(CLI 内 /effort 等实时改写),每次调用现读现解析、
 /// 绝不进程级缓存,见 docs/knowledge/pitfalls/cli-settings-live-rewrite.md
+///
+/// cwd 可选：传入时 permission_mode 按 Claude Code 优先级链读取
+/// (Local > Project > User)，不传时只读 ~/.claude/settings.json
 #[tauri::command]
-pub fn get_cli_settings() -> CliSettings {
+pub fn get_cli_settings(cwd: Option<String>) -> CliSettings {
     let path = dirs::home_dir()
         .unwrap_or_default()
         .join(".claude")
@@ -233,11 +238,15 @@ pub fn get_cli_settings() -> CliSettings {
             .and_then(|v| v.as_str())
             .map(String::from)
     };
-    let perm_mode = json.as_ref()
-        .and_then(|j| j.get("permissions"))
-        .and_then(|p| p.get("defaultMode"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let perm_mode = cwd.as_deref()
+        .and_then(crate::streaming::resolve_default_permission_mode)
+        .or_else(|| {
+            json.as_ref()
+                .and_then(|j| j.get("permissions"))
+                .and_then(|p| p.get("defaultMode"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        });
     CliSettings {
         model: get_str("model"),
         effort_level: get_str("effortLevel"),

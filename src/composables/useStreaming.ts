@@ -188,21 +188,20 @@ export const streamingTick = ref(0)
 let rafId: number | null = null
 
 /**
- * 自适应打字间隔(ms):积压越深间隔越短,但下限锁在帧级(16ms)——
- * 渲染频率永不超过 60fps(markdown 重渲染是主要开销,超帧率只添卡顿不添平滑),
- * 更深的积压靠 charsPerTick 每帧多吐字排空。积压量只计 text(thinking 不逐字)。
+ * 自适应打字间隔(ms)。CLI 2.1.177+ 以快照推送(非字符级 delta),
+ * 积压天然较深;节奏偏向「可见打字」而非「追赶清空」。
  */
 function typingInterval(queueLen: number): number {
-  if (queueLen <= 3) return 80    // ~12 字/秒,慢节奏(接近正常朗读)
-  if (queueLen <= 15) return 40   // ~25 字/秒,中节奏
-  return 16                       // 帧级,~60 字/秒起,排空提速走多字
+  if (queueLen <= 5) return 55     // ~18 字/秒,舒适打字节奏
+  if (queueLen <= 40) return 30    // ~33 字/秒,略快
+  return 20                        // ~50 字/秒基底,配合 charsPerTick 提速
 }
 
-/** 每帧吐字数:排空速度的提升手段(间隔已锁帧级)。多字成组出现在帧级仍是平滑的 */
+/** 每帧吐字数:积压越深每帧多吐,但上限克制,保留打字机可读感 */
 function charsPerTick(queueLen: number): number {
-  if (queueLen <= 50) return 1    // ~60 字/秒
-  if (queueLen <= 200) return 3   // ~188 字/秒,追赶 burst
-  return 8                        // ~500 字/秒,巨量积压(整段长文一次性到达)
+  if (queueLen <= 100) return 1    // ≤50 字/秒
+  if (queueLen <= 500) return 2    // ≤100 字/秒
+  return 3                         // ≤150 字/秒(~10s 清 1500 字)
 }
 
 function totalPendingChars(): number {
@@ -224,8 +223,8 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
   if (pendingTextDeltas.size === 0) return false
   let hasRemaining = false
   const take = allAtOnce ? Infinity : charsPerTick(totalPendingChars())
-  // 本帧已播过 text 的会话:同会话更靠后的 text 块等前块播完(保持阅读顺序)
-  const playedText = new Set<string>()
+  // 本帧已播过内容的会话:同会话后续块等前块播完(text/thinking 共享顺序槽)
+  const playedSession = new Set<string>()
   pendingTextDeltas.forEach((p, key) => {
     const hashIdx = key.indexOf('#')
     if (hashIdx < 0) return
@@ -240,7 +239,7 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
     const block = entry.turn.content[index] as ContentBlock | undefined
     if (!block) return
 
-    // thinking 默认折叠,逐字播放无意义且会把节奏档位顶满:到帧全量落地
+    // thinking: 到帧全量落地(不走打字机,不占 playedSession 槽位)
     if (p.thinking !== undefined && block.type === 'thinking') {
       ;(block as { thinking: string }).thinking += p.thinking
       p.thinking = undefined
@@ -251,7 +250,7 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
     }
 
     if (p.text !== undefined && block.type === 'text') {
-      if (!allAtOnce && playedText.has(entry.sessionId)) {
+      if (!allAtOnce && playedSession.has(entry.sessionId)) {
         hasRemaining = true
       } else {
         ;(block as { text: string }).text += p.text.slice(0, take)
@@ -262,7 +261,7 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
         } else {
           p.text = undefined
         }
-        playedText.add(entry.sessionId)
+        playedSession.add(entry.sessionId)
       }
     }
 
@@ -273,6 +272,18 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
   return hasRemaining
 }
 
+/** 正在排空打字机的会话(CLI 已 done,等打字机播完再翻 streaming=false) */
+const drainingStreams = new Set<string>()
+
+function hasSessionPending(sessionId: string): boolean {
+  for (const [key] of pendingTextDeltas) {
+    const mid = key.slice(0, key.indexOf('#'))
+    const entry = turnIndex.get(mid)
+    if (entry?.sessionId === sessionId) return true
+  }
+  return false
+}
+
 function bump() {
   if (rafId !== null) return
   const delay = typingInterval(totalPendingChars())
@@ -280,7 +291,16 @@ function bump() {
     rafId = null
     const hasRemaining = flushTextDeltas(false)
     streamingTick.value++
-    if (hasRemaining) bump()
+    // 检查排空中的会话:打字机播完 → 完成收尾
+    if (drainingStreams.size > 0) {
+      for (const sid of [...drainingStreams]) {
+        if (!hasSessionPending(sid)) {
+          drainingStreams.delete(sid)
+          completeFinish(sid)
+        }
+      }
+    }
+    if (hasRemaining || drainingStreams.size > 0) bump()
   }, delay)
 }
 
@@ -340,6 +360,63 @@ function toolTarget(input: Record<string, unknown> | undefined): string | null {
     }
   }
   return null
+}
+
+/**
+ * 冲掉指定消息中 < beforeIndex 的所有未播文字,让它们立刻显示完整。
+ * 场景:新块到达时,前面还在打字的块不该阻塞后续内容。
+ */
+function flushPendingBefore(messageId: string, beforeIndex: number) {
+  const prefix = `${messageId}#`
+  for (const [key, p] of pendingTextDeltas) {
+    if (!key.startsWith(prefix)) continue
+    const idx = parseInt(key.slice(prefix.length), 10)
+    if (idx >= beforeIndex) continue
+    const entry = turnIndex.get(messageId)
+    if (!entry) continue
+    const block = entry.turn.content[idx]
+    if (!block) continue
+    if (p.text !== undefined && block.type === 'text') {
+      ;(block as { text: string }).text += p.text
+      p.text = undefined
+    }
+    if (p.text === undefined && p.thinking === undefined && p.signature === undefined) {
+      pendingTextDeltas.delete(key)
+    }
+  }
+}
+
+/**
+ * 从 assistant 快照提取增量。
+ * text → 喂入打字机队列(逐字播放)。
+ * thinking → 直接设值(不走打字机,折叠态逐字无意义)。
+ */
+function feedSnapshotText(
+  messageId: string,
+  index: number,
+  incoming: ContentBlock,
+  stripped: Record<string, unknown>,
+  sessionId: string,
+) {
+  if (incoming.type === 'text') {
+    const key = partialJsonKey(messageId, index)
+    const incText = (incoming as { text?: string }).text ?? ''
+    if (!incText) return
+    const curText = typeof stripped.text === 'string' ? stripped.text : ''
+    const pendingLen = pendingTextDeltas.get(key)?.text?.length ?? 0
+    const alreadyKnown = curText.length + pendingLen
+    if (incText.length > alreadyKnown) {
+      const delta = incText.slice(alreadyKnown)
+      const e = pendingTextDeltas.get(key) ?? {}
+      e.text = (e.text ?? '') + delta
+      pendingTextDeltas.set(key, e)
+      accumulateTailText(sessionId, delta)
+    }
+    stripped.text = curText
+  } else if (incoming.type === 'thinking') {
+    // thinking 直接设值——折叠态逐字无意义,且会阻塞后续 text 块
+    stripped.thinking = (incoming as { thinking?: string }).thinking ?? ''
+  }
 }
 
 /**
@@ -509,14 +586,13 @@ export async function initStreamListeners(): Promise<void> {
         bump()
         break
       case 'assistant_message':
-        // 终态快照兜底校正。CLI 在每个 content block 完成时发一次快照,
-        // content 通常只含该块(非全量消息)——绝不能按 index 硬对齐:
-        // 快照 [text] 会覆盖 index 0 的 thinking 块,truncate 会砍掉正在
-        // 流式的块,被砍块的后续 delta 全部上不了屏。
-        // 策略:按类型序列 cursor 匹配,匹配到的块做字段级合并(保留对象引用,
-        // BlockThinking 等组件展开 state 不丢);匹配不到才 append(块级兜底)。
+        // 快照校正 + 打字机喂料。CLI 2.1.177+ 不再发 content_block_delta,
+        // 只发 assistant 快照(可能多次:空→部分→完整)。检测文本增量,
+        // 扣除已播+已排队部分,喂入 pendingTextDeltas 复用打字机管线。
+        // 兼容旧 CLI:若 block_delta 已喂过相同字符,增量为 0,不重复。
         if (payload.message_id && payload.content) {
-          const entry = turnIndex.get(payload.message_id)
+          const mid = payload.message_id
+          const entry = turnIndex.get(mid)
           if (entry) {
             const existing = entry.turn
             let cursor = 0
@@ -530,9 +606,16 @@ export async function initStreamListeners(): Promise<void> {
                 }
               }
               if (matched < 0) {
-                ;(existing.content as ContentBlock[]).push(incoming)
+                const idx = existing.content.length
+                // 新块到达 → 冲掉前面还在打字的块,避免积压阻塞
+                flushPendingBefore(mid, idx)
+                const stripped: Record<string, unknown> = { ...incoming }
+                if (incoming.type === 'text') stripped.text = ''
+                feedSnapshotText(mid, idx, incoming, stripped, sid)
+                ;(existing.content as ContentBlock[]).push(stripped as ContentBlock)
                 cursor = existing.content.length
               } else {
+                feedSnapshotText(mid, matched, incoming, existing.content[matched] as unknown as Record<string, unknown>, sid)
                 mergeSnapshotBlock(
                   existing.content[matched] as unknown as Record<string, unknown>,
                   incoming,
@@ -541,13 +624,21 @@ export async function initStreamListeners(): Promise<void> {
               }
             }
           } else {
-            // 没收到过 block_start(理论上不会,防御性)直接建 turn
+            const strippedContent: ContentBlock[] = payload.content.map(b => {
+              const s: Record<string, unknown> = { ...b }
+              if (b.type === 'text') s.text = ''
+              // thinking 保留全量(直接显示,不走打字机)
+              return s as ContentBlock
+            })
             state.streamingTurns.push({
-              messageId: payload.message_id,
-              content: [...payload.content],
+              messageId: mid,
+              content: strippedContent,
             })
             const reactiveTurn = state.streamingTurns[state.streamingTurns.length - 1]
-            turnIndex.set(payload.message_id, { turn: reactiveTurn, sessionId: sid })
+            turnIndex.set(mid, { turn: reactiveTurn, sessionId: sid })
+            for (let idx = 0; idx < payload.content.length; idx++) {
+              feedSnapshotText(mid, idx, payload.content[idx], strippedContent[idx] as unknown as Record<string, unknown>, sid)
+            }
           }
           bump()
         }
@@ -572,32 +663,48 @@ export async function initStreamListeners(): Promise<void> {
   })
 }
 
-/** 某一路流结束的统一收尾（其他在播会话不受影响） */
+/**
+ * 某一路流结束(CLI done)——如果打字机还有未播内容,进入排空模式,
+ * 等打字机自然播完再翻 streaming=false,避免:
+ *   1. flushTextDeltas(true) 一次性倾倒剩余文字(文字跳变)
+ *   2. streaming=false 触发 BlockText plain→shiki 切换(布局抖动)
+ *   3. 300ms 后 records reload(DOM 重建)
+ * 三次突变叠在一帧 → 可见闪烁。
+ * 通知回调(toast/系统通知)立即触发,不等打字机。
+ */
 function finishStream(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state || !state.streaming) return
-  // 该会话剩余 pending 一次性落地,确保最后几个字符不丢
-  flushTextDeltas(true, sessionId)
-  streamingTick.value++
+  console.log(`%c ========== [stream] finishStream sid=${sessionId.slice(0, 8)} pending=${hasSessionPending(sessionId)} t=${performance.now().toFixed(0)} ==========`, 'color:#f59e0b;font-weight:bold')
+  state.activeTool = null
+  markTailDirty(sessionId)
+  const hasError = !!state.streamError
+  finishedCallbacks.forEach(cb => {
+    try { cb(sessionId, hasError) } catch (_) { /* */ }
+  })
+  if (hasSessionPending(sessionId)) {
+    drainingStreams.add(sessionId)
+    bump()
+    return
+  }
+  completeFinish(sessionId)
+}
+
+function completeFinish(sessionId: string) {
+  const state = streams.get(sessionId)
+  if (!state || !state.streaming) return
+  console.log(`%c ========== [stream] completeFinish → streaming=false sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#ef4444;font-weight:bold')
   state.streaming = false
   probeFinishFlip(sessionId)
   frameWatchRelease()
-  state.activeTool = null
   finishedDirty.add(sessionId)
   markTailDirty(sessionId)
+  streamingTick.value++
   // 注意:不清 streamingTurns / pendingUserMessage——SessionDetail 在 reload 拿到
   // jsonl 落账后同 batch 清,避免窗口期空白闪烁;无详情挂载的会话等下次发送时重置。
   if (state.lastSent) {
     triggerMetaGeneration(sessionId, state.lastSent.cwd)
   }
-  const hasError = !!state.streamError
-  finishedCallbacks.forEach(cb => {
-    try {
-      cb(sessionId, hasError)
-    } catch (_) {
-      /* 通知层异常不阻断流收尾 */
-    }
-  })
 }
 
 // ---- 操作 ----
@@ -704,10 +811,6 @@ async function closeSession(sessionId: string) {
   }
 }
 
-async function setPermissionMode(sessionId: string, mode: string) {
-  await invoke('set_permission_mode', { sessionId, mode })
-}
-
 export function useStreaming() {
   return {
     streams,
@@ -719,6 +822,5 @@ export function useStreaming() {
     clearStreamingTurns,
     removePendingQueueItem,
     consumePendingQueue,
-    setPermissionMode,
   }
 }

@@ -56,8 +56,10 @@ const wasStreaming = ref(false)
 
 watch(() => props.streaming, (now, was) => {
   if (was && !now) {
+    console.log(`%c ========== [BlockText] streaming→false, trigger shiki len=${displayText.value.length} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
     wasStreaming.value = true
     renderMarkdownDeferred(displayText.value).then(html => {
+      console.log(`%c ========== [BlockText] shiki done len=${html.length} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
       deferredHtml.value = html
       stableHtml.value = ''
       stableLen.value = 0
