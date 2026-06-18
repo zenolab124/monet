@@ -81,6 +81,7 @@ const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const featureBannerShown = ref(false)
 const bannerResumed = ref(false)
 const bannerCwd = ref('')
+const bannerStderr = ref<string[]>([])
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
@@ -95,17 +96,36 @@ interface SessionConnectedPayload {
   cwd: string
 }
 
+interface SessionStderrPayload {
+  session_id: string
+  line: string
+}
+
 let unlistenConnected: (() => void) | null = null
+let unlistenStderr: (() => void) | null = null
+
 listen<SessionConnectedPayload>('session-connected', (e) => {
   const p = e.payload
   if (p.session_id === effectiveSessionId.value) {
     bannerResumed.value = p.resumed
     bannerCwd.value = p.cwd
+    bannerStderr.value = []
     featureBannerShown.value = true
     nextTick(() => scrollToBottom(true))
   }
 }).then(fn => { unlistenConnected = fn })
-onUnmounted(() => unlistenConnected?.())
+
+listen<SessionStderrPayload>('session-stderr', (e) => {
+  const p = e.payload
+  if (p.session_id === effectiveSessionId.value && featureBannerShown.value) {
+    bannerStderr.value.push(p.line)
+  }
+}).then(fn => { unlistenStderr = fn })
+
+onUnmounted(() => {
+  unlistenConnected?.()
+  unlistenStderr?.()
+})
 
 // --- 会话 ID 来源 ---
 
@@ -188,6 +208,7 @@ watch(effectiveSessionId, () => {
   featureBannerShown.value = false
   bannerResumed.value = false
   bannerCwd.value = ''
+  bannerStderr.value = []
   lastScrollTop = 0
 })
 
@@ -1153,6 +1174,7 @@ async function onReload() {
           :model="settings.modelId"
           :effort="(settings.effort as string | null)"
           :features="htmlVisualEnabled ? [$t('settings.htmlVisual')] : []"
+          :stderr-lines="bannerStderr"
         />
         <div v-if="stream.pendingUserMessage || stream.pendingImages?.length" class="user-msg-sticky">
           <div class="flex gap-3">

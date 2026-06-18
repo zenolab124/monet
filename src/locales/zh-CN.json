@@ -151,6 +151,7 @@
     "bannerPrompt": "注入提示词",
     "bannerNew": "新建",
     "bannerResumed": "续接",
+    "bannerStderr": "Hooks 输出（{count} 行）",
     "goTo": "前往",
     "openInWorkbench": "在工作台打开",
     "streaming": "流式输出",

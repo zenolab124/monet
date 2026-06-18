@@ -54,6 +54,14 @@ fn strip_private_tags(text: &str) -> String {
         "task-notification",
         "loop-pause",
         "system-reminder",
+        "user-prompt-submit-hook",
+        "persisted-output",
+        "tool_use_error",
+        "command-name",
+        "command-message",
+        "command-args",
+        "local-command-caveat",
+        "local-command-stdout",
     ];
     let mut result = text.to_string();
     for tag in &tag_names {

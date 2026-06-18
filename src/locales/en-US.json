@@ -151,6 +151,7 @@
     "bannerPrompt": "Injected Prompt",
     "bannerNew": "New",
     "bannerResumed": "Resumed",
+    "bannerStderr": "Hooks output ({count} lines)",
     "goTo": "Go to",
     "openInWorkbench": "Open in Workbench",
     "streaming": "Streaming",
