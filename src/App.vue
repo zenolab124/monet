@@ -11,7 +11,6 @@ import WorkbenchView from '@/views/WorkbenchView.vue'
 import WorkshopView from '@/views/WorkshopView.vue'
 import AutomationView from '@/views/AutomationView.vue'
 import SettingsView from '@/views/SettingsView.vue'
-import ToastStack from '@/components/notifications/ToastStack.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
@@ -171,7 +170,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <div v-if="ghostHtml" v-html="ghostHtml" class="pointer-events-none opacity-85" />
       </DragOverlay>
 
-      <ToastStack />
       <ConfirmDialog />
     </DragDropProvider>
   </div>

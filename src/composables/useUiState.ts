@@ -12,6 +12,7 @@ interface UiState {
   activeSection: AppSection
   projectSidebarWidth: number
   sessionListWidth: number
+  monitorRailCollapsed: boolean
 }
 
 function loadState(): UiState {
@@ -27,10 +28,11 @@ function loadState(): UiState {
           : 'sessions',
         projectSidebarWidth: parsed.projectSidebarWidth ?? 224,
         sessionListWidth: parsed.sessionListWidth ?? 288,
+        monitorRailCollapsed: !!parsed.monitorRailCollapsed,
       }
     }
   } catch (_) {}
-  return { sidebarsCollapsed: false, activeSection: 'sessions', projectSidebarWidth: 224, sessionListWidth: 288 }
+  return { sidebarsCollapsed: false, activeSection: 'sessions', projectSidebarWidth: 224, sessionListWidth: 288, monitorRailCollapsed: false }
 }
 
 const initial = loadState()
@@ -45,12 +47,15 @@ const activeSection = ref<AppSection>(initial.activeSection)
 const projectSidebarWidth = ref(initial.projectSidebarWidth)
 const sessionListWidth = ref(initial.sessionListWidth)
 
+// 工作台监控列收起
+const monitorRailCollapsed = ref(initial.monitorRailCollapsed)
+
 // 持久化
-watch([sidebarsCollapsed, activeSection, projectSidebarWidth, sessionListWidth], ([collapsed, section, pw, sw]) => {
+watch([sidebarsCollapsed, activeSection, projectSidebarWidth, sessionListWidth, monitorRailCollapsed], ([collapsed, section, pw, sw, mr]) => {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ sidebarsCollapsed: collapsed, activeSection: section, projectSidebarWidth: pw, sessionListWidth: sw }),
+      JSON.stringify({ sidebarsCollapsed: collapsed, activeSection: section, projectSidebarWidth: pw, sessionListWidth: sw, monitorRailCollapsed: mr }),
     )
   } catch (_) {}
 })
@@ -63,6 +68,37 @@ function switchSection(section: AppSection) {
   activeSection.value = section
 }
 
+const monitorPeekInstantHide = ref(false)
+
+function toggleMonitorRail() {
+  if (monitorRailCollapsed.value && monitorRailPeeking.value) {
+    monitorPeekInstantHide.value = true
+    monitorRailPeeking.value = false
+  }
+  monitorRailCollapsed.value = !monitorRailCollapsed.value
+  if (!monitorRailCollapsed.value) monitorRailPeeking.value = false
+  requestAnimationFrame(() => { monitorPeekInstantHide.value = false })
+}
+
+// hover 抽屉：收起态下 hover 按钮/Rail 区域时临时浮出
+const monitorRailPeeking = ref(false)
+let peekTimer: ReturnType<typeof setTimeout> | null = null
+const PEEK_DELAY = 200
+
+function peekMonitorRail() {
+  if (!monitorRailCollapsed.value) return
+  if (peekTimer) { clearTimeout(peekTimer); peekTimer = null }
+  monitorRailPeeking.value = true
+}
+
+function unpeekMonitorRail() {
+  if (peekTimer) clearTimeout(peekTimer)
+  peekTimer = setTimeout(() => {
+    monitorRailPeeking.value = false
+    peekTimer = null
+  }, PEEK_DELAY)
+}
+
 export function useUiState() {
   return {
     sidebarsCollapsed,
@@ -71,5 +107,11 @@ export function useUiState() {
     switchSection,
     projectSidebarWidth,
     sessionListWidth,
+    monitorRailCollapsed,
+    toggleMonitorRail,
+    monitorRailPeeking,
+    monitorPeekInstantHide,
+    peekMonitorRail,
+    unpeekMonitorRail,
   }
 }

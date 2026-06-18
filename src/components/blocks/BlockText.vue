@@ -67,6 +67,18 @@ watch(() => props.streaming, (now, was) => {
   }
 })
 
+function onProseClick(e: MouseEvent) {
+  const btn = (e.target as HTMLElement).closest('.code-copy-btn')
+  if (!btn) return
+  e.preventDefault()
+  const pre = btn.closest('.code-block-wrapper')?.querySelector('pre')
+  if (!pre) return
+  navigator.clipboard.writeText(pre.textContent ?? '').then(() => {
+    btn.setAttribute('data-copied', '')
+    setTimeout(() => btn.removeAttribute('data-copied'), 1500)
+  })
+}
+
 const renderedHtml = computed(() => {
   const pendingShiki = wasStreaming.value && !deferredHtml.value
   if (props.streaming || pendingShiki) {
@@ -85,7 +97,7 @@ const renderedHtml = computed(() => {
 </script>
 
 <template>
-  <div class="prose-msg text-sm">
+  <div class="prose-msg text-sm" @click="onProseClick">
     <div v-html="renderedHtml" />
     <button
       v-if="isLargeText"

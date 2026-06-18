@@ -178,7 +178,9 @@
       "fromArchive": "From Archive",
       "newSession": "New Session",
       "newSessionReady": "New session ready",
-      "newSessionHint": "Type your first message to start"
+      "newSessionHint": "Type your first message to start",
+      "show": "Show monitor rail",
+      "hide": "Hide monitor rail"
     },
     "columns": {
       "empty": "Select a session from the left rail to expand",
@@ -611,8 +613,12 @@
     "docGeneric": "Document ({mime})",
     "docTitle": ": {title}",
     "openedFile": "Opened {name}",
+    "ideSelection": "Selected {name} lines {start}-{end}",
     "skillInvoke": "Skill invoked: {name}",
     "systemReminder": "System Reminder",
+    "hookOutput": "Hook Output",
+    "toolUseError": "Tool Error",
+    "taskNotification": "Task Notification",
     "image": "Image ({mime}, {size} bytes)",
     "compactBoundary": "Context compacted",
     "compactTokens": "(Pre-compaction {tokens}k tokens)",

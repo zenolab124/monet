@@ -2,9 +2,10 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiState, type AppSection } from '@/composables/useUiState'
+import TitleBarNotifications from '@/components/notifications/TitleBarNotifications.vue'
 
 const { t } = useI18n()
-const { activeSection } = useUiState()
+const { activeSection, monitorRailCollapsed, toggleMonitorRail, peekMonitorRail, unpeekMonitorRail } = useUiState()
 
 const sectionTitles = computed<Partial<Record<AppSection, string>>>(() => ({
   sessions: t('titlebar.archive'),
@@ -19,6 +20,20 @@ const sectionTitles = computed<Partial<Record<AppSection, string>>>(() => ({
   <header class="titlebar">
     <div class="w-[78px] shrink-0" data-tauri-drag-region />
 
+    <button
+      v-if="activeSection === 'workbench'"
+      class="w-5 h-5 grid place-items-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 mr-1"
+      :title="monitorRailCollapsed ? $t('workbench.rail.show') : $t('workbench.rail.hide')"
+      @click="toggleMonitorRail"
+      @mouseenter="peekMonitorRail"
+      @mouseleave="unpeekMonitorRail"
+    >
+      <span
+        class="w-3.5 h-3.5 block"
+        :class="monitorRailCollapsed ? 'i-carbon-side-panel-open' : 'i-carbon-side-panel-close'"
+      />
+    </button>
+
     <div class="flex items-center min-w-0 h-full">
       <span v-if="!$slots.leading && sectionTitles[activeSection]" class="text-xs font-medium text-foreground">
         {{ sectionTitles[activeSection] }}
@@ -26,7 +41,7 @@ const sectionTitles = computed<Partial<Record<AppSection, string>>>(() => ({
       <slot name="leading" />
     </div>
 
-    <div class="flex-1 min-w-0 h-full" data-tauri-drag-region />
+    <TitleBarNotifications />
 
     <div class="flex items-center gap-1.5 pr-3 shrink-0">
       <slot name="trailing" />

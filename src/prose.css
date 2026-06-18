@@ -50,7 +50,43 @@
   overflow-wrap: anywhere;
 }
 
-/* 代码块容器 */
+/* 代码块容器 + 复制按钮 */
+.prose-msg .code-block-wrapper {
+  position: relative;
+}
+.prose-msg .code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 4px;
+  border-radius: 4px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  line-height: 0;
+}
+.prose-msg .code-block-wrapper:hover .code-copy-btn {
+  opacity: 1;
+}
+.prose-msg .code-copy-btn:hover {
+  color: var(--foreground);
+  background: var(--secondary);
+}
+.prose-msg .code-copy-btn .check-icon { display: none; }
+.prose-msg .code-copy-btn[data-copied] {
+  color: var(--primary);
+  opacity: 1;
+}
+.prose-msg .code-copy-btn[data-copied] .copy-icon { display: none; }
+.prose-msg .code-copy-btn[data-copied] .check-icon { display: block; }
+
 .prose-msg pre {
   margin: 0.5em 0;
   padding: 0.75em 1em;
@@ -60,6 +96,9 @@
   font-size: 0.8125em;
   line-height: 1.5;
   font-family: var(--font-mono);
+}
+.prose-msg .code-block-wrapper pre {
+  margin: 0;
 }
 .prose-msg pre code {
   background: none;

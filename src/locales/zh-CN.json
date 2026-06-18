@@ -178,7 +178,9 @@
       "fromArchive": "从档案馆选择",
       "newSession": "新建会话",
       "newSessionReady": "新会话已就绪",
-      "newSessionHint": "输入第一条消息开始对话"
+      "newSessionHint": "输入第一条消息开始对话",
+      "show": "显示监控列",
+      "hide": "收起监控列"
     },
     "columns": {
       "empty": "从左列选择会话展开",
@@ -611,8 +613,12 @@
     "docGeneric": "文档（{mime}）",
     "docTitle": "：{title}",
     "openedFile": "打开了 {name}",
+    "ideSelection": "选中了 {name} 第 {start}-{end} 行",
     "skillInvoke": "调用技能：{name}",
     "systemReminder": "系统提醒",
+    "hookOutput": "Hook 输出",
+    "toolUseError": "工具错误",
+    "taskNotification": "子任务通知",
     "image": "图片（{mime}，{size} bytes）",
     "compactBoundary": "上下文已压缩",
     "compactTokens": "（压缩前 {tokens}k tokens）",

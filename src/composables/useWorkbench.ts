@@ -442,8 +442,11 @@ function updateColumnSize(tabId: string, index: number, leftRatio: number) {
   const sizes = tab.columnSizes
   if (index < 0 || index >= sizes.length - 1) return
   const combined = sizes[index] + sizes[index + 1]
-  const minLeft = 0.1 * combined
-  const maxLeft = 0.9 * combined
+  const freeWidth = rightZoneWidth.value - COLUMN_GAP * (sizes.length + 1)
+  const minRatio = freeWidth > 0 ? MIN_COLUMN_WIDTH / freeWidth : 0.1
+  const minLeft = minRatio
+  const maxLeft = combined - minRatio
+  if (minLeft >= maxLeft) return
   const clamped = Math.max(minLeft, Math.min(maxLeft, leftRatio))
   sizes[index] = clamped
   sizes[index + 1] = combined - clamped

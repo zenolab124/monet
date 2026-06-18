@@ -27,6 +27,10 @@ async function onAllow(toast: PersistentToast) {
   if (toast.kind === 'permission') await respondRequest(toast.request.requestId, 'allow_once')
 }
 
+async function onAllowSession(toast: PersistentToast) {
+  if (toast.kind === 'permission') await respondRequest(toast.request.requestId, 'allow_session')
+}
+
 async function onDeny(toast: PersistentToast) {
   if (toast.kind === 'permission') await respondRequest(toast.request.requestId, 'deny')
 }
@@ -102,6 +106,7 @@ function toastIcon(toast: PersistentToast): string {
             </template>
             <template v-else>
               <button class="px-2.5 py-0.5 text-[11px] rounded bg-primary text-primary-foreground" @click="onAllow(t)">{{ $t('common.allow') }}</button>
+              <button class="px-2.5 py-0.5 text-[11px] rounded border border-primary text-primary" @click="onAllowSession(t)" :title="$t('permission.allowSessionHint')">{{ $t('permission.allowSession') }}</button>
               <button class="px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="onDeny(t)">{{ $t('common.deny') }}</button>
               <button class="ml-auto px-2.5 py-0.5 text-[11px] rounded border border-border text-muted-foreground" @click="goToSession(t.sessionId)">{{ $t('notification.goToSessionBrief') }}</button>
             </template>

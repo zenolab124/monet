@@ -5,6 +5,16 @@ import type { BundledLanguage } from 'shiki'
 // node 原生 ESM 不解析 vite 别名且要求显式扩展名
 import { probeMd } from '../utils/perfProbe.ts'
 
+const COPY_ICON = '<svg class="copy-icon" width="14" height="14" viewBox="0 0 32 32"><path fill="currentColor" d="M28 10v18H10V10zm0-2H10a2 2 0 0 0-2 2v18a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2"/><path fill="currentColor" d="M4 18H2V4a2 2 0 0 1 2-2h14v2H4Z"/></svg>'
+const CHECK_ICON = '<svg class="check-icon" width="14" height="14" viewBox="0 0 32 32"><path fill="currentColor" d="m13 24l-9-9l1.414-1.414L13 21.171L26.586 7.586L28 9z"/></svg>'
+const COPY_BTN = `<button class="code-copy-btn" type="button">${COPY_ICON}${CHECK_ICON}</button>`
+
+function wrapCodeBlocks(html: string): string {
+  return html.replace(/<pre(\s[^>]*)?>[\s\S]*?<\/pre>/g, (m) =>
+    `<div class="code-block-wrapper">${COPY_BTN}${m}</div>`,
+  )
+}
+
 // 常用语言，按需加载
 const LANGS: BundledLanguage[] = [
   'javascript', 'typescript', 'python', 'rust', 'go', 'java',
@@ -40,7 +50,7 @@ markdownItShiki({
 /** 流式降级渲染:跳过 shiki 高亮。流式中文本每帧变化,全量高亮是逐帧主线程大头 */
 export function renderMarkdownPlain(text: string): string {
   const t0 = performance.now()
-  const html = plainMd.render(text)
+  const html = wrapCodeBlocks(plainMd.render(text))
   probeMd('plain', performance.now() - t0)
   return html
 }
@@ -60,7 +70,7 @@ export function renderMarkdownCached(text: string): string {
     return hit
   }
   const t0 = performance.now()
-  const html = activeMd.render(text)
+  const html = wrapCodeBlocks(activeMd.render(text))
   probeMd('miss', performance.now() - t0)
   // shiki 就绪前的结果是无高亮版,不入缓存,避免固化素色 HTML
   if (shikiReady) {

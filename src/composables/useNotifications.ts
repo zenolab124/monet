@@ -6,6 +6,8 @@ import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
+  registerActionTypes,
+  onAction,
 } from '@tauri-apps/plugin-notification'
 import { displayTitle } from '@/types'
 import { useSessionMeta } from './useSessionMeta'
@@ -15,6 +17,8 @@ import { useUiState } from './useUiState'
 import { onStreamFinished, getStream, useStreaming } from './useStreaming'
 import {
   usePermissionRequests,
+  respondRequest,
+  isInteractiveTool,
   type PermissionRequest,
 } from './usePermissionRequests'
 
@@ -206,7 +210,7 @@ let notifPermissionAsked = false
  * 应用窗口非前台或最小化时发系统通知;前台抑制。
  * 首次需要发送时才请求授权;权限被拒/发送失败静默降级,不影响应用内 toast。
  */
-async function maybeNotifySystem(title: string, body: string) {
+async function maybeNotifySystem(title: string, body: string, extra?: { actionTypeId?: string; extra?: Record<string, unknown> }) {
   try {
     const win = getCurrentWindow()
     const [focused, minimized] = await Promise.all([
@@ -220,7 +224,7 @@ async function maybeNotifySystem(title: string, body: string) {
       granted = (await requestPermission()) === 'granted'
     }
     if (granted) {
-      sendNotification({ title, body })
+      sendNotification({ title, body, ...extra })
     }
   } catch (_) {
     // 静默降级:通知层自身失败不弹错误、不阻断应用内 toast
@@ -258,6 +262,25 @@ export async function initNotificationLayer(): Promise<void> {
 
   const { isSessionVisibleInWorkbench, findSession } = useWorkbench()
 
+  // 0. 注册 Mac 原生通知 actions(Allow / Deny 按钮)
+  try {
+    await registerActionTypes([{
+      id: 'permission-decision',
+      actions: [
+        { id: 'allow', title: i18n.global.t('common.allow'), foreground: true },
+        { id: 'deny', title: i18n.global.t('common.deny'), destructive: true },
+      ],
+    }])
+    await onAction((notification) => {
+      const n = notification as unknown as { actionId?: string; extra?: Record<string, unknown> }
+      const requestId = n.extra?.requestId as string | undefined
+      if (!requestId || !n.actionId) return
+      void respondRequest(requestId, n.actionId === 'allow' ? 'allow_once' : 'deny')
+    })
+  } catch (_) {
+    // 注册失败静默降级:系统通知不带 action 按钮,不影响应用内 toast
+  }
+
   // 1. 流结束:错误→持久型;完成→不可见时瞬态;非前台同步系统通知
   onStreamFinished((sessionId, hasError) => {
     const title = sessionTitle(sessionId)
@@ -284,7 +307,15 @@ export async function initNotificationLayer(): Promise<void> {
       for (const req of queue.value) {
         if (!knownRequests.has(req.requestId)) {
           knownRequests.add(req.requestId)
-          void maybeNotifySystem(requestKindLabel(req.toolName), `${sessionTitle(req.sessionId)} · ${permissionSub(req)}`)
+          const isInteractive = isInteractiveTool(req.toolName)
+          void maybeNotifySystem(
+            requestKindLabel(req.toolName),
+            `${sessionTitle(req.sessionId)} · ${permissionSub(req)}`,
+            isInteractive ? undefined : {
+              actionTypeId: 'permission-decision',
+              extra: { requestId: req.requestId },
+            },
+          )
         }
       }
       // 收缩集合防泄漏

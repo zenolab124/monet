@@ -259,15 +259,21 @@ const { isDropTarget } = useDroppable({
       >{{ $t('workbench.monitor.goAnswer') }}</button>
       <template v-else>
         <button
-          class="px-2 py-0.5 text-[10.5px] rounded bg-primary text-primary-foreground shrink-0"
+          class="w-5 h-5 grid place-items-center rounded bg-primary/15 text-primary shrink-0 hover:bg-primary/25"
+          :title="$t('common.allow')"
           @pointerdown.stop
           @click.stop="onAllow"
-        >{{ $t('common.allow') }}</button>
+        >
+          <span class="i-carbon-arrow-right w-3.5 h-3.5" />
+        </button>
         <button
-          class="px-2 py-0.5 text-[10.5px] rounded border border-border text-muted-foreground shrink-0"
+          class="w-5 h-5 grid place-items-center rounded bg-destructive/15 text-destructive shrink-0 hover:bg-destructive/25"
+          :title="$t('common.deny')"
           @pointerdown.stop
           @click.stop="onDeny"
-        >{{ $t('common.denyBrief') }}</button>
+        >
+          <span class="i-carbon-close w-3.5 h-3.5" />
+        </button>
       </template>
     </div>
 
