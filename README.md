@@ -1,59 +1,72 @@
 # CC Space
 
-跨平台 Claude Code 会话管理器，用 Tauri 2 + Vue 3 构建的桌面应用。
+A desktop app for browsing, searching, and managing [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions.
 
-## 功能
+Built with [Tauri 2](https://tauri.app/) + [Vue 3](https://vuejs.org/).
 
-- **三栏布局**：项目 / 会话 / 详情
-- **会话浏览**：解析 `~/.claude/projects/` 下的 JSONL 记录，支持排序、筛选、全文搜索
-- **对话详情**：Markdown 渲染、代码高亮（Shiki）、工具调用展开、私有标签识别
-- **流式响应**：输入框发送跟进消息、实时流式渲染、Esc 中断
-- **分屏系统**：递归分屏（水平/垂直）、拖拽调整比例、布局持久化
-- **会话操作**：终端恢复（`claude --resume`）、VSCode 打开、删除
-- **文件监控**：后台监听 JSONL 变化，自动刷新列表
-- **外观**：暗色/亮色/跟随系统，macOS 毛玻璃背景
+> **[中文说明](README.zh-CN.md)**
 
-## 技术栈
+<!-- TODO: add screenshot here -->
+<!-- ![CC Space screenshot](docs/screenshot.png) -->
 
-- [Tauri 2](https://tauri.app/) — Rust 后端 + WebView 前端
-- [Vue 3](https://vuejs.org/) + TypeScript + Composition API
-- [UnoCSS](https://unocss.dev/) — 原子化 CSS，preset-wind4 + preset-icons
-- [Shiki](https://shiki.style/) — 语法高亮
+## Features
 
-## 开发
+- **Session browser** — Parses all JSONL records from `~/.claude/projects/`, with sorting, filtering, and full-text search
+- **Rich conversation view** — Markdown rendering, syntax highlighting (Shiki), tool call expansion, thinking block display
+- **Streaming** — Send follow-up messages with real-time streaming, press Esc to interrupt
+- **Workbench** — Tabbed multi-session workspace with draggable split panes
+- **Archive** — Three-panel read-only session explorer (projects → sessions → detail)
+- **Live refresh** — Background file watcher auto-updates when sessions change
+- **Session actions** — Resume in terminal (`claude --resume`), open in VS Code, delete
+- **i18n** — 12 built-in languages, plus AI-powered translation for any language
+- **Appearance** — Dark / light / system theme, macOS native title bar
+
+## Install
+
+Download the latest `.dmg` from [Releases](../../releases).
+
+> macOS only for now. Requires macOS 11+.
+
+## Build from Source
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 22+
+- [pnpm](https://pnpm.io/) 10+
+- [Rust](https://rustup.rs/) 1.77+
+- Xcode Command Line Tools — `xcode-select --install`
+
+### Build
 
 ```bash
+git clone https://github.com/zenolab124/cc-space.git
+cd cc-space
 pnpm install
-pnpm tauri dev       # 启动开发模式（前后端）
-pnpm tauri build     # 打包发布
+pnpm tauri build
 ```
 
-## 目录结构
+The `.dmg` and `.app` will be in `src-tauri/target/release/bundle/macos/`.
 
-```
-cc-space-tauri/
-├── src/                  # Vue 3 前端
-│   ├── components/       # UI 组件
-│   ├── composables/      # 状态/逻辑（useProjects / useSessions / useSplitLayout ...）
-│   ├── views/
-│   └── types/
-├── src-tauri/            # Rust 后端
-│   └── src/
-│       ├── models/       # 数据模型
-│       ├── parser.rs     # JSONL 解析
-│       ├── discovery.rs  # 项目发现
-│       ├── streaming.rs  # Claude CLI 流式进程
-│       └── watcher.rs    # 文件监控
-└── docs/knowledge/       # 项目知识库
+For development:
+
+```bash
+pnpm tauri dev
 ```
 
-更多架构细节见 [docs/knowledge/INDEX.md](docs/knowledge/INDEX.md) 和 [CLAUDE.md](CLAUDE.md)。
+## How It Works
 
-## 数据路径
+CC Space reads Claude Code session data from `~/.claude/projects/`. It **never writes** to these JSONL files — all metadata (titles, tags, archive status) is stored separately in `~/.claude/cc-space/`.
 
-- 会话：`~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`
-- 编码规则：目录名中 `-` 对应路径分隔符 `/`，首个 `-` 为根
+## Tech Stack
+
+- [Tauri 2](https://tauri.app/) — Rust backend + system WebView
+- [Vue 3](https://vuejs.org/) + TypeScript + Composition API
+- [UnoCSS](https://unocss.dev/) — Atomic CSS (preset-wind4 + preset-icons)
+- [Shiki](https://shiki.style/) — Syntax highlighting
+- [markdown-it](https://github.com/markdown-it/markdown-it) — Markdown rendering
+- [vue-i18n](https://vue-i18n.intlify.dev/) — Internationalization
+- [@dnd-kit/vue](https://dndkit.com/) — Drag and drop
 
 ## License
 
-MIT
+[MIT](LICENSE)

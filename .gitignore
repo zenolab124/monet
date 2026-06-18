@@ -4,7 +4,9 @@ src-tauri/target/
 *.log
 .DS_Store
 *.local
+.vscode/
+.claude/
 
-# 私有文档（不公开）
+# Private docs (not public)
 CLAUDE.md
 docs/
