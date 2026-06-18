@@ -151,7 +151,7 @@
     "bannerPrompt": "Injected Prompt",
     "bannerNew": "New",
     "bannerResumed": "Resumed",
-    "bannerStderr": "Hooks output ({count} lines)",
+    "bannerHooks": "SessionStart Hooks ({count})",
     "goTo": "Go to",
     "openInWorkbench": "Open in Workbench",
     "streaming": "Streaming",

@@ -81,7 +81,14 @@ const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const featureBannerShown = ref(false)
 const bannerResumed = ref(false)
 const bannerCwd = ref('')
-const bannerStderr = ref<string[]>([])
+interface HookEvent {
+  subtype: 'hook_started' | 'hook_response'
+  hook_name: string
+  hook_event: string
+  output?: string
+  exit_code?: number
+}
+const bannerHookEvents = ref<HookEvent[]>([])
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
@@ -96,35 +103,30 @@ interface SessionConnectedPayload {
   cwd: string
 }
 
-interface SessionStderrPayload {
-  session_id: string
-  line: string
-}
-
 let unlistenConnected: (() => void) | null = null
-let unlistenStderr: (() => void) | null = null
+let unlistenHook: (() => void) | null = null
 
 listen<SessionConnectedPayload>('session-connected', (e) => {
   const p = e.payload
   if (p.session_id === effectiveSessionId.value) {
     bannerResumed.value = p.resumed
     bannerCwd.value = p.cwd
-    bannerStderr.value = []
+    bannerHookEvents.value = []
     featureBannerShown.value = true
     nextTick(() => scrollToBottom(true))
   }
 }).then(fn => { unlistenConnected = fn })
 
-listen<SessionStderrPayload>('session-stderr', (e) => {
+listen<HookEvent & { session_id: string }>('session-hook', (e) => {
   const p = e.payload
-  if (p.session_id === effectiveSessionId.value && featureBannerShown.value) {
-    bannerStderr.value.push(p.line)
+  if (p.session_id === effectiveSessionId.value) {
+    bannerHookEvents.value.push(p)
   }
-}).then(fn => { unlistenStderr = fn })
+}).then(fn => { unlistenHook = fn })
 
 onUnmounted(() => {
   unlistenConnected?.()
-  unlistenStderr?.()
+  unlistenHook?.()
 })
 
 // --- 会话 ID 来源 ---
@@ -208,7 +210,7 @@ watch(effectiveSessionId, () => {
   featureBannerShown.value = false
   bannerResumed.value = false
   bannerCwd.value = ''
-  bannerStderr.value = []
+  bannerHookEvents.value = []
   lastScrollTop = 0
 })
 
@@ -1174,7 +1176,7 @@ async function onReload() {
           :model="settings.modelId"
           :effort="(settings.effort as string | null)"
           :features="htmlVisualEnabled ? [$t('settings.htmlVisual')] : []"
-          :stderr-lines="bannerStderr"
+          :hook-events="bannerHookEvents"
         />
         <div v-if="stream.pendingUserMessage || stream.pendingImages?.length" class="user-msg-sticky">
           <div class="flex gap-3">

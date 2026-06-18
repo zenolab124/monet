@@ -364,8 +364,19 @@ fn open_session(
             ));
         }
         if let Ok(v) = serde_json::from_str::<Value>(&line_buf) {
-            if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
+            let t = v.get("type").and_then(|t| t.as_str());
+            if t == Some("control_response") {
                 break;
+            }
+            // 握手阶段也可能收到 hook 事件（SessionStart hooks 在 initialize 前执行）
+            if t == Some("system") {
+                if let Some(sub) = v.get("subtype").and_then(|s| s.as_str()) {
+                    if sub == "hook_started" || sub == "hook_response" {
+                        let mut payload = v;
+                        payload.as_object_mut().map(|o| o.insert("session_id".to_string(), json!(session_id)));
+                        let _ = app.emit("session-hook", &payload);
+                    }
+                }
             }
         }
     }
@@ -398,7 +409,7 @@ fn open_session(
         .get_or_insert_with(HashMap::new)
         .insert(session_id.to_string(), sp_arc.clone());
 
-    // 10. 启动 stdout 读取线程（reader 已消费掉握手响应，后续全是流式事件）
+    // 10a. 启动 stdout 读取线程（reader 已消费掉握手响应，后续全是流式事件）
     let handle = app.clone();
     let sid = session_id.to_string();
     let sock = socket_path;
@@ -691,6 +702,17 @@ fn read_stream(
 
         if let Some(event) = decode_stream_event(&value, session_id, &mut current_message_id) {
             let _ = app.emit("stream-event", &event);
+        }
+
+        // hook 事件转发给前端（system 类型的 hook_started / hook_response）
+        if raw_type == "system" {
+            if let Some(subtype) = value.get("subtype").and_then(|s| s.as_str()) {
+                if subtype == "hook_started" || subtype == "hook_response" {
+                    let mut payload = value.clone();
+                    payload.as_object_mut().map(|o| o.insert("session_id".to_string(), json!(session_id)));
+                    let _ = app.emit("session-hook", &payload);
+                }
+            }
         }
 
         // "result" 标记一轮结束（进程继续活着等下一条 stdin 消息）

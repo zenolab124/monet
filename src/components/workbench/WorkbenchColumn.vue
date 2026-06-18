@@ -61,6 +61,15 @@ const sid = computed(() => props.column.sessionId)
 const stream = useSessionStream(sid)
 const status = useSessionStatus(sid)
 
+const projectName = computed(() => {
+  for (const p of projects.value) {
+    if (p.sessions.some(s => s.id === props.column.sessionId))
+      return p.display_path.split('/').pop() || p.display_path
+  }
+  const cwd = draftCwd(props.column.sessionId)
+  return cwd ? cwd.split('/').pop() || cwd : null
+})
+
 const title = computed(() => {
   for (const p of projects.value) {
     const s = p.sessions.find(s => s.id === props.column.sessionId)
@@ -101,6 +110,7 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
         class="w-1.5 h-1.5 rounded-full shrink-0"
         :class="[status.dotClass, { 'col-dot-pulse': status.pulse }]"
       />
+      <span v-if="projectName" class="shrink-0 text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border leading-tight">{{ projectName }}</span>
       <span class="flex-1 min-w-0 truncate text-xs font-semibold">{{ title }}</span>
       <button
         :disabled="rcLoading"

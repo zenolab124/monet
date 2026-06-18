@@ -1,17 +1,41 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { shortId } from '@/types'
 
 const { t } = useI18n()
 
-defineProps<{
+interface HookEvent {
+  subtype: 'hook_started' | 'hook_response'
+  hook_name: string
+  hook_event: string
+  output?: string
+  exit_code?: number
+}
+
+const props = defineProps<{
   sessionId: string
   resumed: boolean
   cwd: string
   model: string | null
   effort: string | null
   features: string[]
+  hookEvents: HookEvent[]
 }>()
+
+function cleanHookOutput(raw?: string): string {
+  if (!raw) return ''
+  // hookSpecificOutput JSON 是给 CLI 内部注入用的，不展示
+  const idx = raw.indexOf('{"hookSpecificOutput"')
+  return (idx >= 0 ? raw.slice(0, idx) : raw).trim()
+}
+
+const hookOutputs = computed(() =>
+  props.hookEvents
+    .filter(e => e.subtype === 'hook_response')
+    .map(e => cleanHookOutput(e.output))
+    .filter(Boolean),
+)
 </script>
 
 <template>
@@ -46,7 +70,9 @@ defineProps<{
           <span v-for="f in features" :key="f" class="banner-tag feature">{{ f }}</span>
         </span>
       </template>
+
     </div>
+    <div v-for="(h, i) in hookOutputs" :key="i" class="hook-output">{{ h }}</div>
   </div>
 </template>
 
@@ -108,5 +134,9 @@ defineProps<{
   background: var(--primary);
   color: var(--primary-foreground);
   border-color: transparent;
+}
+.hook-output {
+  margin-top: 4px;
+  font-size: 11px;
 }
 </style>
