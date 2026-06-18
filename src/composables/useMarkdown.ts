@@ -23,7 +23,17 @@ const LANGS: BundledLanguage[] = [
   'c', 'cpp', 'diff', 'markdown', 'xml',
 ]
 
-const mdOpts = { html: false, linkify: true, breaks: false, typographer: false }
+const mdOpts = { html: true, linkify: true, breaks: false, typographer: false }
+
+function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<([a-z][a-z0-9]*)((?:\s+[^>]*?)?)>/gi, (_m, tag, attrs) => {
+      const cleaned = (attrs as string).replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+      return cleaned !== attrs ? `<${tag}${cleaned}>` : _m
+    })
+}
 
 // 轻量渲染器:无 shiki,常驻。流式期间用它,代码块素色但 parse 成本低一个数量级
 const plainMd = new MarkdownIt(mdOpts)
@@ -50,7 +60,7 @@ markdownItShiki({
 /** 流式降级渲染:跳过 shiki 高亮。流式中文本每帧变化,全量高亮是逐帧主线程大头 */
 export function renderMarkdownPlain(text: string): string {
   const t0 = performance.now()
-  const html = wrapCodeBlocks(plainMd.render(text))
+  const html = sanitizeHtml(wrapCodeBlocks(plainMd.render(text)))
   probeMd('plain', performance.now() - t0)
   return html
 }
@@ -70,7 +80,7 @@ export function renderMarkdownCached(text: string): string {
     return hit
   }
   const t0 = performance.now()
-  const html = wrapCodeBlocks(activeMd.render(text))
+  const html = sanitizeHtml(wrapCodeBlocks(activeMd.render(text)))
   probeMd('miss', performance.now() - t0)
   // shiki 就绪前的结果是无高亮版,不入缓存,避免固化素色 HTML
   if (shikiReady) {

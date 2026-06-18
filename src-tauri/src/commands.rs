@@ -118,6 +118,7 @@ pub async fn start_streaming(
     advisor: bool,
     images: Option<Vec<serde_json::Value>>,
     permission_mode: Option<String>,
+    append_system_prompt: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         streaming::send_message(
@@ -131,6 +132,7 @@ pub async fn start_streaming(
             advisor,
             images.as_deref(),
             permission_mode.as_deref(),
+            append_system_prompt.as_deref(),
         )
     })
     .await

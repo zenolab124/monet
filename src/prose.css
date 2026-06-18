@@ -177,6 +177,52 @@
   background: var(--secondary);
 }
 
+/* HTML 增强：语义标签样式（html-visual 功能模块） */
+.prose-msg details {
+  margin: 0.5em 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.prose-msg details summary {
+  padding: 0.4em 0.75em;
+  background: var(--secondary);
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+}
+.prose-msg details[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+.prose-msg details > :not(summary) {
+  padding: 0.5em 0.75em;
+}
+.prose-msg details > :not(summary):last-child {
+  padding-bottom: 0.6em;
+}
+.prose-msg mark {
+  background: hsl(var(--warning) / 0.25);
+  color: inherit;
+  padding: 0.05em 0.25em;
+  border-radius: 2px;
+}
+.prose-msg kbd {
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  font-size: 0.8125em;
+  font-family: var(--font-mono);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+.prose-msg abbr[title] {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 /* 链接（对齐 messages.html：常显下划线） */
 .prose-msg a {
   color: var(--primary);

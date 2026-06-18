@@ -21,6 +21,7 @@ import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import { useAppDefaults } from '@/composables/useAppDefaults'
+import { useHtmlVisual } from '@/features'
 
 const { t } = useI18n()
 const {
@@ -37,6 +38,8 @@ const {
   locale, availableLocales, switchLocale,
   translating, translateError, parseLanguageIntent, translateLocale, deleteLocale, isBuiltin,
 } = useLocale()
+
+const { enabled: htmlVisualEnabled } = useHtmlVisual()
 
 const agentToggles = ref<Record<string, boolean>>({})
 const agentKeys = [
@@ -573,6 +576,15 @@ function onSaved() {
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
             {{ $t('settings.labDesc') }}
           </p>
+          <div class="settings-grid mb-4">
+            <div class="setting-cell">
+              <label class="form-toggle">
+                <input v-model="htmlVisualEnabled" type="checkbox">
+                <span>{{ $t('settings.htmlVisual') }}</span>
+              </label>
+              <p class="form-hint">{{ $t('settings.htmlVisualDesc') }}</p>
+            </div>
+          </div>
           <div class="iframe-zone">
             <span class="iframe-badge">IFRAME</span>
             <AgentIframeDemo />

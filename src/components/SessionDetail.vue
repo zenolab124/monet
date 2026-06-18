@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { createSessionDetail } from '@/composables/useSessionDetail'
@@ -41,6 +42,8 @@ import QuestionCard from './QuestionCard.vue'
 import PlanApprovalCard from './PlanApprovalCard.vue'
 import MsgClamp from './MsgClamp.vue'
 import { useImageInput } from '@/composables/useImageInput'
+import { useHtmlVisual, HTML_VISUAL_PROMPT } from '@/features'
+import SessionBanner from './SessionBanner.vue'
 import {
   usePermissionRequests,
   currentForSession,
@@ -74,12 +77,35 @@ const { records, loading, error, loadRecords, reloadRecords, clearRecords } = de
 
 const { sendMessage, stopStreaming, clearStreamingTurns, removePendingQueueItem, consumePendingQueue } = useStreaming()
 
+const { enabled: htmlVisualEnabled } = useHtmlVisual()
+const featureBannerShown = ref(false)
+const bannerResumed = ref(false)
+const bannerCwd = ref('')
+
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
 
 const imageInput = useImageInput({ pasteTarget: textareaRef })
 onMounted(() => imageInput.attach())
+
+interface SessionConnectedPayload {
+  session_id: string
+  resumed: boolean
+  cwd: string
+}
+
+let unlistenConnected: (() => void) | null = null
+listen<SessionConnectedPayload>('session-connected', (e) => {
+  const p = e.payload
+  if (p.session_id === effectiveSessionId.value) {
+    bannerResumed.value = p.resumed
+    bannerCwd.value = p.cwd
+    featureBannerShown.value = true
+    nextTick(() => scrollToBottom(true))
+  }
+}).then(fn => { unlistenConnected = fn })
+onUnmounted(() => unlistenConnected?.())
 
 // --- 会话 ID 来源 ---
 
@@ -159,6 +185,9 @@ watch(effectiveSessionId, () => {
   hideHistory.value = false
   showHelpCard.value = false
   followStreaming.value = true
+  featureBannerShown.value = false
+  bannerResumed.value = false
+  bannerCwd.value = ''
   lastScrollTop = 0
 })
 
@@ -395,12 +424,22 @@ const streamingMessageIds = computed(() =>
 /** 进入消息流的 system 子类型（其余 system 记录为噪音，不渲染） */
 const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
 
-/** 流式区 pendingUserMessage 对应的 user record uuid（防历史区双显） */
+/** 流式区 pendingUserMessage 对应的 user record uuid（防历史区双显）。
+ *  通过文本匹配确认 records 里的 user 确实是当前 pending 的那条，
+ *  防止发第二条消息时误杀第一条（此时第二条的 user record 还没入 records）。 */
 const pendingUserUuid = computed(() => {
   if (!stream.value.pendingUserMessage || !stream.value.streamingTurns.length) return null
+  const pendingText = stream.value.pendingUserMessage
   for (let i = records.value.length - 1; i >= 0; i--) {
     const r = records.value[i]
-    if (r.type === 'user') return r.uuid
+    if (r.type !== 'user') continue
+    const content = r.message?.content
+    const text = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? (content.find((b: ContentBlock) => b.type === 'text') as { text?: string } | undefined)?.text
+        : undefined
+    return text === pendingText ? r.uuid : null
   }
   return null
 })
@@ -455,8 +494,10 @@ const messageGroups = computed(() => {
 })
 
 /** 解析私有标签,转为特殊渲染块 */
-const TAG_RE = /<(system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)[^>]*>([\s\S]*?)<\/\1>/g
+const TAG_RE = /<(system-reminder|ide_opened_file|ide_selection|task-notification|user-prompt-submit-hook|persisted-output|tool_use_error|command-name|command-args|command-message|local-command-caveat|local-command-stdout|loop-pause)[^>]*>([\s\S]*?)<\/\1>/g
 const DISCARD_TAGS_RE = /<\/?(?:antml:thinking|antml:function_calls|antml:invoke|antml:parameter)[^>]*>/g
+/** 冗余/仅供模型阅读的标签,解析后直接丢弃不渲染 */
+const SILENT_TAGS = new Set(['command-message', 'local-command-caveat', 'loop-pause'])
 
 function parsePrivateTags(text: string): ContentBlock[] {
   const results: ContentBlock[] = []
@@ -468,7 +509,9 @@ function parsePrivateTags(text: string): ContentBlock[] {
     if (before) results.push({ type: 'text', text: before })
 
     const [, tag, content] = match
-    results.push({ type: tag, text: content.trim() } as any)
+    if (!SILENT_TAGS.has(tag)) {
+      results.push({ type: tag, text: content.trim() } as any)
+    }
 
     lastIndex = match.index! + match[0].length
   }
@@ -495,18 +538,43 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
   const expanded = blocks.flatMap(b => {
     if (b.type !== 'text') return [b]
     const text = (b as any).text as string
+    // 系统自动文本：用户中断
+    if (/^\[Request interrupted by user/.test(text)) {
+      return [{ type: 'system-event', text: text.slice(1, -1) } as any]
+    }
+    // 系统自动文本：图片尺寸元数据
+    if (/^\[Image: (?:original|source:)/.test(text)) {
+      return [{ type: 'image-meta', text: text.slice(1, -1) } as any]
+    }
     const skillMatch = text.match(/^Base directory for this skill:\s*(\S+)/)
     if (skillMatch) {
       const skillPath = skillMatch[1]
       const skillName = skillPath.split('/').pop() || skillPath
       return [{ type: 'skill_prompt', text: text, name: skillName } as any]
     }
-    if (/<(?:system-reminder|ide_opened_file|task-notification|user-prompt-submit-hook)/.test(text)) {
+    if (/<(?:system-reminder|ide_opened_file|ide_selection|task-notification|user-prompt-submit-hook|persisted-output|tool_use_error|command-name|command-args|command-message|local-command-caveat|local-command-stdout|loop-pause)/.test(text)) {
       return parsePrivateTags(text)
     }
     return [b]
   })
-  return expanded
+  // 将 tool_result 内嵌的图片提升到顶层独立渲染
+  const lifted: ContentBlock[] = []
+  for (const b of expanded) {
+    lifted.push(b)
+    if (b.type === 'tool_result' && Array.isArray((b as any).content)) {
+      for (const sub of (b as any).content as ContentBlock[]) {
+        if (sub.type === 'image') lifted.push(sub)
+      }
+    }
+  }
+  return lifted
+}
+
+const USER_CONTENT_TYPES = new Set(['text', 'image', 'document'])
+
+function isSystemOnlyUser(record: Extract<SessionRecord, { type: 'user' }>): boolean {
+  const blocks = contentBlocks(record as any)
+  return blocks.length > 0 && blocks.every(b => !USER_CONTENT_TYPES.has(b.type))
 }
 
 // --- 斜杠命令处理 ---
@@ -623,6 +691,7 @@ async function handleSend() {
   inputText.value = ''
   if (textareaRef.value) textareaRef.value.style.height = 'auto'
   followStreaming.value = true
+  featureBannerShown.value = false
   scrollToBottom(true)
   const advisor = settings.value.advisor
   const images = imageInput.images.value.length ? await imageInput.toImageBlocks() : undefined
@@ -728,9 +797,10 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (!cs) return
     const sid = cs.summary.id
     console.log(`%c ========== [detail] streaming→false, wait 300ms sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
+    // 立即删除 finishedDirty，防止 meta generation 触发 currentSession watch 时误判为后台落账
+    finishedDirty.delete(sid)
     if (SKIP_RECORDS_RELOAD) {
       console.log('%c ========== [detail] SKIP_RECORDS_RELOAD — 跳过 records 更新 ==========', 'color:#ef4444;font-weight:bold')
-      finishedDirty.delete(sid)
       return
     }
     await new Promise(r => setTimeout(r, 300))
@@ -757,7 +827,6 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (effectiveSessionId.value !== sid) return
     console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     if (newRecords) records.value = newRecords
-    finishedDirty.delete(sid)
     if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)
   }
 })
@@ -874,27 +943,29 @@ function stopExternalFollow() {
 
 onUnmounted(stopExternalFollow)
 
+let loadedSessionId: string | null = null
+
 watch(
   () => currentSession.value,
   async (cs) => {
     if (cs) {
-      // 后台结束的流式(本实例未挂载期间)留下脏标记 → 强制刷新拿落账记录
       const force = finishedDirty.has(cs.summary.id)
       if (force) finishedDirty.delete(cs.summary.id)
-      await loadRecords(cs.projectId, cs.summary.id, force)
-      // 落账记录已到手:残留的流式区(turns/pendingUserMessage)让位,
-      // 否则历史区 user record 与 pendingUserMessage 双显、
-      // 残留 turn 经 streamingMessageIds 挡住历史区同 id 的完整记录
-      if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
-        clearStreamingTurns(cs.summary.id)
+      // 同一会话 summary 属性变化(标题/标签等)不重新加载 records,
+      // 只有切换会话或 force(后台流式落账)才刷新
+      if (cs.summary.id !== loadedSessionId || force) {
+        loadedSessionId = cs.summary.id
+        await loadRecords(cs.projectId, cs.summary.id, force)
+        if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
+          clearStreamingTurns(cs.summary.id)
+        }
       }
-      // 会话身份变化才重启外部探测:currentSession 是 computed 新对象,
-      // projects 静默刷新会高频触发本 watch,不能直接当探测信号
       if (cs.summary.id !== followSessionId) {
         followSessionId = cs.summary.id
         startExternalFollow()
       }
     } else {
+      loadedSessionId = null
       followSessionId = null
       stopExternalFollow()
       clearRecords()
@@ -990,7 +1061,16 @@ async function onReload() {
           class="space-y-4"
         >
           <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
-          <div v-if="group.user" :class="group.responses.some(r => r.type === 'assistant') ? 'user-msg-sticky' : ''">
+          <!-- 纯系统注入(无真实用户输入):降级为系统注解样式 -->
+          <div v-if="group.user && group.user.type === 'user' && isSystemOnlyUser(group.user)" class="pl-3">
+            <MessageBlock
+              v-for="(block, bi) in contentBlocks(group.user as any)"
+              :key="bi"
+              :block="block"
+            />
+          </div>
+          <!-- 正常用户消息 -->
+          <div v-else-if="group.user" :class="group.responses.some(r => r.type === 'assistant') ? 'user-msg-sticky' : ''">
             <div class="flex gap-3">
               <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
@@ -1063,8 +1143,17 @@ async function onReload() {
         </div>
       </template>
 
-      <!-- 流式区:pendingUserMessage + streamingTurns 包进同一容器,sticky 限于本轮 -->
-      <div v-if="stream.pendingUserMessage || stream.pendingImages?.length || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
+      <!-- 流式区:横幅 + pendingUserMessage + streamingTurns；turns 不主动清(下次 sendMessage 清),横幅位置才稳定 -->
+      <div v-if="(interactive && featureBannerShown) || stream.pendingUserMessage || stream.pendingImages?.length || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
+        <SessionBanner
+          v-if="interactive && featureBannerShown && effectiveSessionId"
+          :session-id="effectiveSessionId"
+          :resumed="bannerResumed"
+          :cwd="bannerCwd"
+          :model="settings.modelId"
+          :effort="(settings.effort as string | null)"
+          :features="htmlVisualEnabled ? [$t('settings.htmlVisual')] : []"
+        />
         <div v-if="stream.pendingUserMessage || stream.pendingImages?.length" class="user-msg-sticky">
           <div class="flex gap-3">
             <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />

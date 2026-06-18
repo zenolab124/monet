@@ -179,6 +179,7 @@ fn open_session(
     channel: Option<&str>,
     advisor: bool,
     permission_mode: Option<&str>,
+    append_system_prompt: Option<&str>,
 ) -> Result<(), String> {
     if !std::path::Path::new(cwd).is_dir() {
         return Err(format!("工作目录不存在: {}", cwd));
@@ -273,6 +274,10 @@ fn open_session(
     if let Some(ref mode) = effective_mode {
         args.push("--permission-mode".to_string());
         args.push(mode.clone());
+    }
+    if let Some(prompt) = append_system_prompt.filter(|s| !s.is_empty()) {
+        args.push("--append-system-prompt".to_string());
+        args.push(prompt.to_string());
     }
 
     // 6. Spawn（stdin/stdout/stderr 全 piped）
@@ -376,6 +381,12 @@ fn open_session(
     // 10. 存入 ACTIVE_PROCESSES
     let pid = child.id();
     eprintln!("[long-lived] 新建进程 PID={} 会话={}", pid, &session_id[..session_id.len().min(8)]);
+    let resumed = session_flag == "--resume";
+    let _ = app.emit("session-connected", json!({
+        "session_id": session_id,
+        "resumed": resumed,
+        "cwd": cwd,
+    }));
     let sp_arc = Arc::new(Mutex::new(SessionProcess {
         child,
         stdin,
@@ -415,6 +426,7 @@ pub fn send_message(
     advisor: bool,
     images: Option<&[serde_json::Value]>,
     permission_mode: Option<&str>,
+    append_system_prompt: Option<&str>,
 ) -> Result<(), String> {
     let exists = ACTIVE_PROCESSES
         .lock()
@@ -423,7 +435,7 @@ pub fn send_message(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, append_system_prompt)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -494,7 +506,7 @@ pub fn toggle_remote_control(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, None)?;
     }
 
     let process = ACTIVE_PROCESSES

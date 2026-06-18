@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ContentBlock } from '@/types'
 import { triggerMetaGeneration } from './useSessionMeta'
+import { useHtmlVisual, HTML_VISUAL_PROMPT } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import i18n from '../locales'
@@ -744,6 +745,7 @@ async function sendMessage(
   state.activeTool = null
   state.tail = []
   state.lastSent = { cwd, message, opts }
+  const { enabled: htmlVisualEnabled } = useHtmlVisual()
   try {
     await invoke('start_streaming', {
       sessionId,
@@ -755,6 +757,7 @@ async function sendMessage(
       advisor: opts.advisor ?? false,
       images: opts.images?.length ? opts.images : null,
       permissionMode: opts.permissionMode ?? null,
+      appendSystemPrompt: htmlVisualEnabled.value ? HTML_VISUAL_PROMPT : null,
     })
     state.rcActive = true
   } catch (e) {
