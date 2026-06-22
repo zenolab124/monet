@@ -14,10 +14,6 @@ import { useSessionMeta } from '@/composables/useSessionMeta'
 const { getMeta } = useSessionMeta()
 import SessionDetail from '../SessionDetail.vue'
 
-/**
- * 右区单列(FR-004):列头(状态点+标题+收起+关闭) + 完整会话视图。
- * 列头可拖拽重排(FR-005 ④)。
- */
 const props = defineProps<{
   column: WorkbenchColumn
   tabId: string
@@ -25,11 +21,19 @@ const props = defineProps<{
   handleRef?: (el: any) => void
 }>()
 
+const emit = defineEmits<{
+  (e: 'startRace'): void
+}>()
+
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, draftCwd } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state } = useWorkbench()
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
+
+const tab = computed(() => state.value.tabs.find(t => t.id === props.tabId))
+const lane = computed(() => tab.value ? findLane(tab.value, props.column.sessionId) : null)
+const isRace = computed(() => !!lane.value)
 
 const rcLoading = ref(false)
 
@@ -79,18 +83,24 @@ const title = computed(() => {
   return props.column.sessionId.slice(0, 8)
 })
 
-/** 收起回左列:仍激活,流式继续,无确认(FR-004) */
 function onCollapse() {
   collapseColumn(props.tabId, props.column.sessionId)
 }
 
-/** 关闭 = 退出工作台(行为同左列 ×,FR-002):流式中需确认 */
 async function onClose() {
   if (stream.value.streaming) {
     const ok = await confirm(t('workbench.monitor.removeConfirm'), t('common.removeBrief'))
     if (!ok) return
   }
   removeSession(props.column.sessionId)
+}
+
+async function onCloseLane() {
+  if (stream.value.streaming) {
+    const ok = await confirm(t('workbench.monitor.removeConfirm'), t('common.removeBrief'))
+    if (!ok) return
+  }
+  removeRaceLane(props.tabId, props.column.sessionId)
 }
 
 const isDragging = defineModel<boolean>('dragging', { default: false })
@@ -110,8 +120,13 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
         class="w-1.5 h-1.5 rounded-full shrink-0"
         :class="[status.dotClass, { 'col-dot-pulse': status.pulse }]"
       />
-      <span v-if="projectName" class="shrink-0 text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border leading-tight">{{ projectName }}</span>
-      <span class="flex-1 min-w-0 truncate text-xs font-semibold">{{ title }}</span>
+      <template v-if="isRace">
+        <span class="flex-1 min-w-0 truncate text-xs font-semibold">{{ lane!.label }}</span>
+      </template>
+      <template v-else>
+        <span v-if="projectName" class="shrink-0 text-[10px] px-1.5 py-0.5 rounded leading-tight" style="color: var(--tag-foreground); background: var(--tag)">{{ projectName }}</span>
+        <span class="flex-1 min-w-0 truncate text-xs font-semibold">{{ title }}</span>
+      </template>
       <button
         :disabled="rcLoading"
         class="col-head-btn disabled:opacity-40"
@@ -122,27 +137,47 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
       >
         <span class="i-carbon-remote-connection w-3 h-3" />
       </button>
+      <!-- 普通模式:赛马 + 收起 + 关闭 -->
+      <template v-if="!isRace">
+        <button
+          class="col-head-btn"
+          :title="$t('workbench.race.startRace')"
+          @pointerdown.stop
+          @click.stop="emit('startRace')"
+        >
+          <span class="i-carbon-compare w-3 h-3" />
+        </button>
+        <button
+          class="col-head-btn"
+          :title="$t('workbench.column.collapseToRail')"
+          @pointerdown.stop
+          @click="onCollapse"
+        >
+          <span class="i-carbon-chevron-left w-3 h-3" />
+        </button>
+        <button
+          class="col-head-btn hover:text-destructive!"
+          :title="$t('workbench.column.closeExit')"
+          @pointerdown.stop
+          @click="onClose"
+        >
+          <span class="i-carbon-close w-3 h-3" />
+        </button>
+      </template>
+      <!-- 赛马模式:关闭赛道 -->
       <button
-        class="col-head-btn"
-        :title="$t('workbench.column.collapseToRail')"
-        @pointerdown.stop
-        @click="onCollapse"
-      >
-        <span class="i-carbon-chevron-left w-3 h-3" />
-      </button>
-      <button
+        v-else
         class="col-head-btn hover:text-destructive!"
-        :title="$t('workbench.column.closeExit')"
+        :title="$t('workbench.race.closeLane')"
         @pointerdown.stop
-        @click="onClose"
+        @click="onCloseLane"
       >
         <span class="i-carbon-close w-3 h-3" />
       </button>
     </div>
 
-    <!-- 完整会话视图(独立输入/流式/权限) -->
     <div class="flex-1 min-h-0">
-      <SessionDetail mode="workbench" :session-id="column.sessionId" />
+      <SessionDetail mode="workbench" :session-id="column.sessionId" :hide-input="isRace" />
     </div>
   </div>
 </template>

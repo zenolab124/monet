@@ -1,0 +1,48 @@
+/*
+ * Ink 主题 —— Dark+ 风格中性灰，无氛围层
+ */
+
+.theme-ink {
+  --background: oklch(0.20 0.002 80);           /* #1e1e1e 中性灰 */
+  --foreground: oklch(0.87 0.003 80);           /* #d4d4d4 偏冷白 */
+
+  --card: oklch(0.23 0.002 80);                 /* #252526 */
+  --card-foreground: var(--foreground);
+
+  --popover: oklch(0.25 0.002 80);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.64 0.07 145);              /* 墨绿 */
+  --primary-foreground: oklch(0.20 0.002 80);
+
+  --secondary: oklch(0.26 0.002 80);
+  --secondary-foreground: var(--foreground);
+
+  --muted: oklch(0.24 0.002 80);
+  --muted-foreground: oklch(0.60 0.003 80);
+
+  --accent: oklch(0.62 0.12 28);                /* 砖红 */
+  --accent-foreground: oklch(0.20 0.002 80);
+
+  --tag: oklch(0.28 0.015 250);                 /* 石板蓝标签底 */
+  --tag-foreground: oklch(0.68 0.03 250);
+
+  --destructive: oklch(0.58 0.16 25);
+  --destructive-foreground: oklch(0.95 0.003 80);
+
+  --border: oklch(0.34 0.002 80);               /* #474747 */
+  --input: oklch(0.30 0.002 80);
+  --ring: oklch(0.64 0.07 145);
+
+  --claude: oklch(0.75 0.115 42);
+
+  --shadow-paper:
+    0 1px 0 rgba(255, 255, 255, 0.02) inset,
+    0 1px 2px rgba(0, 0, 0, 0.40),
+    0 2px 6px rgba(0, 0, 0, 0.25);
+
+  --shadow-paper-lifted:
+    0 1px 0 rgba(255, 255, 255, 0.02) inset,
+    0 4px 10px rgba(0, 0, 0, 0.50),
+    0 8px 24px rgba(0, 0, 0, 0.30);
+}

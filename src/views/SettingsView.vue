@@ -22,6 +22,7 @@ import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import { useAppDefaults } from '@/composables/useAppDefaults'
 import { useHtmlVisual } from '@/features'
+import { useTheme } from '@/composables/useTheme'
 
 const { t } = useI18n()
 const {
@@ -40,6 +41,7 @@ const {
 } = useLocale()
 
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
+const { config: themeConfig, themes: themeList, setLightTheme, setDarkTheme } = useTheme()
 
 const agentToggles = ref<Record<string, boolean>>({})
 const agentKeys = [
@@ -219,6 +221,32 @@ function onSaved() {
         <section v-show="activeTab === 'general'">
           <h2 class="section-title">{{ $t('settings.general') }}</h2>
           <div class="settings-grid">
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.themeLight') }}</div>
+              <select
+                :value="themeConfig.lightTheme"
+                class="form-select w-full"
+                @change="setLightTheme(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="t in themeList" :key="t.id" :value="t.id">
+                  {{ $t(t.labelKey) }}
+                </option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.themeLightHint') }}</div>
+            </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.themeDark') }}</div>
+              <select
+                :value="themeConfig.darkTheme"
+                class="form-select w-full"
+                @change="setDarkTheme(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="t in themeList" :key="t.id" :value="t.id">
+                  {{ $t(t.labelKey) }}
+                </option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.themeDarkHint') }}</div>
+            </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.language') }}</div>
               <select

@@ -84,7 +84,9 @@
     "hideSidebar": "Hide sidebar",
     "searchSessions": "Search sessions… (⌘F)",
     "searchAllSessions": "Search all sessions… (⌘F)",
-    "recalculate": "Recalculate"
+    "recalculate": "Recalculate",
+    "netcheck": "Network Check",
+    "netcheckRunning": "Checking…"
   },
   "archive": {
     "projects": "Projects",
@@ -205,6 +207,17 @@
       "rcOpened": "Remote Control enabled",
       "rcClosed": "Remote Control disabled",
       "rcFailed": "Remote Control operation failed"
+    },
+    "race": {
+      "startRace": "Race",
+      "defaultTabName": "Race {seq}",
+      "addLane": "Add Lane",
+      "closeLane": "Close Lane",
+      "laneLabel": "Lane {n}",
+      "stopAll": "Stop All",
+      "sharedInput": "Type a message to send to all lanes…",
+      "noCwd": "Session has no working directory, cannot start race",
+      "forkFailed": "Fork failed"
     }
   },
   "workshop": {
@@ -363,6 +376,10 @@
     "models": "Models",
     "lab": "Lab",
     "diagnostics": "Diagnostics",
+    "themeLight": "Light Theme",
+    "themeLightHint": "Used when system appearance is light",
+    "themeDark": "Dark Theme",
+    "themeDarkHint": "Used when system appearance is dark",
     "language": "Language",
     "languageHint": "Switch the interface language",
     "addLanguage": "+ AI Translate New Language",
@@ -610,9 +627,9 @@
     "official": "Official"
   },
   "theme": {
-    "system": "System",
-    "light": "Light",
-    "dark": "Dark"
+    "paper": "Paper",
+    "ink": "Ink",
+    "glass": "Glass"
   },
   "block": {
     "thinking": "Thinking process ({length} chars)",

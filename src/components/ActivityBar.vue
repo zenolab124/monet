@@ -7,7 +7,7 @@ import { useNotifications } from '@/composables/useNotifications'
 
 const { t } = useI18n()
 const { activeSection, switchSection } = useUiState()
-const { mode, cycleTheme, themeLabel, themeIcon } = useTheme()
+const { activeTheme, activeThemeLabel, cycleActiveTheme } = useTheme()
 const { badgeCount } = useNotifications()
 
 /** 终态七域全摆；v2.1.0 点亮工作台,「会话」更名档案语义,其余灰置 */
@@ -65,8 +65,8 @@ const badgeText = computed(() => {
     <div class="flex-1" data-tauri-drag-region />
 
     <!-- 外观切换（自 Toolbar 移入，全域可达） -->
-    <button class="ab-item" :title="themeLabel[mode]" @click="cycleTheme">
-      <span :class="themeIcon[mode]" class="w-4.5 h-4.5 block" />
+    <button class="ab-item" :title="activeThemeLabel" @click="cycleActiveTheme">
+      <span :class="activeTheme.icon" class="w-4.5 h-4.5 block" />
     </button>
 
     <!-- 设置(自多渠道起点亮:渠道管理是第一个设置域) -->

@@ -1,0 +1,17 @@
+/*
+ * 主题共享基础 —— 跨主题不变的排版与布局 token
+ */
+
+:root {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable",
+    "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+    system-ui, sans-serif;
+
+  --radius: 0.3rem;
+}
+
+h1, h2, h3, h4 {
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}

@@ -1,0 +1,77 @@
+/*
+ * Paper 主题 —— 暖米色卡纸 · 墨上纸 · 系统字（源出 inkast）
+ * 含颗粒 + vignette 氛围层
+ */
+
+.theme-paper {
+  --background: oklch(0.935 0.020 80);          /* #F2EBDC 浓米色卡纸 */
+  --foreground: oklch(0.265 0.020 50);          /* #2A2620 深棕墨 */
+
+  --card: oklch(0.965 0.014 80);                /* #FBF6EA 比背景亮一档的纸 */
+  --card-foreground: var(--foreground);
+
+  --popover: oklch(0.970 0.012 80);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.43 0.06 145);              /* #3A5A40 墨绿 */
+  --primary-foreground: oklch(0.96 0.014 80);
+
+  --secondary: oklch(0.89 0.018 75);
+  --secondary-foreground: var(--foreground);
+
+  --muted: oklch(0.90 0.016 75);
+  --muted-foreground: oklch(0.48 0.022 55);
+
+  --accent: oklch(0.55 0.13 28);                /* #A4453B 砖红 */
+  --accent-foreground: oklch(0.97 0.012 80);
+
+  --tag: oklch(0.90 0.02 250);                  /* 石板蓝标签底 */
+  --tag-foreground: oklch(0.42 0.04 250);       /* 蓝墨文字 */
+
+  --destructive: oklch(0.52 0.16 25);
+  --destructive-foreground: oklch(0.97 0.012 80);
+
+  --border: oklch(0.82 0.018 70);
+  --input: oklch(0.85 0.014 72);
+  --ring: oklch(0.43 0.06 145);
+
+  --claude: oklch(0.71 0.12 40);
+
+  --shadow-paper:
+    0 1px 0 rgba(255, 250, 235, 0.6) inset,
+    0 1px 2px rgba(70, 45, 20, 0.10),
+    0 2px 6px rgba(70, 45, 20, 0.06);
+
+  --shadow-paper-lifted:
+    0 1px 0 rgba(255, 250, 235, 0.6) inset,
+    0 4px 10px rgba(70, 45, 20, 0.14),
+    0 8px 24px rgba(70, 45, 20, 0.08);
+}
+
+/* === 氛围层：颗粒 + vignette === */
+
+.theme-paper .paper-atmosphere::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.20 0 0 0 0 0.16 0 0 0 0 0.10 0 0 0 0.95 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size: 200px 200px;
+  mix-blend-mode: multiply;
+}
+
+.theme-paper .paper-atmosphere::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 35%,
+    rgba(70, 45, 20, 0.12) 100%
+  );
+  mix-blend-mode: multiply;
+}

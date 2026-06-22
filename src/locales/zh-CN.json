@@ -84,7 +84,9 @@
     "hideSidebar": "隐藏侧栏",
     "searchSessions": "搜索会话… (⌘F)",
     "searchAllSessions": "搜索全部会话… (⌘F)",
-    "recalculate": "重新统计"
+    "recalculate": "重新统计",
+    "netcheck": "网络诊断",
+    "netcheckRunning": "检测中…"
   },
   "archive": {
     "projects": "项目",
@@ -205,6 +207,17 @@
       "rcOpened": "Remote Control 已开启",
       "rcClosed": "Remote Control 已关闭",
       "rcFailed": "Remote Control 操作失败"
+    },
+    "race": {
+      "startRace": "赛马",
+      "defaultTabName": "赛马 {seq}",
+      "addLane": "添加赛道",
+      "closeLane": "关闭赛道",
+      "laneLabel": "赛道 {n}",
+      "stopAll": "全部停止",
+      "sharedInput": "输入消息，同时发送到所有赛道…",
+      "noCwd": "此会话无工作目录，无法发起赛马",
+      "forkFailed": "分叉失败"
     }
   },
   "workshop": {
@@ -363,6 +376,10 @@
     "models": "模型",
     "lab": "实验室",
     "diagnostics": "诊断",
+    "themeLight": "亮色主题",
+    "themeLightHint": "系统为亮色外观时使用",
+    "themeDark": "暗色主题",
+    "themeDarkHint": "系统为暗色外观时使用",
     "language": "界面语言",
     "languageHint": "切换界面显示语言",
     "addLanguage": "+ AI 翻译新语言",
@@ -610,9 +627,9 @@
     "official": "官方"
   },
   "theme": {
-    "system": "跟随系统",
-    "light": "亮色模式",
-    "dark": "暗色模式"
+    "paper": "Paper · 纸",
+    "ink": "Ink · 墨",
+    "glass": "Glass · 玻璃"
   },
   "block": {
     "thinking": "思考过程（{length} 字）",

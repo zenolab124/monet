@@ -1,0 +1,75 @@
+/*
+ * Glass 主题（暗色）—— 极深黑底 · 极光光晕 · 毛玻璃面板
+ */
+
+.theme-glass {
+  --background: oklch(0.10 0.01 265);           /* 极深蓝黑 */
+  --foreground: oklch(0.92 0.005 250);          /* 冷白 */
+
+  --card: rgba(15, 15, 25, 0.55);               /* 深色半透明玻璃 */
+  --card-foreground: var(--foreground);
+
+  --popover: rgba(15, 15, 25, 0.70);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.66 0.17 265);              /* 玻璃蓝 */
+  --primary-foreground: oklch(0.98 0.005 240);
+
+  --secondary: rgba(15, 15, 25, 0.45);          /* sidebar 半透明 */
+  --secondary-foreground: var(--foreground);
+
+  --muted: rgba(255, 255, 255, 0.06);
+  --muted-foreground: rgba(255, 255, 255, 0.52);
+
+  --accent: oklch(0.74 0.22 320);              /* 极光紫 */
+  --accent-foreground: oklch(0.98 0.005 240);
+
+  --tag: rgba(72, 121, 254, 0.22);
+  --tag-foreground: oklch(0.72 0.14 265);
+
+  --destructive: oklch(0.66 0.18 25);
+  --destructive-foreground: oklch(0.98 0.005 240);
+
+  --border: rgba(255, 255, 255, 0.18);          /* 白色高光描边 */
+  --input: rgba(255, 255, 255, 0.10);
+  --ring: oklch(0.66 0.17 265);
+
+  --claude: oklch(0.75 0.115 42);
+
+  --shadow-paper:
+    0 4px 20px 0 rgba(0, 0, 0, 0.40);
+  --shadow-paper-lifted:
+    0 8px 32px 0 rgba(0, 0, 0, 0.55);
+}
+
+/* === body 极深背景 === */
+.theme-glass body {
+  background: oklch(0.08 0.015 265);
+}
+
+/* === 毛玻璃 === */
+.theme-glass :is(.bg-card, .bg-popover, .bg-secondary) {
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* === 极光光晕 ===
+ * 黑底上鲜明的三色光斑，backdrop-filter 模糊后产生玻璃感
+ */
+.theme-glass .glass-atmosphere::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(ellipse 50% 42% at 18% 22%, rgba(72, 121, 254, 0.55), transparent 70%),
+    radial-gradient(ellipse 45% 38% at 82% 18%, rgba(17, 176, 238, 0.45), transparent 70%),
+    radial-gradient(ellipse 52% 46% at 50% 88%, rgba(237, 100, 246, 0.40), transparent 70%);
+  filter: blur(40px);
+}
+
+.theme-glass #app {
+  position: relative;
+  z-index: 2;
+}
