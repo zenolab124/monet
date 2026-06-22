@@ -83,6 +83,7 @@ pub fn run() {
             commands::set_permission_mode,
             commands::get_cli_settings,
             commands::check_session_running,
+            commands::fork_session,
             commands::get_usage_stats,
             commands::get_schema_diagnosis,
             workshop::get_workshop_assets,

@@ -403,3 +403,20 @@ pub(crate) fn projects_dir() -> PathBuf {
         .join(".claude")
         .join("projects")
 }
+
+#[tauri::command]
+pub fn fork_session(
+    source_session_id: String,
+    new_session_id: String,
+    cwd: String,
+) -> Result<(), String> {
+    let project_dir = projects_dir().join(cwd.replace('/', "-"));
+    let source = project_dir.join(format!("{}.jsonl", source_session_id));
+    let dest = project_dir.join(format!("{}.jsonl", new_session_id));
+    if !source.exists() {
+        return Err(format!("Source session not found: {}", source_session_id));
+    }
+    std::fs::copy(&source, &dest)
+        .map_err(|e| format!("Fork failed: {}", e))?;
+    Ok(())
+}

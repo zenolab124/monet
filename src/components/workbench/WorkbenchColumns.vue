@@ -2,16 +2,13 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDroppable } from '@dnd-kit/vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
+import { useProjects } from '@/composables/useProjects'
 import { useNotifications } from '@/composables/useNotifications'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 import SortableColumn from './SortableColumn.vue'
 
-/**
- * 右区多列布局(FR-004):浮起纸方案——四周边距与列间隙均 10px,
- * flex-grow 比例只作用于自由空间;
- * 同时承接两类拖拽落点(FR-005 ③卡片展开定位 / ④列头重排)。
- */
 const {
   activeTab,
   updateColumnSize,
@@ -19,9 +16,45 @@ const {
   reorderColumns,
   focusColumnRequest,
   enforceColumnCapacity,
+  createRaceTab,
+  draftCwd,
+  state,
 } = useWorkbench()
 const { t } = useI18n()
+const { projects } = useProjects()
 const { notifyTransient, sessionTitle } = useNotifications()
+
+function resolveSessionCwd(sessionId: string): string | undefined {
+  for (const p of projects.value) {
+    const s = p.sessions.find(s => s.id === sessionId)
+    if (s?.cwd) return s.cwd
+  }
+  return draftCwd(sessionId) ?? undefined
+}
+
+async function onStartRace(sessionId: string) {
+  const cwd = resolveSessionCwd(sessionId)
+  if (!cwd) {
+    notifyTransient(t('workbench.race.noCwd'))
+    return
+  }
+  const isDraft = !!state.value.drafts[sessionId]
+  const newSessionId = crypto.randomUUID()
+  try {
+    if (!isDraft) {
+      await invoke('fork_session', {
+        sourceSessionId: sessionId,
+        newSessionId,
+        cwd,
+      })
+    } else {
+      state.value.drafts[newSessionId] = cwd
+    }
+    createRaceTab(sessionId, cwd, newSessionId)
+  } catch (e) {
+    notifyTransient(t('workbench.race.forkFailed'), String(e))
+  }
+}
 
 const containerRef = ref<HTMLElement>()
 const { isDropTarget } = useDroppable({ id: computed(() => 'col-zone:' + activeTab.value.id), element: containerRef })
@@ -132,7 +165,7 @@ watch(focusColumnRequest, async (req) => {
       :flex="activeTab.columnSizes[i]"
     >
       <template #default="{ isDragging: colDragging, handleRef }">
-        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" />
+        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" @start-race="onStartRace(col.sessionId)" />
         <!-- 列间 resize 手柄（绝对定位在右边界，不参与 flex 布局） -->
         <div
           v-if="i < activeTab.columns.length - 1"

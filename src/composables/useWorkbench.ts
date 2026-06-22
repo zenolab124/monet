@@ -18,6 +18,17 @@ export interface WorkbenchColumn {
   openedSeq: number
 }
 
+export interface RaceLane {
+  id: string
+  sessionId: string
+  label: string
+}
+
+export interface RaceConfig {
+  cwd: string
+  lanes: RaceLane[]
+}
+
 export interface WorkbenchTab {
   id: string
   name: string
@@ -27,6 +38,8 @@ export interface WorkbenchTab {
   columns: WorkbenchColumn[]
   /** 各列宽度比例,与 columns 平行,和 ≈ 1 */
   columnSizes: number[]
+  /** 赛马模式配置。非 undefined 即赛马 Tab */
+  race?: RaceConfig
 }
 
 interface WorkbenchState {
@@ -83,6 +96,7 @@ function enforceColumnCapacity(): string[] {
   const max = dynamicMaxColumns()
   const collapsedInActive: string[] = []
   for (const tab of state.value.tabs) {
+    if (tab.race) continue
     let changed = false
     while (tab.columns.length > max) {
       const earliest = tab.columns.reduce((min, c) => (c.openedSeq < min.openedSeq ? c : min))
@@ -154,6 +168,17 @@ function loadState(): WorkbenchState | null {
       if (t.columns.length > 0) {
         const sum = t.columnSizes.reduce((a, b) => a + b, 0)
         if (Math.abs(sum - 1) > 0.01) return null
+      }
+      if (t.race !== undefined) {
+        if (!t.race || typeof t.race !== 'object') return null
+        if (typeof t.race.cwd !== 'string' || !t.race.cwd) return null
+        if (!Array.isArray(t.race.lanes) || t.race.lanes.length === 0) return null
+        for (const lane of t.race.lanes) {
+          if (!lane || typeof lane.id !== 'string' || typeof lane.sessionId !== 'string') return null
+          if (typeof lane.label !== 'string') return null
+          if (!t.sessionIds.includes(lane.sessionId)) return null
+          if (!t.columns.some(c => c.sessionId === lane.sessionId)) return null
+        }
       }
     }
     if (!parsed.tabs.some(t => t.id === parsed.activeTabId)) return null
@@ -279,6 +304,86 @@ function reorderSessions(tabId: string, fromIndex: number, toIndex: number) {
   if (fromIndex < 0 || fromIndex >= n || toIndex < 0 || toIndex >= n || fromIndex === toIndex) return
   const [moved] = tab.sessionIds.splice(fromIndex, 1)
   tab.sessionIds.splice(toIndex, 0, moved)
+}
+
+// ---- 赛马模式 ----
+
+/**
+ * 从已有会话发起赛马:原会话迁入新赛马 Tab 为 lane 1,
+ * 再分叉一份为 lane 2。调用方负责先调 Rust fork_session 完成文件复制。
+ */
+function createRaceTab(sourceSessionId: string, cwd: string, forkedSessionId: string): WorkbenchTab {
+  removeSession(sourceSessionId)
+
+  state.value.tabSeq += 1
+  const tab = createTabObject(state.value.tabSeq)
+  tab.name = i18n.global.t('workbench.race.defaultTabName', { seq: state.value.tabSeq })
+
+  const lanes: RaceLane[] = []
+  for (const sid of [sourceSessionId, forkedSessionId]) {
+    tab.sessionIds.push(sid)
+    state.value.openSeq += 1
+    tab.columns.push({
+      id: genId('wbcol'),
+      type: 'session',
+      sessionId: sid,
+      openedSeq: state.value.openSeq,
+    })
+    lanes.push({
+      id: genId('lane'),
+      sessionId: sid,
+      label: i18n.global.t('workbench.race.laneLabel', { n: lanes.length + 1 }),
+    })
+  }
+
+  tab.columnSizes = equalSizes(lanes.length)
+  tab.race = { cwd, lanes }
+
+  state.value.tabs.push(tab)
+  state.value.activeTabId = tab.id
+  return tab
+}
+
+/** 向赛马 Tab 追加一个分叉赛道。调用方负责先完成文件复制 */
+function addRaceLane(tabId: string, forkedSessionId: string) {
+  const tab = state.value.tabs.find(t => t.id === tabId)
+  if (!tab?.race) return
+
+  tab.sessionIds.push(forkedSessionId)
+  state.value.openSeq += 1
+  tab.columns.push({
+    id: genId('wbcol'),
+    type: 'session',
+    sessionId: forkedSessionId,
+    openedSeq: state.value.openSeq,
+  })
+  tab.race.lanes.push({
+    id: genId('lane'),
+    sessionId: forkedSessionId,
+    label: i18n.global.t('workbench.race.laneLabel', { n: tab.race.lanes.length + 1 }),
+  })
+  tab.columnSizes = equalSizes(tab.columns.length)
+}
+
+/** 关闭赛马赛道:移除列 + lane;剩 1 条时自动解散为普通 Tab */
+function removeRaceLane(tabId: string, sessionId: string) {
+  const tab = state.value.tabs.find(t => t.id === tabId)
+  if (!tab?.race) return
+
+  tab.race.lanes = tab.race.lanes.filter(l => l.sessionId !== sessionId)
+  const si = tab.sessionIds.indexOf(sessionId)
+  if (si >= 0) tab.sessionIds.splice(si, 1)
+  const ci = tab.columns.findIndex(c => c.sessionId === sessionId)
+  if (ci >= 0) tab.columns.splice(ci, 1)
+  tab.columnSizes = equalSizes(tab.columns.length)
+
+  if (tab.race.lanes.length <= 1) {
+    delete tab.race
+  }
+}
+
+function findLane(tab: WorkbenchTab, sessionId: string): RaceLane | null {
+  return tab.race?.lanes.find(l => l.sessionId === sessionId) ?? null
 }
 
 // ---- 会话进出与展开(FR-002/004) ----
@@ -461,6 +566,10 @@ export function useWorkbench() {
     findSession,
     isSessionVisibleInWorkbench,
     createTab,
+    createRaceTab,
+    addRaceLane,
+    removeRaceLane,
+    findLane,
     renameTab,
     closeTab,
     setActiveTab,

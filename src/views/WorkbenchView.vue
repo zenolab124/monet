@@ -1,31 +1,40 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import MonitorRail from '@/components/workbench/MonitorRail.vue'
 import WorkbenchColumns from '@/components/workbench/WorkbenchColumns.vue'
+import RaceColumns from '@/components/workbench/RaceColumns.vue'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useUiState } from '@/composables/useUiState'
 
 const { activeTab } = useWorkbench()
 const { monitorRailCollapsed, monitorRailPeeking, monitorPeekInstantHide, peekMonitorRail, unpeekMonitorRail } = useUiState()
+
+const isRaceTab = computed(() => !!activeTab.value.race)
 </script>
 
 <template>
   <div class="h-full flex min-h-0 relative">
-    <!-- 常驻模式 -->
-    <MonitorRail v-show="!monitorRailCollapsed" />
+    <template v-if="!isRaceTab">
+      <!-- 常驻模式 -->
+      <MonitorRail v-show="!monitorRailCollapsed" />
 
-    <!-- 抽屉模式：收起时 hover 浮出 -->
-    <Transition :name="monitorPeekInstantHide ? '' : 'rail-peek'">
-      <aside
-        v-if="monitorRailCollapsed && monitorRailPeeking"
-        class="rail-drawer"
-        @mouseenter="peekMonitorRail"
-        @mouseleave="unpeekMonitorRail"
-      >
-        <MonitorRail />
-      </aside>
-    </Transition>
+      <!-- 抽屉模式：收起时 hover 浮出 -->
+      <Transition :name="monitorPeekInstantHide ? '' : 'rail-peek'">
+        <aside
+          v-if="monitorRailCollapsed && monitorRailPeeking"
+          class="rail-drawer"
+          @mouseenter="peekMonitorRail"
+          @mouseleave="unpeekMonitorRail"
+        >
+          <MonitorRail />
+        </aside>
+      </Transition>
 
-    <WorkbenchColumns :key="activeTab.id" />
+      <WorkbenchColumns :key="activeTab.id" />
+    </template>
+
+    <!-- 赛马模式:全宽列 + 共享输入 -->
+    <RaceColumns v-else :key="activeTab.id" />
   </div>
 </template>
 

@@ -59,6 +59,8 @@ const props = defineProps<{
   /** 直接指定会话(工作台列);优先于全局选中 */
   sessionId?: string | null
   mode?: 'archive' | 'workbench'
+  /** 赛马模式:隐藏列内输入框(共享输入在底部) */
+  hideInput?: boolean
 }>()
 
 const { t } = useI18n()
@@ -1267,8 +1269,8 @@ async function onReload() {
       />
     </div>
 
-    <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染,事件绑定随之移除) -->
-    <div v-if="interactive && currentSession.summary.cwd" class="px-4 py-3 border-t border-border shrink-0 relative">
+    <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染;赛马模式由共享输入替代) -->
+    <div v-if="interactive && !hideInput && currentSession.summary.cwd" class="px-4 py-3 border-t border-border shrink-0 relative">
       <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
       </div>

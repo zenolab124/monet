@@ -128,6 +128,10 @@ function loadFromStorage(sid: string): SessionSettings {
   }
 }
 
+export function getSessionSettings(sid: string): SessionSettings {
+  return loadFromStorage(sid)
+}
+
 function saveToStorage(sid: string, settings: SessionSettings) {
   try {
     localStorage.setItem(storageKey(sid), JSON.stringify(settings))
