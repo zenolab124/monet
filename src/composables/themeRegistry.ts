@@ -28,7 +28,7 @@ export const THEMES: ThemeMeta[] = [
     id: 'glass',
     className: 'theme-glass',
     isDark: true,
-    atmosphere: 'glass-atmosphere',
+    atmosphere: false,
     icon: 'i-carbon-fog',
     labelKey: 'theme.glass',
   },
