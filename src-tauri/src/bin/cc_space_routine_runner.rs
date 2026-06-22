@@ -1,0 +1,317 @@
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RoutineDefinition {
+    id: String,
+    name: String,
+    cron_expression: String,
+    original_text: String,
+    prompt: String,
+    enabled: bool,
+    created_at: String,
+    last_run: Option<String>,
+    next_run: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutionLog {
+    routine_id: String,
+    started_at: String,
+    finished_at: Option<String>,
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+
+fn main() {
+    let routine_id = parse_args();
+
+    let routines = load_routines();
+    let routine = routines
+        .iter()
+        .find(|r| r.id == routine_id)
+        .unwrap_or_else(|| {
+            eprintln!("routine not found: {}", routine_id);
+            std::process::exit(1);
+        })
+        .clone();
+
+    if !routine.enabled {
+        eprintln!("routine is disabled, skipping");
+        std::process::exit(0);
+    }
+
+    // File lock to prevent concurrent execution
+    let lock_path = locks_dir().join(format!("{}.lock", routine_id));
+    let _ = fs::create_dir_all(lock_path.parent().unwrap());
+    let lock_file = fs::File::create(&lock_path).unwrap_or_else(|e| {
+        eprintln!("cannot create lock file: {}", e);
+        std::process::exit(1);
+    });
+
+    use fs2::FileExt;
+    if lock_file.try_lock_exclusive().is_err() {
+        eprintln!("another instance is running, skipping");
+        std::process::exit(0);
+    }
+
+    // Dedup: check if already ran in current cron period
+    if should_skip(&routine) {
+        eprintln!("already ran in current period, skipping");
+        std::process::exit(0);
+    }
+
+    // Execute
+    let started_at = Utc::now().to_rfc3339();
+    let claude_path = find_claude();
+
+    let output = Command::new(&claude_path)
+        .arg("-p")
+        .arg(&routine.prompt)
+        .arg("--output-format")
+        .arg("text")
+        .arg("--no-session-persistence")
+        .current_dir(agent_cwd())
+        .output();
+
+    let finished_at = Utc::now().to_rfc3339();
+
+    let log = match output {
+        Ok(out) => ExecutionLog {
+            routine_id: routine_id.clone(),
+            started_at: started_at.clone(),
+            finished_at: Some(finished_at),
+            exit_code: out.status.code(),
+            stdout: truncate(&String::from_utf8_lossy(&out.stdout), 10240),
+            stderr: truncate(&String::from_utf8_lossy(&out.stderr), 4096),
+        },
+        Err(e) => ExecutionLog {
+            routine_id: routine_id.clone(),
+            started_at: started_at.clone(),
+            finished_at: Some(finished_at),
+            exit_code: Some(-1),
+            stdout: String::new(),
+            stderr: format!("spawn failed: {}", e),
+        },
+    };
+
+    write_log(&log);
+    update_routine_state(&routine_id, &started_at);
+}
+
+fn parse_args() -> String {
+    let args: Vec<String> = env::args().collect();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--routine-id" && i + 1 < args.len() {
+            return args[i + 1].clone();
+        }
+        i += 1;
+    }
+    eprintln!("usage: cc-space-routine-runner --routine-id <uuid>");
+    std::process::exit(1);
+}
+
+fn data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+        PathBuf::from(dir)
+    } else {
+        dirs::home_dir().unwrap_or_default().join(".cc-space")
+    }
+}
+
+fn routines_path() -> PathBuf {
+    data_dir().join("routines.json")
+}
+
+fn logs_dir(routine_id: &str) -> PathBuf {
+    data_dir()
+        .join("routines")
+        .join("logs")
+        .join(routine_id)
+}
+
+fn locks_dir() -> PathBuf {
+    data_dir().join("routines").join("locks")
+}
+
+fn agent_cwd() -> PathBuf {
+    let p = data_dir().join("agent");
+    let _ = fs::create_dir_all(&p);
+    p
+}
+
+fn load_routines() -> Vec<RoutineDefinition> {
+    let path = routines_path();
+    if !path.exists() {
+        eprintln!("routines.json not found");
+        std::process::exit(1);
+    }
+    let content = fs::read_to_string(&path).unwrap_or_else(|e| {
+        eprintln!("read routines.json: {}", e);
+        std::process::exit(1);
+    });
+    serde_json::from_str(&content).unwrap_or_else(|e| {
+        eprintln!("parse routines.json: {}", e);
+        std::process::exit(1);
+    })
+}
+
+fn should_skip(routine: &RoutineDefinition) -> bool {
+    let last_run = match &routine.last_run {
+        Some(lr) => lr,
+        None => return false,
+    };
+
+    let last_run_dt = match chrono::DateTime::parse_from_rfc3339(last_run) {
+        Ok(dt) => dt.with_timezone(&chrono::Local),
+        Err(_) => return false,
+    };
+
+    // Find the previous scheduled time before now
+    use cron::Schedule;
+    use std::str::FromStr;
+
+    let full = format!("0 {}", routine.cron_expression);
+    let schedule = match Schedule::from_str(&full) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let now = chrono::Local::now();
+    // Get upcoming times and find the one just before now
+    // by getting the next occurrence and subtracting one period
+    let mut prev = None;
+    // Walk backwards: get many upcoming from a past point
+    let past = now - chrono::Duration::days(2);
+    for dt in schedule.after(&past) {
+        if dt > now {
+            break;
+        }
+        prev = Some(dt);
+    }
+
+    match prev {
+        Some(prev_scheduled) => last_run_dt >= prev_scheduled,
+        None => false,
+    }
+}
+
+fn find_claude() -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+
+    let bin_name = if cfg!(target_os = "windows") {
+        "claude.exe"
+    } else {
+        "claude"
+    };
+
+    let mut candidates: Vec<PathBuf> = vec![
+        home.join(".local").join("bin").join(bin_name),
+        home.join(".cargo").join("bin").join(bin_name),
+    ];
+
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(PathBuf::from("/usr/local/bin/claude"));
+        candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = env::var("APPDATA") {
+            candidates.push(PathBuf::from(appdata).join("npm").join(bin_name));
+        }
+        if let Ok(localappdata) = env::var("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(localappdata).join("Programs").join("claude").join(bin_name));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(PathBuf::from("/usr/local/bin/claude"));
+        candidates.push(home.join(".npm-global").join("bin").join("claude"));
+    }
+
+    for c in &candidates {
+        if c.exists() {
+            return c.to_string_lossy().to_string();
+        }
+    }
+
+    bin_name.to_string()
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        s[..max].to_string()
+    }
+}
+
+fn write_log(log: &ExecutionLog) {
+    let dir = logs_dir(&log.routine_id);
+    let _ = fs::create_dir_all(&dir);
+
+    let epoch_ms = chrono::DateTime::parse_from_rfc3339(&log.started_at)
+        .map(|dt| dt.timestamp_millis())
+        .unwrap_or_else(|_| Utc::now().timestamp_millis());
+
+    let path = dir.join(format!("{}.json", epoch_ms));
+    if let Ok(json) = serde_json::to_string_pretty(log) {
+        let _ = fs::write(&path, json);
+    }
+}
+
+fn update_routine_state(routine_id: &str, last_run: &str) {
+    let path = routines_path();
+
+    // Read-modify-write with file lock
+    let file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+
+    use fs2::FileExt;
+    let _ = file.lock_exclusive();
+
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let mut routines: Vec<RoutineDefinition> = match serde_json::from_str(&content) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    if let Some(r) = routines.iter_mut().find(|r| r.id == routine_id) {
+        r.last_run = Some(last_run.to_string());
+        r.next_run = compute_next_run(&r.cron_expression);
+    }
+
+    if let Ok(json) = serde_json::to_string_pretty(&routines) {
+        let _ = fs::write(&path, json);
+    }
+
+    let _ = file.unlock();
+}
+
+fn compute_next_run(cron_expr: &str) -> Option<String> {
+    use cron::Schedule;
+    use std::str::FromStr;
+
+    let full = format!("0 {}", cron_expr);
+    let schedule = Schedule::from_str(&full).ok()?;
+    let next = schedule.upcoming(chrono::Local).next()?;
+    Some(next.to_rfc3339())
+}

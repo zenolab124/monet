@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::config;
+
 /// 保留 id:语义为「官方/零注入」。参与链排序,不对应 channels/ 下的文件
 pub const OFFICIAL_ID: &str = "official";
 
@@ -28,10 +30,7 @@ pub const DEFENSE_ENV_KEYS: [&str; 4] = [
 ];
 
 fn cc_space_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space")
+    config::data_dir().to_path_buf()
 }
 
 fn channels_dir() -> PathBuf {

@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::commands::projects_dir;
+use crate::config;
 use crate::models::{SessionRecord, MessageContent};
 use crate::parser;
 
@@ -31,11 +32,7 @@ pub struct SessionMeta {
 }
 
 fn meta_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space")
-        .join("metadata.json")
+    config::data_dir().join("metadata.json")
 }
 
 fn load() -> HashMap<String, SessionMeta> {
@@ -105,10 +102,7 @@ pub fn update_meta(session_id: String, patch: SessionMeta) -> Result<SessionMeta
 }
 
 pub fn agent_cwd() -> PathBuf {
-    let p = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space-agent");
+    let p = config::data_dir().join("agent");
     let _ = fs::create_dir_all(&p);
     p
 }

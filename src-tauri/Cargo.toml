@@ -51,3 +51,8 @@ tauri-plugin-window-state = "2.4.1"
 cron = "0.15"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
+fs2 = "0.4"
+
+[[bin]]
+name = "cc-space-routine-runner"
+path = "src/bin/cc_space_routine_runner.rs"

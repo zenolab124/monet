@@ -1,0 +1,597 @@
+use std::path::{Path, PathBuf};
+
+use crate::config;
+use crate::routines::RoutineDefinition;
+
+pub fn register_routine(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
+    platform::register(routine, runner_path)
+}
+
+pub fn unregister_routine(routine_id: &str) -> Result<(), String> {
+    platform::unregister(routine_id)
+}
+
+pub fn sync_all(routines: &[RoutineDefinition], runner_path: &Path) -> Result<(), String> {
+    for routine in routines {
+        if routine.enabled {
+            if !platform::is_registered(&routine.id) {
+                platform::register(routine, runner_path)?;
+            }
+        } else {
+            if platform::is_registered(&routine.id) {
+                platform::unregister(&routine.id)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn runner_binary_path() -> PathBuf {
+    config::data_dir().join("bin").join(runner_bin_name())
+}
+
+pub fn install_runner_binary() -> Result<(), String> {
+    let target = runner_binary_path();
+    let source = bundled_runner_path();
+
+    if !source.exists() {
+        return Err(format!(
+            "runner binary not found at: {}",
+            source.display()
+        ));
+    }
+
+    if let Some(parent) = target.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let needs_install = if target.exists() {
+        let src_meta = std::fs::metadata(&source).map_err(|e| e.to_string())?;
+        let dst_meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
+        src_meta.len() != dst_meta.len()
+    } else {
+        true
+    };
+
+    if needs_install {
+        std::fs::copy(&source, &target).map_err(|e| {
+            format!("failed to install runner binary: {}", e)
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    Ok(())
+}
+
+fn bundled_runner_path() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(runner_bin_name());
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(runner_bin_name())
+}
+
+fn runner_bin_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "cc-space-routine-runner.exe"
+    } else {
+        "cc-space-routine-runner"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// macOS: launchd
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn plist_path(routine_id: &str) -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join("Library")
+            .join("LaunchAgents")
+            .join(format!("com.cc-space.routine.{}.plist", routine_id))
+    }
+
+    fn label(routine_id: &str) -> String {
+        format!("com.cc-space.routine.{}", routine_id)
+    }
+
+    pub fn is_registered(routine_id: &str) -> bool {
+        plist_path(routine_id).exists()
+    }
+
+    pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
+        let path = plist_path(&routine.id);
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        let calendar_intervals = cron_to_calendar_intervals(&routine.cron_expression)?;
+        let plist_content = generate_plist(
+            &label(&routine.id),
+            runner_path,
+            &routine.id,
+            &calendar_intervals,
+        );
+
+        fs::write(&path, &plist_content)
+            .map_err(|e| format!("failed to write plist: {}", e))?;
+
+        let uid = Command::new("id").arg("-u").output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "501".to_string());
+        let domain_target = format!("gui/{}", uid);
+
+        let _ = Command::new("launchctl")
+            .args(["bootout", &domain_target, &path.to_string_lossy()])
+            .output();
+
+        let output = Command::new("launchctl")
+            .args(["bootstrap", &domain_target, &path.to_string_lossy()])
+            .output()
+            .map_err(|e| format!("launchctl bootstrap failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("already bootstrapped") {
+                return Err(format!("launchctl bootstrap error: {}", stderr));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn unregister(routine_id: &str) -> Result<(), String> {
+        let path = plist_path(routine_id);
+
+        let uid = Command::new("id").arg("-u").output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "501".to_string());
+        let domain_target = format!("gui/{}", uid);
+
+        let _ = Command::new("launchctl")
+            .args(["bootout", &domain_target, &path.to_string_lossy()])
+            .output();
+
+        if path.exists() {
+            let _ = fs::remove_file(&path);
+        }
+
+        Ok(())
+    }
+
+    fn generate_plist(
+        label: &str,
+        runner_path: &Path,
+        routine_id: &str,
+        calendar_intervals: &str,
+    ) -> String {
+        let log_path = config::data_dir()
+            .join("routines")
+            .join("logs")
+            .join(routine_id);
+        let _ = std::fs::create_dir_all(&log_path);
+        let stdout_log = log_path.join("launchd.log");
+
+        let path_env = enhanced_path();
+
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{label}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{runner}</string>
+		<string>--routine-id</string>
+		<string>{routine_id}</string>
+	</array>
+{calendar_intervals}
+	<key>RunAtLoad</key>
+	<true/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{path_env}</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>{stdout_log}</string>
+	<key>StandardErrorPath</key>
+	<string>{stdout_log}</string>
+</dict>
+</plist>
+"#,
+            label = label,
+            runner = runner_path.display(),
+            routine_id = routine_id,
+            calendar_intervals = calendar_intervals,
+            path_env = path_env,
+            stdout_log = stdout_log.display(),
+        )
+    }
+
+    fn enhanced_path() -> String {
+        let home = dirs::home_dir().unwrap_or_default();
+        let extra = [
+            home.join(".local/bin"),
+            home.join(".cargo/bin"),
+            home.join(".nvm/versions/node").join("current").join("bin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/opt/homebrew/bin"),
+        ];
+        let base = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string());
+        let mut parts: Vec<String> = extra
+            .iter()
+            .filter(|p| p.exists())
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        parts.push(base);
+        parts.join(":")
+    }
+
+    fn cron_to_calendar_intervals(cron_expr: &str) -> Result<String, String> {
+        use cron::Schedule;
+        use std::str::FromStr;
+
+        let full = format!("0 {}", cron_expr);
+        let schedule = Schedule::from_str(&full)
+            .map_err(|e| format!("invalid cron: {}", e))?;
+
+        let mut entries: Vec<(u32, u32, Option<u32>, Option<u32>, Option<u32>)> = Vec::new();
+
+        // Sample next 366 occurrences (covers a full year cycle) to find the pattern
+        for dt in schedule.upcoming(chrono::Local).take(366) {
+            let min = dt.minute();
+            let hour = dt.hour();
+            let day = dt.day();
+            let month = dt.month();
+            let weekday = dt.weekday().num_days_from_sunday(); // 0=Sun
+
+            let entry = (min, hour, Some(day), Some(month), Some(weekday));
+            if !entries.contains(&entry) {
+                entries.push(entry);
+            }
+            if entries.len() > 200 {
+                break;
+            }
+        }
+
+        // Analyze: if all entries share the same minute+hour and vary only by date,
+        // it's a simple daily/weekly pattern
+        let all_same_time = entries.iter().all(|e| e.0 == entries[0].0 && e.1 == entries[0].1);
+        let unique_weekdays: std::collections::HashSet<_> =
+            entries.iter().filter_map(|e| e.4).collect();
+        let unique_days: std::collections::HashSet<_> =
+            entries.iter().filter_map(|e| e.2).collect();
+
+        if all_same_time && unique_days.len() >= 28 {
+            // Daily pattern (all days covered) — simplest: just hour+minute
+            return Ok(format!(
+                "\t<key>StartCalendarInterval</key>\n\t<dict>\n\t\t<key>Hour</key>\n\t\t<integer>{}</integer>\n\t\t<key>Minute</key>\n\t\t<integer>{}</integer>\n\t</dict>",
+                entries[0].1, entries[0].0
+            ));
+        }
+
+        if all_same_time && unique_weekdays.len() <= 7 && unique_days.len() < 28 {
+            // Weekly pattern — emit one dict per weekday
+            let mut intervals = String::from("\t<key>StartCalendarInterval</key>\n\t<array>\n");
+            for wd in &unique_weekdays {
+                intervals.push_str(&format!(
+                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Weekday</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                    entries[0].1, entries[0].0, wd
+                ));
+            }
+            intervals.push_str("\t</array>");
+            return Ok(intervals);
+        }
+
+        // Fallback: high-frequency or complex — use multiple calendar intervals
+        // Cap at 48 entries (e.g. every 30 min = 48/day)
+        let capped = &entries[..entries.len().min(48)];
+        if capped.len() == 1 {
+            let e = &capped[0];
+            return Ok(format!(
+                "\t<key>StartCalendarInterval</key>\n\t<dict>\n\t\t<key>Hour</key>\n\t\t<integer>{}</integer>\n\t\t<key>Minute</key>\n\t\t<integer>{}</integer>\n\t</dict>",
+                e.1, e.0
+            ));
+        }
+
+        let mut intervals = String::from("\t<key>StartCalendarInterval</key>\n\t<array>\n");
+        // For sub-hourly patterns, just emit minute values
+        let unique_minutes: std::collections::HashSet<_> = entries.iter().map(|e| e.0).collect();
+        let unique_hours: std::collections::HashSet<_> = entries.iter().map(|e| e.1).collect();
+
+        if unique_hours.len() == 24 {
+            // Every-N-minutes pattern — emit per-minute dicts
+            for min in &unique_minutes {
+                intervals.push_str(&format!(
+                    "\t\t<dict>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                    min
+                ));
+            }
+        } else {
+            for e in capped {
+                intervals.push_str(&format!(
+                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                    e.1, e.0
+                ));
+            }
+        }
+        intervals.push_str("\t</array>");
+        Ok(intervals)
+    }
+
+    use chrono::Timelike;
+    use chrono::Datelike;
+}
+
+// ---------------------------------------------------------------------------
+// Windows: Task Scheduler
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+mod platform {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn task_name(routine_id: &str) -> String {
+        format!("CC-Space\\Routine-{}", routine_id)
+    }
+
+    fn xml_path(routine_id: &str) -> PathBuf {
+        config::data_dir()
+            .join("routines")
+            .join("tasks")
+            .join(format!("{}.xml", routine_id))
+    }
+
+    pub fn is_registered(routine_id: &str) -> bool {
+        let output = Command::new("schtasks")
+            .args(["/Query", "/TN", &task_name(routine_id)])
+            .output();
+        output.map_or(false, |o| o.status.success())
+    }
+
+    pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
+        let xml_file = xml_path(&routine.id);
+        if let Some(parent) = xml_file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        let xml = generate_task_xml(runner_path, &routine.id, &routine.cron_expression)?;
+        fs::write(&xml_file, &xml).map_err(|e| format!("write task xml: {}", e))?;
+
+        let output = Command::new("schtasks")
+            .args([
+                "/Create",
+                "/TN", &task_name(&routine.id),
+                "/XML", &xml_file.to_string_lossy(),
+                "/F",
+            ])
+            .output()
+            .map_err(|e| format!("schtasks create: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "schtasks error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn unregister(routine_id: &str) -> Result<(), String> {
+        let _ = Command::new("schtasks")
+            .args(["/Delete", "/TN", &task_name(routine_id), "/F"])
+            .output();
+        let xml = xml_path(routine_id);
+        if xml.exists() {
+            let _ = fs::remove_file(&xml);
+        }
+        Ok(())
+    }
+
+    fn generate_task_xml(
+        runner_path: &Path,
+        routine_id: &str,
+        cron_expr: &str,
+    ) -> Result<String, String> {
+        // Parse cron for daily time (simplified: covers daily/weekly)
+        use cron::Schedule;
+        use std::str::FromStr;
+
+        let full = format!("0 {}", cron_expr);
+        let schedule = Schedule::from_str(&full).map_err(|e| format!("invalid cron: {}", e))?;
+        let next = schedule.upcoming(chrono::Local).next().ok_or("no next run")?;
+        let start_time = next.format("%Y-%m-%dT%H:%M:%S").to_string();
+
+        Ok(format!(
+            r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>{start_time}</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Settings>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>{runner}</Command>
+      <Arguments>--routine-id {routine_id}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+            start_time = start_time,
+            runner = runner_path.display(),
+            routine_id = routine_id,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Linux: systemd user timer
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn unit_dir() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".config")
+            .join("systemd")
+            .join("user")
+    }
+
+    fn service_name(routine_id: &str) -> String {
+        format!("cc-space-routine-{}.service", routine_id)
+    }
+
+    fn timer_name(routine_id: &str) -> String {
+        format!("cc-space-routine-{}.timer", routine_id)
+    }
+
+    pub fn is_registered(routine_id: &str) -> bool {
+        unit_dir().join(timer_name(routine_id)).exists()
+    }
+
+    pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
+        let dir = unit_dir();
+        let _ = fs::create_dir_all(&dir);
+
+        let service = format!(
+            "[Unit]\nDescription=CC Space Routine: {name}\n\n[Service]\nType=oneshot\nExecStart={runner} --routine-id {id}\n",
+            name = routine.name,
+            runner = runner_path.display(),
+            id = routine.id,
+        );
+
+        let on_calendar = cron_to_systemd_calendar(&routine.cron_expression)?;
+        let timer = format!(
+            "[Unit]\nDescription=Timer for CC Space Routine: {name}\n\n[Timer]\nOnCalendar={cal}\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+            name = routine.name,
+            cal = on_calendar,
+        );
+
+        fs::write(dir.join(service_name(&routine.id)), &service)
+            .map_err(|e| format!("write service: {}", e))?;
+        fs::write(dir.join(timer_name(&routine.id)), &timer)
+            .map_err(|e| format!("write timer: {}", e))?;
+
+        let _ = Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
+
+        let output = Command::new("systemctl")
+            .args(["--user", "enable", "--now", &timer_name(&routine.id)])
+            .output()
+            .map_err(|e| format!("systemctl enable: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "systemctl enable error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn unregister(routine_id: &str) -> Result<(), String> {
+        let _ = Command::new("systemctl")
+            .args(["--user", "disable", "--now", &timer_name(routine_id)])
+            .output();
+
+        let dir = unit_dir();
+        let _ = fs::remove_file(dir.join(service_name(routine_id)));
+        let _ = fs::remove_file(dir.join(timer_name(routine_id)));
+
+        let _ = Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
+
+        Ok(())
+    }
+
+    fn cron_to_systemd_calendar(cron_expr: &str) -> Result<String, String> {
+        let parts: Vec<&str> = cron_expr.split_whitespace().collect();
+        if parts.len() != 5 {
+            return Err(format!("expected 5-field cron, got {}", parts.len()));
+        }
+        let (min, hour, dom, _mon, dow) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+
+        let weekday_prefix = if dow != "*" {
+            let days = dow
+                .split(',')
+                .map(|d| match d {
+                    "0" | "7" => "Sun",
+                    "1" => "Mon",
+                    "2" => "Tue",
+                    "3" => "Wed",
+                    "4" => "Thu",
+                    "5" => "Fri",
+                    "6" => "Sat",
+                    range if range.contains('-') => range, // pass-through for ranges like 1-5
+                    _ => d,
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            // Convert numeric range like 1-5 to Mon..Fri
+            let days = days
+                .replace("1-5", "Mon..Fri")
+                .replace("0-6", "*")
+                .replace("1-7", "*");
+            format!("{} ", days)
+        } else {
+            String::new()
+        };
+
+        let day_part = if dom == "*" {
+            "*-*-*".to_string()
+        } else {
+            format!("*-*-{}", dom.replace("*/", "1/"))
+        };
+
+        let hour_part = if hour == "*" {
+            "*".to_string()
+        } else {
+            hour.replace("*/", "0/")
+        };
+
+        let min_part = if min == "*" {
+            "*".to_string()
+        } else {
+            min.replace("*/", "0/")
+        };
+
+        Ok(format!("{}{}:{}:00", weekday_prefix, hour_part, min_part))
+    }
+}

@@ -2,6 +2,7 @@ use tauri::Manager;
 
 mod cache;
 mod channels;
+pub mod config;
 mod commands;
 mod discovery;
 mod models;
@@ -17,6 +18,7 @@ mod agent;
 mod automation;
 mod metadata;
 mod routines;
+mod scheduler;
 mod workshop;
 mod cli_settings;
 mod translate;
@@ -48,8 +50,8 @@ pub fn run() {
             channels::cleanup_runtime_dir();
             // AgentService 常驻进程
             agent::init();
-            // 本地定时任务调度器
-            routines::init_scheduler(app.handle().clone());
+            // 系统级定时任务调度器同步
+            routines::startup_sync();
             // 后台刷新 CLI settings schema
             cli_settings::refresh_settings_schema();
 
@@ -60,7 +62,6 @@ pub fn run() {
                     if let tauri::WindowEvent::Destroyed = event {
                         streaming::close_all_sessions();
                         agent::shutdown();
-                        routines::shutdown_scheduler();
                     }
                 });
             }

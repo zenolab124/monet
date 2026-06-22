@@ -2,14 +2,14 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::metadata::agent_cwd;
+use crate::config;
+use crate::scheduler;
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -55,25 +55,17 @@ pub struct RoutineRow {
 
 static ROUTINES: Mutex<Option<Vec<RoutineDefinition>>> = Mutex::new(None);
 static RUNNING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-static SCHEDULER_ALIVE: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // File paths
 // ---------------------------------------------------------------------------
 
 fn routines_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space")
-        .join("routines.json")
+    config::data_dir().join("routines.json")
 }
 
 fn logs_dir(routine_id: &str) -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space")
+    config::data_dir()
         .join("routines")
         .join("logs")
         .join(routine_id)
@@ -221,6 +213,12 @@ fn truncate_str(s: &str, max: usize) -> String {
 // Execution
 // ---------------------------------------------------------------------------
 
+fn agent_cwd() -> PathBuf {
+    let p = config::data_dir().join("agent");
+    let _ = fs::create_dir_all(&p);
+    p
+}
+
 fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
     let id = routine.id.clone();
     let prompt = routine.prompt.clone();
@@ -234,8 +232,6 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
         let output = Command::new("claude")
             .arg("-p")
             .arg(&prompt)
-            .arg("--model")
-            .arg("claude-haiku-4-5-20251001")
             .arg("--output-format")
             .arg("text")
             .arg("--no-session-persistence")
@@ -282,13 +278,19 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Scheduler (tick loop)
+// System scheduler sync (replaces tick loop)
 // ---------------------------------------------------------------------------
 
-pub fn init_scheduler(app: AppHandle) {
-    SCHEDULER_ALIVE.store(true, Ordering::SeqCst);
+pub fn startup_sync() {
+    // Install runner binary to stable path
+    if let Err(e) = scheduler::install_runner_binary() {
+        log::warn!("routine runner install failed: {}", e);
+        return;
+    }
 
-    // 初始化 next_run
+    let runner_path = scheduler::runner_binary_path();
+
+    // Ensure all enabled routines have next_run computed
     with_routines(|routines| {
         let mut changed = false;
         for r in routines.iter_mut() {
@@ -302,52 +304,12 @@ pub fn init_scheduler(app: AppHandle) {
         }
     });
 
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
-            if !SCHEDULER_ALIVE.load(Ordering::SeqCst) {
-                break;
-            }
-            tick(&app);
-        }
-    });
-}
+    // Sync with OS scheduler
+    let routines_snapshot: Vec<RoutineDefinition> =
+        with_routines(|routines| routines.clone());
 
-pub fn shutdown_scheduler() {
-    SCHEDULER_ALIVE.store(false, Ordering::SeqCst);
-}
-
-fn tick(app: &AppHandle) {
-    let now = Utc::now();
-    let to_fire: Vec<RoutineDefinition> = with_routines(|routines| {
-        routines
-            .iter()
-            .filter(|r| {
-                r.enabled
-                    && !is_running(&r.id)
-                    && r.next_run.as_ref().map_or(false, |nr| {
-                        chrono::DateTime::parse_from_rfc3339(nr)
-                            .map_or(false, |dt| dt <= now)
-                    })
-            })
-            .cloned()
-            .collect()
-    });
-
-    for routine in &to_fire {
-        execute_routine(routine, app);
-    }
-
-    // 更新已触发 routine 的 next_run
-    if !to_fire.is_empty() {
-        with_routines(|routines| {
-            for fired in &to_fire {
-                if let Some(r) = routines.iter_mut().find(|r| r.id == fired.id) {
-                    r.next_run = compute_next_run_full(&r.cron_expression);
-                }
-            }
-            save_routines(routines);
-        });
+    if let Err(e) = scheduler::sync_all(&routines_snapshot, &runner_path) {
+        log::warn!("routine scheduler sync failed: {}", e);
     }
 }
 
@@ -402,6 +364,13 @@ pub fn create_routine(
         save_routines(routines);
     });
 
+    if routine.enabled {
+        let runner_path = scheduler::runner_binary_path();
+        if let Err(e) = scheduler::register_routine(&routine, &runner_path) {
+            log::warn!("scheduler register failed: {}", e);
+        }
+    }
+
     Ok(routine)
 }
 
@@ -450,12 +419,30 @@ pub fn update_routine(
 
         let result = r.clone();
         save_routines(routines);
+
+        // Sync system scheduler
+        if cron_changed || enabled_changed {
+            let runner_path = scheduler::runner_binary_path();
+            if result.enabled {
+                let _ = scheduler::unregister_routine(&result.id);
+                if let Err(e) = scheduler::register_routine(&result, &runner_path) {
+                    log::warn!("scheduler re-register failed: {}", e);
+                }
+            } else {
+                let _ = scheduler::unregister_routine(&result.id);
+            }
+        }
+
         Ok(result)
     })
 }
 
 #[tauri::command]
 pub fn delete_routine(id: String) -> Result<(), String> {
+    if let Err(e) = scheduler::unregister_routine(&id) {
+        log::warn!("scheduler unregister failed: {}", e);
+    }
+
     with_routines(|routines| {
         routines.retain(|r| r.id != id);
         save_routines(routines);

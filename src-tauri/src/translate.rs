@@ -5,14 +5,11 @@ use std::process::Command;
 use serde_json::{json, Value};
 
 use crate::channels::{resolve_agent_chain, try_agent_chain, AgentChannelCredentials};
+use crate::config;
 use crate::streaming::{enhanced_path, find_claude};
 
 fn locales_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space")
-        .join("locales")
+    config::data_dir().join("locales")
 }
 
 fn build_translate_prompt(source_json: &str, target_lang: &str, target_native: &str) -> String {

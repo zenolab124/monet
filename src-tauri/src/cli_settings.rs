@@ -6,15 +6,14 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
+use crate::config;
+
 static SCHEMA_CACHE: Mutex<Option<Value>> = Mutex::new(None);
 
 const SCHEMA_URL: &str = "https://json.schemastore.org/claude-code-settings.json";
 
 fn cc_space_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("cc-space")
+    config::data_dir().to_path_buf()
 }
 
 fn schema_cache_path() -> PathBuf {
