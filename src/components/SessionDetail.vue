@@ -796,6 +796,13 @@ function scrollToBottom(force = false) {
       if (!el) return
       programmaticScroll = true
       el.scrollTop = el.scrollHeight
+      // 内容刚挂载时 scrollHeight 可能还是 0，延迟重试一次
+      if (el.scrollHeight <= el.clientHeight) {
+        requestAnimationFrame(() => {
+          programmaticScroll = true
+          el.scrollTop = el.scrollHeight
+        })
+      }
     })
   })
 }
@@ -982,6 +989,7 @@ watch(
         if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
           clearStreamingTurns(cs.summary.id)
         }
+        scrollToBottom(true)
       }
       if (cs.summary.id !== followSessionId) {
         followSessionId = cs.summary.id

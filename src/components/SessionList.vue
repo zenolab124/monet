@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions, type SortOrder, type TimeRange } from '@/composables/useSessions'
@@ -51,6 +51,64 @@ function pickModel(model: string) {
   showModelDropdown.value = false
 }
 
+// ====== 虚拟滚动 ======
+const ITEM_HEIGHT = 60
+const OVERSCAN = 5
+
+const scrollContainer = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const containerHeight = ref(0)
+
+const totalHeight = computed(() => sortedSessions.value.length * ITEM_HEIGHT)
+
+const visibleRange = computed(() => {
+  const start = Math.max(0, Math.floor(scrollTop.value / ITEM_HEIGHT) - OVERSCAN)
+  const visibleCount = Math.ceil(containerHeight.value / ITEM_HEIGHT) + OVERSCAN * 2
+  const end = Math.min(sortedSessions.value.length, start + visibleCount)
+  return { start, end }
+})
+
+const visibleSessions = computed(() => {
+  const { start, end } = visibleRange.value
+  return sortedSessions.value.slice(start, end).map((session, i) => ({
+    session,
+    index: start + i,
+  }))
+})
+
+const offsetY = computed(() => visibleRange.value.start * ITEM_HEIGHT)
+
+function onScroll() {
+  const el = scrollContainer.value
+  if (el) scrollTop.value = el.scrollTop
+}
+
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  const el = scrollContainer.value
+  if (el) {
+    containerHeight.value = el.clientHeight
+    resizeObserver = new ResizeObserver(() => {
+      containerHeight.value = el.clientHeight
+    })
+    resizeObserver.observe(el)
+  }
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+})
+
+// 数据源变化时重置滚动
+watch(sortedSessions, () => {
+  const el = scrollContainer.value
+  if (el && el.scrollTop > totalHeight.value) {
+    el.scrollTop = 0
+    scrollTop.value = 0
+  }
+})
+
 // 原生右键菜单
 import { invoke } from '@tauri-apps/api/core'
 import { Menu } from '@tauri-apps/api/menu'
@@ -68,7 +126,6 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
     items.push({
       text: t('archive.resumeInTerminal'),
       action: async () => {
-        // 带上该会话已存的渠道(resolve 跟随默认),终端恢复不静默回落官方
         await refreshChannels()
         const channel = resolveChannel(readStoredChannelId(session.id))
         await invoke('resume_in_terminal', { cwd: session.cwd!, sessionId: session.id, channel })
@@ -82,7 +139,6 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       const { projects } = useProjects()
       const project = projects.value.find(p => p.sessions.some(s => s.id === session.id))
       if (!project) return
-      // 会话在工作台中:先确认(注明归属)再自动移出(FR-009)
       const { findSession, removeSession } = useWorkbench()
       const home = findSession(session.id)
       if (home) {
@@ -198,44 +254,52 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       </div>
     </div>
 
-    <!-- 会话列表 -->
-    <div class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain p-2 flex flex-col gap-1">
+    <!-- 会话列表（虚拟滚动） -->
+    <div
+      ref="scrollContainer"
+      class="flex-1 overflow-y-auto min-h-0 overscroll-y-contain"
+      @scroll.passive="onScroll"
+    >
       <div v-if="sortedSessions.length === 0" class="px-3 py-8 text-center">
         <p class="text-muted-foreground text-xs">{{ $t('archive.noSessions') }}</p>
         <p class="text-muted-foreground text-xs mt-1">{{ $t('archive.adjustFilter') }}</p>
       </div>
 
-      <template
-        v-for="(session, i) in sortedSessions"
-        :key="session.id"
-      >
-      <div v-if="i > 0" class="mx-3 border-t border-border/30" />
-      <div
-        class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors cursor-pointer group relative shrink-0"
-        :class="selectedSessionId === session.id ? 'bg-card border-border shadow-paper' : 'hover:bg-muted'"
-        @click="selectSession(session.id)"
-        @contextmenu="onContextMenu($event, session)"
-      >
-        <div class="text-sm text-foreground truncate">
-          {{ displayTitle(session, getMeta(session.id)?.title) }}
-        </div>
-        <div class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate">
-          <span v-if="session.git_branch">{{ session.git_branch }}</span>
-          <span v-if="session.git_branch">·</span>
-          <span>{{ relativeTime(session.last_modified) }}</span>
-          <span>·</span>
-          <span>{{ formatTokens(tokenTotal(session.total_tokens)) }}</span>
-          <span v-if="session.model">·</span>
-          <span v-if="session.model" class="text-muted-foreground">{{ shortModel(session.model) }}</span>
-        </div>
-        <!-- 摘要（仅展示） -->
-        <div v-if="getMeta(session.id)?.summary" v-tooltip="getMeta(session.id)!.summary" class="text-[11px] text-muted-foreground/70 mt-1 line-clamp-2 leading-relaxed">
-          {{ getMeta(session.id)!.summary }}
+      <div v-else :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div :style="{ transform: `translateY(${offsetY}px)` }" class="p-2 flex flex-col gap-1">
+          <template
+            v-for="({ session, index }) in visibleSessions"
+            :key="session.id"
+          >
+          <div v-if="index > 0" class="mx-3 border-t border-border/30" />
+          <div
+            class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors cursor-pointer group relative shrink-0"
+            :class="selectedSessionId === session.id ? 'bg-card border-border shadow-paper' : 'hover:bg-muted'"
+            :style="{ height: ITEM_HEIGHT + 'px', boxSizing: 'border-box' }"
+            @click="selectSession(session.id)"
+            @contextmenu="onContextMenu($event, session)"
+          >
+            <div class="text-sm text-foreground truncate">
+              {{ displayTitle(session, getMeta(session.id)?.title) }}
+            </div>
+            <div class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate">
+              <span v-if="session.git_branch">{{ session.git_branch }}</span>
+              <span v-if="session.git_branch">·</span>
+              <span>{{ relativeTime(session.last_modified) }}</span>
+              <span>·</span>
+              <span>{{ formatTokens(tokenTotal(session.total_tokens)) }}</span>
+              <span v-if="session.model">·</span>
+              <span v-if="session.model" class="text-muted-foreground">{{ shortModel(session.model) }}</span>
+            </div>
+            <!-- 摘要（仅展示） -->
+            <div v-if="getMeta(session.id)?.summary" v-tooltip="getMeta(session.id)!.summary" class="text-[11px] text-muted-foreground/70 mt-1 line-clamp-1 leading-relaxed">
+              {{ getMeta(session.id)!.summary }}
+            </div>
+          </div>
+          </template>
         </div>
       </div>
-      </template>
     </div>
 
   </div>
 </template>
-

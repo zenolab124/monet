@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { formatBytes, formatTokens, tokenTotal, relativeTime } from '@/types'
@@ -14,10 +13,6 @@ const {
   toggleProject,
   sidebarStats,
 } = useProjects()
-
-onMounted(() => {
-  loadProjects()
-})
 
 function isSelected(id: string) {
   return selectedProjectIds.value.has(id)

@@ -137,6 +137,8 @@ onMounted(async () => {
   await initPermissionListener()
   await initNotificationLayer()
   await useRoutines().initRoutineListener()
+  // 档案馆预加载:v-show 保活但数据要提前拉，首次切换零等待
+  loadProjects()
   // 工作台持久化损坏回退提示(NFR-002)
   if (stateWasReset) {
     useNotifications().notifyTransient(t('workbench.stateReset'))

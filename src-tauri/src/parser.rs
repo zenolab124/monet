@@ -342,23 +342,37 @@ fn search_tail_for_title(path: &Path, tail_size: u64) -> Option<String> {
     None
 }
 
-/// 从 JSONL value 中提取第一段用户文本
+/// 从 JSONL value 中提取第一段用户文本（截断到 200 字符，降低 IPC 载荷）
 fn extract_first_text(value: &Value) -> Option<String> {
     let message = value.get("message")?;
     let content = message.get("content")?;
 
-    if let Some(text) = content.as_str() {
-        return Some(text.to_string());
-    }
-
-    if let Some(blocks) = content.as_array() {
+    let raw = if let Some(text) = content.as_str() {
+        text.to_string()
+    } else if let Some(blocks) = content.as_array() {
+        let mut found = None;
         for block in blocks {
             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                    return Some(text.to_string());
+                found = block.get("text").and_then(|t| t.as_str()).map(String::from);
+                if found.is_some() {
+                    break;
                 }
             }
         }
+        found?
+    } else {
+        return None;
+    };
+
+    Some(truncate_chars(&raw, 200))
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    let mut chars = s.char_indices();
+    if chars.nth(max).is_some() {
+        let byte_end = s.char_indices().nth(max).unwrap().0;
+        format!("{}…", &s[..byte_end])
+    } else {
+        s.to_string()
     }
-    None
 }
