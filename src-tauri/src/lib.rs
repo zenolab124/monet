@@ -122,6 +122,8 @@ pub fn run() {
             routines::delete_routine,
             routines::get_routine_logs,
             routines::run_routine_now,
+            routines::get_routine_wake_policy,
+            routines::set_routine_wake_policy,
             cli_settings::get_settings_schema,
             cli_settings::get_full_cli_settings,
             cli_settings::update_cli_settings,

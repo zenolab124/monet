@@ -97,6 +97,21 @@ const editing = ref<'new' | ChannelInfo | null>(null)
 
 const { appDefaults, setDefaultEffort } = useAppDefaults()
 const rcEnabled = ref(true)
+const wakePolicy = ref('passive')
+
+async function loadWakePolicy() {
+  try {
+    wakePolicy.value = await invoke<string>('get_routine_wake_policy')
+  } catch {}
+}
+async function setWakePolicy(policy: string) {
+  wakePolicy.value = policy
+  try {
+    await invoke('set_routine_wake_policy', { policy })
+  } catch (e) {
+    wakePolicy.value = policy === 'active' ? 'passive' : 'active'
+  }
+}
 
 // 模型 — 暂用本地状态
 const advisorMain = ref('claude-sonnet-4-6')
@@ -104,7 +119,7 @@ const advisorModel = ref('claude-fable-5')
 const hideCreditsModels = ref(false)
 const autoDetectModels = ref(false)
 
-onMounted(() => { refreshChannels(); loadAgentToggles() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadWakePolicy() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -350,6 +365,36 @@ function onSaved() {
                 <span class="text-[11px] text-muted-foreground">{{ $t('settings.remoteControlSub') }}</span>
               </div>
               <div class="setting-hint">{{ $t('settings.remoteControlHint') }}</div>
+            </div>
+
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.routineWake') }}</div>
+              <div class="flex flex-col gap-1.5">
+                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
+                  <input
+                    type="radio"
+                    name="wake-policy"
+                    value="passive"
+                    :checked="wakePolicy === 'passive'"
+                    class="accent-primary"
+                    @change="setWakePolicy('passive')"
+                  />
+                  {{ $t('settings.routineWakePassive') }}
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
+                  <input
+                    type="radio"
+                    name="wake-policy"
+                    value="active"
+                    :checked="wakePolicy === 'active'"
+                    class="accent-primary"
+                    @change="setWakePolicy('active')"
+                  />
+                  {{ $t('settings.routineWakeActive') }}
+                </label>
+                <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground ml-5">{{ $t('settings.routineWakeActiveSub') }}</span>
+              </div>
+              <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
           </div>
         </section>

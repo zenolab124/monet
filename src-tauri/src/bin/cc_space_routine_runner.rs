@@ -105,6 +105,7 @@ fn main() {
 
     write_log(&log);
     update_routine_state(&routine_id, &started_at);
+    maybe_sleep_after_run();
 }
 
 fn parse_args() -> String {
@@ -314,4 +315,57 @@ fn compute_next_run(cron_expr: &str) -> Option<String> {
     let schedule = Schedule::from_str(&full).ok()?;
     let next = schedule.upcoming(chrono::Local).next()?;
     Some(next.to_rfc3339())
+}
+
+fn maybe_sleep_after_run() {
+    if read_wake_policy() != "active" {
+        return;
+    }
+    if !is_lid_closed() {
+        return;
+    }
+    // 有即将执行的 routine 则不休眠（5 分钟内）
+    if has_imminent_routine() {
+        return;
+    }
+    eprintln!("active wake: lid closed, sleeping");
+    let _ = Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"System Events\" to sleep")
+        .output();
+}
+
+fn read_wake_policy() -> String {
+    let path = data_dir().join("settings.json");
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("routineWakePolicy")?.as_str().map(String::from))
+        .unwrap_or_else(|| "passive".to_string())
+}
+
+fn is_lid_closed() -> bool {
+    Command::new("ioreg")
+        .args(["-r", "-k", "AppleClamshellState"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("\"AppleClamshellState\" = Yes"))
+        .unwrap_or(false)
+}
+
+fn has_imminent_routine() -> bool {
+    use cron::Schedule;
+    use std::str::FromStr;
+
+    let routines = load_routines();
+    let now = chrono::Local::now();
+    let threshold = now + chrono::Duration::minutes(5);
+
+    routines.iter().filter(|r| r.enabled).any(|r| {
+        let full = format!("0 {}", r.cron_expression);
+        Schedule::from_str(&full)
+            .ok()
+            .and_then(|s| s.upcoming(chrono::Local).next())
+            .is_some_and(|next| next <= threshold)
+    })
 }

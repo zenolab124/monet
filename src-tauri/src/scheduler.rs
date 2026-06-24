@@ -53,7 +53,7 @@ pub fn install_runner_binary() -> Result<(), String> {
     let needs_install = if target.exists() {
         let src_meta = std::fs::metadata(&source).map_err(|e| e.to_string())?;
         let dst_meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
-        src_meta.len() != dst_meta.len()
+        src_meta.len() != dst_meta.len() || !is_codesigned(&target)
     } else {
         true
     };
@@ -67,9 +67,28 @@ pub fn install_runner_binary() -> Result<(), String> {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
         }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("codesign")
+                .args(["--sign", "-", "--force", target.to_string_lossy().as_ref()])
+                .output();
+        }
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn is_codesigned(path: &Path) -> bool {
+    std::process::Command::new("codesign")
+        .args(["--verify", "--quiet", path.to_string_lossy().as_ref()])
+        .output()
+        .map_or(false, |o| o.status.success())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_codesigned(_path: &Path) -> bool {
+    true
 }
 
 fn bundled_runner_path() -> PathBuf {
@@ -90,6 +109,23 @@ fn runner_bin_name() -> &'static str {
     } else {
         "cc-space-routine-runner"
     }
+}
+
+// ---------------------------------------------------------------------------
+// Wake schedule management
+// ---------------------------------------------------------------------------
+
+pub fn sync_wake_schedule(routines: &[RoutineDefinition], policy: &str) {
+    platform::sync_wake(routines, policy);
+}
+
+fn read_wake_policy_file() -> String {
+    let path = config::data_dir().join("settings.json");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("routineWakePolicy")?.as_str().map(String::from))
+        .unwrap_or_else(|| "passive".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -387,8 +423,120 @@ mod platform {
         Ok(intervals)
     }
 
+    // -----------------------------------------------------------------------
+    // Wake schedule (pmset)
+    // -----------------------------------------------------------------------
+
+    pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) {
+        if policy != "active" {
+            cancel_wake();
+            return;
+        }
+
+        let wake_times = compute_wake_times(routines);
+        if wake_times.is_empty() {
+            cancel_wake();
+            return;
+        }
+
+        if is_wake_current(&wake_times) {
+            return;
+        }
+
+        let mut parts = Vec::new();
+        for (h, m) in &wake_times {
+            parts.push(format!("wakeorpoweron MTWRFSU {:02}:{:02}:00", h, m));
+        }
+        let pmset_cmd = format!("pmset repeat {}", parts.join(" "));
+
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "do shell script \"{}\" with administrator privileges",
+                pmset_cmd
+            ))
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                log::info!("wake schedule set: {:?}", wake_times);
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                log::warn!("pmset repeat failed: {}", stderr);
+            }
+            Err(e) => {
+                log::warn!("osascript failed: {}", e);
+            }
+        }
+    }
+
+    fn cancel_wake() {
+        let current = Command::new("pmset")
+            .args(["-g", "sched"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+
+        if !current.contains("Repeating") {
+            return;
+        }
+
+        let _ = Command::new("osascript")
+            .arg("-e")
+            .arg("do shell script \"pmset repeat cancel\" with administrator privileges")
+            .output();
+    }
+
+    fn compute_wake_times(routines: &[RoutineDefinition]) -> Vec<(u32, u32)> {
+        let mut all_times = std::collections::HashSet::new();
+
+        for routine in routines.iter().filter(|r| r.enabled) {
+            let full = format!("0 {}", routine.cron_expression);
+            if let Ok(schedule) = cron::Schedule::from_str(&full) {
+                for dt in schedule.upcoming(chrono::Local).take(48) {
+                    all_times.insert((dt.hour(), dt.minute()));
+                    if all_times.len() >= 24 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut wake: Vec<(u32, u32)> = all_times
+            .into_iter()
+            .map(|(h, m)| {
+                if m >= 3 {
+                    (h, m - 3)
+                } else if h > 0 {
+                    (h - 1, m + 57)
+                } else {
+                    (23, m + 57)
+                }
+            })
+            .collect();
+
+        wake.sort();
+        wake.dedup();
+        wake
+    }
+
+    fn is_wake_current(expected: &[(u32, u32)]) -> bool {
+        let output = Command::new("pmset")
+            .args(["-g", "sched"])
+            .output();
+        let Ok(output) = output else { return false };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        expected
+            .iter()
+            .all(|(h, m)| stdout.contains(&format!("{:02}:{:02}:00", h, m)))
+    }
+
     use chrono::Timelike;
     use chrono::Datelike;
+    use std::str::FromStr;
 }
 
 // ---------------------------------------------------------------------------
@@ -425,13 +573,34 @@ mod platform {
 
     pub fn cleanup_orphans(_known_ids: &std::collections::HashSet<&str>) {}
 
+    pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) {
+        let wake = policy == "active";
+        let runner_path = super::runner_binary_path();
+        for routine in routines.iter().filter(|r| r.enabled) {
+            if let Ok(xml) = generate_task_xml(&runner_path, &routine.id, &routine.cron_expression, wake) {
+                let xml_file = xml_path(&routine.id);
+                if let Some(parent) = xml_file.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if fs::read_to_string(&xml_file).ok().as_deref() == Some(&xml) {
+                    continue;
+                }
+                let _ = fs::write(&xml_file, &xml);
+                let _ = Command::new("schtasks")
+                    .args(["/Create", "/TN", &task_name(&routine.id), "/XML", &xml_file.to_string_lossy(), "/F"])
+                    .output();
+            }
+        }
+    }
+
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
+        let wake = super::read_wake_policy_file() == "active";
         let xml_file = xml_path(&routine.id);
         if let Some(parent) = xml_file.parent() {
             let _ = fs::create_dir_all(parent);
         }
 
-        let xml = generate_task_xml(runner_path, &routine.id, &routine.cron_expression)?;
+        let xml = generate_task_xml(runner_path, &routine.id, &routine.cron_expression, wake)?;
         fs::write(&xml_file, &xml).map_err(|e| format!("write task xml: {}", e))?;
 
         let output = Command::new("schtasks")
@@ -468,8 +637,8 @@ mod platform {
         runner_path: &Path,
         routine_id: &str,
         cron_expr: &str,
+        wake: bool,
     ) -> Result<String, String> {
-        // Parse cron for daily time (simplified: covers daily/weekly)
         use cron::Schedule;
         use std::str::FromStr;
 
@@ -477,6 +646,7 @@ mod platform {
         let schedule = Schedule::from_str(&full).map_err(|e| format!("invalid cron: {}", e))?;
         let next = schedule.upcoming(chrono::Local).next().ok_or("no next run")?;
         let start_time = next.format("%Y-%m-%dT%H:%M:%S").to_string();
+        let wake_str = if wake { "true" } else { "false" };
 
         Ok(format!(
             r#"<?xml version="1.0" encoding="UTF-16"?>
@@ -492,6 +662,7 @@ mod platform {
   </Triggers>
   <Settings>
     <StartWhenAvailable>true</StartWhenAvailable>
+    <WakeToRun>{wake}</WakeToRun>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
@@ -507,6 +678,7 @@ mod platform {
             start_time = start_time,
             runner = runner_path.display(),
             routine_id = routine_id,
+            wake = wake_str,
         ))
     }
 }
@@ -546,6 +718,8 @@ mod platform {
     }
 
     pub fn cleanup_orphans(_known_ids: &std::collections::HashSet<&str>) {}
+
+    pub fn sync_wake(_routines: &[RoutineDefinition], _policy: &str) {}
 
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
         let dir = unit_dir();

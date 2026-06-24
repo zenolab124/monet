@@ -64,6 +64,43 @@ fn routines_path() -> PathBuf {
     config::data_dir().join("routines.json")
 }
 
+fn app_settings_path() -> PathBuf {
+    config::data_dir().join("settings.json")
+}
+
+// ---------------------------------------------------------------------------
+// App settings (wake policy etc.)
+// ---------------------------------------------------------------------------
+
+fn read_app_setting(key: &str) -> Option<serde_json::Value> {
+    let content = fs::read_to_string(app_settings_path()).ok()?;
+    let settings: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&content).ok()?;
+    settings.get(key).cloned()
+}
+
+fn write_app_setting(key: &str, value: serde_json::Value) {
+    let path = app_settings_path();
+    let mut settings: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    if value.is_null() {
+        settings.remove(key);
+    } else {
+        settings.insert(key.to_string(), value);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(settings)) {
+        let _ = fs::write(&path, json);
+    }
+}
+
+pub fn wake_policy() -> String {
+    read_app_setting("routineWakePolicy")
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| "passive".to_string())
+}
+
 fn logs_dir(routine_id: &str) -> PathBuf {
     config::data_dir()
         .join("routines")
@@ -324,6 +361,17 @@ pub fn startup_sync() {
     if let Err(e) = scheduler::sync_all(&routines_snapshot, &runner_path) {
         log::warn!("routine scheduler sync failed: {}", e);
     }
+
+    // Sync wake schedule
+    scheduler::sync_wake_schedule(&routines_snapshot, &wake_policy());
+}
+
+fn sync_wake_if_active() {
+    let policy = wake_policy();
+    if policy == "active" {
+        let snapshot: Vec<RoutineDefinition> = with_routines(|r| r.clone());
+        scheduler::sync_wake_schedule(&snapshot, &policy);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +432,7 @@ pub fn create_routine(
         }
     }
 
+    sync_wake_if_active();
     Ok(routine)
 }
 
@@ -424,6 +473,9 @@ pub fn update_routine(
             r.enabled = v;
         }
 
+        if cron_changed {
+            r.last_run = None;
+        }
         if (cron_changed || enabled_changed) && r.enabled {
             r.next_run = compute_next_run_full(&r.cron_expression);
         } else if !r.enabled {
@@ -444,6 +496,7 @@ pub fn update_routine(
             } else {
                 let _ = scheduler::unregister_routine(&result.id);
             }
+            sync_wake_if_active();
         }
 
         Ok(result)
@@ -460,6 +513,7 @@ pub fn delete_routine(id: String) -> Result<(), String> {
         routines.retain(|r| r.id != id);
         save_routines(routines);
     });
+    sync_wake_if_active();
     Ok(())
 }
 
@@ -480,5 +534,26 @@ pub fn run_routine_now(id: String, app: AppHandle) -> Result<(), String> {
     .ok_or_else(|| format!("找不到任务: {}", id))?;
 
     execute_routine(&routine, &app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_routine_wake_policy() -> String {
+    wake_policy()
+}
+
+#[tauri::command]
+pub fn set_routine_wake_policy(policy: String) -> Result<(), String> {
+    if policy != "passive" && policy != "active" {
+        return Err("无效策略，支持: passive | active".to_string());
+    }
+    write_app_setting(
+        "routineWakePolicy",
+        serde_json::Value::String(policy.clone()),
+    );
+
+    let snapshot: Vec<RoutineDefinition> = with_routines(|r| r.clone());
+    scheduler::sync_wake_schedule(&snapshot, &policy);
+
     Ok(())
 }
