@@ -135,6 +135,147 @@ pub fn refresh_settings_schema() {
     std::thread::spawn(fetch_and_cache_schema);
 }
 
+// ---------------------------------------------------------------------------
+// MCP Server registration
+// ---------------------------------------------------------------------------
+
+fn mcp_bin_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "cc-space-mcp.exe"
+    } else {
+        "cc-space-mcp"
+    }
+}
+
+fn installed_mcp_path() -> PathBuf {
+    config::data_dir().join("bin").join(mcp_bin_name())
+}
+
+fn bundled_mcp_path() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(mcp_bin_name());
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(mcp_bin_name())
+}
+
+fn install_mcp_binary() -> Result<PathBuf, String> {
+    let source = bundled_mcp_path();
+    let target = installed_mcp_path();
+
+    if !source.exists() {
+        return Err(format!("MCP binary not found at: {}", source.display()));
+    }
+
+    if let Some(parent) = target.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let needs_install = if target.exists() {
+        let src_meta = fs::metadata(&source).map_err(|e| e.to_string())?;
+        let dst_meta = fs::metadata(&target).map_err(|e| e.to_string())?;
+        src_meta.len() != dst_meta.len()
+    } else {
+        true
+    };
+
+    if needs_install {
+        fs::copy(&source, &target).map_err(|e| format!("install failed: {}", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    Ok(target)
+}
+
+#[tauri::command]
+pub fn get_mcp_status() -> serde_json::Value {
+    let path = claude_settings_path();
+    let settings: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let registered = settings
+        .get("mcpServers")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|servers| servers.contains_key("cc-space"));
+
+    serde_json::json!({ "registered": registered })
+}
+
+#[tauri::command]
+pub fn register_mcp() -> Result<(), String> {
+    let mcp_path = install_mcp_binary()?;
+    let settings_path = claude_settings_path();
+
+    let mut settings: serde_json::Map<String, serde_json::Value> =
+        fs::read_to_string(&settings_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+    let mcp_servers = settings
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or("mcpServers is not an object")?;
+
+    let mut server_config = serde_json::Map::new();
+    server_config.insert(
+        "command".to_string(),
+        serde_json::Value::String(mcp_path.to_string_lossy().to_string()),
+    );
+    server_config.insert("args".to_string(), serde_json::json!([]));
+
+    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+        let mut env = serde_json::Map::new();
+        env.insert(
+            "CC_SPACE_DATA_DIR".to_string(),
+            serde_json::Value::String(dir),
+        );
+        server_config.insert("env".to_string(), serde_json::Value::Object(env));
+    }
+
+    mcp_servers.insert(
+        "cc-space".to_string(),
+        serde_json::Value::Object(server_config),
+    );
+
+    let json_str = serde_json::to_string_pretty(&serde_json::Value::Object(settings))
+        .map_err(|e| format!("序列化失败: {}", e))?;
+    fs::write(&settings_path, json_str).map_err(|e| format!("写入失败: {}", e))
+}
+
+#[tauri::command]
+pub fn unregister_mcp() -> Result<(), String> {
+    let settings_path = claude_settings_path();
+
+    let mut settings: serde_json::Map<String, serde_json::Value> =
+        fs::read_to_string(&settings_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+    if let Some(servers) = settings
+        .get_mut("mcpServers")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        servers.remove("cc-space");
+    }
+
+    let json_str = serde_json::to_string_pretty(&serde_json::Value::Object(settings))
+        .map_err(|e| format!("序列化失败: {}", e))?;
+    fs::write(&settings_path, json_str).map_err(|e| format!("写入失败: {}", e))
+}
+
 /// 定位 claude CLI 的真实二进制路径（解析 symlink）
 pub fn find_claude_binary() -> Option<PathBuf> {
     let home = dirs::home_dir()?;

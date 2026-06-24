@@ -1,30 +1,106 @@
 //! cc-space MCP server
 //!
-//! 一个最小化的 stdio JSON-RPC 2.0 server，作为 claude CLI 的 `--permission-prompt-tool` 工具实现。
+//! stdio JSON-RPC 2.0 server，双职能：
+//! 1. 权限审批（--permission-prompt-tool）：通过 Unix socket 与主进程通信
+//! 2. 通用工具：直接读写数据目录，暴露 routine 管理等能力
 //!
-//! 协议要点：
-//! - stdin/stdout 用作与 claude CLI 之间的 MCP JSON-RPC 通道（每行一个 JSON 对象）
-//! - 仅实现 MCP 三个核心方法：`initialize` / `tools/list` / `tools/call`
-//! - 暴露唯一工具 `approve_tool_use`，签名 `{ tool_name: string, input: object }`
-//!   - 通过环境变量 `CC_SPACE_PERMISSION_SOCK` 找到主进程的 Unix socket
-//!   - 把请求转发给主进程，等主进程返回前端用户决策
-//!   - 把决策包装成 MCP `tools/call` 返回值（content 为单条 text，text 内容是 JSON 字符串）
-//!
-//! 与 claude CLI（参考 docs.claude.com/en/agent-sdk/user-input）契约：
-//!   Allow → `{ "behavior": "allow", "updatedInput": <object> }`
-//!   Deny  → `{ "behavior": "deny",  "message": "<reason>" }`
+//! tool 列表根据环境动态组装：
+//! - CC_SPACE_PERMISSION_SOCK 存在 → 包含 approve_tool_use
+//! - 始终包含 routine_list / routine_create / routine_delete
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(unix)]
 use std::time::Duration;
 
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// MCP server 元信息（与 claude CLI 协商时返回）
 const SERVER_NAME: &str = "cc-space";
-const SERVER_VERSION: &str = "0.1.0";
-/// MCP 协议版本（写死一个常用版本，claude CLI 容忍主版本号匹配）
+const SERVER_VERSION: &str = "0.2.0";
 const PROTOCOL_VERSION: &str = "2024-11-05";
+
+// ---------------------------------------------------------------------------
+// Data directory (mirrors config.rs)
+// ---------------------------------------------------------------------------
+
+fn data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+        PathBuf::from(dir)
+    } else {
+        dirs::home_dir().unwrap_or_default().join(".cc-space")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Routine data structures (mirrors routines.rs)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RoutineDefinition {
+    id: String,
+    name: String,
+    cron_expression: String,
+    original_text: String,
+    prompt: String,
+    enabled: bool,
+    created_at: String,
+    last_run: Option<String>,
+    next_run: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Routine file operations
+// ---------------------------------------------------------------------------
+
+fn routines_path() -> PathBuf {
+    data_dir().join("routines.json")
+}
+
+fn load_routines() -> Vec<RoutineDefinition> {
+    let path = routines_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_routines(data: &[RoutineDefinition]) {
+    let path = routines_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json_str) = serde_json::to_string_pretty(data) {
+        let _ = std::fs::write(&path, json_str);
+    }
+}
+
+fn validate_cron(cron_expr: &str) -> Result<(), String> {
+    use cron::Schedule;
+    use std::str::FromStr;
+    let full = format!("0 {}", cron_expr);
+    Schedule::from_str(&full).map_err(|e| format!("无效的 cron 表达式: {}", e))?;
+    Ok(())
+}
+
+fn compute_next_run(cron_expr: &str) -> Option<String> {
+    use cron::Schedule;
+    use std::str::FromStr;
+    let full = format!("0 {}", cron_expr);
+    let schedule = Schedule::from_str(&full).ok()?;
+    schedule.upcoming(Utc).next().map(|t| t.to_rfc3339())
+}
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
 
 fn main() {
     let stdin = std::io::stdin();
@@ -42,24 +118,20 @@ fn main() {
         let req: Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => {
-                // 解析失败，写一个 parse error 但保持连接（id 用 null）
                 let resp = error_response(Value::Null, -32700, "Parse error");
                 write_response(&mut stdout_lock, &resp);
                 continue;
             }
         };
 
-        // notification（无 id）：MCP 里通知不返回响应
         let id = req.get("id").cloned();
         let is_notification = id.is_none() || id.as_ref().is_some_and(Value::is_null);
-
         let method = req.get("method").and_then(Value::as_str).unwrap_or("");
 
         let response = match method {
             "initialize" => handle_initialize(id.clone().unwrap_or(Value::Null)),
             "tools/list" => handle_tools_list(id.clone().unwrap_or(Value::Null)),
             "tools/call" => handle_tools_call(id.clone().unwrap_or(Value::Null), &req),
-            // 收到 notifications/initialized 等通知，不响应
             m if m.starts_with("notifications/") => continue,
             _ if is_notification => continue,
             _ => error_response(
@@ -75,7 +147,6 @@ fn main() {
     }
 }
 
-/// 写一行 JSON 到 stdout（每条消息独占一行）
 fn write_response<W: Write>(out: &mut W, value: &Value) {
     if let Ok(s) = serde_json::to_string(value) {
         let _ = out.write_all(s.as_bytes());
@@ -83,6 +154,10 @@ fn write_response<W: Write>(out: &mut W, value: &Value) {
         let _ = out.flush();
     }
 }
+
+// ---------------------------------------------------------------------------
+// MCP protocol handlers
+// ---------------------------------------------------------------------------
 
 fn handle_initialize(id: Value) -> Value {
     json!({
@@ -97,36 +172,122 @@ fn handle_initialize(id: Value) -> Value {
 }
 
 fn handle_tools_list(id: Value) -> Value {
+    let mut tools = Vec::new();
+
+    if has_permission_socket() {
+        tools.push(json!({
+            "name": "approve_tool_use",
+            "description": "Approve or deny a tool use request from the user.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tool_name": { "type": "string" },
+                    "input": { "type": "object" }
+                },
+                "required": ["tool_name", "input"]
+            }
+        }));
+    }
+
+    tools.push(json!({
+        "name": "routine_list",
+        "description": "List all scheduled routines in CC Space.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
+    }));
+
+    tools.push(json!({
+        "name": "routine_create",
+        "description": "Create a new scheduled routine. The routine will run the given prompt on the specified cron schedule via claude CLI.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Human-readable name for the routine"
+                },
+                "cron_expression": {
+                    "type": "string",
+                    "description": "5-field cron expression (minute hour day month weekday), e.g. '0 9 * * 1-5' for weekdays at 9am"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "The prompt to send to claude CLI when the routine fires"
+                },
+                "original_text": {
+                    "type": "string",
+                    "description": "Original natural language description (optional, for display)"
+                }
+            },
+            "required": ["name", "cron_expression", "prompt"]
+        }
+    }));
+
+    tools.push(json!({
+        "name": "routine_delete",
+        "description": "Delete a scheduled routine by ID.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "The routine ID to delete"
+                }
+            },
+            "required": ["id"]
+        }
+    }));
+
     json!({
         "jsonrpc": "2.0",
         "id": id,
-        "result": {
-            "tools": [
-                {
-                    "name": "approve_tool_use",
-                    "description": "Approve or deny a tool use request from the user.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "tool_name": { "type": "string" },
-                            "input": { "type": "object" }
-                        },
-                        "required": ["tool_name", "input"]
-                    }
-                }
-            ]
-        }
+        "result": { "tools": tools }
     })
 }
 
 fn handle_tools_call(id: Value, req: &Value) -> Value {
-    // 提取参数
     let params = req.get("params").cloned().unwrap_or(Value::Null);
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    if name != "approve_tool_use" {
-        return error_response(id, -32602, &format!("Unknown tool: {}", name));
+    let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+
+    let result = match name {
+        "approve_tool_use" => handle_approve_tool_use(&arguments),
+        "routine_list" => handle_routine_list(),
+        "routine_create" => handle_routine_create(&arguments),
+        "routine_delete" => handle_routine_delete(&arguments),
+        _ => Err(format!("Unknown tool: {}", name)),
+    };
+
+    match result {
+        Ok(text) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "content": [{ "type": "text", "text": text }]
+            }
+        }),
+        Err(msg) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "content": [{ "type": "text", "text": msg }],
+                "isError": true
+            }
+        }),
     }
-    let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+}
+
+// ---------------------------------------------------------------------------
+// Tool: approve_tool_use
+// ---------------------------------------------------------------------------
+
+fn has_permission_socket() -> bool {
+    std::env::var("CC_SPACE_PERMISSION_SOCK").is_ok()
+}
+
+fn handle_approve_tool_use(arguments: &Value) -> Result<String, String> {
     let tool_name = arguments
         .get("tool_name")
         .and_then(Value::as_str)
@@ -137,51 +298,23 @@ fn handle_tools_call(id: Value, req: &Value) -> Value {
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    // 走主进程 socket 等待用户决策
     let decision = ask_main_process(&tool_name, &tool_input).unwrap_or_else(|err| {
-        // 通信失败，按 deny 处理（保安全）
         json!({
             "behavior": "deny",
             "message": format!("权限服务通信失败：{}", err)
         })
     });
 
-    // MCP tools/call result：content 数组，单条 text，text 内容是 JSON 字符串
-    let text = serde_json::to_string(&decision).unwrap_or_else(|_| {
-        "{\"behavior\":\"deny\",\"message\":\"内部序列化错误\"}".to_string()
-    });
-
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": {
-            "content": [ { "type": "text", "text": text } ]
-        }
-    })
+    serde_json::to_string(&decision).map_err(|e| e.to_string())
 }
 
-fn error_response(id: Value, code: i32, message: &str) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": { "code": code, "message": message }
-    })
-}
-
-/// 走 Unix socket 与主进程通信。
-///
-/// 通信协议（自定义、行分隔 JSON）：
-/// 1. 连上 `CC_SPACE_PERMISSION_SOCK`
-/// 2. 发送一行：`{"toolName": "...", "input": <object>}`
-/// 3. 等一行：`{"behavior": "allow"|"deny", "updatedInput"?: ..., "message"?: ...}`
+#[cfg(unix)]
 fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String> {
     let sock_path = std::env::var("CC_SPACE_PERMISSION_SOCK")
         .map_err(|_| "环境变量 CC_SPACE_PERMISSION_SOCK 未设置".to_string())?;
 
     let mut stream = UnixStream::connect(&sock_path)
         .map_err(|e| format!("连接 {} 失败：{}", sock_path, e))?;
-    // 不设读超时:主进程永不超时,这里一直阻塞等用户决策。
-    // 异常路径(主进程退出/socket 关闭)由 read 返回 0 字节自然 break,不会永久挂死。
     stream
         .set_write_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| e.to_string())?;
@@ -199,7 +332,6 @@ fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String
         .map_err(|e| format!("发送换行失败：{}", e))?;
     stream.flush().map_err(|e| e.to_string())?;
 
-    // 读一行响应
     let mut reader = BufReader::new(stream);
     let mut buf = String::new();
     let mut tmp = [0u8; 1024];
@@ -220,17 +352,15 @@ fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String
         .lines()
         .next()
         .ok_or_else(|| "主进程未返回任何数据".to_string())?;
-    let decision: Value = serde_json::from_str(line)
-        .map_err(|e| format!("解析主进程响应失败：{}", e))?;
+    let decision: Value =
+        serde_json::from_str(line).map_err(|e| format!("解析主进程响应失败：{}", e))?;
 
-    // 校验：只允许 allow / deny 两种
     let behavior = decision
         .get("behavior")
         .and_then(Value::as_str)
         .unwrap_or("");
     match behavior {
         "allow" => {
-            // 缺 updatedInput 时回填原始 input，避免 claude CLI 那边 fallback warn
             let mut out = decision.clone();
             if out.get("updatedInput").is_none() {
                 if let Some(obj) = out.as_object_mut() {
@@ -242,4 +372,99 @@ fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String
         "deny" => Ok(decision),
         _ => Err(format!("主进程返回未知 behavior：{:?}", behavior)),
     }
+}
+
+#[cfg(not(unix))]
+fn ask_main_process(_tool_name: &str, _tool_input: &Value) -> Result<Value, String> {
+    Err("权限审批仅支持 Unix 平台".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tool: routine_list
+// ---------------------------------------------------------------------------
+
+fn handle_routine_list() -> Result<String, String> {
+    let routines = load_routines();
+    serde_json::to_string_pretty(&routines).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tool: routine_create
+// ---------------------------------------------------------------------------
+
+fn handle_routine_create(arguments: &Value) -> Result<String, String> {
+    let name = arguments
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or("缺少参数: name")?
+        .to_string();
+    let cron_expression = arguments
+        .get("cron_expression")
+        .and_then(Value::as_str)
+        .ok_or("缺少参数: cron_expression")?
+        .to_string();
+    let prompt = arguments
+        .get("prompt")
+        .and_then(Value::as_str)
+        .ok_or("缺少参数: prompt")?
+        .to_string();
+    let original_text = arguments
+        .get("original_text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    validate_cron(&cron_expression)?;
+
+    let routine = RoutineDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        cron_expression: cron_expression.clone(),
+        original_text,
+        prompt,
+        enabled: true,
+        created_at: Utc::now().to_rfc3339(),
+        last_run: None,
+        next_run: compute_next_run(&cron_expression),
+    };
+
+    let mut routines = load_routines();
+    routines.push(routine.clone());
+    save_routines(&routines);
+
+    serde_json::to_string_pretty(&routine).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tool: routine_delete
+// ---------------------------------------------------------------------------
+
+fn handle_routine_delete(arguments: &Value) -> Result<String, String> {
+    let id = arguments
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("缺少参数: id")?;
+
+    let mut routines = load_routines();
+    let before = routines.len();
+    routines.retain(|r| r.id != id);
+
+    if routines.len() == before {
+        return Err(format!("未找到 routine: {}", id));
+    }
+
+    save_routines(&routines);
+    Ok(json!({ "deleted": id }).to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn error_response(id: Value, code: i32, message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message }
+    })
 }

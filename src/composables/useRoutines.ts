@@ -62,6 +62,9 @@ async function initRoutineListener() {
   await listen('routine-executed', () => {
     loadRoutines()
   })
+  await listen('routines-changed', () => {
+    loadRoutines()
+  })
 }
 
 async function createRoutine(params: {

@@ -460,6 +460,12 @@
       "baseUrlError": "Base URL is required",
       "tokenError": "Auth Token is required for new channels"
     },
+    "mcp": {
+      "title": "MCP Tool Service",
+      "description": "Register as MCP Server so you can manage routines and more via natural language in any Claude Code session",
+      "registered": "Enabled",
+      "notRegistered": "Disabled"
+    },
     "cliConfig": {
       "title": "Claude Code Configuration",
       "subtitle": "Read/write ~/.claude/settings.json",

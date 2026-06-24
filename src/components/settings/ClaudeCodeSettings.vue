@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import { useCliSettings, type SettingsField, type SchemaProperty } from '@/composables/useCliSettings'
 import { useUiState } from '@/composables/useUiState'
@@ -12,6 +13,29 @@ const {
   load, updateField, removeField, refreshSchema,
   translateMissing, extractMissingDefaults, getTranslation, getDefault,
 } = useCliSettings()
+
+const mcpRegistered = ref(false)
+const mcpLoading = ref(false)
+
+async function loadMcpStatus() {
+  try {
+    const status = await invoke<{ registered: boolean }>('get_mcp_status')
+    mcpRegistered.value = status.registered
+  } catch { /* ignore */ }
+}
+
+async function toggleMcp() {
+  mcpLoading.value = true
+  try {
+    if (mcpRegistered.value) {
+      await invoke('unregister_mcp')
+    } else {
+      await invoke('register_mcp')
+    }
+    await loadMcpStatus()
+  } catch { /* ignore */ }
+  finally { mcpLoading.value = false }
+}
 
 const addingKey = ref('')
 const addingValue = ref('')
@@ -101,6 +125,7 @@ let resizeObs: ResizeObserver | null = null
 
 onMounted(async () => {
   await load()
+  loadMcpStatus()
   translateMissing()
   extractMissingDefaults()
   await nextTick()
@@ -260,6 +285,27 @@ async function onRemove(key: string) {
           </p>
         </div>
       </div>
+      <!-- MCP Server 注册 -->
+      <div class="mcp-card">
+        <div class="flex items-center gap-2">
+          <span class="i-carbon-plug w-3.5 h-3.5 text-muted-foreground" />
+          <span class="text-[11.5px] font-medium">{{ $t('settings.mcp.title') }}</span>
+          <span :class="['mcp-status', { active: mcpRegistered }]">
+            {{ mcpRegistered ? $t('settings.mcp.registered') : $t('settings.mcp.notRegistered') }}
+          </span>
+          <button
+            :class="['form-toggle ml-auto', { on: mcpRegistered }]"
+            :disabled="mcpLoading"
+            @click="toggleMcp"
+          >
+            <span class="form-toggle-knob" />
+          </button>
+        </div>
+        <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
+          {{ $t('settings.mcp.description') }}
+        </p>
+      </div>
+
       <div class="flex gap-2 items-center">
         <div class="search-bar flex-1">
           <span class="i-carbon-search w-3.5 h-3.5 text-muted-foreground shrink-0" />
@@ -536,6 +582,26 @@ async function onRemove(key: string) {
 .cli-header {
   flex-shrink: 0;
   padding-bottom: 10px;
+}
+
+.mcp-card {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.mcp-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.mcp-status.active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: hsl(var(--primary) / 0.08);
 }
 
 .search-bar {

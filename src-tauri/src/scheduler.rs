@@ -12,15 +12,20 @@ pub fn unregister_routine(routine_id: &str) -> Result<(), String> {
 }
 
 pub fn sync_all(routines: &[RoutineDefinition], runner_path: &Path) -> Result<(), String> {
+    let known_ids: std::collections::HashSet<&str> =
+        routines.iter().map(|r| r.id.as_str()).collect();
+    platform::cleanup_orphans(&known_ids);
+
     for routine in routines {
         if routine.enabled {
             if !platform::is_registered(&routine.id) {
                 platform::register(routine, runner_path)?;
+            } else if platform::needs_update(routine, runner_path) {
+                let _ = platform::unregister(&routine.id);
+                platform::register(routine, runner_path)?;
             }
-        } else {
-            if platform::is_registered(&routine.id) {
-                platform::unregister(&routine.id)?;
-            }
+        } else if platform::is_registered(&routine.id) {
+            platform::unregister(&routine.id)?;
         }
     }
     Ok(())
@@ -111,6 +116,49 @@ mod platform {
 
     pub fn is_registered(routine_id: &str) -> bool {
         plist_path(routine_id).exists()
+    }
+
+    pub fn needs_update(routine: &RoutineDefinition, runner_path: &Path) -> bool {
+        let path = plist_path(&routine.id);
+        let existing = match fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => return true,
+        };
+        let calendar_intervals = match cron_to_calendar_intervals(&routine.cron_expression) {
+            Ok(ci) => ci,
+            Err(_) => return false,
+        };
+        let expected = generate_plist(
+            &label(&routine.id),
+            runner_path,
+            &routine.id,
+            &calendar_intervals,
+        );
+        existing.trim() != expected.trim()
+    }
+
+    pub fn cleanup_orphans(known_ids: &std::collections::HashSet<&str>) {
+        let agents_dir = dirs::home_dir()
+            .unwrap_or_default()
+            .join("Library")
+            .join("LaunchAgents");
+        let entries = match fs::read_dir(&agents_dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if let Some(id) = name
+                .strip_prefix("com.cc-space.routine.")
+                .and_then(|s| s.strip_suffix(".plist"))
+            {
+                if !known_ids.contains(id) {
+                    log::info!("cleaning up orphaned routine agent: {}", id);
+                    let _ = unregister(id);
+                }
+            }
+        }
     }
 
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
@@ -325,11 +373,14 @@ mod platform {
                 ));
             }
         } else {
+            let mut seen = std::collections::HashSet::new();
             for e in capped {
-                intervals.push_str(&format!(
-                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
-                    e.1, e.0
-                ));
+                if seen.insert((e.1, e.0)) {
+                    intervals.push_str(&format!(
+                        "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                        e.1, e.0
+                    ));
+                }
             }
         }
         intervals.push_str("\t</array>");
@@ -367,6 +418,12 @@ mod platform {
             .output();
         output.map_or(false, |o| o.status.success())
     }
+
+    pub fn needs_update(_routine: &RoutineDefinition, _runner_path: &Path) -> bool {
+        false
+    }
+
+    pub fn cleanup_orphans(_known_ids: &std::collections::HashSet<&str>) {}
 
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
         let xml_file = xml_path(&routine.id);
@@ -483,6 +540,12 @@ mod platform {
     pub fn is_registered(routine_id: &str) -> bool {
         unit_dir().join(timer_name(routine_id)).exists()
     }
+
+    pub fn needs_update(_routine: &RoutineDefinition, _runner_path: &Path) -> bool {
+        false
+    }
+
+    pub fn cleanup_orphans(_known_ids: &std::collections::HashSet<&str>) {}
 
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
         let dir = unit_dir();

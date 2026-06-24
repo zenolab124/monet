@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter};
 /// - 防抖 1 秒后向前端发送 "projects-changed" 事件
 /// - 增量探测会话 jsonl 新增的 api_error 记录，发送 "session-api-error" 事件
 ///   （FR-010 外部会话出错兜底；是否属于工作台由前端判定过滤）
+/// - 监控 data_dir/routines.json 变化，发送 "routines-changed" 事件（MCP 外部写入感知）
 pub fn start(app: &AppHandle) {
     let root = match dirs::home_dir() {
         Some(h) => h.join(".claude").join("projects"),
@@ -20,6 +21,9 @@ pub fn start(app: &AppHandle) {
     if !root.is_dir() {
         return;
     }
+
+    let data_dir = crate::config::data_dir().to_path_buf();
+    let routines_file = data_dir.join("routines.json");
 
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -42,6 +46,12 @@ pub fn start(app: &AppHandle) {
             return;
         }
 
+        if data_dir.is_dir() {
+            if let Err(e) = watcher.watch(&data_dir, RecursiveMode::NonRecursive) {
+                log::warn!("Failed to watch data dir {:?}: {}", data_dir, e);
+            }
+        }
+
         log::info!("File watcher started on {:?}", root);
 
         // 启动时预记录全部会话文件 size：只对"启动之后新增"的内容做 api_error 探测，
@@ -49,11 +59,24 @@ pub fn start(app: &AppHandle) {
         let mut file_sizes = snapshot_sizes(&root);
 
         let mut last_emit = Instant::now() - Duration::from_secs(10);
+        let mut last_routines_emit = Instant::now() - Duration::from_secs(10);
 
         loop {
             // 阻塞等待事件，超时 500ms
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(event) => {
+                    let is_routine = event.paths.iter().any(|p| p == &routines_file);
+
+                    if is_routine {
+                        let now = Instant::now();
+                        if now.duration_since(last_routines_emit) >= Duration::from_secs(1) {
+                            last_routines_emit = now;
+                            crate::routines::invalidate_cache();
+                            crate::routines::sync_scheduler();
+                            let _ = handle.emit("routines-changed", ());
+                        }
+                    }
+
                     // api_error 增量探测：每个事件都处理（需要 paths，不能合并丢弃）
                     for path in &event.paths {
                         if let Some((sid, pid)) = session_file_ids(&root, path) {
@@ -62,10 +85,12 @@ pub fn start(app: &AppHandle) {
                     }
 
                     // projects-changed 防抖：距离上次发射不足 1 秒则跳过
-                    let now = Instant::now();
-                    if now.duration_since(last_emit) >= Duration::from_secs(1) {
-                        last_emit = now;
-                        let _ = handle.emit("projects-changed", ());
+                    if !is_routine {
+                        let now = Instant::now();
+                        if now.duration_since(last_emit) >= Duration::from_secs(1) {
+                            last_emit = now;
+                            let _ = handle.emit("projects-changed", ());
+                        }
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -172,12 +197,18 @@ fn probe_api_errors(
         if !is_api_error {
             continue;
         }
+        let retry_attempt = value.get("retryAttempt").and_then(Value::as_u64);
+        let max_retries = value.get("maxRetries").and_then(Value::as_u64);
+        if let (Some(attempt), Some(max)) = (retry_attempt, max_retries) {
+            if attempt < max {
+                continue;
+            }
+        }
         let content = value
             .get("content")
             .and_then(Value::as_str)
             .unwrap_or("API 错误")
             .to_string();
-        let retry_attempt = value.get("retryAttempt").and_then(Value::as_u64);
         let _ = app.emit(
             "session-api-error",
             json!({

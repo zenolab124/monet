@@ -105,6 +105,19 @@ where
     f(store)
 }
 
+pub fn invalidate_cache() {
+    let mut guard = ROUTINES.lock().unwrap();
+    *guard = None;
+}
+
+pub fn sync_scheduler() {
+    let runner_path = scheduler::runner_binary_path();
+    let routines_snapshot: Vec<RoutineDefinition> = with_routines(|routines| routines.clone());
+    if let Err(e) = scheduler::sync_all(&routines_snapshot, &runner_path) {
+        log::warn!("routine scheduler sync (external change): {}", e);
+    }
+}
+
 fn is_running(id: &str) -> bool {
     RUNNING
         .lock()

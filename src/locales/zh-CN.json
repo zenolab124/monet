@@ -460,6 +460,12 @@
       "baseUrlError": "Base URL 不能为空",
       "tokenError": "新建渠道必须提供 Auth Token"
     },
+    "mcp": {
+      "title": "MCP 工具服务",
+      "description": "注册为 MCP Server，让你在任意 Claude Code 会话中通过自然语言管理定时任务等",
+      "registered": "已启用",
+      "notRegistered": "未启用"
+    },
     "cliConfig": {
       "title": "Claude Code 配置",
       "subtitle": "读写 ~/.claude/settings.json",
