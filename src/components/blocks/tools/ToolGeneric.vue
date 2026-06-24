@@ -111,7 +111,7 @@ function renderMd(text: string) {
       <!-- 查询 -->
       <div v-else-if="f.kind === 'query'" class="flex items-center gap-1.5 flex-wrap">
         <span class="text-muted-foreground shrink-0">{{ f.key }}:</span>
-        <code class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono">{{ f.value }}</code>
+        <code class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono break-all">{{ f.value }}</code>
       </div>
 
       <!-- URL -->
