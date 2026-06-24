@@ -191,6 +191,9 @@
       "newSession": "New Session",
       "newSessionReady": "New session ready",
       "newSessionHint": "Type your first message to start",
+      "recentProjects": "Recent Projects",
+      "allProjects": "All Projects",
+      "pickFolder": "Pick folder to start…",
       "show": "Show monitor rail",
       "hide": "Hide monitor rail"
     },

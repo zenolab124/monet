@@ -2,6 +2,10 @@ import type { ContentBlock } from '@/types'
 
 export const INLINE_RESULT_TOOLS = new Set(['Bash', 'WebSearch'])
 
+function isInlineTool(name: string): boolean {
+  return INLINE_RESULT_TOOLS.has(name) || name.startsWith('mcp__')
+}
+
 export interface ToolResultData {
   content: string | ContentBlock[]
   is_error: boolean
@@ -15,14 +19,10 @@ export function flattenResultText(content: string | ContentBlock[]): string {
     .join('\n')
 }
 
-/**
- * 过滤流式 turn content 中已被内联工具消费的 tool_result 块。
- * 历史视图不需要此函数（tool_result 在 user 消息中，被消息过滤器排除）。
- */
 export function filterConsumedResults(blocks: ContentBlock[]): ContentBlock[] {
   const inlineIds = new Set<string>()
   for (const b of blocks) {
-    if (b.type === 'tool_use' && INLINE_RESULT_TOOLS.has((b as { name: string }).name)) {
+    if (b.type === 'tool_use' && isInlineTool((b as { name: string }).name)) {
       inlineIds.add((b as { id: string }).id)
     }
   }

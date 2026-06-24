@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Menu } from '@tauri-apps/api/menu'
+import { open } from '@tauri-apps/plugin-dialog'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
 import { useUiState } from '@/composables/useUiState'
 import { useNotifications } from '@/composables/useNotifications'
 import MonitorCard from './MonitorCard.vue'
 
-/**
- * 工作台左列(FR-003):当前 tab 全部会话的监控卡竖排(加入顺序,状态变化不重排)。
- * 底部「＋」格:从档案馆选择 / 新建会话(FR-002 进入口)。
- */
 const { t } = useI18n()
 const { activeTab, createDraftSession } = useWorkbench()
 const { projects } = useProjects()
@@ -26,40 +22,102 @@ const hint = computed(() => {
   return n === 0 ? null : t('workbench.rail.hint', { n, m })
 })
 
-/** ＋ 菜单:从档案馆选择 / 新建会话(子菜单按项目,应用内直开草稿卡,首条消息落盘) */
-async function onAddClick() {
-  const projectItems = projects.value.slice(0, 12).map(p => ({
-    id: `new-${p.id}`,
-    text: p.display_path.split('/').pop() || p.display_path,
-    action: () => {
-      createDraftSession(p.display_path)
-      notifyTransient(t('workbench.rail.newSessionReady'), t('workbench.rail.newSessionHint'))
-    },
-  }))
-  const menu = await Menu.new({
-    items: [
-      {
-        id: 'from-archive',
-        text: t('workbench.rail.fromArchive'),
-        action: () => switchSection('sessions'),
-      },
-      {
-        id: 'new-session',
-        text: t('workbench.rail.newSession'),
-        enabled: projectItems.length > 0,
-        items: projectItems,
-      },
-    ],
-  })
-  await menu.popup()
+const showPopover = ref(false)
+const popoverRef = ref<HTMLElement>()
+const triggerRef = ref<HTMLButtonElement>()
+
+const recentProjects = computed(() => projects.value.slice(0, 5))
+const hasMore = computed(() => projects.value.length > 5)
+const showAllProjects = ref(false)
+const subMenuRef = ref<HTMLElement>()
+const subMenuStyle = ref<Record<string, string>>({})
+let subMenuLeaveTimer = 0
+
+function cancelSubMenuClose() {
+  clearTimeout(subMenuLeaveTimer)
 }
+
+function scheduleSubMenuClose() {
+  cancelSubMenuClose()
+  subMenuLeaveTimer = window.setTimeout(() => {
+    showAllProjects.value = false
+  }, 150)
+}
+
+async function positionSubMenu() {
+  cancelSubMenuClose()
+  subMenuStyle.value = {}
+  showAllProjects.value = true
+  await nextTick()
+  const el = subMenuRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const style: Record<string, string> = {}
+
+  if (rect.right > vw) {
+    style.left = 'auto'
+    style.right = '100%'
+    style.marginRight = '4px'
+    style.marginLeft = '0'
+  }
+
+  if (rect.bottom > vh) {
+    style.top = 'auto'
+    style.bottom = '0'
+  }
+
+  subMenuStyle.value = style
+}
+
+function togglePopover() {
+  showPopover.value = !showPopover.value
+}
+
+function closePopover() {
+  showPopover.value = false
+  showAllProjects.value = false
+  subMenuStyle.value = {}
+}
+
+function onDocumentClick(e: MouseEvent) {
+  if (!showPopover.value) return
+  const target = e.target as Node
+  if (popoverRef.value && !popoverRef.value.contains(target)
+    && triggerRef.value && !triggerRef.value.contains(target)) {
+    closePopover()
+  }
+}
+
+function selectProject(displayPath: string) {
+  createDraftSession(displayPath)
+  notifyTransient(t('workbench.rail.newSessionReady'), t('workbench.rail.newSessionHint'))
+  closePopover()
+}
+
+function goToArchive() {
+  switchSection('sessions')
+  closePopover()
+}
+
+async function pickFolder() {
+  closePopover()
+  const selected = await open({ directory: true, multiple: false })
+  if (selected) {
+    createDraftSession(selected)
+    notifyTransient(t('workbench.rail.newSessionReady'), t('workbench.rail.newSessionHint'))
+  }
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocumentClick))
+onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
 </script>
 
 <template>
   <aside class="w-64 shrink-0 border-r border-border p-2.5 flex flex-col gap-2 min-h-0">
     <div v-if="hint" class="px-0.5 text-[10.5px] text-muted-foreground shrink-0">{{ hint }}</div>
 
-    <!-- 卡片滚动区:卡片不压缩(shrink-0),超出即滚;＋格固定在滚动区外永远可见 -->
     <TransitionGroup
       tag="div"
       name="card"
@@ -73,7 +131,6 @@ async function onAddClick() {
         :expanded="expandedSet.has(sid)"
       />
 
-      <!-- 空态(FR-001) -->
       <div
         v-if="activeTab.sessionIds.length === 0"
         key="empty-state"
@@ -83,15 +140,114 @@ async function onAddClick() {
       </div>
     </TransitionGroup>
 
-    <!-- ＋ 格 -->
-    <button
-      class="shrink-0 min-h-12 border border-dashed border-border rounded text-xs text-muted-foreground
-             flex items-center justify-center gap-1.5 hover:text-primary hover:border-primary transition-colors"
-      @click="onAddClick"
-    >
-      <span class="text-sm">＋</span>
-      <span>{{ $t('workbench.rail.openSession') }}</span>
-    </button>
+    <!-- ＋ 格 + Popover -->
+    <div class="relative shrink-0">
+      <!-- Popover 面板（向上弹出） -->
+      <Transition name="popover">
+        <div
+          v-if="showPopover"
+          ref="popoverRef"
+          class="absolute bottom-full left-0 right-0 mb-1.5 z-50
+                 rounded border border-border shadow-paper-lifted bg-popover"
+        >
+          <!-- 最近项目 -->
+          <div v-if="recentProjects.length" class="py-1">
+            <div class="px-2.5 py-1 text-[10px] text-muted-foreground/70 tracking-wider">
+              {{ $t('workbench.rail.recentProjects') }}
+            </div>
+            <button
+              v-for="p in recentProjects"
+              :key="p.id"
+              class="w-full px-2.5 py-1.5 text-left text-xs text-muted-foreground
+                     hover:bg-muted hover:text-foreground transition-colors
+                     flex items-center gap-2"
+              @click="selectProject(p.display_path)"
+            >
+              <span class="i-carbon-folder w-3.5 h-3.5 shrink-0 opacity-60" />
+              <span class="truncate">{{ p.display_path.split('/').pop() || p.display_path }}</span>
+            </button>
+
+            <!-- 全部项目（二级） -->
+            <div
+              v-if="hasMore"
+              class="relative"
+              @mouseenter="positionSubMenu"
+              @mouseleave="scheduleSubMenuClose"
+            >
+              <button
+                class="w-full px-2.5 py-1.5 text-left text-xs text-muted-foreground
+                       hover:bg-muted hover:text-foreground transition-colors
+                       flex items-center gap-2"
+              >
+                <span class="i-carbon-list w-3.5 h-3.5 shrink-0 opacity-60" />
+                <span class="flex-1">{{ $t('workbench.rail.allProjects') }}</span>
+                <span class="i-carbon-chevron-right w-3 h-3 opacity-40" />
+              </button>
+
+              <!-- 二级面板 -->
+              <div
+                v-if="showAllProjects"
+                ref="subMenuRef"
+                :style="subMenuStyle"
+                class="absolute left-full top-0 ml-1 z-50 w-56
+                       rounded border border-border shadow-paper-lifted bg-popover
+                       py-1 max-h-96 overflow-y-auto"
+              >
+                <button
+                  v-for="p in projects"
+                  :key="p.id"
+                  class="w-full px-2.5 py-1.5 text-left text-muted-foreground
+                         hover:bg-muted hover:text-foreground transition-colors
+                         flex items-center gap-2"
+                  @click="selectProject(p.display_path)"
+                >
+                  <span class="i-carbon-folder w-3.5 h-3.5 shrink-0 opacity-60 mt-0.5 self-start" />
+                  <span class="min-w-0">
+                    <span class="block text-xs truncate">{{ p.display_path.split('/').pop() || p.display_path }}</span>
+                    <span class="block text-[10px] text-muted-foreground/50 truncate">{{ p.display_path }}</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="border-t border-border" />
+
+          <!-- 固定操作 -->
+          <div class="py-1">
+            <button
+              class="w-full px-2.5 py-1.5 text-left text-xs text-muted-foreground
+                     hover:bg-muted hover:text-foreground transition-colors
+                     flex items-center gap-2"
+              @click="goToArchive"
+            >
+              <span class="i-carbon-archive w-3.5 h-3.5 shrink-0 opacity-60" />
+              <span>{{ $t('workbench.rail.fromArchive') }}</span>
+            </button>
+            <button
+              class="w-full px-2.5 py-1.5 text-left text-xs text-muted-foreground
+                     hover:bg-muted hover:text-foreground transition-colors
+                     flex items-center gap-2"
+              @click="pickFolder"
+            >
+              <span class="i-carbon-folder-add w-3.5 h-3.5 shrink-0 opacity-60" />
+              <span>{{ $t('workbench.rail.pickFolder') }}</span>
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <button
+        ref="triggerRef"
+        class="w-full min-h-12 border border-dashed border-border rounded text-xs text-muted-foreground
+               flex items-center justify-center gap-1.5 hover:text-primary hover:border-primary transition-colors"
+        @click="togglePopover"
+      >
+        <span class="text-sm">＋</span>
+        <span>{{ $t('workbench.rail.openSession') }}</span>
+      </button>
+    </div>
   </aside>
 </template>
 
@@ -102,5 +258,15 @@ async function onAddClick() {
 .card-leave-active {
   position: absolute;
   opacity: 0;
+}
+
+.popover-enter-active,
+.popover-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.popover-enter-from,
+.popover-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
 }
 </style>

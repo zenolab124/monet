@@ -450,8 +450,8 @@ const streamingMessageIds = computed(() =>
 const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
 
 /** 流式区 pendingUserMessage 对应的 user record uuid（防历史区双显）。
- *  通过文本匹配确认 records 里的 user 确实是当前 pending 的那条，
- *  防止发第二条消息时误杀第一条（此时第二条的 user record 还没入 records）。 */
+ *  从后向前扫描所有 user record 做文本匹配，跳过纯 tool_result 的中间记录，
+ *  找到文本一致的那条返回其 uuid。 */
 const pendingUserUuid = computed(() => {
   if (!stream.value.pendingUserMessage || !stream.value.streamingTurns.length) return null
   const pendingText = stream.value.pendingUserMessage
@@ -464,7 +464,7 @@ const pendingUserUuid = computed(() => {
       : Array.isArray(content)
         ? (content.find((b: ContentBlock) => b.type === 'text') as { text?: string } | undefined)?.text
         : undefined
-    return text === pendingText ? r.uuid : null
+    if (text === pendingText) return r.uuid
   }
   return null
 })
