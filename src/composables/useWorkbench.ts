@@ -1,4 +1,5 @@
 import { ref, computed, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import i18n from '../locales'
 
 /**
@@ -277,10 +278,11 @@ function closeTab(tabId: string) {
   if (state.value.tabs.length <= 1) return
   const idx = state.value.tabs.findIndex(t => t.id === tabId)
   if (idx < 0) return
-  state.value.tabs.splice(idx, 1)
+  const removed = state.value.tabs.splice(idx, 1)[0]
   if (state.value.activeTabId === tabId) {
     state.value.activeTabId = state.value.tabs[Math.max(0, idx - 1)].id
   }
+  for (const sid of removed.sessionIds) teardownSession(sid)
 }
 
 function setActiveTab(tabId: string) {
@@ -509,6 +511,7 @@ function removeSession(sessionId: string) {
       }
     }
   }
+  teardownSession(sessionId)
 }
 
 /**
@@ -555,6 +558,14 @@ function updateColumnSize(tabId: string, index: number, leftRatio: number) {
   const clamped = Math.max(minLeft, Math.min(maxLeft, leftRatio))
   sizes[index] = clamped
   sizes[index + 1] = combined - clamped
+}
+
+/** 会话离开工作台后,若不再被任何 tab 持有则关闭进程(断 Remote Control) */
+function teardownSession(sessionId: string) {
+  const stillReferenced = state.value.tabs.some(t => t.sessionIds.includes(sessionId))
+  if (!stillReferenced) {
+    invoke('close_session', { sessionId }).catch(() => {})
+  }
 }
 
 export function useWorkbench() {

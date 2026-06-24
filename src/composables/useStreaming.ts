@@ -189,20 +189,21 @@ export const streamingTick = ref(0)
 let rafId: number | null = null
 
 /**
- * 自适应打字间隔(ms)。CLI 2.1.177+ 以快照推送(非字符级 delta),
- * 积压天然较深;节奏偏向「可见打字」而非「追赶清空」。
+ * 自适应打字间隔(ms)。积压浅时保留打字机质感,深时快速追赶。
  */
 function typingInterval(queueLen: number): number {
   if (queueLen <= 5) return 55     // ~18 字/秒,舒适打字节奏
   if (queueLen <= 40) return 30    // ~33 字/秒,略快
-  return 20                        // ~50 字/秒基底,配合 charsPerTick 提速
+  if (queueLen <= 200) return 20   // 配合 charsPerTick 加速
+  return 16                        // 深积压:贴合 rAF 节奏全速追赶
 }
 
-/** 每帧吐字数:积压越深每帧多吐,但上限克制,保留打字机可读感 */
+/** 每帧吐字数:积压越深每帧多吐,2s 内消化大块快照 */
 function charsPerTick(queueLen: number): number {
-  if (queueLen <= 100) return 1    // ≤50 字/秒
-  if (queueLen <= 500) return 2    // ≤100 字/秒
-  return 3                         // ≤150 字/秒(~10s 清 1500 字)
+  if (queueLen <= 100) return 1
+  if (queueLen <= 500) return 3
+  if (queueLen <= 2000) return 10
+  return 30
 }
 
 function totalPendingChars(): number {
@@ -215,17 +216,36 @@ function totalPendingChars(): number {
 
 /**
  * @param allAtOnce    true:一次性 flush 全部(流结束 / 中断收尾用,确保不丢字符)
- *                     false:打字机节奏——每会话每帧只播最早未完成的 text 块
- *                     (块序播放,多会话互不阻塞);thinking/signature 到帧即全量落地
+ *                     false:打字机节奏;thinking/signature 到帧即全量落地
  * @param onlySession  仅 flush 指定会话的 pending(某一路流结束时不影响其他在播会话)
  * @returns 是否还有未消化字符
  */
 function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
   if (pendingTextDeltas.size === 0) return false
+  const pending = totalPendingChars()
+  if (pending > 5000) allAtOnce = true
   let hasRemaining = false
-  const take = allAtOnce ? Infinity : charsPerTick(totalPendingChars())
-  // 本帧已播过内容的会话:同会话后续块等前块播完(text/thinking 共享顺序槽)
-  const playedSession = new Set<string>()
+  const take = allAtOnce ? Infinity : charsPerTick(pending)
+
+  // 统计每个会话有几个待播 text 块,有后续块时前面的瞬间吐完
+  const sessionTextKeys = new Map<string, string[]>()
+  if (!allAtOnce) {
+    pendingTextDeltas.forEach((p, key) => {
+      if (p.text === undefined) return
+      const mid = key.slice(0, key.indexOf('#'))
+      const entry = turnIndex.get(mid)
+      if (!entry) return
+      if (onlySession && entry.sessionId !== onlySession) return
+      const arr = sessionTextKeys.get(entry.sessionId)
+      if (arr) arr.push(key)
+      else sessionTextKeys.set(entry.sessionId, [key])
+    })
+  }
+  const instantKeys = new Set<string>()
+  sessionTextKeys.forEach(keys => {
+    for (let i = 0; i < keys.length - 1; i++) instantKeys.add(keys[i])
+  })
+
   pendingTextDeltas.forEach((p, key) => {
     const hashIdx = key.indexOf('#')
     if (hashIdx < 0) return
@@ -240,7 +260,6 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
     const block = entry.turn.content[index] as ContentBlock | undefined
     if (!block) return
 
-    // thinking: 到帧全量落地(不走打字机,不占 playedSession 槽位)
     if (p.thinking !== undefined && block.type === 'thinking') {
       ;(block as { thinking: string }).thinking += p.thinking
       p.thinking = undefined
@@ -251,18 +270,15 @@ function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
     }
 
     if (p.text !== undefined && block.type === 'text') {
-      if (!allAtOnce && playedSession.has(entry.sessionId)) {
+      const instant = instantKeys.has(key)
+      const actualTake = instant ? Infinity : take
+      ;(block as { text: string }).text += p.text.slice(0, actualTake)
+      const rem = p.text.slice(actualTake)
+      if (rem) {
+        p.text = rem
         hasRemaining = true
       } else {
-        ;(block as { text: string }).text += p.text.slice(0, take)
-        const rem = p.text.slice(take)
-        if (rem) {
-          p.text = rem
-          hasRemaining = true
-        } else {
-          p.text = undefined
-        }
-        playedSession.add(entry.sessionId)
+        p.text = undefined
       }
     }
 

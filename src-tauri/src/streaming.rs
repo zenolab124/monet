@@ -598,7 +598,8 @@ pub fn close_session(session_id: &str) {
 
     if let Some(process_arc) = process_arc {
         let pid = {
-            let sp = process_arc.lock().unwrap();
+            let mut sp = process_arc.lock().unwrap();
+            graceful_shutdown(&mut sp);
             sp.child.id()
         };
         sigterm_pid(pid);
@@ -626,11 +627,22 @@ pub fn close_all_sessions() {
         .unwrap_or_default();
 
     for (sid, process_arc) in processes {
-        if let Ok(sp) = process_arc.lock() {
+        if let Ok(mut sp) = process_arc.lock() {
+            graceful_shutdown(&mut sp);
             sigterm_pid(sp.child.id());
         }
         PermissionService::stop_for(&sid);
     }
+}
+
+fn graceful_shutdown(sp: &mut SessionProcess) {
+    sp.request_counter += 1;
+    let req_id = format!("shutdown-{}", sp.request_counter);
+    let _ = write_stdin(&mut sp.stdin, &json!({
+        "type": "control_request",
+        "request_id": req_id,
+        "request": {"subtype": "remote_control", "enabled": false}
+    }));
 }
 
 fn emit_error(app: &AppHandle, session_id: &str, message: String) {

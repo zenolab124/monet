@@ -139,6 +139,19 @@ pub fn refresh_settings_schema() {
 // MCP Server registration
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "macos")]
+fn is_codesigned(path: &std::path::Path) -> bool {
+    std::process::Command::new("codesign")
+        .args(["--verify", "--quiet", path.to_string_lossy().as_ref()])
+        .output()
+        .map_or(false, |o| o.status.success())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_codesigned(_path: &std::path::Path) -> bool {
+    true
+}
+
 fn mcp_bin_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "cc-space-mcp.exe"
@@ -178,7 +191,7 @@ fn install_mcp_binary() -> Result<PathBuf, String> {
     let needs_install = if target.exists() {
         let src_meta = fs::metadata(&source).map_err(|e| e.to_string())?;
         let dst_meta = fs::metadata(&target).map_err(|e| e.to_string())?;
-        src_meta.len() != dst_meta.len()
+        src_meta.len() != dst_meta.len() || !is_codesigned(&target)
     } else {
         true
     };
@@ -189,6 +202,12 @@ fn install_mcp_binary() -> Result<PathBuf, String> {
         {
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o755));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("codesign")
+                .args(["--sign", "-", "--force", target.to_string_lossy().as_ref()])
+                .output();
         }
     }
 

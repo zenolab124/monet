@@ -142,7 +142,7 @@ const positionStyle = computed(() => {
     </div>
 
     <!-- 命令列表 -->
-    <ul v-else class="py-1 max-h-72 overflow-y-auto">
+    <ul v-else class="py-1 max-h-80 overflow-y-auto">
       <li
         v-for="(cmd, i) in filtered"
         :key="cmd.name"

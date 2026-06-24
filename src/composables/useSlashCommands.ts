@@ -32,41 +32,40 @@ export interface SlashCommand {
   category: SlashCommandCategory
 }
 
-/** 本版命令清单（仅 5 条，PRD L234-243） */
+/** 命令清单：native = 前端处理，pass = 透传 CLI */
 export function getSlashCommands(): SlashCommand[] {
+  const t = (k: string) => i18n.global.t(k)
   return [
-    {
-      name: 'new',
-      hint: i18n.global.t('slash.hintNew'),
-      hasArg: false,
-      category: 'native',
-    },
-    {
-      name: 'clear',
-      hint: i18n.global.t('slash.hintClear'),
-      hasArg: false,
-      category: 'native',
-    },
-    {
-      name: 'cd',
-      hint: i18n.global.t('slash.hintCd'),
-      hasArg: true,
-      argHint: '<path>',
-      category: 'native',
-    },
-    {
-      name: 'help',
-      hint: i18n.global.t('slash.hintHelp'),
-      hasArg: false,
-      category: 'native',
-    },
-    {
-      name: 'model',
-      hint: i18n.global.t('slash.hintModel'),
-      hasArg: true,
-      argHint: '<name>',
-      category: 'pass',
-    },
+    { name: 'new',       hint: t('slash.hintNew'),       hasArg: false, category: 'native' },
+    { name: 'clear',     hint: t('slash.hintClear'),     hasArg: false, category: 'native' },
+    { name: 'cd',        hint: t('slash.hintCd'),        hasArg: true, argHint: '<path>', category: 'native' },
+    { name: 'help',      hint: t('slash.hintHelp'),      hasArg: false, category: 'native' },
+    { name: 'model',     hint: t('slash.hintModel'),     hasArg: true, argHint: '<name>', category: 'pass' },
+    { name: 'compact',   hint: t('slash.hintCompact'),   hasArg: false, category: 'pass' },
+    { name: 'config',    hint: t('slash.hintConfig'),    hasArg: false, category: 'pass' },
+    { name: 'cost',      hint: t('slash.hintCost'),      hasArg: false, category: 'pass' },
+    { name: 'diff',      hint: t('slash.hintDiff'),      hasArg: false, category: 'pass' },
+    { name: 'doctor',    hint: t('slash.hintDoctor'),    hasArg: false, category: 'pass' },
+    { name: 'effort',    hint: t('slash.hintEffort'),    hasArg: true, argHint: '<level>', category: 'pass' },
+    { name: 'fast',      hint: t('slash.hintFast'),      hasArg: false, category: 'pass' },
+    { name: 'hooks',     hint: t('slash.hintHooks'),     hasArg: false, category: 'pass' },
+    { name: 'init',      hint: t('slash.hintInit'),      hasArg: false, category: 'pass' },
+    { name: 'login',     hint: t('slash.hintLogin'),     hasArg: false, category: 'pass' },
+    { name: 'logout',    hint: t('slash.hintLogout'),    hasArg: false, category: 'pass' },
+    { name: 'mcp',       hint: t('slash.hintMcp'),       hasArg: false, category: 'pass' },
+    { name: 'memory',    hint: t('slash.hintMemory'),    hasArg: false, category: 'pass' },
+    { name: 'permissions', hint: t('slash.hintPermissions'), hasArg: false, category: 'pass' },
+    { name: 'review',    hint: t('slash.hintReview'),    hasArg: false, category: 'pass' },
+    { name: 'stats',     hint: t('slash.hintStats'),     hasArg: false, category: 'pass' },
+    { name: 'status',    hint: t('slash.hintStatus'),    hasArg: false, category: 'pass' },
+    { name: 'terminal-setup', hint: t('slash.hintTerminalSetup'), hasArg: false, category: 'pass' },
+    { name: 'theme',     hint: t('slash.hintTheme'),     hasArg: true, argHint: '<name>', category: 'pass' },
+    { name: 'undo',      hint: t('slash.hintUndo'),      hasArg: false, category: 'pass' },
+    { name: 'vim',       hint: t('slash.hintVim'),       hasArg: false, category: 'pass' },
+    { name: 'add-dir',   hint: t('slash.hintAddDir'),    hasArg: true, argHint: '<path>', category: 'pass' },
+    { name: 'bug',       hint: t('slash.hintBug'),       hasArg: false, category: 'pass' },
+    { name: 'ide',       hint: t('slash.hintIde'),       hasArg: false, category: 'pass' },
+    { name: 'resume',    hint: t('slash.hintResume'),    hasArg: false, category: 'pass' },
   ]
 }
 
@@ -99,15 +98,7 @@ export function shouldTriggerPanel(input: string, cursorPos: number): boolean {
   return TRIGGER_RE.test(slice)
 }
 
-/**
- * 严格前缀过滤。
- *
- * - "/" 返回全部 5 条
- * - "/h" 返回 [help]
- * - "/x" 返回空数组
- *
- * 不做模糊匹配。输入若不以 `/` 开头，统一返回空数组。
- */
+/** 严格前缀过滤，不做模糊匹配 */
 export function filterCommands(input: string): SlashCommand[] {
   if (!input.startsWith('/')) return []
   const prefix = input.slice(1).toLowerCase()
