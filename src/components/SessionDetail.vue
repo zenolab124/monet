@@ -920,37 +920,28 @@ async function probeExternal() {
     }
     if (effectiveSessionId.value !== cs.summary.id) return
     if (running) {
+      // 进程在跑就保持运行态,不做闲置退出(API 调用等响应可能 10-30s 无输出)
       const prevCount = records.value.length
       await silentReloadRecords()
-      const changed = records.value.length > prevCount
-      if (changed) {
+      if (records.value.length > prevCount) {
         externalIdleTicks = 0
-        if (!externalRunning.value) {
-          externalRunning.value = true
-          followStreaming.value = true
-        }
-      } else if (externalRunning.value) {
-        externalIdleTicks++
-        if (externalIdleTicks >= 4) {
-          // 连续 4 轮(~6s)无新输出 → 外部长活进程闲置,解除锁定
-          externalRunning.value = false
-        }
-      } else {
-        externalIdleTicks++
-        if (externalIdleTicks >= 4) {
-          // 从未产出过新记录 → 闲置进程,停止探测
-          stopExternalFollow()
-        }
+      }
+      if (!externalRunning.value) {
+        externalRunning.value = true
+        followStreaming.value = true
       }
     } else if (externalRunning.value) {
-      // 进程刚退出:收尾 reload 拿最终落账,结束跟随
+      // 进程退出:收尾 reload 拿最终落账,结束跟随
       externalRunning.value = false
       externalIdleTicks = 0
       await silentReloadRecords()
       stopExternalFollow()
     } else {
-      externalIdleTicks = 0
-      stopExternalFollow()
+      // 进程未运行且从未标记过运行态,累积空轮次后停止探测
+      externalIdleTicks++
+      if (externalIdleTicks >= 4) {
+        stopExternalFollow()
+      }
     }
   } finally {
     probing = false
@@ -974,6 +965,16 @@ function stopExternalFollow() {
 }
 
 onUnmounted(stopExternalFollow)
+
+// 文件变化驱动探测：watcher 检测到 JSONL 增长时触发 projects-changed，
+// 如果当前会话探测已停止且未在本地流式，重启探测以捕获孤儿进程输出
+let unlistenProjectsChanged: (() => void) | null = null
+listen('projects-changed', () => {
+  if (externalTimer !== null) return
+  if (!currentSession.value || stream.value.streaming) return
+  startExternalFollow()
+}).then(fn => { unlistenProjectsChanged = fn })
+onUnmounted(() => unlistenProjectsChanged?.())
 
 let loadedSessionId: string | null = null
 
@@ -1013,6 +1014,7 @@ async function onReload() {
   const sid = effectiveSessionId.value
   if (sid && !stream.value.streaming) {
     clearStreamingTurns(sid)
+    startExternalFollow()
   }
 }
 </script>

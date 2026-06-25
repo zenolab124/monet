@@ -154,7 +154,7 @@ onUnmounted(() => {
       ref="buttonRef"
       type="button"
       :disabled="disabled"
-      class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
+      class="px-1.5 py-0.5 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
              transition-colors flex items-center gap-1 border border-border
              disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
       :title="disabled ? $t('topbar.modelAdvisorLocked') : $t('topbar.modelTitle', { name: currentLabel })"
@@ -162,7 +162,6 @@ onUnmounted(() => {
       :aria-expanded="open"
       @click="toggle"
     >
-      <span class="i-carbon-machine-learning-model w-3.5 h-3.5" />
       <span class="truncate max-w-32">{{ currentLabel }}</span>
       <span class="i-carbon-chevron-down w-3 h-3 text-muted-foreground" />
     </button>

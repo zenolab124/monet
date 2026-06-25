@@ -51,14 +51,14 @@ const capacityText = computed(() => formatTokens(props.capacity))
 
 <template>
   <div
-    class="inline-flex items-center gap-2"
-    :class="{ 'min-w-32': !compact }"
+    class="flex items-center gap-1.5"
+    :class="compact ? 'flex-1 min-w-0' : 'min-w-32 inline-flex'"
     :title="$t('topbar.contextUsage', { used: usedText, capacity: capacityText, percent })"
   >
     <!-- 进度条 -->
     <div
-      class="relative h-1.5 rounded-full overflow-hidden bg-muted shrink-0"
-      :class="compact ? 'w-12' : 'w-20'"
+      class="relative h-1.5 rounded-full overflow-hidden bg-muted"
+      :class="compact ? 'flex-1 min-w-0' : 'w-20 shrink-0'"
     >
       <div
         class="absolute inset-y-0 left-0 rounded-full transition-all duration-200"
@@ -67,7 +67,7 @@ const capacityText = computed(() => formatTokens(props.capacity))
       />
     </div>
     <!-- 紧凑形态:仅百分比(将满时染警示色已足够提示) -->
-    <span v-if="compact" class="text-xs tabular-nums" :class="textColorClass">{{ percent }}%</span>
+    <span v-if="compact" class="text-xs tabular-nums shrink-0" :class="textColorClass">{{ percent }}%</span>
     <!-- 完整形态:数字 + 百分比 + 将满提示 -->
     <template v-else>
       <span class="text-xs whitespace-nowrap" :class="textColorClass">

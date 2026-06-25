@@ -41,9 +41,7 @@ function chainFirstName(): string {
 }
 
 const options = computed<ChannelOption[]>(() => {
-  const result: ChannelOption[] = [
-    { value: FOLLOW, label: t('topbar.channelFollow', { name: chainFirstName() }) },
-  ]
+  const result: ChannelOption[] = []
   for (const id of sessionChain.value) {
     if (id === OFFICIAL_CHANNEL_ID) {
       result.push({ value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') })
@@ -55,14 +53,17 @@ const options = computed<ChannelOption[]>(() => {
   return result
 })
 
+const resolvedChannel = computed(() => props.current ?? sessionChain.value[0] ?? OFFICIAL_CHANNEL_ID)
+
 const currentIndex = computed(() =>
-  options.value.findIndex(o => o.value === (props.current ?? FOLLOW)),
+  options.value.findIndex(o => o.value === resolvedChannel.value),
 )
 
-/** 按钮展示标签:跟随默认时显示「默认 · 真值」,免去用户猜默认指向 */
 const currentLabel = computed(() => {
-  if (!props.current) return t('topbar.channelFollow', { name: chainFirstName() })
-  return channelDisplayName(props.current)
+  const id = resolvedChannel.value
+  if (id === OFFICIAL_CHANNEL_ID) return t('topbar.channelOfficial')
+  const ch = channels.value.find(c => c.id === id)
+  return ch?.name ?? channelDisplayName(id)
 })
 
 const open = ref(false)
@@ -88,7 +89,7 @@ function close() {
 function selectAt(index: number) {
   const o = options.value[index]
   if (!o) return
-  emit('select', o.value === FOLLOW ? null : o.value)
+  emit('select', o.value)
   close()
 }
 
@@ -153,15 +154,14 @@ onUnmounted(() => {
     <button
       ref="buttonRef"
       type="button"
-      class="px-2 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
+      class="px-1.5 py-0.5 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-muted
              transition-colors flex items-center gap-1 border border-border"
       :title="$t('topbar.channelTitle', { name: currentLabel })"
       :aria-haspopup="'listbox'"
       :aria-expanded="open"
       @click="toggle"
     >
-      <span class="i-carbon-cloud w-3.5 h-3.5" />
-      <span class="truncate">{{ currentLabel }}</span>
+      <span class="truncate max-w-24">{{ currentLabel }}</span>
       <span class="i-carbon-chevron-down w-3 h-3 text-muted-foreground" />
     </button>
 

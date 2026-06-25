@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime } from '@/types'
 import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
-import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
+import { ADVISOR_MAIN_MODEL, type EffortSetting, type EffortLevel } from '@/composables/useSessionSettings'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
+import { useChannels, OFFICIAL_CHANNEL_ID, channelDisplayName, refreshChannels } from '@/composables/useChannels'
 import ModelDropdown from './ModelDropdown.vue'
 import ContextProgress from './ContextProgress.vue'
 import EffortDropdown from './EffortDropdown.vue'
@@ -116,20 +117,18 @@ const capacity = computed(() =>
 
 // --- 窄列折叠 ---
 //
-// 单行布局的折叠顺序:渠道 → 努力等级 → token 进度,模型永不折叠。
-// 阈值按紧凑形态估算(模型 ~90 + 进度 ~75 + 努力 ~70 + 渠道 ~110 + 菜单 ~30 + gap/padding):
-//   >= 480px : 全部展示
-//   >= 360px : 折叠渠道
-//   >= 280px : 再折叠努力等级
-//   <  280px : 仅模型 + 菜单
-// 被折叠的控件进 ⋯ 菜单(完整形态)。
+// 进度条 flex-1 自适应可压很短,几乎不折叠。
+// 折叠顺序:渠道 → 努力等级,模型和进度条永不折叠,顾问始终在菜单。
+//   >= 280px : 全部展示
+//   >= 200px : 折叠渠道
+//   <  200px : 仅模型 + 进度 + 菜单
 
 const containerRef = ref<HTMLElement>()
 const containerWidth = ref(Number.POSITIVE_INFINITY)
 
-const showChannel = computed(() => containerWidth.value >= 480)
-const showEffort = computed(() => containerWidth.value >= 360)
-const showProgress = computed(() => containerWidth.value >= 280)
+const showChannel = computed(() => containerWidth.value >= 280)
+const showProgress = true
+const showEffort = computed(() => containerWidth.value >= 200)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -154,17 +153,101 @@ onUnmounted(() => {
 
 const menuOpen = ref(false)
 const menuRef = ref<HTMLElement>()
+const menuPanelRef = ref<HTMLElement>()
+const menuAlignLeft = ref(false)
 
 function onDocClick(e: MouseEvent) {
   if (!menuOpen.value) return
   const target = e.target as Node
   if (menuRef.value && !menuRef.value.contains(target)) {
     menuOpen.value = false
+    activeSubmenu.value = null
+  }
+}
+
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+  activeSubmenu.value = null
+  if (menuOpen.value) {
+    nextTick(() => {
+      const panel = menuPanelRef.value
+      if (!panel) return
+      const rect = panel.getBoundingClientRect()
+      menuAlignLeft.value = rect.right > window.innerWidth - 4
+    })
   }
 }
 
 onMounted(() => document.addEventListener('mousedown', onDocClick))
 onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
+
+// --- 二级菜单 ---
+
+const { channels, sessionChain } = useChannels()
+
+const EFFORT_OPTIONS: { value: NonNullable<EffortSetting>; label: string }[] = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'xHigh' },
+  { value: 'max', label: 'Max' },
+  { value: 'ultracode', label: 'Ultracode' },
+]
+
+const channelOptions = computed(() => {
+  const result: { value: string; label: string }[] = []
+  for (const id of sessionChain.value) {
+    if (id === OFFICIAL_CHANNEL_ID) {
+      result.push({ value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') })
+    } else {
+      const ch = channels.value.find(c => c.id === id)
+      if (ch?.enabled) result.push({ value: id, label: ch.name })
+    }
+  }
+  return result
+})
+
+const effortLabel = computed(() => {
+  const o = EFFORT_OPTIONS.find(o => o.value === props.selectedEffort)
+  return o?.label ?? 'Auto'
+})
+
+const channelLabel = computed(() => {
+  const id = props.selectedChannelId ?? sessionChain.value[0] ?? OFFICIAL_CHANNEL_ID
+  if (id === OFFICIAL_CHANNEL_ID) return t('topbar.channelOfficial')
+  const ch = channels.value.find(c => c.id === id)
+  return ch?.name ?? channelDisplayName(id)
+})
+
+type SubmenuType = 'effort' | 'channel' | null
+const activeSubmenu = ref<SubmenuType>(null)
+const submenuAlignLeft = ref(false)
+
+function openSubmenu(type: SubmenuType, event: MouseEvent) {
+  activeSubmenu.value = type
+  if (type) {
+    if (type === 'channel') refreshChannels()
+    nextTick(() => {
+      const target = (event.currentTarget as HTMLElement)
+      const sub = target.querySelector('.submenu-panel') as HTMLElement
+      if (!sub) return
+      const rect = sub.getBoundingClientRect()
+      submenuAlignLeft.value = rect.right > window.innerWidth - 4
+    })
+  }
+}
+
+function selectEffort(value: NonNullable<EffortSetting>) {
+  onEffortChange(value)
+  menuOpen.value = false
+  activeSubmenu.value = null
+}
+
+function selectChannel(value: string) {
+  onChannelChange(value)
+  menuOpen.value = false
+  activeSubmenu.value = null
+}
 
 // --- 菜单操作 ---
 
@@ -239,21 +322,13 @@ function onPermissionModeChange(mode: PermissionMode) {
 <template>
   <div
     ref="containerRef"
-    class="px-3 py-1.5 border-b border-border shrink-0 flex items-center gap-1.5"
+    class="px-3 py-1 border-b border-border shrink-0 flex items-center gap-1.5"
   >
     <!-- 模型切换(永不折叠) -->
     <ModelDropdown
       :current="effectiveModel?.id ?? effectiveModelStr"
       :disabled="selectedAdvisor"
       @select="onModelChange"
-    />
-
-    <!-- token 进度(紧凑形态:条 + 百分比) -->
-    <ContextProgress
-      v-if="showProgress"
-      :used="usedContextTokens"
-      :capacity="capacity"
-      compact
     />
 
     <!-- 努力等级 -->
@@ -270,24 +345,12 @@ function onPermissionModeChange(mode: PermissionMode) {
       @select="onChannelChange"
     />
 
-    <!-- 顾问模式开关 -->
-    <button
-      v-if="showChannel"
-      type="button"
-      :disabled="advisorDisabled"
-      class="px-2 py-1 text-xs rounded-md border transition-colors flex items-center gap-1 shrink-0
-             disabled:opacity-40 disabled:cursor-not-allowed"
-      :class="selectedAdvisor && !advisorDisabled
-        ? 'border-primary text-primary bg-primary/10'
-        : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'"
-      :title="advisorTitle"
-      @click="onAdvisorToggle"
-    >
-      <span class="i-carbon-idea w-3.5 h-3.5" />
-      <span>{{ $t('topbar.advisor') }}</span>
-    </button>
-
-    <div class="ml-auto" />
+    <!-- token 进度(紧凑形态:条 + 百分比,永不折叠) -->
+    <ContextProgress
+      :used="usedContextTokens"
+      :capacity="capacity"
+      compact
+    />
 
     <!-- ⋯ 统一菜单 -->
     <div ref="menuRef" class="relative inline-flex shrink-0">
@@ -296,47 +359,102 @@ function onPermissionModeChange(mode: PermissionMode) {
         class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         :title="$t('topbar.sessionMenu')"
         :aria-expanded="menuOpen"
-        @click="menuOpen = !menuOpen"
+        @click="toggleMenu"
       >
         <span class="i-carbon-overflow-menu-horizontal w-3.5 h-3.5" />
       </button>
 
       <div
         v-if="menuOpen"
-        class="absolute top-full right-0 mt-1 z-50 py-1 rounded-md border border-border
-               shadow-paper-lifted bg-popover w-60"
+        ref="menuPanelRef"
+        class="absolute top-full mt-1 z-50 py-1 rounded-md border border-border
+               shadow-paper-lifted bg-popover w-52"
+        :class="menuAlignLeft ? 'left-0' : 'right-0'"
       >
-        <!-- 窄列被折叠的控件 -->
-        <div v-if="!showProgress || !showEffort || !showChannel" class="px-2 py-1.5 flex flex-col gap-2 border-b border-border">
-          <ContextProgress
-            v-if="!showProgress"
-            :used="usedContextTokens"
-            :capacity="capacity"
-          />
-          <EffortDropdown
+        <!-- 折叠的下拉控件(二级菜单) + 进度 + 顾问 -->
+        <div class="py-0.5 border-b border-border">
+          <!-- 努力等级(二级菜单) -->
+          <div
             v-if="!showEffort"
-            :current="selectedEffort"
-            @select="onEffortChange"
-          />
-          <ChannelDropdown
+            class="submenu-trigger"
+            @mouseenter="openSubmenu('effort', $event)"
+            @mouseleave="activeSubmenu === 'effort' && (activeSubmenu = null)"
+          >
+            <span class="menu-item">
+              <span class="i-carbon-meter w-3.5 h-3.5" />
+              <span class="flex-1">{{ $t('topbar.effortLabel') }}</span>
+              <span class="text-muted-foreground">{{ effortLabel }}</span>
+              <span class="i-carbon-chevron-right w-3 h-3 text-muted-foreground" />
+            </span>
+            <div
+              v-if="activeSubmenu === 'effort'"
+              class="submenu-panel"
+              :class="submenuAlignLeft ? 'right-full mr-1' : 'left-full ml-1'"
+            >
+              <button
+                v-for="o in EFFORT_OPTIONS"
+                :key="o.value"
+                class="menu-item"
+                :class="{ 'text-primary!': o.value === selectedEffort }"
+                @click="selectEffort(o.value)"
+              >
+                <span
+                  class="w-3 h-3 shrink-0"
+                  :class="o.value === selectedEffort ? 'i-carbon-checkmark text-primary' : ''"
+                />
+                {{ o.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 渠道(二级菜单) -->
+          <div
             v-if="!showChannel"
-            :current="selectedChannelId"
-            @select="onChannelChange"
-          />
+            class="submenu-trigger"
+            @mouseenter="openSubmenu('channel', $event)"
+            @mouseleave="activeSubmenu === 'channel' && (activeSubmenu = null)"
+          >
+            <span class="menu-item">
+              <span class="i-carbon-cloud w-3.5 h-3.5" />
+              <span class="flex-1">{{ $t('topbar.channelLabel') }}</span>
+              <span class="text-muted-foreground">{{ channelLabel }}</span>
+              <span class="i-carbon-chevron-right w-3 h-3 text-muted-foreground" />
+            </span>
+            <div
+              v-if="activeSubmenu === 'channel'"
+              class="submenu-panel"
+              :class="submenuAlignLeft ? 'right-full mr-1' : 'left-full ml-1'"
+            >
+              <button
+                v-for="o in channelOptions"
+                :key="o.value"
+                class="menu-item"
+                :class="{ 'text-primary!': o.value === (selectedChannelId ?? sessionChain[0] ?? OFFICIAL_CHANNEL_ID) }"
+                @click="selectChannel(o.value)"
+              >
+                <span
+                  class="w-3 h-3 shrink-0"
+                  :class="o.value === (selectedChannelId ?? sessionChain[0] ?? OFFICIAL_CHANNEL_ID) ? 'i-carbon-checkmark text-primary' : ''"
+                />
+                {{ o.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 顾问(始终在菜单) -->
           <button
-            v-if="!showChannel"
-            type="button"
+            class="menu-item"
             :disabled="advisorDisabled"
-            class="px-2 py-1 text-xs rounded-md border transition-colors flex items-center gap-1.5 self-start
-                   disabled:opacity-40 disabled:cursor-not-allowed"
-            :class="selectedAdvisor && !advisorDisabled
-              ? 'border-primary text-primary bg-primary/10'
-              : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'"
+            :class="advisorDisabled ? 'opacity-40 cursor-not-allowed' : ''"
             :title="advisorTitle"
             @click="onAdvisorToggle"
           >
             <span class="i-carbon-idea w-3.5 h-3.5" />
-            <span>{{ $t('topbar.advisorMode') }}</span>
+            <span class="flex-1">{{ $t('topbar.advisorMode') }}</span>
+            <span
+              v-if="selectedAdvisor && !advisorDisabled"
+              class="i-carbon-checkmark w-3 h-3 text-primary"
+            />
           </button>
         </div>
 
@@ -368,7 +486,7 @@ function onPermissionModeChange(mode: PermissionMode) {
           <button v-if="cwd" class="menu-item" @click="openInVscode">
             <span class="i-carbon-code w-3.5 h-3.5" />{{ $t('topbar.openInVscode') }}
           </button>
-          <button class="menu-item text-destructive hover:bg-destructive/10" @click="onDelete">
+          <button class="menu-item text-destructive! hover:bg-destructive/10" @click="onDelete">
             <span class="i-carbon-trash-can w-3.5 h-3.5" />{{ $t('topbar.deleteSession') }}
           </button>
         </div>
@@ -392,5 +510,19 @@ function onPermissionModeChange(mode: PermissionMode) {
 }
 .menu-item:hover {
   background: var(--muted);
+}
+.submenu-trigger {
+  position: relative;
+}
+.submenu-panel {
+  position: absolute;
+  top: 0;
+  z-index: 51;
+  min-width: 120px;
+  padding: 4px 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-paper-lifted);
 }
 </style>
