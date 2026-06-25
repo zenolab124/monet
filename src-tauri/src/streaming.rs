@@ -34,6 +34,8 @@ struct SessionProcess {
     child: Child,
     stdin: ChildStdin,
     request_counter: u64,
+    channel: Option<String>,
+    effort: Option<String>,
 }
 
 /// 活跃的长活进程表（sessionId → SessionProcess）
@@ -402,6 +404,8 @@ fn open_session(
         child,
         stdin,
         request_counter: 1,
+        channel: channel.map(|s| s.to_string()),
+        effort: effort.map(|s| s.to_string()),
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -439,11 +443,28 @@ pub fn send_message(
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
 ) -> Result<(), String> {
-    let exists = ACTIVE_PROCESSES
+    let mut exists = ACTIVE_PROCESSES
         .lock()
         .unwrap()
         .as_ref()
         .map_or(false, |m| m.contains_key(session_id));
+
+    if exists {
+        let needs_restart = ACTIVE_PROCESSES
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|m| m.get(session_id).cloned())
+            .map_or(false, |arc| {
+                let sp = arc.lock().unwrap();
+                sp.channel.as_deref() != channel || sp.effort.as_deref() != effort
+            });
+        if needs_restart {
+            eprintln!("[long-lived] 渠道/effort 变更，重启进程 会话={}", &session_id[..session_id.len().min(8)]);
+            close_session(session_id);
+            exists = false;
+        }
+    }
 
     if !exists {
         open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, append_system_prompt)?;
