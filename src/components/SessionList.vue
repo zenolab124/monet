@@ -51,20 +51,46 @@ function pickModel(model: string) {
   showModelDropdown.value = false
 }
 
-// ====== 虚拟滚动 ======
-const ITEM_HEIGHT = 60
+// ====== 虚拟滚动（两档高度） ======
+const ITEM_H = 60
+const ITEM_H_SUMMARY = 80
 const OVERSCAN = 5
+
+function itemHeight(session: SessionSummary) {
+  return getMeta(session.id)?.summary ? ITEM_H_SUMMARY : ITEM_H
+}
 
 const scrollContainer = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const containerHeight = ref(0)
 
-const totalHeight = computed(() => sortedSessions.value.length * ITEM_HEIGHT)
+const prefixHeights = computed(() => {
+  const sessions = sortedSessions.value
+  const h = new Float64Array(sessions.length + 1)
+  for (let i = 0; i < sessions.length; i++)
+    h[i + 1] = h[i] + itemHeight(sessions[i])
+  return h
+})
+
+const totalHeight = computed(() => prefixHeights.value[sortedSessions.value.length])
+
+function findIndex(top: number) {
+  const h = prefixHeights.value
+  let lo = 0, hi = h.length - 2
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (h[mid] <= top) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
 
 const visibleRange = computed(() => {
-  const start = Math.max(0, Math.floor(scrollTop.value / ITEM_HEIGHT) - OVERSCAN)
-  const visibleCount = Math.ceil(containerHeight.value / ITEM_HEIGHT) + OVERSCAN * 2
-  const end = Math.min(sortedSessions.value.length, start + visibleCount)
+  const h = prefixHeights.value
+  const len = sortedSessions.value.length
+  const start = Math.max(0, findIndex(scrollTop.value) - OVERSCAN)
+  let end = findIndex(scrollTop.value + containerHeight.value)
+  end = Math.min(len, end + OVERSCAN + 1)
   return { start, end }
 })
 
@@ -73,10 +99,11 @@ const visibleSessions = computed(() => {
   return sortedSessions.value.slice(start, end).map((session, i) => ({
     session,
     index: start + i,
+    height: itemHeight(session),
   }))
 })
 
-const offsetY = computed(() => visibleRange.value.start * ITEM_HEIGHT)
+const offsetY = computed(() => prefixHeights.value[visibleRange.value.start])
 
 function onScroll() {
   const el = scrollContainer.value
@@ -268,14 +295,14 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       <div v-else :style="{ height: totalHeight + 'px', position: 'relative' }">
         <div :style="{ transform: `translateY(${offsetY}px)` }" class="p-2 flex flex-col gap-1">
           <template
-            v-for="({ session, index }) in visibleSessions"
+            v-for="({ session, index, height }) in visibleSessions"
             :key="session.id"
           >
           <div v-if="index > 0" class="mx-3 border-t border-border/30" />
           <div
             class="w-full text-left px-3 py-2 rounded-md border border-transparent transition-colors cursor-pointer group relative shrink-0"
             :class="selectedSessionId === session.id ? 'bg-card border-border shadow-paper' : 'hover:bg-muted'"
-            :style="{ height: ITEM_HEIGHT + 'px', boxSizing: 'border-box' }"
+            :style="{ height: height + 'px', boxSizing: 'border-box' }"
             @click="selectSession(session.id)"
             @contextmenu="onContextMenu($event, session)"
           >
