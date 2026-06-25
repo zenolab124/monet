@@ -69,12 +69,12 @@ const rows = computed(() => {
       <div class="mt-2.5 flex flex-col gap-1.25">
         <div v-if="loading" class="text-2xs text-muted-foreground">{{ $t('home.token.counting') }}</div>
         <div v-else-if="!rows.length" class="text-2xs text-muted-foreground">{{ $t('home.token.noUsage') }}</div>
-        <div v-for="m in rows" :key="m.name" class="flex items-center gap-2 text-xs">
-          <span class="w-20 text-muted-foreground font-mono text-2xs truncate" :title="m.name">{{ m.name }}</span>
-          <span class="flex-1 h-1.25 rounded-sm bg-muted overflow-hidden">
-            <span class="block h-full rounded-sm bg-primary" :style="{ width: `${m.pct}%` }" />
+        <div v-for="m in rows" :key="m.name" class="bar-row">
+          <span class="bar-label" :title="m.name">{{ m.name }}</span>
+          <span class="bar-track">
+            <span class="bar-fill bg-primary" :style="{ width: `${m.pct}%` }" />
           </span>
-          <span class="w-12 text-right tabular-nums text-muted-foreground text-2xs">{{ m.amount }}</span>
+          <span class="bar-value">{{ m.amount }}</span>
         </div>
       </div>
     </template>
@@ -105,6 +105,43 @@ const rows = computed(() => {
 .text-2xs {
   font-size: 10px;
   line-height: 1.4;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.bar-label {
+  flex-shrink: 0;
+  max-width: 35%;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--muted);
+  overflow: hidden;
+  min-width: 0;
+}
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+.bar-value {
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  font-size: 10px;
 }
 
 .retry-btn {

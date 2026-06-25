@@ -49,7 +49,7 @@ function timeAgo(ts: number, now: number): string {
       <div v-for="r in rows" :key="r.id" class="flex items-center gap-2 text-xs">
         <span class="flex-1 min-w-0 truncate" :title="r.path">{{ r.name }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground tabular-nums">{{ $t('home.projectActivity.nSessions', { count: r.sessions }) }}</span>
-        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums w-14 text-right">{{ r.recency }}</span>
+        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums text-right">{{ r.recency }}</span>
       </div>
     </div>
   </HomeCard>

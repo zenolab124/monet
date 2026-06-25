@@ -54,7 +54,7 @@ const avgDepth = computed(() => {
   <HomeCard icon="i-carbon-chart-histogram" :title="$t('home.sessionDepth.title')" :badge="$t('home.sessionDepth.badge')">
     <div v-if="loading && !distribution.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
-      <div class="flex items-end gap-3 h-14 mt-1 px-2">
+      <div class="flex items-end gap-3 flex-1 min-h-10 px-2">
         <div v-for="d in distribution" :key="d.label" class="bucket">
           <div class="bucket-bar-wrap">
             <div class="bucket-bar" :style="{ height: `${Math.max(d.pct, 3)}%` }" />
@@ -84,7 +84,8 @@ const avgDepth = computed(() => {
 }
 .bucket-bar-wrap {
   width: 100%;
-  height: 48px;
+  flex: 1;
+  min-height: 24px;
   display: flex;
   align-items: flex-end;
 }

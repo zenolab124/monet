@@ -293,6 +293,13 @@
     }
   },
   "home": {
+    "grid": {
+      "edit": "Edit layout",
+      "done": "Done editing",
+      "reset": "Reset to default layout",
+      "hide": "Hide card",
+      "show": "Show card"
+    },
     "branchActivity": {
       "title": "Branch Activity",
       "badge": "By recent activity",
@@ -578,10 +585,12 @@
     "channelFollow": "Default · {name}",
     "channelOfficial": "Official",
     "channelTitle": "Channel: {name}",
+    "channelLabel": "Channel",
     "manageChannels": "Manage channels…",
     "contextUsage": "Used {used} / Capacity {capacity} ({percent}%)",
     "contextNearFull": "Context nearly full",
     "effortTitle": "Effort level: {name}",
+    "effortLabel": "Effort",
     "modelDefault": "Default",
     "modelAdvisorLocked": "Primary model locked to Sonnet in advisor mode",
     "modelTitle": "Model: {name}",

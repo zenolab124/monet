@@ -22,6 +22,8 @@ mod scheduler;
 mod workshop;
 mod cli_settings;
 mod translate;
+mod widget;
+mod dashboard;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -29,7 +31,13 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin({
+            let mut ws = tauri_plugin_window_state::Builder::new();
+            if cfg!(debug_assertions) {
+                ws = ws.skip_initial_state("main");
+            }
+            ws.build()
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -135,6 +143,9 @@ pub fn run() {
             translate::parse_language_intent,
             translate::list_external_locales,
             translate::delete_external_locale,
+            widget::update_widget,
+            dashboard::list_dashboard_widgets,
+            dashboard::delete_dashboard_widget,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

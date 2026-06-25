@@ -64,7 +64,7 @@ const activeDays = computed(() => {
   <HomeCard icon="i-carbon-fire" :title="$t('home.streak.title')" :badge="$t('home.streak.badge')">
     <div v-if="loading" class="text-2xs text-muted-foreground py-2">{{ $t('home.streak.counting') }}</div>
     <template v-else>
-      <div class="flex gap-6 mt-0.5">
+      <div class="streak-row">
         <div class="streak-stat">
           <div class="streak-num">{{ streaks.current }}</div>
           <div class="streak-label">{{ $t('home.streak.currentStreak') }}</div>
@@ -86,6 +86,12 @@ const activeDays = computed(() => {
 .text-2xs {
   font-size: 10px;
   line-height: 1.4;
+}
+.streak-row {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  height: 100%;
 }
 .streak-stat {
   text-align: center;

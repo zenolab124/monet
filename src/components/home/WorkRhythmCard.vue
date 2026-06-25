@@ -34,7 +34,7 @@ const peakHour = computed(() => {
   <HomeCard icon="i-carbon-time" :title="$t('home.workRhythm.title')" :badge="$t('home.workRhythm.badge')">
     <div v-if="loading && !hours.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
-      <div class="flex items-end gap-px h-12 mt-1">
+      <div class="flex items-end gap-px flex-1 min-h-8">
         <div
           v-for="h in hours"
           :key="h.hour"

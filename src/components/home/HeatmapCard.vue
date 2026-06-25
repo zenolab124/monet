@@ -73,12 +73,12 @@ const rows = computed<Cell[][]>(() => {
       <button class="retry-btn" @click="emit('retry')">{{ $t('common.retry') }}</button>
     </template>
     <template v-else>
-      <div class="flex flex-col gap-0.75 overflow-x-auto">
-        <div v-for="(row, di) in rows" :key="di" class="flex gap-0.75">
+      <div class="hm-grid">
+        <div v-for="(row, di) in rows" :key="di" class="hm-row">
           <span
             v-for="cell in row"
             :key="cell.date"
-            class="hm-cell shrink-0"
+            class="hm-cell"
             :class="[
               cell.future ? 'future' : cell.level ? `l${cell.level}` : '',
               !cell.future && cell.total > 0 ? 'clickable' : '',
@@ -103,11 +103,22 @@ const rows = computed<Cell[][]>(() => {
   line-height: 1.4;
 }
 
+.hm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.hm-row {
+  display: flex;
+  gap: 3px;
+}
 .hm-cell {
-  width: 12px;
-  height: 12px;
+  flex: 1;
+  aspect-ratio: 1;
   border-radius: 2px;
   background: var(--muted);
+  min-width: 0;
 }
 .hm-cell.sm {
   width: 9px;

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/** 首页卡片外壳：头部（图标/标题/badge）+ 内容 slot；wide 跨双列 */
 defineProps<{
   icon: string
   title: string
@@ -9,13 +8,15 @@ defineProps<{
 </script>
 
 <template>
-  <div class="home-card" :class="{ wide }">
-    <div class="flex items-center gap-1.5 mb-2.5">
+  <div class="home-card">
+    <div class="hc-header">
       <span :class="icon" class="w-3.75 h-3.75 text-primary" />
       <span class="text-sm font-semibold">{{ title }}</span>
       <span class="hc-badge">{{ badge }}</span>
     </div>
-    <slot />
+    <div class="hc-body">
+      <slot />
+    </div>
   </div>
 </template>
 
@@ -26,15 +27,26 @@ defineProps<{
   border-radius: var(--radius);
   box-shadow: var(--shadow-paper);
   padding: 14px 16px;
-  transition: box-shadow 0.18s, transform 0.18s;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-/* hover「拈起」 */
-.home-card:hover {
-  box-shadow: var(--shadow-paper-lifted);
-  transform: translateY(-1px);
+
+.hc-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
-.home-card.wide {
-  grid-column: 1 / -1;
+
+.hc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .hc-badge {
@@ -44,11 +56,6 @@ defineProps<{
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--muted-foreground);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .home-card {
-    transition: none !important;
-  }
+  flex-shrink: 0;
 }
 </style>

@@ -54,7 +54,7 @@ function timeAgo(ts: number): string {
         <span class="i-carbon-branch w-3 h-3 text-muted-foreground shrink-0" />
         <span class="flex-1 min-w-0 truncate text-xs font-mono" :title="r.branch">{{ r.branch }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground tabular-nums">{{ $t('home.branchActivity.nSessions', { count: r.count }) }}</span>
-        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums w-14 text-right">{{ r.recency }}</span>
+        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums text-right">{{ r.recency }}</span>
       </div>
     </div>
   </HomeCard>

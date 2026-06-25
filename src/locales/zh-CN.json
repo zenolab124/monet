@@ -293,6 +293,13 @@
     }
   },
   "home": {
+    "grid": {
+      "edit": "编辑布局",
+      "done": "完成编辑",
+      "reset": "恢复默认布局",
+      "hide": "隐藏卡片",
+      "show": "显示卡片"
+    },
     "branchActivity": {
       "title": "分支活跃",
       "badge": "按最近活跃",
@@ -578,10 +585,12 @@
     "channelFollow": "默认 · {name}",
     "channelOfficial": "官方",
     "channelTitle": "渠道:{name}",
+    "channelLabel": "渠道",
     "manageChannels": "管理渠道…",
     "contextUsage": "已用 {used} / 总容量 {capacity} ({percent}%)",
     "contextNearFull": "上下文将满",
     "effortTitle": "努力等级:{name}",
+    "effortLabel": "努力等级",
     "modelDefault": "默认",
     "modelAdvisorLocked": "顾问模式下主模型锁定为 Sonnet",
     "modelTitle": "模型:{name}",

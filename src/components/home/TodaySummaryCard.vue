@@ -55,7 +55,7 @@ const todayModels = computed(() => {
   <HomeCard icon="i-carbon-calendar" :title="$t('home.todaySummary.title')" :badge="$t('home.todaySummary.badge')">
     <div v-if="loading && !props.usage" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
-      <div class="flex flex-col gap-2.5 mt-0.5">
+      <div class="stat-body">
         <div class="stat-row">
           <span class="stat-label">{{ $t('common.sessions') }}</span>
           <span class="stat-value">{{ todaySessions }}</span>
@@ -81,6 +81,13 @@ const todayModels = computed(() => {
   font-size: 10px;
   line-height: 1.4;
 }
+.stat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  height: 100%;
+}
 .stat-row {
   display: flex;
   align-items: center;
@@ -89,7 +96,7 @@ const todayModels = computed(() => {
 .stat-label {
   font-size: 11px;
   color: var(--muted-foreground);
-  width: 40px;
+  min-width: 40px;
   flex-shrink: 0;
 }
 .stat-value {

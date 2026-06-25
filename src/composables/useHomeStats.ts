@@ -18,10 +18,9 @@ const diagError = ref<string | null>(null)
 /** 诊断结果到达的本地时刻（FR-005 底注「上次扫描」） */
 const diagAt = ref<Date | null>(null)
 
-let loadedOnce = false
-
 async function loadUsage() {
-  usageLoading.value = true
+  const hasCached = usage.value !== null
+  if (!hasCached) usageLoading.value = true
   usageError.value = null
   try {
     usage.value = await invoke<UsageStats>('get_usage_stats')
@@ -33,7 +32,8 @@ async function loadUsage() {
 }
 
 async function loadDiag() {
-  diagLoading.value = true
+  const hasCached = diag.value !== null
+  if (!hasCached) diagLoading.value = true
   diagError.value = null
   try {
     diag.value = await invoke<SchemaDiagnosis>('get_schema_diagnosis')
@@ -45,10 +45,9 @@ async function loadDiag() {
   }
 }
 
-/** 首次进入首页时调用；会话期内已加载则直接用缓存（FR-006） */
+/** 进首页时调用；首次显示 loading，后续静默后台刷新 */
 function ensureLoaded() {
-  if (loadedOnce) return
-  loadedOnce = true
+  if (usageLoading.value || diagLoading.value) return
   loadUsage()
   loadDiag()
 }

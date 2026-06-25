@@ -49,7 +49,7 @@ function projectName(path: string): string {
       >
         <span class="flex-1 min-w-0 truncate text-xs">{{ s.title || s.first_user_message || $t('archive.noTitle') }}</span>
         <span class="shrink-0 text-2xs text-muted-foreground font-mono">{{ projectName(s.projectPath) }}</span>
-        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums w-16 text-right">{{ timeAgo(s.last_modified) }}</span>
+        <span class="shrink-0 text-2xs text-muted-foreground tabular-nums text-right">{{ timeAgo(s.last_modified) }}</span>
       </button>
     </div>
   </HomeCard>

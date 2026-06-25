@@ -12,7 +12,8 @@ let watcherSetup = false
 
 /** 加载所有项目 */
 async function loadProjects() {
-  loading.value = true
+  const hasCached = projects.value.length > 0
+  if (!hasCached) loading.value = true
   error.value = null
   try {
     projects.value = await invoke<Project[]>('get_projects')
