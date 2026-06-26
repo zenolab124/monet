@@ -27,7 +27,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state, openSession } = useWorkbench()
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
 
@@ -83,6 +83,23 @@ const title = computed(() => {
   return props.column.sessionId.slice(0, 8)
 })
 
+async function onFork() {
+  const session = projects.value.flatMap(p => p.sessions).find(s => s.id === props.column.sessionId)
+  if (!session?.cwd) return
+  const newSessionId = crypto.randomUUID()
+  try {
+    await invoke('fork_session', {
+      sourceSessionId: props.column.sessionId,
+      newSessionId,
+      cwd: session.cwd,
+    })
+    openSession(newSessionId)
+    notifyTransient(t('workbench.column.forkCreated'))
+  } catch (e) {
+    notifyTransient(t('workbench.column.forkFailed'), String(e))
+  }
+}
+
 function onCollapse() {
   collapseColumn(props.tabId, props.column.sessionId)
 }
@@ -137,8 +154,16 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
       >
         <span class="i-carbon-remote-connection w-3 h-3" />
       </button>
-      <!-- 普通模式:赛马 + 收起 + 关闭 -->
+      <!-- 普通模式:分叉 + 赛马 + 收起 + 关闭 -->
       <template v-if="!isRace">
+        <button
+          class="icon-btn icon-btn-sm"
+          v-tooltip="$t('workbench.column.fork')"
+          @pointerdown.stop
+          @click.stop="onFork"
+        >
+          <span class="i-carbon-branch w-3 h-3" />
+        </button>
         <button
           class="icon-btn icon-btn-sm"
           v-tooltip="$t('workbench.race.startRace')"

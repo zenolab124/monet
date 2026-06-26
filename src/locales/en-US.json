@@ -213,7 +213,10 @@
       "closeExit": "Close (exit workbench)",
       "rcOpened": "Remote Control enabled",
       "rcClosed": "Remote Control disabled",
-      "rcFailed": "Remote Control operation failed"
+      "rcFailed": "Remote Control operation failed",
+      "fork": "Fork session",
+      "forkCreated": "Session forked",
+      "forkFailed": "Fork failed"
     },
     "race": {
       "startRace": "Race",

@@ -213,7 +213,10 @@
       "closeExit": "关闭（退出工作台）",
       "rcOpened": "Remote Control 已开启",
       "rcClosed": "Remote Control 已关闭",
-      "rcFailed": "Remote Control 操作失败"
+      "rcFailed": "Remote Control 操作失败",
+      "fork": "分叉会话",
+      "forkCreated": "会话已分叉",
+      "forkFailed": "分叉失败"
     },
     "race": {
       "startRace": "赛马",
