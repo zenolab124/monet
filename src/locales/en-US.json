@@ -484,6 +484,7 @@
     "agentSummaryDesc": "Auto-generate 2-3 sentence session summaries for quick review",
     "agentTranslate": "AI Translate",
     "agentTranslateDesc": "Translate the UI into user-defined languages",
+    "agentAutoChannel": "Auto (chain order)",
     "labDesc": "Experimental features, may be unstable.",
     "htmlVisual": "HTML Visual Enhancement",
     "htmlVisualDesc": "Guide AI to embed HTML in Markdown for side-by-side comparisons, info cards, collapsible sections, etc. Injects prompt via --append-system-prompt, only affects CC Space workbench sessions.",
@@ -503,7 +504,12 @@
       "nameError": "Name is required",
       "baseUrlHint": "(no trailing /)",
       "baseUrlError": "Base URL is required",
-      "tokenError": "Auth Token is required for new channels"
+      "tokenError": "Auth Token is required for new channels",
+      "protocolLabel": "Protocol",
+      "scopeLabel": "Scope",
+      "scopeFullHint": "Session + Agent",
+      "scopeAgentOnlyHint": "Agent only",
+      "tokenOptional": "(optional)"
     },
     "mcp": {
       "title": "MCP Tool Service",

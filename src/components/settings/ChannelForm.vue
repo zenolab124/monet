@@ -22,6 +22,8 @@ const name = ref(props.channel?.name ?? '')
 const baseUrl = ref(props.channel?.baseUrl ?? '')
 const authToken = ref('')
 const note = ref(props.channel?.note ?? '')
+const protocol = ref(props.channel?.protocol ?? 'anthropic')
+const scope = ref(props.channel?.scope ?? 'full')
 const tokenVisible = ref(false)
 
 const saving = ref(false)
@@ -51,7 +53,7 @@ async function onSave() {
     formError.value = t('settings.channelForm.baseUrlError')
     return
   }
-  if (!authToken.value.trim()) {
+  if (protocol.value !== 'openai' && !authToken.value.trim()) {
     formError.value = t('settings.channelForm.tokenError')
     return
   }
@@ -61,8 +63,10 @@ async function onSave() {
       id: trimmedId,
       name: name.value.trim(),
       baseUrl: baseUrl.value.trim().replace(/\/+$/, ''),
-      authToken: authToken.value.trim(),
+      authToken: authToken.value.trim() || undefined,
       note: note.value.trim() || undefined,
+      protocol: protocol.value,
+      scope: scope.value,
     })
     emit('saved')
   } catch (e) {
@@ -95,6 +99,14 @@ async function onSave() {
     </label>
 
     <label class="form-field">
+      <span class="form-label">{{ $t('settings.channelForm.protocolLabel') }}</span>
+      <select v-model="protocol" class="form-input">
+        <option value="anthropic">Anthropic Messages API</option>
+        <option value="openai">OpenAI Chat Completions</option>
+      </select>
+    </label>
+
+    <label class="form-field">
       <span class="form-label">Base URL <span class="text-muted-foreground font-normal">{{ $t('settings.channelForm.baseUrlHint') }}</span></span>
       <input
         v-model="baseUrl"
@@ -106,7 +118,7 @@ async function onSave() {
     </label>
 
     <div class="form-field">
-      <span class="form-label">Auth Token</span>
+      <span class="form-label">Auth Token <span v-if="protocol === 'openai'" class="text-muted-foreground/60 font-normal italic">{{ $t('settings.channelForm.tokenOptional') }}</span></span>
       <div class="relative">
         <input
           v-model="authToken"
@@ -124,6 +136,14 @@ async function onSave() {
         </button>
       </div>
     </div>
+
+    <label class="form-field">
+      <span class="form-label">{{ $t('settings.channelForm.scopeLabel') }}</span>
+      <select v-model="scope" class="form-input">
+        <option value="full">{{ $t('settings.channelForm.scopeFullHint') }}</option>
+        <option value="agent-only">{{ $t('settings.channelForm.scopeAgentOnlyHint') }}</option>
+      </select>
+    </label>
 
     <label class="form-field">
       <span class="form-label">{{ $t('settings.channelForm.noteLabel') }}</span>

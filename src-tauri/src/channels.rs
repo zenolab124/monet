@@ -21,6 +21,10 @@ use crate::config;
 /// 保留 id:语义为「官方/零注入」。参与链排序,不对应 channels/ 下的文件
 pub const OFFICIAL_ID: &str = "official";
 
+/// Apple Foundation Models 虚拟渠道 id
+pub const APPLE_FM_ID: &str = "apple-fm";
+const APPLE_FM_PORT: u16 = 8179;
+
 /// 注入渠道时无条件压制的认证/路由残留键
 pub const DEFENSE_ENV_KEYS: [&str; 4] = [
     "ANTHROPIC_API_KEY",
@@ -73,6 +77,8 @@ pub struct ChannelMeta {
     pub name: Option<String>,
     pub note: Option<String>,
     pub enabled: Option<bool>,
+    pub protocol: Option<String>,
+    pub scope: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -81,6 +87,21 @@ impl ChannelMeta {
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
     }
+    pub fn protocol(&self) -> &str {
+        self.protocol.as_deref().unwrap_or("anthropic")
+    }
+    pub fn scope(&self) -> &str {
+        self.scope.as_deref().unwrap_or("full")
+    }
+    pub fn is_agent_only(&self) -> bool {
+        self.scope() == "agent-only"
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentFeaturePrefs {
+    pub preferred_channel: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -92,6 +113,7 @@ pub struct AppSettings {
     pub agent_chain: Vec<String>,
     pub channels: BTreeMap<String, ChannelMeta>,
     pub agent_toggles: BTreeMap<String, bool>,
+    pub agent_preferences: BTreeMap<String, AgentFeaturePrefs>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -139,7 +161,8 @@ pub(crate) fn load_app_settings() -> AppSettings {
     let file_ids = scan_channel_ids();
     let all_ids = std::iter::once(OFFICIAL_ID.to_string()).chain(file_ids.into_iter());
     for id in all_ids {
-        if !settings.session_chain.contains(&id) {
+        let is_agent_only = settings.channels.get(&id).map_or(false, |m| m.is_agent_only());
+        if !is_agent_only && !settings.session_chain.contains(&id) {
             settings.session_chain.push(id.clone());
         }
         if !settings.agent_chain.contains(&id) {
@@ -224,6 +247,7 @@ pub struct AgentChannelCredentials {
     pub is_official: bool,
     pub base_url: Option<String>,
     pub token: Option<String>,
+    pub protocol: String,
 }
 
 pub fn resolve_agent_chain() -> Vec<AgentChannelCredentials> {
@@ -236,30 +260,87 @@ pub fn resolve_agent_chain() -> Vec<AgentChannelCredentials> {
             result.push(AgentChannelCredentials {
                 id: id.clone(), is_official: true,
                 base_url: None, token: None,
+                protocol: "anthropic".to_string(),
             });
             continue;
         }
+        if id == APPLE_FM_ID {
+            result.push(AgentChannelCredentials {
+                id: id.clone(), is_official: false,
+                base_url: Some(format!("http://localhost:{}", APPLE_FM_PORT)),
+                token: Some(String::new()),
+                protocol: "openai".to_string(),
+            });
+            continue;
+        }
+        let protocol = meta.map_or("anthropic", |m| m.protocol()).to_string();
         if let Some((base_url, token)) = read_channel_credentials(id) {
             result.push(AgentChannelCredentials {
                 id: id.clone(), is_official: false,
                 base_url: Some(base_url), token: Some(token),
+                protocol,
             });
         }
     }
     result
 }
 
+pub fn resolve_preferred_channel(channel_id: &str) -> Option<AgentChannelCredentials> {
+    let settings = load_app_settings();
+    if channel_id == OFFICIAL_ID {
+        return Some(AgentChannelCredentials {
+            id: OFFICIAL_ID.to_string(), is_official: true,
+            base_url: None, token: None,
+            protocol: "anthropic".to_string(),
+        });
+    }
+    if channel_id == APPLE_FM_ID {
+        let meta = settings.channels.get(APPLE_FM_ID);
+        if !meta.map_or(true, |m| m.is_enabled()) { return None; }
+        return Some(AgentChannelCredentials {
+            id: APPLE_FM_ID.to_string(), is_official: false,
+            base_url: Some(format!("http://localhost:{}", APPLE_FM_PORT)),
+            token: Some(String::new()),
+            protocol: "openai".to_string(),
+        });
+    }
+    let meta = settings.channels.get(channel_id);
+    if !meta.map_or(true, |m| m.is_enabled()) { return None; }
+    let protocol = meta.map_or("anthropic", |m| m.protocol()).to_string();
+    let (base_url, token) = read_channel_credentials(channel_id)?;
+    Some(AgentChannelCredentials {
+        id: channel_id.to_string(), is_official: false,
+        base_url: Some(base_url), token: Some(token),
+        protocol,
+    })
+}
+
+pub fn preferred_for(agent_key: &str) -> Option<String> {
+    load_app_settings()
+        .agent_preferences
+        .get(agent_key)
+        .and_then(|p| p.preferred_channel.clone())
+}
+
 pub(crate) fn read_channel_credentials(id: &str) -> Option<(String, String)> {
     let text = fs::read_to_string(channel_file_path(id)).ok()?;
     let root: Value = serde_json::from_str(&text).ok()?;
     let env = root.get("env")?.as_object()?;
-    let base_url = env.get("ANTHROPIC_BASE_URL")?.as_str()?.to_string();
-    let token = env
-        .get("ANTHROPIC_AUTH_TOKEN")
-        .or_else(|| env.get("ANTHROPIC_API_KEY"))
-        .and_then(|v| v.as_str())?
-        .to_string();
-    Some((base_url, token))
+    // Anthropic keys
+    if let Some(base_url) = env.get("ANTHROPIC_BASE_URL").and_then(|v| v.as_str()) {
+        let token = env
+            .get("ANTHROPIC_AUTH_TOKEN")
+            .or_else(|| env.get("ANTHROPIC_API_KEY"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return Some((base_url.to_string(), token.to_string()));
+    }
+    // OpenAI keys
+    if let Some(base_url) = env.get("OPENAI_BASE_URL").and_then(|v| v.as_str()) {
+        let token = env.get("OPENAI_API_KEY").and_then(|v| v.as_str()).unwrap_or("");
+        return Some((base_url.to_string(), token.to_string()));
+    }
+    None
 }
 
 // ---- Fallback 执行器 ----
@@ -315,6 +396,8 @@ pub struct ChannelView {
     pub extra_env_keys: Vec<String>,
     pub valid: bool,
     pub enabled: bool,
+    pub protocol: String,
+    pub scope: String,
 }
 
 #[derive(Serialize)]
@@ -336,6 +419,22 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             extra_env_keys: vec![],
             valid: true,
             enabled: meta.is_enabled(),
+            protocol: "anthropic".to_string(),
+            scope: "full".to_string(),
+        };
+    }
+    if id == APPLE_FM_ID {
+        return ChannelView {
+            id: APPLE_FM_ID.to_string(),
+            name: meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "Apple FM".to_string()),
+            note: meta.note.clone().filter(|s| !s.is_empty()),
+            base_url: Some(format!("http://localhost:{}", APPLE_FM_PORT)),
+            auth_token_masked: None,
+            extra_env_keys: vec![],
+            valid: true,
+            enabled: meta.is_enabled(),
+            protocol: "openai".to_string(),
+            scope: "agent-only".to_string(),
         };
     }
     let path = channel_file_path(id);
@@ -347,18 +446,29 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         .as_ref()
         .and_then(|v| v.get("env"))
         .and_then(|v| v.as_object());
+    let is_openai = meta.protocol() == "openai";
+    let (url_key, token_key) = if is_openai {
+        ("OPENAI_BASE_URL", "OPENAI_API_KEY")
+    } else {
+        ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
+    };
     let base_url = env
-        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|e| e.get(url_key))
         .and_then(|v| v.as_str())
         .map(String::from);
     let token = env
-        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+        .and_then(|e| e.get(token_key))
         .and_then(|v| v.as_str())
         .filter(|t| !t.is_empty());
+    let hidden_keys: &[&str] = if is_openai {
+        &["OPENAI_BASE_URL", "OPENAI_API_KEY"]
+    } else {
+        &["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
+    };
     let extra_env_keys = env
         .map(|e| {
             e.keys()
-                .filter(|k| k.as_str() != "ANTHROPIC_BASE_URL" && k.as_str() != "ANTHROPIC_AUTH_TOKEN")
+                .filter(|k| !hidden_keys.contains(&k.as_str()))
                 .cloned()
                 .collect()
         })
@@ -372,6 +482,8 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         valid,
         enabled: meta.is_enabled(),
         id: id.to_string(),
+        protocol: meta.protocol().to_string(),
+        scope: meta.scope().to_string(),
     }
 }
 
@@ -388,7 +500,7 @@ pub fn list_channels() -> ChannelListResult {
     for id in settings.session_chain.iter().chain(settings.agent_chain.iter()) {
         if !seen.insert(id.clone()) { continue; }
         let meta = settings.channels.get(id).cloned().unwrap_or_default();
-        if id == OFFICIAL_ID || file_ids.contains(id) {
+        if id == OFFICIAL_ID || id == APPLE_FM_ID || file_ids.contains(id) {
             channels.push(build_channel_view(id, &meta));
         }
     }
@@ -414,12 +526,15 @@ pub fn save_channel(
     base_url: String,
     auth_token: Option<String>,
     note: Option<String>,
+    protocol: Option<String>,
+    scope: Option<String>,
 ) -> Result<(), String> {
     validate_id(&id)?;
     let base_url = base_url.trim().to_string();
     if base_url.is_empty() {
         return Err("Base URL 不能为空".to_string());
     }
+    let is_openai = protocol.as_deref() == Some("openai");
     fs::create_dir_all(channels_dir()).map_err(|e| e.to_string())?;
     let path = channel_file_path(&id);
 
@@ -434,17 +549,24 @@ pub fn save_channel(
         .ok_or("渠道文件顶层不是 JSON 对象,请手动修复后重试")?;
     let env = obj.entry("env").or_insert_with(|| json!({}));
     let env_obj = env.as_object_mut().ok_or("渠道文件 env 字段不是对象")?;
-    env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(base_url));
     let token = auth_token.as_deref().map(str::trim).filter(|t| !t.is_empty());
-    if let Some(t) = token {
-        env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), json!(t));
-    } else if env_obj
-        .get("ANTHROPIC_AUTH_TOKEN")
-        .and_then(|v| v.as_str())
-        .filter(|t| !t.is_empty())
-        .is_none()
-    {
-        return Err("新建渠道必须提供 Auth Token".to_string());
+    if is_openai {
+        env_obj.insert("OPENAI_BASE_URL".to_string(), json!(base_url));
+        if let Some(t) = token {
+            env_obj.insert("OPENAI_API_KEY".to_string(), json!(t));
+        }
+    } else {
+        env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(base_url));
+        if let Some(t) = token {
+            env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), json!(t));
+        } else if env_obj
+            .get("ANTHROPIC_AUTH_TOKEN")
+            .and_then(|v| v.as_str())
+            .filter(|t| !t.is_empty())
+            .is_none()
+        {
+            return Err("新建渠道必须提供 Auth Token".to_string());
+        }
     }
     write_json_0600(&path, &root)?;
 
@@ -452,9 +574,13 @@ pub fn save_channel(
     let meta = settings.channels.entry(id.clone()).or_default();
     meta.name = Some(name.trim().to_string()).filter(|s| !s.is_empty());
     meta.note = note.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    meta.protocol = protocol;
+    meta.scope = scope;
 
-    // 新渠道自动追加到两条链末尾
-    if !settings.session_chain.contains(&id) {
+    let is_agent_only = meta.is_agent_only();
+    if is_agent_only {
+        settings.session_chain.retain(|x| x != &id);
+    } else if !settings.session_chain.contains(&id) {
         settings.session_chain.push(id.clone());
     }
     if !settings.agent_chain.contains(&id) {
@@ -516,17 +642,33 @@ pub fn is_agent_enabled(key: &str) -> bool {
 }
 
 #[tauri::command]
+pub fn get_agent_preferences() -> BTreeMap<String, AgentFeaturePrefs> {
+    load_app_settings().agent_preferences
+}
+
+#[tauri::command]
+pub fn set_agent_preferred_channel(key: String, channel_id: Option<String>) -> Result<(), String> {
+    let mut settings = load_app_settings();
+    let prefs = settings.agent_preferences.entry(key).or_default();
+    prefs.preferred_channel = channel_id.filter(|s| !s.is_empty());
+    save_app_settings(&settings)
+}
+
+#[tauri::command]
 pub fn get_channel_token(id: String) -> Result<Option<String>, String> {
-    if id == OFFICIAL_ID {
+    if id == OFFICIAL_ID || id == APPLE_FM_ID {
         return Ok(None);
     }
     validate_id(&id)?;
     let path = channel_file_path(&id);
     let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let root: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    Ok(root
-        .get("env")
-        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+    let env = root.get("env").and_then(|e| e.as_object());
+    Ok(env
+        .and_then(|e| {
+            e.get("ANTHROPIC_AUTH_TOKEN")
+                .or_else(|| e.get("OPENAI_API_KEY"))
+        })
         .and_then(|v| v.as_str())
         .filter(|t| !t.is_empty())
         .map(String::from))
@@ -685,26 +827,42 @@ pub async fn probe_channel(id: String) -> Result<ProbeResult, String> {
         });
     }
 
-    let (base_url, token) = read_channel_credentials(&id)
-        .ok_or_else(|| format!("渠道 {} 凭据不可读", id))?;
+    let settings = load_app_settings();
+    let protocol = if id == APPLE_FM_ID {
+        "openai".to_string()
+    } else {
+        settings.channels.get(&id).map_or("anthropic", |m| m.protocol()).to_string()
+    };
+
+    let (base_url, token) = if id == APPLE_FM_ID {
+        (format!("http://localhost:{}", APPLE_FM_PORT), String::new())
+    } else {
+        read_channel_credentials(&id)
+            .ok_or_else(|| format!("渠道 {} 凭据不可读", id))?
+    };
 
     tauri::async_runtime::spawn_blocking(move || {
-        probe_channel_blocking(&base_url, &token)
+        probe_channel_blocking(&base_url, &token, &protocol)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-fn probe_channel_blocking(base_url: &str, token: &str) -> Result<ProbeResult, String> {
+fn probe_channel_blocking(base_url: &str, token: &str, protocol: &str) -> Result<ProbeResult, String> {
     let client = probe_client()?;
     let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
     let start = std::time::Instant::now();
 
-    let resp = client
-        .get(&url)
-        .header("x-api-key", token)
-        .header("anthropic-version", "2023-06-01")
-        .send();
+    let mut req = client.get(&url);
+    if protocol == "openai" {
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+    } else {
+        req = req.header("x-api-key", token);
+        req = req.header("anthropic-version", "2023-06-01");
+    }
+    let resp = req.send();
 
     match resp {
         Ok(r) => {
@@ -749,6 +907,97 @@ fn probe_channel_blocking(base_url: &str, token: &str) -> Result<ProbeResult, St
                 latency_ms: latency,
             })
         }
+    }
+}
+
+// ---- Apple FM 自动检测 & 进程管理 ----
+
+use std::sync::Mutex;
+use std::process::{Child, Command, Stdio};
+
+static FM_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+
+fn detect_apple_fm() -> bool {
+    #[cfg(not(target_os = "macos"))]
+    return false;
+
+    #[cfg(target_os = "macos")]
+    Command::new("which")
+        .arg("fm")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub fn register_apple_fm_if_available() {
+    if !detect_apple_fm() { return; }
+
+    let mut settings = load_app_settings();
+    if settings.channels.contains_key(APPLE_FM_ID) { return; }
+
+    let meta = ChannelMeta {
+        name: Some("Apple FM".to_string()),
+        note: Some("Apple Foundation Models (local)".to_string()),
+        enabled: Some(true),
+        protocol: Some("openai".to_string()),
+        scope: Some("agent-only".to_string()),
+        ..Default::default()
+    };
+    settings.channels.insert(APPLE_FM_ID.to_string(), meta);
+    if !settings.agent_chain.contains(&APPLE_FM_ID.to_string()) {
+        settings.agent_chain.push(APPLE_FM_ID.to_string());
+    }
+    let _ = save_app_settings(&settings);
+    eprintln!("[apple-fm] 检测到 fm 命令，已注册 Apple FM 渠道");
+}
+
+fn probe_port_open(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::time::Duration::from_millis(500),
+    ).is_ok()
+}
+
+pub fn ensure_fm_serve_running() -> Result<(), String> {
+    let mut guard = FM_PROCESS.lock().unwrap_or_else(|e| e.into_inner());
+
+    if let Some(ref mut child) = *guard {
+        if child.try_wait().ok().flatten().is_none() && probe_port_open(APPLE_FM_PORT) {
+            return Ok(());
+        }
+    }
+
+    if probe_port_open(APPLE_FM_PORT) {
+        return Ok(());
+    }
+
+    eprintln!("[apple-fm] 启动 fm serve --port {}", APPLE_FM_PORT);
+    let child = Command::new("fm")
+        .args(["serve", "--port", &APPLE_FM_PORT.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("fm serve 启动失败: {}", e))?;
+
+    *guard = Some(child);
+    // 等待服务就绪
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if probe_port_open(APPLE_FM_PORT) {
+            eprintln!("[apple-fm] fm serve 已就绪");
+            return Ok(());
+        }
+    }
+    Err("fm serve 启动超时".to_string())
+}
+
+pub fn shutdown_fm_serve() {
+    let mut guard = FM_PROCESS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        eprintln!("[apple-fm] fm serve 已关闭");
     }
 }
 

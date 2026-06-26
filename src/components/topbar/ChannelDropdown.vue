@@ -47,7 +47,7 @@ const options = computed<ChannelOption[]>(() => {
       result.push({ value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') })
     } else {
       const ch = channels.value.find(c => c.id === id)
-      if (ch?.enabled) result.push({ value: id, label: ch.name })
+      if (ch?.enabled && ch.scope !== 'agent-only') result.push({ value: id, label: ch.name })
     }
   }
   return result

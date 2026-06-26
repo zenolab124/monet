@@ -11,7 +11,11 @@ export interface ChannelInfo {
   extraEnvKeys: string[]
   valid: boolean
   enabled: boolean
+  protocol: string
+  scope: string
 }
+
+export const APPLE_FM_CHANNEL_ID = 'apple-fm'
 
 interface ChannelListResult {
   channels: ChannelInfo[]
@@ -58,6 +62,8 @@ export interface SaveChannelPayload {
   baseUrl: string
   authToken?: string
   note?: string
+  protocol?: string
+  scope?: string
 }
 
 async function saveChannel(payload: SaveChannelPayload): Promise<void> {
@@ -67,8 +73,32 @@ async function saveChannel(payload: SaveChannelPayload): Promise<void> {
     baseUrl: payload.baseUrl,
     authToken: payload.authToken ?? null,
     note: payload.note ?? null,
+    protocol: payload.protocol ?? null,
+    scope: payload.scope ?? null,
   })
   await refreshChannels()
+}
+
+export interface AgentFeaturePrefs {
+  preferredChannel: string | null
+}
+
+const agentPreferences = ref<Record<string, AgentFeaturePrefs>>({})
+
+async function loadAgentPreferences(): Promise<void> {
+  try {
+    agentPreferences.value = await invoke<Record<string, AgentFeaturePrefs>>('get_agent_preferences')
+  } catch {
+    // ignore
+  }
+}
+
+async function setAgentPreferredChannel(key: string, channelId: string | null): Promise<void> {
+  await invoke('set_agent_preferred_channel', { key, channelId })
+  agentPreferences.value = {
+    ...agentPreferences.value,
+    [key]: { preferredChannel: channelId },
+  }
 }
 
 async function deleteChannel(id: string): Promise<void> {
@@ -146,6 +176,7 @@ export function useChannels() {
     agentChain,
     probeResults,
     probing,
+    agentPreferences,
     refreshChannels,
     saveChannel,
     deleteChannel,
@@ -158,5 +189,7 @@ export function useChannels() {
     revealedTokens,
     revealToken,
     hideToken,
+    loadAgentPreferences,
+    setAgentPreferredChannel,
   }
 }

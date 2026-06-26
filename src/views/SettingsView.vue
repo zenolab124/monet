@@ -27,9 +27,9 @@ import { useTheme } from '@/composables/useTheme'
 const { t } = useI18n()
 const {
   channels, sessionChain, agentChain, probeResults, probing,
-  revealedTokens, revealToken, hideToken,
+  revealedTokens, revealToken, hideToken, agentPreferences,
   deleteChannel, setChannelEnabled, setSessionChain, setAgentChain, revealChannelsDir,
-  probeChannel, probeAllChannels,
+  probeChannel, probeAllChannels, loadAgentPreferences, setAgentPreferredChannel,
 } = useChannels()
 const { activeSection } = useUiState()
 const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
@@ -131,7 +131,7 @@ const advisorModel = ref('claude-fable-5')
 const hideCreditsModels = ref(false)
 const autoDetectModels = ref(false)
 
-onMounted(() => { refreshChannels(); loadAgentToggles(); loadWakePolicy(); loadWidgetConfig() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -161,13 +161,18 @@ function channelById(id: string): ChannelInfo {
     id, name: id === OFFICIAL_CHANNEL_ID ? t('channel.official') : id,
     enabled: true, valid: true, note: null, baseUrl: null,
     authTokenMasked: null, extraEnvKeys: [],
+    protocol: 'anthropic', scope: 'full',
   } as ChannelInfo
 }
 
 const sessionPrefixed = ref<string[]>([])
 const agentPrefixed = ref<string[]>([])
 
-watch(sessionChain, (ids) => { sessionPrefixed.value = ids.map(id => `session:${id}`) }, { immediate: true })
+watch(sessionChain, (ids) => {
+  sessionPrefixed.value = ids
+    .filter(id => channelById(id).scope !== 'agent-only')
+    .map(id => `session:${id}`)
+}, { immediate: true })
 watch(agentChain, (ids) => { agentPrefixed.value = ids.map(id => `agent:${id}`) }, { immediate: true })
 
 function stripPrefix(prefixedId: string): string {
@@ -652,6 +657,17 @@ function onSaved() {
               <div class="flex-1 min-w-0">
                 <div class="text-xs font-medium">{{ $t(a.label) }}</div>
                 <div class="text-[11px] text-muted-foreground mt-0.5">{{ $t(a.desc) }}</div>
+                <select
+                  v-if="isAgentEnabled(a.key)"
+                  class="form-input text-[11px] mt-1.5 w-auto max-w-48 h-6 py-0"
+                  :value="agentPreferences[a.key]?.preferredChannel ?? ''"
+                  @change="setAgentPreferredChannel(a.key, ($event.target as HTMLSelectElement).value || null)"
+                >
+                  <option value="">{{ $t('settings.agentAutoChannel') }}</option>
+                  <option v-for="ch in channels.filter(c => c.enabled && c.id !== OFFICIAL_CHANNEL_ID)" :key="ch.id" :value="ch.id">
+                    {{ ch.name }}
+                  </option>
+                </select>
               </div>
               <button
                 :class="['form-toggle', { on: isAgentEnabled(a.key) }]"

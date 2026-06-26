@@ -62,6 +62,8 @@ pub fn run() {
             channels::cleanup_runtime_dir();
             // AgentService 常驻进程
             agent::init();
+            // Apple FM 自动检测
+            channels::register_apple_fm_if_available();
             // 系统级定时任务调度器同步
             routines::startup_sync();
             // 后台刷新 CLI settings schema
@@ -82,6 +84,7 @@ pub fn run() {
                         tauri::WindowEvent::Destroyed => {
                             streaming::close_all_sessions();
                             agent::shutdown();
+                            channels::shutdown_fm_serve();
                         }
                         _ => {}
                     }
@@ -123,6 +126,8 @@ pub fn run() {
             channels::get_channel_token,
             channels::get_agent_toggles,
             channels::set_agent_toggle,
+            channels::get_agent_preferences,
+            channels::set_agent_preferred_channel,
             channels::reveal_channels_dir,
             channels::probe_channel,
             commands::open_in_default_app,

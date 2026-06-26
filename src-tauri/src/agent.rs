@@ -154,22 +154,44 @@ pub(crate) fn request_blocking_pub(prompt: &str) -> Result<String, String> {
     request_with_fallback(prompt, "claude-haiku-4-5-20251001", 2048)
 }
 
+fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, model: &str, max_tokens: u32) -> Result<String, String> {
+    if cred.is_official {
+        request_via_cli(prompt)
+    } else {
+        if cred.id == crate::channels::APPLE_FM_ID {
+            crate::channels::ensure_fm_serve_running()?;
+        }
+        crate::translate::http_call_by_protocol(
+            cred.base_url.as_deref().unwrap(),
+            cred.token.as_deref().unwrap_or(""),
+            prompt, model, max_tokens,
+            &cred.protocol,
+        )
+    }
+}
+
 fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<String, String> {
     let chain = crate::channels::resolve_agent_chain();
     if chain.is_empty() {
         return request_via_cli(prompt);
     }
     crate::channels::try_agent_chain(&chain, |cred| {
-        if cred.is_official {
-            request_via_cli(prompt)
-        } else {
-            crate::translate::http_call_messages(
-                cred.base_url.as_deref().unwrap(),
-                cred.token.as_deref().unwrap(),
-                prompt, model, max_tokens,
-            )
-        }
+        call_channel(cred, prompt, model, max_tokens)
     })
+}
+
+fn request_for_agent(prompt: &str, agent_key: &str) -> Result<String, String> {
+    if let Some(pref_id) = crate::channels::preferred_for(agent_key) {
+        if let Some(cred) = crate::channels::resolve_preferred_channel(&pref_id) {
+            match call_channel(&cred, prompt, "claude-haiku-4-5-20251001", 2048) {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    eprintln!("[agent] preferred channel {} failed for {}, fallback: {}", pref_id, agent_key, e);
+                }
+            }
+        }
+    }
+    request_blocking(prompt)
 }
 
 fn request_via_cli(prompt: &str) -> Result<String, String> {
@@ -357,7 +379,7 @@ pub fn permission_hint(tool_name: &str, input_json: &str) -> Result<String, Stri
         {lang}\n\n\
         <data>\n工具：{tool_name}\n参数：\n{truncated}\n</data>"
     );
-    request_blocking(&prompt)
+    request_for_agent(&prompt, "permission_hint")
 }
 
 /// 生成或修订会话标题
@@ -380,7 +402,7 @@ pub fn generate_title(snippet: &str, current_title: Option<&str>) -> Result<Stri
             <data>\n{snippet}\n</data>"
         ),
     };
-    request_blocking(&prompt)
+    request_for_agent(&prompt, "title")
 }
 
 /// 解读 settings 字段——不是翻译，是专家解释
@@ -398,7 +420,7 @@ pub fn translate_settings(fields_json: &str) -> Result<String, String> {
         输出纯 JSON 数组，不要 markdown 代码块、不要其他文字。\n\n\
         <data>\n{fields_json}\n</data>"
     );
-    request_blocking(&prompt)
+    request_for_agent(&prompt, "settings_explain")
 }
 
 /// 生成会话标签
@@ -428,7 +450,7 @@ pub fn generate_tags(snippet: &str, current_tags: Option<&[String]>) -> Result<S
             snippet
         ),
     };
-    request_blocking(&prompt)
+    request_for_agent(&prompt, "tags")
 }
 
 /// 生成会话摘要
@@ -456,7 +478,7 @@ pub fn generate_summary(snippet: &str, current_summary: Option<&str>) -> Result<
             <data>\n{snippet}\n</data>"
         ),
     };
-    request_blocking(&prompt)
+    request_for_agent(&prompt, "summary")
 }
 
 /// 自然语言转 cron 表达式
@@ -465,7 +487,7 @@ pub fn parse_cron(text: &str) -> Result<String, String> {
         "【角色：cron 表达式转换器】将自然语言时间描述转换为标准 5 字段 cron 表达式（分 时 日 月 周）。只输出 cron 表达式本身，不要任何解释。如果无法识别，输出 INVALID。\n\n\
         <data>\n{text}\n</data>"
     );
-    let result = request_blocking(&prompt)?;
+    let result = request_for_agent(&prompt, "cron_parse")?;
     if result == "INVALID" {
         return Err("无法识别时间描述".to_string());
     }

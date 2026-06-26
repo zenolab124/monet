@@ -79,16 +79,68 @@ pub(crate) fn http_call_messages(
         .ok_or_else(|| "API 响应格式异常".to_string())
 }
 
-fn translate_via_http(
+pub(crate) fn http_call_openai(
     base_url: &str,
     token: &str,
-    source_json: &str,
-    target_lang: &str,
-    target_native: &str,
+    prompt: &str,
+    model: &str,
+    max_tokens: u32,
 ) -> Result<String, String> {
-    let prompt = build_translate_prompt(source_json, target_lang, target_native);
-    http_call_messages(base_url, token, &prompt, "claude-sonnet-4-6-20250514", 16000)
+    let client = reqwest::blocking::Client::new();
+    let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+    let body = json!({
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let mut req = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .timeout(std::time::Duration::from_secs(120));
+
+    if !token.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+
+    let resp = req
+        .json(&body)
+        .send()
+        .map_err(|e| format!("API 请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body_text = resp.text().unwrap_or_default();
+        return Err(format!("API {} — {}", status, body_text));
+    }
+
+    let resp_json: Value = resp.json().map_err(|e| format!("响应解析失败: {}", e))?;
+    resp_json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|msg| msg.get("content"))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "API 响应格式异常".to_string())
 }
+
+pub(crate) fn http_call_by_protocol(
+    base_url: &str,
+    token: &str,
+    prompt: &str,
+    model: &str,
+    max_tokens: u32,
+    protocol: &str,
+) -> Result<String, String> {
+    match protocol {
+        "openai" => http_call_openai(base_url, token, prompt, model, max_tokens),
+        _ => http_call_messages(base_url, token, prompt, model, max_tokens),
+    }
+}
+
+
 
 fn translate_via_cli(
     source_json: &str,
@@ -140,10 +192,12 @@ fn do_translate(
     if cred.is_official {
         translate_via_cli(source_json, target_lang, target_native)
     } else {
-        translate_via_http(
+        let prompt = build_translate_prompt(source_json, target_lang, target_native);
+        http_call_by_protocol(
             cred.base_url.as_deref().unwrap(),
-            cred.token.as_deref().unwrap(),
-            source_json, target_lang, target_native,
+            cred.token.as_deref().unwrap_or(""),
+            &prompt, "claude-sonnet-4-6-20250514", 16000,
+            &cred.protocol,
         )
     }
 }
