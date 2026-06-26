@@ -16,6 +16,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use crate::cache::{self, CachedContrib, CachedUsage};
 use crate::models::TokenUsage;
 use crate::probe;
 
@@ -98,7 +99,6 @@ fn scan_file(path: &Path) -> Buckets {
 
     for line in reader.lines() {
         let Ok(line) = line else { break };
-        // 快速字符串预检，非目标行不进 JSON 解析
         if !line.contains("\"assistant\"") || !line.contains("\"usage\"") {
             continue;
         }
@@ -111,7 +111,6 @@ fn scan_file(path: &Path) -> Buckets {
             continue;
         }
         let Some(usage) = msg.usage else { continue };
-        // timestamp 缺失或非法的记录不进任何桶（PRD FR-001 规则 4）
         let Some(date) = ext
             .timestamp
             .as_deref()
@@ -134,6 +133,78 @@ fn scan_file(path: &Path) -> Buckets {
         }
     }
     out
+}
+
+fn scan_file_cached(path: &Path) -> Buckets {
+    if let Some(cached) = cache::get_usage(path) {
+        return cached_to_buckets(cached);
+    }
+    let buckets = scan_file(path);
+    cache::set_usage(path, buckets_to_cached(&buckets));
+    buckets
+}
+
+fn cached_to_buckets(cached: CachedUsage) -> Buckets {
+    let by_id = cached
+        .by_id
+        .into_iter()
+        .filter_map(|(id, c)| {
+            NaiveDate::parse_from_str(&c.date, "%Y-%m-%d")
+                .ok()
+                .map(|date| {
+                    (
+                        id,
+                        Contribution {
+                            date,
+                            model: c.model,
+                            tokens: c.tokens,
+                        },
+                    )
+                })
+        })
+        .collect();
+    let anon = cached
+        .anon
+        .into_iter()
+        .filter_map(|c| {
+            NaiveDate::parse_from_str(&c.date, "%Y-%m-%d")
+                .ok()
+                .map(|date| Contribution {
+                    date,
+                    model: c.model,
+                    tokens: c.tokens,
+                })
+        })
+        .collect();
+    Buckets { by_id, anon }
+}
+
+fn buckets_to_cached(buckets: &Buckets) -> CachedUsage {
+    CachedUsage {
+        by_id: buckets
+            .by_id
+            .iter()
+            .map(|(id, c)| {
+                (
+                    id.clone(),
+                    CachedContrib {
+                        date: c.date.format("%Y-%m-%d").to_string(),
+                        model: c.model.clone(),
+                        tokens: c.tokens,
+                    },
+                )
+            })
+            .collect(),
+        anon: buckets
+            .anon
+            .iter()
+            .map(|c| CachedContrib {
+                date: c.date.format("%Y-%m-%d").to_string(),
+                model: c.model.clone(),
+                tokens: c.tokens,
+            })
+            .collect(),
+    }
 }
 
 /// 模型名归一化（PRD FR-001 规则 5，五步顺序执行）
@@ -165,7 +236,7 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
 
     let buckets = files
         .par_iter()
-        .map(|p| scan_file(p))
+        .map(|p| scan_file_cached(p))
         .reduce(Buckets::default, Buckets::merge);
 
     let today = Local::now().date_naive();
@@ -210,6 +281,8 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
         .map(|(model, total)| ModelUsage { model, total })
         .collect();
     by_model.sort_unstable_by(|a, b| b.total.cmp(&a.total));
+
+    cache::flush();
 
     Ok(UsageStats {
         daily,

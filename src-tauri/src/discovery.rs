@@ -49,6 +49,8 @@ pub fn discover_all() -> Vec<Project> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    cache::flush();
+
     projects
 }
 
