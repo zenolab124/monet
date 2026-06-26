@@ -31,7 +31,7 @@ function stateOf(s: WorkshopMcpServer): McpProbeState {
   <div v-if="items.length === 0" class="py-8 text-center">
     <p class="text-xs text-muted-foreground">{{ $t('workshop.noMcp') }}</p>
   </div>
-  <div v-else>
+  <div v-else class="mcp-grid">
     <AssetItem
       v-for="s in items"
       :key="mcpKey(s)"
@@ -57,6 +57,16 @@ function stateOf(s: WorkshopMcpServer): McpProbeState {
 </template>
 
 <style scoped>
+.mcp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 768px) {
+  .mcp-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .mcp-state {
   display: inline-flex;
   align-items: center;

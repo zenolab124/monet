@@ -79,6 +79,9 @@ async function openFile(path: string) {
 
 const isLoading = computed(() => loadingConfig.value || loadingStats.value)
 
+// --- 详情弹窗 ---
+const detailPopup = ref<{ title: string; content: string } | null>(null)
+
 // --- Routines UI ---
 const showRoutineForm = ref<'new' | RoutineDefinition | null>(null)
 const deletingId = ref<string | null>(null)
@@ -132,6 +135,18 @@ async function onRunNow(r: RoutineRow) {
 
       <!-- Hooks -->
       <section v-show="autoTab === 'hooks'">
+        <div class="flex items-center gap-2 mb-2.5">
+          <h2 class="sec-title mb-0">{{ $t('automation.hooksTitle') }}</h2>
+          <div class="ml-auto flex items-center gap-1.5">
+            <button class="icon-btn" :disabled="isLoading" @click="refresh">
+              <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': isLoading }" />
+            </button>
+            <button class="auto-btn" @click="openGlobalConfig">
+              <span class="i-carbon-settings w-3 h-3" />
+              {{ $t('common.openConfig') }}
+            </button>
+          </div>
+        </div>
 
         <!-- 配置加载中 -->
         <div v-if="loadingConfig && !config" class="py-8 text-center text-xs text-muted-foreground">
@@ -147,7 +162,6 @@ async function onRunNow(r: RoutineRow) {
         <!-- 空态：无任何配置 -->
         <div v-else-if="config && rows.length === 0" class="auto-empty">
           <p class="text-sm text-muted-foreground">{{ $t('automation.noHooks') }}</p>
-          <button class="auto-btn mt-3" @click="openGlobalConfig">{{ $t('common.openConfig') }}</button>
         </div>
 
         <!-- 表格 -->
@@ -174,13 +188,13 @@ async function onRunNow(r: RoutineRow) {
                 <tr v-for="(row, i) in rows" :key="i">
                   <!-- 事件列 -->
                   <td>
-                    <code class="text-[11px]">{{ row.event }}</code>
-                    <div v-if="row.matcher" class="text-[10px] text-muted-foreground mt-0.5">{{ row.matcher }}</div>
+                    <div class="text-xs">{{ $t(`automation.events.${row.event}`, row.event) }}</div>
+                    <div class="text-[10px] text-muted-foreground mt-0.5">{{ row.event }}<template v-if="row.matcher"> · {{ row.matcher }}</template></div>
                   </td>
 
                   <!-- 动作列 -->
                   <td>
-                    <span class="truncate-cmd" :title="row.command">{{ row.command }}</span>
+                    <span class="wrap-cmd cursor-pointer" @click="detailPopup = { title: row.event, content: row.command }">{{ row.command }}</span>
                   </td>
 
                   <!-- 作用域列 -->
@@ -215,8 +229,8 @@ async function onRunNow(r: RoutineRow) {
                   <td class="text-center">
                     <button
                       v-if="row.scope !== $t('common.global')"
-                      class="auto-open-btn"
-                      :title="$t('common.openConfigFile')"
+                      class="icon-btn icon-btn-sm"
+                      v-tooltip="$t('common.openConfigFile')"
                       @click="openFile(row.sourcePath)"
                     >
                       <span class="i-carbon-document w-3 h-3 block" />
@@ -234,7 +248,7 @@ async function onRunNow(r: RoutineRow) {
         <div class="flex items-center gap-2 mb-2.5">
           <h2 class="sec-title mb-0">{{ $t('automation.routinesTitle') }}</h2>
           <div class="ml-auto flex items-center gap-1.5">
-            <button class="auto-btn" :disabled="routinesLoading" @click="refreshRoutines">
+            <button class="icon-btn" :disabled="routinesLoading" @click="refreshRoutines">
               <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': routinesLoading }" />
             </button>
             <button class="auto-btn" @click="showRoutineForm = 'new'">
@@ -266,12 +280,12 @@ async function onRunNow(r: RoutineRow) {
           <table class="auto-table">
             <thead>
               <tr>
-                <th>{{ $t('automation.routineColumns.name') }}</th>
-                <th>{{ $t('automation.routineColumns.schedule') }}</th>
+                <th class="w-[15%]">{{ $t('automation.routineColumns.name') }}</th>
+                <th class="w-[25%]">{{ $t('automation.routineColumns.schedule') }}</th>
                 <th>{{ $t('automation.routineColumns.command') }}</th>
-                <th>{{ $t('automation.routineColumns.status') }}</th>
-                <th>{{ $t('automation.routineColumns.lastRun') }}</th>
-                <th></th>
+                <th class="w-[52px]">{{ $t('automation.routineColumns.status') }}</th>
+                <th class="w-[88px]">{{ $t('automation.routineColumns.lastRun') }}</th>
+                <th class="w-[100px]"></th>
               </tr>
             </thead>
             <tbody>
@@ -279,45 +293,45 @@ async function onRunNow(r: RoutineRow) {
                 <td class="text-xs font-medium">{{ r.name }}</td>
                 <td>
                   <code class="text-[11px]">{{ r.cronExpression }}</code>
-                  <div v-if="r.originalText" class="text-[10px] text-muted-foreground mt-0.5">{{ r.originalText }}</div>
+                  <div v-if="r.originalText" v-tooltip="r.originalText" class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[200px]">{{ r.originalText }}</div>
                 </td>
                 <td>
-                  <span class="truncate-cmd" :title="r.prompt">{{ r.prompt }}</span>
+                  <span class="truncate-cmd cursor-pointer" @click="detailPopup = { title: r.name, content: r.prompt }">{{ r.prompt }}</span>
                 </td>
-                <td class="text-xs">
+                <td class="text-xs whitespace-nowrap">
                   <span v-if="r.isRunning" class="text-accent">{{ $t('common.running') }}</span>
                   <span v-else-if="r.enabled" class="text-success">{{ $t('common.enabled') }}</span>
                   <span v-else class="text-muted-foreground">{{ $t('common.paused') }}</span>
                 </td>
-                <td class="text-xs">
+                <td class="text-xs whitespace-nowrap">
                   <template v-if="!r.lastExecution">—</template>
                   <template v-else>
                     <span :class="r.lastExecution.exitCode === 0 ? 'text-success' : 'text-destructive'">
                       {{ r.lastExecution.exitCode === 0 ? '✓' : '✗' }}
                     </span>
-                    <span class="text-muted-foreground"> {{ formatTime(r.lastExecution.startedAt) }}</span>
+                    <span class="text-muted-foreground">{{ formatTime(r.lastExecution.startedAt) }}</span>
                   </template>
                 </td>
                 <td>
                   <div class="flex items-center gap-0.5">
                     <button
-                      class="auto-open-btn" :title="r.enabled ? $t('automation.pause') : $t('automation.enable')"
+                      class="icon-btn icon-btn-sm" v-tooltip="r.enabled ? $t('automation.pause') : $t('automation.enable')"
                       @click="onToggleRoutine(r)"
                     >
                       <span class="w-3 h-3 block" :class="r.enabled ? 'i-carbon-pause' : 'i-carbon-play'" />
                     </button>
-                    <button class="auto-open-btn" :title="$t('common.edit')" @click="showRoutineForm = r">
+                    <button class="icon-btn icon-btn-sm" v-tooltip="$t('common.edit')" @click="showRoutineForm = r">
                       <span class="i-carbon-edit w-3 h-3 block" />
                     </button>
                     <button
-                      class="auto-open-btn" :title="$t('automation.runNow')"
+                      class="icon-btn icon-btn-sm" v-tooltip="$t('automation.runNow')"
                       :disabled="r.isRunning"
                       @click="onRunNow(r)"
                     >
                       <span class="i-carbon-flash w-3 h-3 block" />
                     </button>
                     <button
-                      class="auto-open-btn" :title="$t('common.delete')"
+                      class="icon-btn icon-btn-sm" v-tooltip="$t('common.delete')"
                       :disabled="deletingId === r.id"
                       @click="onDeleteRoutine(r)"
                     >
@@ -342,6 +356,24 @@ async function onRunNow(r: RoutineRow) {
 
     </div>
     </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div
+      v-if="detailPopup"
+      class="fixed inset-0 z-70 grid place-items-center"
+      style="background: rgba(70, 45, 20, 0.18)"
+      @mousedown.self="detailPopup = null"
+    >
+      <div class="detail-popup">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-semibold">{{ detailPopup.title }}</span>
+          <button class="icon-btn icon-btn-sm" @click="detailPopup = null">
+            <span class="i-carbon-close w-3.5 h-3.5 block" />
+          </button>
+        </div>
+        <pre class="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed">{{ detailPopup.content }}</pre>
+      </div>
     </div>
   </div>
 </template>
@@ -409,11 +441,12 @@ async function onRunNow(r: RoutineRow) {
 .auto-table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .auto-table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -442,9 +475,9 @@ async function onRunNow(r: RoutineRow) {
 }
 
 .auto-table td {
-  padding: 7px 10px;
+  padding: 10px;
   color: var(--foreground);
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .truncate-cmd {
@@ -458,19 +491,14 @@ async function onRunNow(r: RoutineRow) {
   color: var(--muted-foreground);
 }
 
-.auto-open-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius);
-  display: grid;
-  place-items: center;
+.wrap-cmd {
+  display: block;
+  max-width: 380px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
   color: var(--muted-foreground);
-  transition: color 0.1s, background 0.1s;
-}
-
-.auto-open-btn:hover {
-  color: var(--foreground);
-  background: var(--muted);
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 .auto-note {
@@ -506,5 +534,17 @@ async function onRunNow(r: RoutineRow) {
 
 .text-success {
   color: var(--success, #2d7d3a);
+}
+
+.detail-popup {
+  width: 520px;
+  max-width: 90vw;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-paper-lifted, 0 4px 16px rgba(0,0,0,0.12));
 }
 </style>

@@ -1,4 +1,8 @@
 {
+  "app": {
+    "quit": "Quit",
+    "quitConfirm": "Quit CC Space?"
+  },
   "common": {
     "confirm": "Confirm",
     "cancel": "Cancel",
@@ -215,6 +219,7 @@
       "startRace": "Race",
       "defaultTabName": "Race {seq}",
       "addLane": "Add Lane",
+      "tokenHud": "Token HUD",
       "closeLane": "Close Lane",
       "laneLabel": "Lane {n}",
       "stopAll": "Stop All",
@@ -247,9 +252,18 @@
   "automation": {
     "title": "Automation",
     "scheduledTasks": "Scheduled Tasks",
+    "hooksTitle": "Hooks",
     "noHooks": "No Hooks configured",
     "statsUnavailable": "Stats unavailable",
     "event": "Event",
+    "events": {
+      "SessionStart": "Session Start",
+      "PreToolUse": "Pre Tool Use",
+      "PostToolUse": "Post Tool Use",
+      "Notification": "Notification",
+      "Stop": "Stop",
+      "SubagentStop": "Subagent Stop"
+    },
     "action": "Action",
     "scope": "Scope",
     "last7Days": "Last 7 days",
@@ -628,7 +642,14 @@
     "checkClipboard": "Please check clipboard permissions",
     "terminalFailed": "Failed to open terminal",
     "vscodeFailed": "Failed to open VS Code",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "tokenInput": "Input",
+    "tokenOutput": "Output",
+    "tokenCacheRead": "Cache read",
+    "tokenCacheCreate": "Cache create",
+    "tokenCacheHitRate": "Input cache rate",
+    "tokenCacheRatio": "Overall cache rate",
+    "tokenTotal": "Total"
   },
   "slash": {
     "title": "Slash Commands",

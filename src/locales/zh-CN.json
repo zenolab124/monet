@@ -1,4 +1,8 @@
 {
+  "app": {
+    "quit": "退出",
+    "quitConfirm": "确定退出 CC Space？"
+  },
   "common": {
     "confirm": "确认",
     "cancel": "取消",
@@ -215,6 +219,7 @@
       "startRace": "赛马",
       "defaultTabName": "赛马 {seq}",
       "addLane": "添加赛道",
+      "tokenHud": "Token 面板",
       "closeLane": "关闭赛道",
       "laneLabel": "赛道 {n}",
       "stopAll": "全部停止",
@@ -247,9 +252,18 @@
   "automation": {
     "title": "自动化",
     "scheduledTasks": "定时任务",
+    "hooksTitle": "Hooks（事件钩子）",
     "noHooks": "未配置任何 Hook",
     "statsUnavailable": "统计不可用",
     "event": "事件",
+    "events": {
+      "SessionStart": "会话启动",
+      "PreToolUse": "工具调用前",
+      "PostToolUse": "工具调用后",
+      "Notification": "通知",
+      "Stop": "会话结束",
+      "SubagentStop": "子代理结束"
+    },
     "action": "动作",
     "scope": "作用域",
     "last7Days": "近 7 天",
@@ -628,7 +642,14 @@
     "checkClipboard": "请检查剪贴板权限",
     "terminalFailed": "终端打开失败",
     "vscodeFailed": "VS Code 打开失败",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "tokenInput": "输入",
+    "tokenOutput": "输出",
+    "tokenCacheRead": "缓存命中",
+    "tokenCacheCreate": "缓存创建",
+    "tokenCacheHitRate": "输入缓存率",
+    "tokenCacheRatio": "总体缓存率",
+    "tokenTotal": "合计"
   },
   "slash": {
     "title": "斜杠命令",
