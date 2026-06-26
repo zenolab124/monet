@@ -66,6 +66,8 @@ export interface SessionStreamState {
   realContextWindow: number | null
   /** API 报告的已用 input token 数（result 事件 modelUsage.inputTokens） */
   realUsedTokens: number | null
+  /** API 报告的 output token 数（result 事件 modelUsage.outputTokens） */
+  realOutputTokens: number | null
   /** Remote Control 是否已启用（open_session 自动启用，手动可关） */
   rcActive: boolean
 }
@@ -115,6 +117,7 @@ function createState(): SessionStreamState {
     lastSent: null,
     realContextWindow: null,
     realUsedTokens: null,
+    realOutputTokens: null,
     rcActive: false,
   }
 }
@@ -665,6 +668,7 @@ export async function initStreamListeners(): Promise<void> {
         state.activeTool = null
         if (payload.context_window) state.realContextWindow = payload.context_window
         if (payload.input_tokens) state.realUsedTokens = payload.input_tokens
+        if (payload.output_tokens) state.realOutputTokens = payload.output_tokens
         markTailDirty(sid)
         break
       case 'error':

@@ -142,3 +142,59 @@ body {
 .form-checkbox-row input[type="checkbox"] {
   accent-color: var(--primary);
 }
+
+/* === 方形图标按钮 === */
+
+.icon-btn {
+  --icon-btn-size: 24px;
+  width: var(--icon-btn-size);
+  height: var(--icon-btn-size);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+.icon-btn:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn:disabled:hover {
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+/* 尺寸 */
+.icon-btn-sm { --icon-btn-size: 22px; }
+.icon-btn-lg { --icon-btn-size: 28px; }
+
+/* 变体：虚线(添加) */
+.icon-btn-dashed { border-style: dashed; }
+
+/* 变体：幽灵(无边框) */
+.icon-btn-ghost { border-color: transparent; }
+.icon-btn-ghost:hover { border-color: var(--border); }
+
+/* 变体：激活态(开关类) */
+.icon-btn-active {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.icon-btn-active:hover {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+/* 变体：危险 hover */
+.icon-btn-danger:hover {
+  color: var(--destructive);
+  border-color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+}

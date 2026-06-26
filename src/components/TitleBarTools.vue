@@ -68,38 +68,17 @@ async function openGlobalConfig() {
   </template>
 
   <!-- 首页 -->
-  <button v-if="activeSection === 'home'" class="tb-btn" :disabled="homeRefreshing" :title="$t('titlebar.recalculate')" @click="homeRefresh">
+  <button v-if="activeSection === 'home'" class="icon-btn icon-btn-sm" :disabled="homeRefreshing" v-tooltip="$t('titlebar.recalculate')" @click="homeRefresh">
     <span class="i-carbon-renew w-3.5 h-3.5" :class="{ 'animate-spin': homeRefreshing }" />
   </button>
 
   <!-- 自动化 -->
   <template v-if="activeSection === 'automation'">
     <span v-if="openFailMsg" class="text-xs text-destructive">{{ openFailMsg }}</span>
-    <button class="tb-btn" :disabled="!autoConfig" @click="openGlobalConfig">{{ $t('common.openConfig') }}</button>
-    <button class="tb-btn" :disabled="autoLoading" @click="autoRefresh">
+    <button class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-border bg-card cursor-pointer hover:shadow-paper disabled:opacity-50 disabled:cursor-default" :disabled="!autoConfig" @click="openGlobalConfig">{{ $t('common.openConfig') }}</button>
+    <button class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-border bg-card cursor-pointer hover:shadow-paper disabled:opacity-50 disabled:cursor-default" :disabled="autoLoading" @click="autoRefresh">
       <span class="i-carbon-renew w-3 h-3" :class="{ 'animate-spin': autoLoading }" />
       {{ $t('common.refresh') }}
     </button>
   </template>
 </template>
-
-<style scoped>
-.tb-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--card);
-  cursor: pointer;
-}
-.tb-btn:hover:not(:disabled) {
-  box-shadow: var(--shadow-paper);
-}
-.tb-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-</style>

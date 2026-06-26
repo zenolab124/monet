@@ -164,16 +164,16 @@ function onSelectDate(date: string) {
         <div class="ml-auto flex items-center gap-1.5">
           <button
             v-if="gridRef?.editing"
-            class="grid-action-btn"
-            :title="t('home.grid.reset')"
+            class="icon-btn"
+            v-tooltip="t('home.grid.reset')"
             @click="gridRef?.resetLayout()"
           >
             <span class="i-carbon-reset w-3.5 h-3.5" />
           </button>
           <button
-            class="grid-action-btn"
+            class="icon-btn"
             :class="{ active: gridRef?.editing }"
-            :title="gridRef?.editing ? t('home.grid.done') : t('home.grid.edit')"
+            v-tooltip="gridRef?.editing ? t('home.grid.done') : t('home.grid.edit')"
             @click="gridRef?.toggleEdit()"
           >
             <span class="w-3.5 h-3.5" :class="gridRef?.editing ? 'i-carbon-checkmark' : 'i-carbon-edit'" />
@@ -228,26 +228,4 @@ function onSelectDate(date: string) {
 </template>
 
 <style scoped>
-.grid-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--muted-foreground);
-  background: transparent;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.grid-action-btn:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-.grid-action-btn.active {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 8%, transparent);
-}
 </style>

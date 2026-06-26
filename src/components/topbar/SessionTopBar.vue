@@ -2,7 +2,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
-import { shortModel, relativeTime } from '@/types'
+import { shortModel, relativeTime, formatTokens, type TokenUsage } from '@/types'
 import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
 import { ADVISOR_MAIN_MODEL, type EffortSetting, type EffortLevel } from '@/composables/useSessionSettings'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
@@ -51,6 +51,8 @@ const props = defineProps<{
   selectedAdvisor: boolean
   /** 权限模式 */
   selectedPermissionMode: PermissionMode
+  /** 会话累计 token 用量 */
+  totalTokens: TokenUsage
 }>()
 
 const emit = defineEmits<{
@@ -473,6 +475,47 @@ function onPermissionModeChange(mode: PermissionMode) {
           </span>
           <span v-if="modelString && !effectiveModel" class="truncate">{{ shortModel(modelString) }}</span>
           <span>{{ relativeTime(lastModified) }}</span>
+          <!-- 会话 token 统计 -->
+          <div class="flex flex-col gap-0.5 pt-1 border-t border-border/50 tabular-nums">
+            <!-- 原始四项 -->
+            <div class="flex items-center justify-between">
+              <span>input_tokens</span>
+              <span>{{ formatTokens(totalTokens.input_tokens) }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>output_tokens</span>
+              <span>{{ formatTokens(totalTokens.output_tokens) }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>cache_creation</span>
+              <span>{{ formatTokens(totalTokens.cache_creation_input_tokens) }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>cache_read</span>
+              <span>{{ formatTokens(totalTokens.cache_read_input_tokens) }}</span>
+            </div>
+            <!-- 派生指标 -->
+            <div class="flex items-center justify-between pt-1 border-t border-border/50">
+              <span>{{ $t('topbar.tokenTotalInput') }}</span>
+              <span>{{ formatTokens(totalTokens.input_tokens + totalTokens.cache_creation_input_tokens + totalTokens.cache_read_input_tokens) }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>{{ $t('topbar.tokenTotalOutput') }}</span>
+              <span>{{ formatTokens(totalTokens.output_tokens) }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>{{ $t('topbar.tokenCacheHitRate') }}</span>
+              <span>{{ (totalTokens.input_tokens + totalTokens.cache_read_input_tokens + totalTokens.cache_creation_input_tokens) > 0 ? Math.round(totalTokens.cache_read_input_tokens / (totalTokens.input_tokens + totalTokens.cache_read_input_tokens + totalTokens.cache_creation_input_tokens) * 100) + '%' : '—' }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span>{{ $t('topbar.tokenCacheRatio') }}</span>
+              <span>{{ (totalTokens.input_tokens + totalTokens.output_tokens + totalTokens.cache_read_input_tokens + totalTokens.cache_creation_input_tokens) > 0 ? Math.round(totalTokens.cache_read_input_tokens / (totalTokens.input_tokens + totalTokens.output_tokens + totalTokens.cache_read_input_tokens + totalTokens.cache_creation_input_tokens) * 100) + '%' : '—' }}</span>
+            </div>
+            <div class="flex items-center justify-between font-medium text-foreground">
+              <span>{{ $t('topbar.tokenTotal') }}</span>
+              <span>{{ formatTokens(totalTokens.input_tokens + totalTokens.output_tokens + totalTokens.cache_read_input_tokens + totalTokens.cache_creation_input_tokens) }}</span>
+            </div>
+          </div>
         </div>
 
         <!-- 操作 -->

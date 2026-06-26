@@ -129,9 +129,9 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
       </template>
       <button
         :disabled="rcLoading"
-        class="col-head-btn disabled:opacity-40"
+        class="icon-btn icon-btn-sm disabled:opacity-40"
         :class="stream.rcActive ? 'border-primary! text-primary!' : ''"
-        :title="stream.rcActive ? $t('workbench.column.rcEnabled') : $t('workbench.column.rcEnable')"
+        v-tooltip="stream.rcActive ? $t('workbench.column.rcEnabled') : $t('workbench.column.rcEnable')"
         @pointerdown.stop
         @click.stop="onToggleRC"
       >
@@ -140,24 +140,24 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
       <!-- 普通模式:赛马 + 收起 + 关闭 -->
       <template v-if="!isRace">
         <button
-          class="col-head-btn"
-          :title="$t('workbench.race.startRace')"
+          class="icon-btn icon-btn-sm"
+          v-tooltip="$t('workbench.race.startRace')"
           @pointerdown.stop
           @click.stop="emit('startRace')"
         >
           <span class="i-carbon-compare w-3 h-3" />
         </button>
         <button
-          class="col-head-btn"
-          :title="$t('workbench.column.collapseToRail')"
+          class="icon-btn icon-btn-sm"
+          v-tooltip="$t('workbench.column.collapseToRail')"
           @pointerdown.stop
           @click="onCollapse"
         >
           <span class="i-carbon-chevron-left w-3 h-3" />
         </button>
         <button
-          class="col-head-btn hover:text-destructive!"
-          :title="$t('workbench.column.closeExit')"
+          class="icon-btn icon-btn-sm icon-btn-danger"
+          v-tooltip="$t('workbench.column.closeExit')"
           @pointerdown.stop
           @click="onClose"
         >
@@ -167,8 +167,8 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
       <!-- 赛马模式:关闭赛道 -->
       <button
         v-else
-        class="col-head-btn hover:text-destructive!"
-        :title="$t('workbench.race.closeLane')"
+        class="icon-btn icon-btn-sm icon-btn-danger"
+        v-tooltip="$t('workbench.race.closeLane')"
         @pointerdown.stop
         @click="onCloseLane"
       >
@@ -183,21 +183,6 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
 </template>
 
 <style scoped>
-.col-head-btn {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
-  transition: color 0.15s, background-color 0.15s;
-}
-.col-head-btn:hover {
-  color: var(--foreground);
-  background: var(--muted);
-}
 .col-dot-pulse {
   animation: col-pulse 1.6s ease-in-out infinite;
 }

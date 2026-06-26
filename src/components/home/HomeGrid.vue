@@ -234,16 +234,16 @@ defineExpose({ toggleEdit, resetLayout, editing, addWidget, removeWidget })
 
         <div v-if="editing" class="card-edit-overlay">
           <button
-            class="edit-btn"
-            :title="hiddenIds.has(card.id) ? $t('home.grid.show') : $t('home.grid.hide')"
+            class="icon-btn"
+            v-tooltip="hiddenIds.has(card.id) ? $t('home.grid.show') : $t('home.grid.hide')"
             @click.stop="toggleCardVisibility(card.id)"
           >
             <span class="w-3.5 h-3.5" :class="hiddenIds.has(card.id) ? 'i-carbon-view' : 'i-carbon-view-off'" />
           </button>
           <button
             v-if="isCustomWidget(card.id)"
-            class="edit-btn delete"
-            :title="$t('common.delete')"
+            class="icon-btn delete"
+            v-tooltip="$t('common.delete')"
             @click.stop="deleteWidget(card.id)"
           >
             <span class="i-carbon-trash-can w-3.5 h-3.5" />
@@ -301,25 +301,4 @@ defineExpose({ toggleEdit, resetLayout, editing, addWidget, removeWidget })
   z-index: 10;
 }
 
-.edit-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--muted-foreground);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-.edit-btn:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-.edit-btn.delete:hover {
-  color: var(--destructive, #c45d3e);
-}
 </style>

@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
+import { useWorkbench, setRightZoneWidth, MIN_COLUMN_WIDTH } from '@/composables/useWorkbench'
 import { useRaceInput } from '@/composables/useRaceInput'
+import { useProjects } from '@/composables/useProjects'
+import { useConfirm } from '@/composables/useConfirm'
+import { shortModel, formatTokens, type TokenUsage, type SessionSummary } from '@/types'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 
-const { activeTab } = useWorkbench()
+const { activeTab, resetRaceLanes } = useWorkbench()
 const { t } = useI18n()
+const { projects } = useProjects()
+const { confirm } = useConfirm()
+
+async function onResetRace() {
+  const ok = await confirm(t('workbench.race.resetConfirm'), t('workbench.race.reset'))
+  if (!ok) return
+  resetRaceLanes(activeTab.value.id)
+}
 
 const race = computed(() => activeTab.value.race!)
 
@@ -23,13 +34,41 @@ const {
 } = useRaceInput(activeTab)
 
 const containerRef = ref<HTMLElement>()
+const showHud = ref(false)
+
+function getSessionSummary(sessionId: string): SessionSummary | null {
+  for (const p of projects.value) {
+    const s = p.sessions.find(s => s.id === sessionId)
+    if (s) return s
+  }
+  return null
+}
+
+function cacheHitRate(t: TokenUsage): string {
+  const total = t.input_tokens + t.cache_read_input_tokens + t.cache_creation_input_tokens
+  return total > 0 ? Math.round(t.cache_read_input_tokens / total * 100) + '%' : '—'
+}
+
+function cacheOverallRate(t: TokenUsage): string {
+  const total = t.input_tokens + t.output_tokens + t.cache_read_input_tokens + t.cache_creation_input_tokens
+  return total > 0 ? Math.round(t.cache_read_input_tokens / total * 100) + '%' : '—'
+}
 
 let resizeObserver: ResizeObserver | null = null
+
+function onWheelCapture(e: WheelEvent) {
+  const el = containerRef.value
+  if (!el || el.scrollWidth <= el.clientWidth) return
+  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+  e.preventDefault()
+  el.scrollLeft += e.deltaX
+}
 
 onMounted(() => {
   const el = containerRef.value
   if (!el) return
   setRightZoneWidth(el.clientWidth)
+  el.addEventListener('wheel', onWheelCapture, { capture: true, passive: false })
   resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (entry.contentRect.width > 0) setRightZoneWidth(entry.contentRect.width)
@@ -40,6 +79,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  containerRef.value?.removeEventListener('wheel', onWheelCapture, { capture: true } as EventListenerOptions)
   resizeObserver?.disconnect()
   resizeObserver = null
 })
@@ -61,28 +101,104 @@ function onInputKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="flex-1 min-w-0 h-full flex flex-col">
-    <!-- 列区 -->
-    <div ref="containerRef" class="flex-1 min-h-0 flex flex-row p-2.5 gap-2.5">
-      <div
-        v-for="(col, i) in activeTab.columns"
-        :key="col.id"
-        class="flex-1 min-w-0 relative"
-      >
-        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" />
+    <div class="flex-1 min-h-0 flex flex-row">
+      <!-- 赛道区(横向滚动) -->
+      <div ref="containerRef" class="flex-1 min-w-0 overflow-x-auto flex flex-row p-2.5 gap-2.5">
+        <div
+          v-for="(col, i) in activeTab.columns"
+          :key="col.id"
+          class="h-full relative"
+          :style="{ flex: `1 0 ${MIN_COLUMN_WIDTH}px` }"
+        >
+          <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" />
+
+          <!-- Token HUD 覆盖层 -->
+          <div
+            v-if="showHud"
+            class="race-hud"
+          >
+            <template v-if="getSessionSummary(col.sessionId)">
+              <div class="hud-row font-medium">
+                <span>{{ shortModel(getSessionSummary(col.sessionId)!.model ?? '') }}</span>
+              </div>
+              <div class="hud-divider" />
+              <div class="hud-row">
+                <span>input_tokens</span>
+                <span>{{ formatTokens(getSessionSummary(col.sessionId)!.total_tokens.input_tokens) }}</span>
+              </div>
+              <div class="hud-row">
+                <span>output_tokens</span>
+                <span>{{ formatTokens(getSessionSummary(col.sessionId)!.total_tokens.output_tokens) }}</span>
+              </div>
+              <div class="hud-row">
+                <span>cache_creation</span>
+                <span>{{ formatTokens(getSessionSummary(col.sessionId)!.total_tokens.cache_creation_input_tokens) }}</span>
+              </div>
+              <div class="hud-row">
+                <span>cache_read</span>
+                <span>{{ formatTokens(getSessionSummary(col.sessionId)!.total_tokens.cache_read_input_tokens) }}</span>
+              </div>
+              <div class="hud-divider" />
+              <div class="hud-row">
+                <span>{{ $t('topbar.tokenTotalInput') }}</span>
+                <span>{{ formatTokens(getSessionSummary(col.sessionId)!.total_tokens.input_tokens + getSessionSummary(col.sessionId)!.total_tokens.cache_creation_input_tokens + getSessionSummary(col.sessionId)!.total_tokens.cache_read_input_tokens) }}</span>
+              </div>
+              <div class="hud-row">
+                <span>{{ $t('topbar.tokenTotalOutput') }}</span>
+                <span>{{ formatTokens(getSessionSummary(col.sessionId)!.total_tokens.output_tokens) }}</span>
+              </div>
+              <div class="hud-row">
+                <span>{{ $t('topbar.tokenCacheHitRate') }}</span>
+                <span>{{ cacheHitRate(getSessionSummary(col.sessionId)!.total_tokens) }}</span>
+              </div>
+              <div class="hud-row">
+                <span>{{ $t('topbar.tokenCacheRatio') }}</span>
+                <span>{{ cacheOverallRate(getSessionSummary(col.sessionId)!.total_tokens) }}</span>
+              </div>
+              <div class="hud-divider" />
+              <div class="hud-row font-medium">
+                <span>{{ $t('topbar.tokenTotal') }}</span>
+                <span>{{ formatTokens(
+                  getSessionSummary(col.sessionId)!.total_tokens.input_tokens +
+                  getSessionSummary(col.sessionId)!.total_tokens.output_tokens +
+                  getSessionSummary(col.sessionId)!.total_tokens.cache_read_input_tokens +
+                  getSessionSummary(col.sessionId)!.total_tokens.cache_creation_input_tokens
+                ) }}</span>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
 
-      <!-- 添加赛道 -->
-      <button
-        class="shrink-0 w-8 self-stretch grid place-items-center rounded border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-ring transition-colors"
-        :title="t('workbench.race.addLane')"
-        @click="forkNewLane"
-      >
-        <span class="i-carbon-add w-4 h-4" />
-      </button>
+      <!-- 右侧工具栏 -->
+      <div class="shrink-0 w-10 flex flex-col items-center gap-2 py-2.5 border-l border-border bg-background">
+        <button
+          class="icon-btn icon-btn-lg"
+          :class="showHud && 'icon-btn-active'"
+          v-tooltip="$t('workbench.race.tokenHud')"
+          @click="showHud = !showHud"
+        >
+          <span class="i-carbon-dashboard w-3.5 h-3.5" />
+        </button>
+        <button
+          class="icon-btn icon-btn-lg"
+          v-tooltip="$t('workbench.race.reset')"
+          @click="onResetRace"
+        >
+          <span class="i-carbon-reset w-3.5 h-3.5" />
+        </button>
+        <button
+          class="icon-btn icon-btn-lg icon-btn-dashed flex-1"
+          v-tooltip="t('workbench.race.addLane')"
+          @click="forkNewLane"
+        >
+          <span class="i-carbon-add w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
 
-    <!-- 共享输入区 -->
-    <div class="px-4 py-3 border-t border-border shrink-0 relative">
+    <!-- 输入区 -->
+    <div class="px-4 py-3 border-t border-border shrink-0">
       <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
       </div>
@@ -133,3 +249,35 @@ function onInputKeydown(e: KeyboardEvent) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.race-hud {
+  position: absolute;
+  top: 40px;
+  right: 6px;
+  z-index: 20;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--foreground);
+  color: var(--background);
+  opacity: 0.75;
+  font-size: 11px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  min-width: 130px;
+}
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hud-sep {
+  opacity: 0.5;
+}
+.hud-divider {
+  border-top: 1px solid currentColor;
+  opacity: 0.2;
+  margin: 2px 0;
+}
+</style>

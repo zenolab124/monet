@@ -22,7 +22,7 @@ const setHandle = (node: any) => { handleEl.value = node }
     ref="el"
     class="sortable-col"
     :class="{ 'sortable-col-dragging': isDragging }"
-    :style="{ flex: `${flex} 1 0%` }"
+    :style="{ width: `${flex}px`, flex: '0 0 auto' }"
   >
     <slot :is-dragging="isDragging" :handle-ref="setHandle" />
   </div>
@@ -33,7 +33,7 @@ const setHandle = (node: any) => { handleEl.value = node }
   min-width: 0;
   height: 100%;
   position: relative;
-  transition: flex 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: width 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sortable-col-dragging {
   opacity: 0.4;

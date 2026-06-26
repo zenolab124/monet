@@ -189,11 +189,12 @@ export function shortModel(model: string | null): string {
   if (!model) return ''
   // CLI 本地合成的占位消息(API Error 等),非真实模型响应
   if (model === '<synthetic>') return i18n.global.t('session.system')
-  if (model.includes('fable')) return 'Fable'
-  if (model.includes('opus')) return 'Opus'
-  if (model.includes('sonnet-4-5') || model.includes('sonnet-4.5')) return 'Sonnet 4.5'
-  if (model.includes('sonnet')) return 'Sonnet'
-  if (model.includes('haiku')) return 'Haiku'
+  const ver = model.match(/(\d+)[.-](\d+)/) ?? model.match(/[- ](\d+)(?:\b|$)/)
+  const v = ver ? (ver[2] ? ` ${ver[1]}.${ver[2]}` : ` ${ver[1]}`) : ''
+  if (model.includes('fable')) return 'Fable' + v
+  if (model.includes('opus')) return 'Opus' + v
+  if (model.includes('sonnet')) return 'Sonnet' + v
+  if (model.includes('haiku')) return 'Haiku' + v
   return model
 }
 

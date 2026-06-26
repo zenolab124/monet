@@ -301,7 +301,7 @@ function onSaved() {
                     <span class="text-muted-foreground">({{ code }})</span>
                     <button
                       class="ml-auto p-0.5 text-muted-foreground hover:text-destructive transition-colors"
-                      :title="$t('common.delete')"
+                      v-tooltip="$t('common.delete')"
                       @click="deleteLocale(String(code))"
                     >
                       <span class="i-carbon-close w-3 h-3" />
@@ -459,8 +459,8 @@ function onSaved() {
                           <span class="form-toggle-knob" />
                         </button>
                         <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
-                          <button class="chain-action" :title="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
-                          <button class="chain-action text-destructive!" :title="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
+                          <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
+                          <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
                         </template>
                       </div>
                     </div>
@@ -490,8 +490,8 @@ function onSaved() {
                         </template>
                         <button
                           v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID"
-                          class="chain-action"
-                          :title="$t('settings.probeChannel')"
+                          class="icon-btn icon-btn-sm icon-btn-ghost"
+                          v-tooltip="$t('settings.probeChannel')"
                           @pointerdown.stop
                           @click="probeChannel(stripPrefix(pid))"
                         >
@@ -528,8 +528,8 @@ function onSaved() {
                           <span class="form-toggle-knob" />
                         </button>
                         <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
-                          <button class="chain-action" :title="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
-                          <button class="chain-action text-destructive!" :title="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
+                          <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
+                          <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
                         </template>
                       </div>
                     </div>
@@ -559,8 +559,8 @@ function onSaved() {
                         </template>
                         <button
                           v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID"
-                          class="chain-action"
-                          :title="$t('settings.probeChannel')"
+                          class="icon-btn icon-btn-sm icon-btn-ghost"
+                          v-tooltip="$t('settings.probeChannel')"
                           @pointerdown.stop
                           @click="probeChannel(stripPrefix(pid))"
                         >
@@ -887,20 +887,6 @@ function onSaved() {
   gap: 4px;
   margin-left: auto;
   flex-shrink: 0;
-}
-.chain-action {
-  padding: 2px;
-  color: var(--muted-foreground);
-  border-radius: 3px;
-  transition: color 0.15s, background 0.15s;
-  border: none;
-  background: none;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.chain-action:hover {
-  color: var(--foreground);
-  background: var(--muted);
 }
 .agent-item {
   display: flex;

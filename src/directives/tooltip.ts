@@ -78,7 +78,7 @@ export const vTooltip: Directive<HTMLElement, string> = {
       text: binding.value ?? '',
       onEnter: () => {
         if (!b.text) return
-        showTimer = setTimeout(() => show(el, b.text), 400)
+        showTimer = setTimeout(() => show(el, b.text), 200)
       },
       onLeave: hide,
     }

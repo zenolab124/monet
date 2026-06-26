@@ -29,7 +29,7 @@ import {
   type SlashCommand,
 } from '@/composables/useSlashCommands'
 import { useSessionMeta } from '@/composables/useSessionMeta'
-import { shortId, shortModel } from '@/types'
+import { shortId, shortModel, formatTokens } from '@/types'
 import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
@@ -503,6 +503,25 @@ interface MsgGroup {
   responses: VisibleRecord[]
 }
 
+/** 同 message.id 的连续 assistant 记录合并为单条（CLI 每个 content block 单独写一行） */
+function mergeResponses(responses: VisibleRecord[]): VisibleRecord[] {
+  const merged: VisibleRecord[] = []
+  for (const r of responses) {
+    if (r.type !== 'assistant') { merged.push(r); continue }
+    const msgId = (r as any).message?.id
+    const prev = merged.length ? merged[merged.length - 1] : null
+    if (msgId && prev?.type === 'assistant' && (prev as any).message?.id === msgId) {
+      const prevMsg = (prev as any).message
+      const curMsg = (r as any).message
+      prevMsg.content = [...prevMsg.content, ...curMsg.content]
+      if (curMsg.usage) prevMsg.usage = curMsg.usage
+    } else {
+      merged.push({ ...r, message: r.type === 'assistant' && r.message ? { ...r.message, content: [...r.message.content] } : r.message } as any)
+    }
+  }
+  return merged
+}
+
 const messageGroups = computed(() => {
   const groups: MsgGroup[] = []
   let cur: MsgGroup = { user: null, responses: [] }
@@ -515,7 +534,7 @@ const messageGroups = computed(() => {
     }
   }
   if (cur.user || cur.responses.length) groups.push(cur)
-  return groups
+  return groups.map(g => ({ ...g, responses: mergeResponses(g.responses) }))
 })
 
 /** 解析私有标签,转为特殊渲染块 */
@@ -1036,6 +1055,7 @@ async function onReload() {
       :model-string="displayModelString"
       :used-context-tokens="stream.realUsedTokens ?? lastAssistantContextSize"
       :real-context-window="stream.realContextWindow ?? currentSession.summary.context_window ?? null"
+      :total-tokens="currentSession.summary.total_tokens"
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
@@ -1137,10 +1157,18 @@ async function onReload() {
             <div v-else class="flex gap-3 msg-block">
               <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
               <div class="min-w-0 flex-1">
-                <div class="text-xs font-medium mb-1 text-claude">
-                  {{ $t('session.claude') }}
-                  <span v-if="(resp as any).message?.model" class="text-muted-foreground font-normal">
-                    ({{ shortModel((resp as any).message.model) }})
+                <div class="text-xs font-medium mb-1 text-claude flex items-center gap-1.5 flex-wrap">
+                  <span>
+                    {{ $t('session.claude') }}
+                    <span v-if="(resp as any).message?.model" class="text-muted-foreground font-normal">
+                      ({{ shortModel((resp as any).message.model) }})
+                    </span>
+                  </span>
+                  <span v-if="(resp as any).message?.usage" class="text-muted-foreground/70 font-normal tabular-nums">
+                    {{ formatTokens((resp as any).message.usage.input_tokens) }} in
+                    · {{ formatTokens((resp as any).message.usage.cache_read_input_tokens) }} cache
+                    · {{ formatTokens((resp as any).message.usage.cache_creation_input_tokens) }} new
+                    · {{ formatTokens((resp as any).message.usage.output_tokens) }} out
                   </span>
                 </div>
                 <div>
@@ -1213,7 +1241,13 @@ async function onReload() {
         <div v-for="turn in stream.streamingTurns" :key="turn.messageId" class="flex gap-3 msg-block">
           <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
           <div class="min-w-0 flex-1">
-            <div class="text-xs font-medium mb-1 text-claude">{{ $t('session.claude') }}</div>
+            <div class="text-xs font-medium mb-1 text-claude flex items-center gap-1.5">
+              <span>{{ $t('session.claude') }}</span>
+              <span v-if="!stream.streaming && stream.realUsedTokens" class="text-muted-foreground/70 font-normal tabular-nums">
+                {{ formatTokens(stream.realUsedTokens) }} in
+                <template v-if="stream.realOutputTokens"> · {{ formatTokens(stream.realOutputTokens) }} out</template>
+              </span>
+            </div>
             <TransitionGroup name="block-fade" tag="div" appear>
               <MessageBlock
                 v-for="(block, i) in filterConsumedResults(turn.content)"

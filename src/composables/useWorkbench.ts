@@ -37,7 +37,7 @@ export interface WorkbenchTab {
   sessionIds: string[]
   /** 右区展开列(数组序 = 列序,可拖拽重排) */
   columns: WorkbenchColumn[]
-  /** 各列宽度比例,与 columns 平行,和 ≈ 1 */
+  /** 各列像素宽度,与 columns 平行 */
   columnSizes: number[]
   /** 赛马模式配置。非 undefined 即赛马 Tab */
   race?: RaceConfig
@@ -63,7 +63,7 @@ const STORAGE_KEY = 'cc-space-workbench'
 /** 单列最小可用宽度(px):低于此值会话可读性崩坏(顶栏全折叠、输入框过窄) */
 export const MIN_COLUMN_WIDTH = 360
 
-/** 右区四周边距与列间隙(与 WorkbenchColumns 的 PAD/GAP 一致,动态上限计算用) */
+/** 右区四周边距与列间隙(与 WorkbenchColumns 的 PAD/GAP 一致) */
 const COLUMN_GAP = 10
 
 /**
@@ -73,42 +73,26 @@ const COLUMN_GAP = 10
 const rightZoneWidth = ref(Math.max(MIN_COLUMN_WIDTH, window.innerWidth - 48 - 256))
 
 export function setRightZoneWidth(w: number) {
-  if (w > 0) rightZoneWidth.value = w
+  if (w <= 0) return
+  const prev = rightZoneWidth.value
+  rightZoneWidth.value = w
+  if (w > prev) redistributeOnGrow()
 }
 
-/**
- * 动态列上限(FR-004 演进):不固定列数,按「每列 ≥ 最小宽度」推算容量——
- * n·MIN + (n-1)·GAP + 2·PAD ≤ W。屏幕够宽就能开更多列,窄屏自动收紧;
- * 到达上限仍是软置换(最早展开的收回左列),不是拒绝。
- */
-function dynamicMaxColumns(): number {
-  return Math.max(
-    1,
-    Math.floor((rightZoneWidth.value - COLUMN_GAP) / (MIN_COLUMN_WIDTH + COLUMN_GAP)),
-  )
+function containerFreeWidth(n: number): number {
+  return rightZoneWidth.value - COLUMN_GAP * Math.max(0, n - 1) - COLUMN_GAP * 2
 }
 
-/**
- * 容量收紧(窗口缩小后调用):全部 tab 中超出动态上限的列收回左列,
- * 最早展开者(openedSeq 最小)优先,与展开置换同序。
- * @returns 当前激活 tab 被收回的会话(调用方 toast 提示;非激活 tab 静默收)
- */
-function enforceColumnCapacity(): string[] {
-  const max = dynamicMaxColumns()
-  const collapsedInActive: string[] = []
+/** 窗口变大时,按比例放大各列填满(仅当前全部列已 fit 时触发) */
+function redistributeOnGrow() {
   for (const tab of state.value.tabs) {
-    if (tab.race) continue
-    let changed = false
-    while (tab.columns.length > max) {
-      const earliest = tab.columns.reduce((min, c) => (c.openedSeq < min.openedSeq ? c : min))
-      const idx = tab.columns.findIndex(c => c.id === earliest.id)
-      tab.columns.splice(idx, 1)
-      changed = true
-      if (tab.id === state.value.activeTabId) collapsedInActive.push(earliest.sessionId)
-    }
-    if (changed) tab.columnSizes = equalSizes(tab.columns.length)
+    if (tab.race || tab.columns.length === 0) continue
+    const free = containerFreeWidth(tab.columns.length)
+    const total = tab.columnSizes.reduce((s, w) => s + w, 0)
+    if (total <= 0 || total > free) continue
+    const scale = free / total
+    tab.columnSizes = tab.columnSizes.map(w => Math.max(MIN_COLUMN_WIDTH, Math.round(w * scale)))
   }
-  return collapsedInActive
 }
 
 let idCounter = 0
@@ -117,7 +101,10 @@ function genId(prefix: string) {
 }
 
 function equalSizes(n: number): number[] {
-  return n <= 0 ? [] : Array(n).fill(1 / n)
+  if (n <= 0) return []
+  const free = containerFreeWidth(n)
+  const w = Math.max(MIN_COLUMN_WIDTH, Math.round(free / n))
+  return Array(n).fill(w)
 }
 
 function createTabObject(seq: number): WorkbenchTab {
@@ -165,11 +152,7 @@ function loadState(): WorkbenchState | null {
         // 列引用的会话必须在左列中
         if (!t.sessionIds.includes(c.sessionId)) return null
       }
-      if (t.columnSizes.some(s => typeof s !== 'number' || !Number.isFinite(s))) return null
-      if (t.columns.length > 0) {
-        const sum = t.columnSizes.reduce((a, b) => a + b, 0)
-        if (Math.abs(sum - 1) > 0.01) return null
-      }
+      if (t.columnSizes.some(s => typeof s !== 'number' || !Number.isFinite(s) || s < 0)) return null
       if (t.race !== undefined) {
         if (!t.race || typeof t.race !== 'object') return null
         if (typeof t.race.cwd !== 'string' || !t.race.cwd) return null
@@ -203,6 +186,16 @@ function loadState(): WorkbenchState | null {
 }
 
 const loaded = loadState()
+
+// ratio → pixel 迁移:旧版 columnSizes 为比例(均 < MIN_COLUMN_WIDTH),转为像素宽度
+if (loaded) {
+  for (const tab of loaded.tabs) {
+    if (tab.columns.length > 0 && tab.columnSizes.length > 0 && Math.max(...tab.columnSizes) < MIN_COLUMN_WIDTH) {
+      const free = Math.max(MIN_COLUMN_WIDTH, window.innerWidth - 48 - 256) - COLUMN_GAP * Math.max(0, tab.columns.length - 1) - COLUMN_GAP * 2
+      tab.columnSizes = tab.columnSizes.map(r => Math.max(MIN_COLUMN_WIDTH, Math.round(r * free)))
+    }
+  }
+}
 
 /** 持久化损坏被重置(App 启动后弹瞬态 toast「工作台状态已重置」) */
 export const stateWasReset = !!localStorage.getItem(STORAGE_KEY) && !loaded
@@ -384,6 +377,49 @@ function removeRaceLane(tabId: string, sessionId: string) {
   }
 }
 
+/** 重置所有赛道：保留赛道数、cwd 和每条赛道的设置（模型/强度/渠道），只清空会话 */
+function resetRaceLanes(tabId: string) {
+  const tab = state.value.tabs.find(t => t.id === tabId)
+  if (!tab?.race) return
+  const cwd = tab.race.cwd
+  const oldLanes = tab.race.lanes
+
+  const oldSettings: Array<{ sid: string; raw: string | null }> = oldLanes.map(lane => ({
+    sid: lane.sessionId,
+    raw: localStorage.getItem(`cc-space:session-settings:${lane.sessionId}`),
+  }))
+
+  for (const lane of oldLanes) {
+    teardownSession(lane.sessionId)
+  }
+
+  tab.sessionIds = []
+  tab.columns = []
+  const lanes: RaceLane[] = []
+  for (let i = 0; i < oldLanes.length; i++) {
+    const sid = crypto.randomUUID()
+    state.value.drafts[sid] = cwd
+    tab.sessionIds.push(sid)
+    state.value.openSeq += 1
+    tab.columns.push({
+      id: genId('wbcol'),
+      type: 'session',
+      sessionId: sid,
+      openedSeq: state.value.openSeq,
+    })
+    lanes.push({
+      id: genId('lane'),
+      sessionId: sid,
+      label: i18n.global.t('workbench.race.laneLabel', { n: i + 1 }),
+    })
+    if (oldSettings[i].raw) {
+      localStorage.setItem(`cc-space:session-settings:${sid}`, oldSettings[i].raw!)
+    }
+  }
+  tab.columnSizes = equalSizes(lanes.length)
+  tab.race = { cwd, lanes }
+}
+
 function findLane(tab: WorkbenchTab, sessionId: string): RaceLane | null {
   return tab.race?.lanes.find(l => l.sessionId === sessionId) ?? null
 }
@@ -441,18 +477,12 @@ function pruneDrafts(isPersisted: (sessionId: string) => boolean) {
 }
 
 export interface ExpandResult {
-  /**
-   * 软上限置换时被收回的会话(调用方弹瞬态 toast「已收起:<标题>」)。
-   * 窗口缩小后已超员再展开时可能一次收回多个。
-   */
   collapsedSessionIds: string[]
-  /** 已展开时为聚焦而非新增 */
   focusedExisting: boolean
 }
 
 /**
- * 展开会话到右区(FR-004):列上限按容器宽度动态推算(每列 ≥ MIN_COLUMN_WIDTH),
- * 超出时最早展开(openedSeq 最小)的列自动收回。
+ * 展开会话到右区:无容量上限,超出容器时横向滚动。
  * atIndex 指定插入列位(拖拽落点);缺省追加末尾。
  */
 function expandSession(tabId: string, sessionId: string, atIndex?: number): ExpandResult {
@@ -465,16 +495,6 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
     return { collapsedSessionIds: [], focusedExisting: true }
   }
 
-  // 置换到容量内(窗口缩小后可能超员,循环收回最早展开者直到容得下新列)
-  const collapsedSessionIds: string[] = []
-  const max = dynamicMaxColumns()
-  while (tab.columns.length >= max) {
-    const earliest = tab.columns.reduce((min, c) => (c.openedSeq < min.openedSeq ? c : min))
-    const removeIdx = tab.columns.findIndex(c => c.id === earliest.id)
-    tab.columns.splice(removeIdx, 1)
-    collapsedSessionIds.push(earliest.sessionId)
-  }
-
   state.value.openSeq += 1
   const column: WorkbenchColumn = {
     id: genId('wbcol'),
@@ -485,20 +505,25 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
   const idx = atIndex === undefined ? tab.columns.length : Math.max(0, Math.min(atIndex, tab.columns.length))
   tab.columns.splice(idx, 0, column)
   tab.columnSizes = equalSizes(tab.columns.length)
-  return { collapsedSessionIds, focusedExisting: false }
+  return { collapsedSessionIds: [], focusedExisting: false }
 }
 
-/** 收起列回左列(仍激活,FR-004「收起非退出」) */
+/** 收起列回左列(仍激活,「收起非退出」),释放的空间分给相邻列 */
 function collapseColumn(tabId: string, sessionId: string) {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab) return
   const idx = tab.columns.findIndex(c => c.sessionId === sessionId)
   if (idx < 0) return
+  const freed = tab.columnSizes[idx]
   tab.columns.splice(idx, 1)
-  tab.columnSizes = equalSizes(tab.columns.length)
+  tab.columnSizes.splice(idx, 1)
+  if (tab.columnSizes.length > 0) {
+    const neighbor = Math.min(idx, tab.columnSizes.length - 1)
+    tab.columnSizes[neighbor] += freed
+  }
 }
 
-/** 退出工作台(左列 × / 列头 ×):从归属 tab 移除,展开列一并收回。调用方负责进行中确认 */
+/** 退出工作台(左列 × / 列头 ×):从归属 tab 移除,展开列一并收回,释放空间分给相邻列 */
 function removeSession(sessionId: string) {
   for (const tab of state.value.tabs) {
     const i = tab.sessionIds.indexOf(sessionId)
@@ -506,8 +531,13 @@ function removeSession(sessionId: string) {
       tab.sessionIds.splice(i, 1)
       const ci = tab.columns.findIndex(c => c.sessionId === sessionId)
       if (ci >= 0) {
+        const freed = tab.columnSizes[ci]
         tab.columns.splice(ci, 1)
-        tab.columnSizes = equalSizes(tab.columns.length)
+        tab.columnSizes.splice(ci, 1)
+        if (tab.columnSizes.length > 0) {
+          const neighbor = Math.min(ci, tab.columnSizes.length - 1)
+          tab.columnSizes[neighbor] += freed
+        }
       }
     }
   }
@@ -541,23 +571,24 @@ function reorderColumns(tabId: string, fromIndex: number, toIndex: number) {
 }
 
 /**
- * 拖动第 index 条分隔线:
- * leftRatio 是 columns[index] 的目标新比例,仅在相邻两列间重分配,clamp 防压没。
+ * 拖动第 index 条分隔线(像素宽度模型):
+ * 有余量时左右列此消彼长;右列顶到 MIN_COLUMN_WIDTH 后切换为独立拉宽(触发滚动)。
  */
-function updateColumnSize(tabId: string, index: number, leftRatio: number) {
+function updateColumnSize(tabId: string, index: number, desiredLeftWidth: number) {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab) return
   const sizes = tab.columnSizes
   if (index < 0 || index >= sizes.length - 1) return
+  const left = Math.max(MIN_COLUMN_WIDTH, Math.round(desiredLeftWidth))
   const combined = sizes[index] + sizes[index + 1]
-  const freeWidth = rightZoneWidth.value - COLUMN_GAP * (sizes.length + 1)
-  const minRatio = freeWidth > 0 ? MIN_COLUMN_WIDTH / freeWidth : 0.1
-  const minLeft = minRatio
-  const maxLeft = combined - minRatio
-  if (minLeft >= maxLeft) return
-  const clamped = Math.max(minLeft, Math.min(maxLeft, leftRatio))
-  sizes[index] = clamped
-  sizes[index + 1] = combined - clamped
+  const rightFromZeroSum = combined - left
+  if (rightFromZeroSum >= MIN_COLUMN_WIDTH) {
+    sizes[index] = left
+    sizes[index + 1] = rightFromZeroSum
+  } else {
+    sizes[index] = left
+    sizes[index + 1] = MIN_COLUMN_WIDTH
+  }
 }
 
 /** 会话离开工作台后,若不再被任何 tab 持有则关闭进程(断 Remote Control) */
@@ -580,6 +611,7 @@ export function useWorkbench() {
     createRaceTab,
     addRaceLane,
     removeRaceLane,
+    resetRaceLanes,
     findLane,
     renameTab,
     closeTab,
@@ -591,7 +623,6 @@ export function useWorkbench() {
     draftCwd,
     pruneDrafts,
     expandSession,
-    enforceColumnCapacity,
     collapseColumn,
     removeSession,
     moveSessionToTab,

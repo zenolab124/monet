@@ -15,14 +15,13 @@ const {
   expandSession,
   reorderColumns,
   focusColumnRequest,
-  enforceColumnCapacity,
   createRaceTab,
   draftCwd,
   state,
 } = useWorkbench()
 const { t } = useI18n()
 const { projects } = useProjects()
-const { notifyTransient, sessionTitle } = useNotifications()
+const { notifyTransient } = useNotifications()
 
 function resolveSessionCwd(sessionId: string): string | undefined {
   for (const p of projects.value) {
@@ -60,31 +59,25 @@ const containerRef = ref<HTMLElement>()
 const { isDropTarget } = useDroppable({ id: computed(() => 'col-zone:' + activeTab.value.id), element: containerRef })
 const dragging = ref(false)
 
-// 右区实测宽度回写状态层:动态列上限(每列 ≥ MIN_COLUMN_WIDTH)依赖它。
-// 窗口缩小导致超员时自动收列(300ms 防抖:拖拽调窗过程中不连环触发)
 let zoneResizeObserver: ResizeObserver | null = null
-let capacityTimer: number | null = null
 
-function scheduleCapacityCheck() {
-  if (capacityTimer !== null) clearTimeout(capacityTimer)
-  capacityTimer = window.setTimeout(() => {
-    capacityTimer = null
-    const collapsed = enforceColumnCapacity()
-    if (collapsed.length > 0) {
-      notifyTransient(t('workbench.columns.noSpace', { names: collapsed.map(sessionTitle).join('、') }))
-    }
-  }, 300)
+function onWheelCapture(e: WheelEvent) {
+  const el = containerRef.value
+  if (!el || el.scrollWidth <= el.clientWidth) return
+  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+  e.preventDefault()
+  el.scrollLeft += e.deltaX
 }
 
 onMounted(() => {
   const el = containerRef.value
   if (!el) return
   setRightZoneWidth(el.clientWidth)
+  el.addEventListener('wheel', onWheelCapture, { capture: true, passive: false })
   zoneResizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (entry.contentRect.width > 0) {
         setRightZoneWidth(entry.contentRect.width)
-        scheduleCapacityCheck()
       }
     }
   })
@@ -92,29 +85,23 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  containerRef.value?.removeEventListener('wheel', onWheelCapture, { capture: true } as EventListenerOptions)
   zoneResizeObserver?.disconnect()
   zoneResizeObserver = null
-  if (capacityTimer !== null) clearTimeout(capacityTimer)
 })
 
-const PAD = 10
-const GAP = 10
-
-/** 拖动第 index 条分隔线(作用于当前 tab 的 columnSizes) */
+/** 拖动第 index 条分隔线:像素级调整左列宽度 */
 function onDividerMouseDown(e: MouseEvent, index: number) {
   e.preventDefault()
   dragging.value = true
-  const rect = containerRef.value?.getBoundingClientRect()
-  if (!rect) return
 
   const tab = activeTab.value
-  const freeWidth = rect.width - PAD * 2 - GAP * (tab.columns.length - 1)
-  const prefix = tab.columnSizes.slice(0, index).reduce((s, v) => s + v, 0)
-  const prefixLeft = prefix * freeWidth + PAD + GAP * index
+  const startX = e.clientX
+  const startWidth = tab.columnSizes[index]
 
   const onMouseMove = (ev: MouseEvent) => {
-    const leftPx = ev.clientX - rect.left - prefixLeft
-    updateColumnSize(tab.id, index, leftPx / freeWidth)
+    const delta = ev.clientX - startX
+    updateColumnSize(tab.id, index, startWidth + delta)
   }
   const onMouseUp = () => {
     dragging.value = false
@@ -134,7 +121,7 @@ watch(focusColumnRequest, async (req) => {
   const idx = activeTab.value.columns.findIndex(c => c.sessionId === req.sessionId)
   if (idx < 0) return
   await nextTick()
-  const colEl = containerRef.value?.querySelectorAll('.wb-col')[idx] as HTMLElement | undefined
+  const colEl = containerRef.value?.querySelectorAll('.sortable-col')[idx] as HTMLElement | undefined
   colEl?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
   flashIndex.value = idx
   window.setTimeout(() => {
@@ -146,7 +133,7 @@ watch(focusColumnRequest, async (req) => {
 <template>
   <div
     ref="containerRef"
-    class="flex-1 min-w-0 h-full flex flex-row p-2.5 gap-2.5"
+    class="flex-1 min-w-0 h-full flex flex-row p-2.5 gap-2.5 overflow-x-auto"
     :class="{ 'drop-target-highlight': isDropTarget }"
   >
     <!-- 空态(FR-004) -->
