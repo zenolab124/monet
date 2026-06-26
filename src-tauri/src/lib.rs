@@ -11,6 +11,7 @@ mod permission;
 /// pub：schema-probe bin 复用扫描与 diff 核心
 pub mod probe;
 mod streaming;
+mod menu;
 mod tray;
 pub mod usage_stats;
 mod watcher;
@@ -38,6 +39,8 @@ pub fn run() {
             }
             ws.build()
         })
+        .menu(|app| menu::create(app))
+        .on_menu_event(|app, event| menu::handle_event(app, &event))
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -66,13 +69,21 @@ pub fn run() {
             // Widget LaunchAgent 自动安装
             widget::ensure_launch_agent();
 
-            // 应用退出时 SIGTERM 所有长活会话进程
+            // 窗口事件拦截：红色关闭按钮→隐藏到托盘；Destroyed→清理
             let handle = app.handle().clone();
             if let Some(window) = handle.get_webview_window("main") {
+                let w = window.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Destroyed = event {
-                        streaming::close_all_sessions();
-                        agent::shutdown();
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            api.prevent_close();
+                            let _ = w.hide();
+                        }
+                        tauri::WindowEvent::Destroyed => {
+                            streaming::close_all_sessions();
+                            agent::shutdown();
+                        }
+                        _ => {}
                     }
                 });
             }
@@ -150,6 +161,8 @@ pub fn run() {
             widget::set_widget_config,
             dashboard::list_dashboard_widgets,
             dashboard::delete_dashboard_widget,
+            menu::hide_main_window,
+            menu::quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

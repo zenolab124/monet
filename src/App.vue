@@ -19,6 +19,7 @@ import { initPermissionListener } from '@/composables/usePermissionRequests'
 import { initStreamListeners } from '@/composables/useStreaming'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
 import { useRoutines } from '@/composables/useRoutines'
+import { initShortcuts } from '@/composables/useShortcuts'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
 import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 
@@ -136,6 +137,7 @@ onMounted(async () => {
   await initStreamListeners()
   await initPermissionListener()
   await initNotificationLayer()
+  await initShortcuts()
   await useRoutines().initRoutineListener()
   // 档案馆预加载:v-show 保活但数据要提前拉，首次切换零等待
   loadProjects()

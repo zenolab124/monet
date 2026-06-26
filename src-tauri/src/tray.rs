@@ -5,6 +5,8 @@ use tauri::{
     AppHandle, Manager,
 };
 
+use crate::{agent, streaming};
+
 /// 初始化系统托盘图标
 pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItemBuilder::new("打开 CC Space").id("show").build(app)?;
@@ -26,6 +28,8 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
+                streaming::close_all_sessions();
+                agent::shutdown();
                 app.exit(0);
             }
             _ => {}
