@@ -288,7 +288,8 @@
       "schedule": "时间计划",
       "command": "指令",
       "status": "状态",
-      "lastRun": "上次执行"
+      "lastRun": "上次执行",
+      "actions": "操作"
     },
     "pause": "暂停",
     "enable": "启用",
@@ -309,6 +310,14 @@
       "nameRequired": "名称不能为空",
       "cronRequired": "Cron 表达式不能为空（请输入时间计划并点击 AI 识别）",
       "promptRequired": "指令不能为空"
+    },
+    "logs": {
+      "title": "执行日志 · {name}",
+      "noLogs": "暂无执行记录",
+      "duration": "耗时 {duration}",
+      "exitCode": "退出码 {code}",
+      "stderr": "错误输出",
+      "running": "运行中…"
     }
   },
   "home": {

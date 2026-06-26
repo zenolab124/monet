@@ -288,7 +288,8 @@
       "schedule": "Schedule",
       "command": "Command",
       "status": "Status",
-      "lastRun": "Last Run"
+      "lastRun": "Last Run",
+      "actions": "Actions"
     },
     "pause": "Pause",
     "enable": "Enable",
@@ -309,6 +310,14 @@
       "nameRequired": "Name is required",
       "cronRequired": "Cron expression is required (enter a schedule and click AI Parse)",
       "promptRequired": "Prompt is required"
+    },
+    "logs": {
+      "title": "Logs · {name}",
+      "noLogs": "No execution records",
+      "duration": "Duration {duration}",
+      "exitCode": "Exit code {code}",
+      "stderr": "Stderr",
+      "running": "Running…"
     }
   },
   "home": {

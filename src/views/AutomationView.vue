@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
 import { useAutomation, buildRows } from '@/composables/useAutomation'
-import { useRoutines, type RoutineDefinition, type RoutineRow } from '@/composables/useRoutines'
+import { useRoutines, type RoutineDefinition, type RoutineRow, type RoutineExecutionLog } from '@/composables/useRoutines'
+import { renderMarkdownCached } from '@/composables/useMarkdown'
 import RoutineForm from '@/components/automation/RoutineForm.vue'
 
 const { t } = useI18n()
@@ -23,6 +24,7 @@ const {
   deleteRoutine,
   updateRoutine,
   runNow,
+  getRoutineLogs,
 } = useRoutines()
 
 // 首次进入自动化域加载数据
@@ -109,6 +111,54 @@ async function onRunNow(r: RoutineRow) {
   } catch {
     // 已在运行中，忽略
   }
+}
+
+// --- 日志弹窗 ---
+const logPopup = ref<{ routine: RoutineRow; logs: RoutineExecutionLog[]; selected: number; loading: boolean } | null>(null)
+
+async function openLogs(r: RoutineRow) {
+  logPopup.value = { routine: r, logs: [], selected: 0, loading: true }
+  try {
+    const logs = await getRoutineLogs(r.id, 20)
+    if (logPopup.value?.routine.id === r.id) {
+      logPopup.value.logs = logs
+      logPopup.value.loading = false
+    }
+  } catch {
+    if (logPopup.value?.routine.id === r.id) {
+      logPopup.value.loading = false
+    }
+  }
+}
+
+function selectLog(idx: number) {
+  if (logPopup.value) logPopup.value.selected = idx
+}
+
+function formatDuration(start: string, end: string | null): string {
+  if (!end) return ''
+  const ms = new Date(end).getTime() - new Date(start).getTime()
+  if (ms < 1000) return `${ms}ms`
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return `${m}m${s % 60}s`
+}
+
+function formatLogTime(ts: string): string {
+  try {
+    const d = new Date(ts)
+    return d.toLocaleString('zh-CN', {
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+  } catch {
+    return ts
+  }
+}
+
+function renderLogContent(log: RoutineExecutionLog): string {
+  return renderMarkdownCached(log.stdout || '')
 }
 </script>
 
@@ -277,15 +327,15 @@ async function onRunNow(r: RoutineRow) {
 
         <!-- 表格 -->
         <div v-if="routineRows.length" class="auto-table-wrap">
-          <table class="auto-table">
+          <table class="auto-table routine-table">
             <thead>
               <tr>
-                <th class="w-[15%]">{{ $t('automation.routineColumns.name') }}</th>
-                <th class="w-[25%]">{{ $t('automation.routineColumns.schedule') }}</th>
+                <th>{{ $t('automation.routineColumns.name') }}</th>
+                <th>{{ $t('automation.routineColumns.schedule') }}</th>
                 <th>{{ $t('automation.routineColumns.command') }}</th>
-                <th class="w-[52px]">{{ $t('automation.routineColumns.status') }}</th>
-                <th class="w-[88px]">{{ $t('automation.routineColumns.lastRun') }}</th>
-                <th class="w-[100px]"></th>
+                <th>{{ $t('automation.routineColumns.status') }}</th>
+                <th>{{ $t('automation.routineColumns.lastRun') }}</th>
+                <th>{{ $t('automation.routineColumns.actions') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -293,7 +343,7 @@ async function onRunNow(r: RoutineRow) {
                 <td class="text-xs font-medium">{{ r.name }}</td>
                 <td>
                   <code class="text-[11px]">{{ r.cronExpression }}</code>
-                  <div v-if="r.originalText" v-tooltip="r.originalText" class="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[200px]">{{ r.originalText }}</div>
+                  <div v-if="r.originalText" v-tooltip="r.originalText" class="text-[10px] text-muted-foreground mt-0.5 truncate">{{ r.originalText }}</div>
                 </td>
                 <td>
                   <span class="truncate-cmd cursor-pointer" @click="detailPopup = { title: r.name, content: r.prompt }">{{ r.prompt }}</span>
@@ -313,28 +363,20 @@ async function onRunNow(r: RoutineRow) {
                   </template>
                 </td>
                 <td>
-                  <div class="flex items-center gap-0.5">
-                    <button
-                      class="icon-btn icon-btn-sm" v-tooltip="r.enabled ? $t('automation.pause') : $t('automation.enable')"
-                      @click="onToggleRoutine(r)"
-                    >
+                  <div class="routine-actions">
+                    <button class="icon-btn icon-btn-sm" v-tooltip="r.enabled ? $t('automation.pause') : $t('automation.enable')" @click="onToggleRoutine(r)">
                       <span class="w-3 h-3 block" :class="r.enabled ? 'i-carbon-pause' : 'i-carbon-play'" />
                     </button>
                     <button class="icon-btn icon-btn-sm" v-tooltip="$t('common.edit')" @click="showRoutineForm = r">
                       <span class="i-carbon-edit w-3 h-3 block" />
                     </button>
-                    <button
-                      class="icon-btn icon-btn-sm" v-tooltip="$t('automation.runNow')"
-                      :disabled="r.isRunning"
-                      @click="onRunNow(r)"
-                    >
+                    <button class="icon-btn icon-btn-sm" v-tooltip="$t('automation.runNow')" :disabled="r.isRunning" @click="onRunNow(r)">
                       <span class="i-carbon-flash w-3 h-3 block" />
                     </button>
-                    <button
-                      class="icon-btn icon-btn-sm" v-tooltip="$t('common.delete')"
-                      :disabled="deletingId === r.id"
-                      @click="onDeleteRoutine(r)"
-                    >
+                    <button class="icon-btn icon-btn-sm" v-tooltip="$t('automation.routineColumns.lastRun')" @click="openLogs(r)">
+                      <span class="i-carbon-report w-3 h-3 block" />
+                    </button>
+                    <button class="icon-btn icon-btn-sm" v-tooltip="$t('common.delete')" :disabled="deletingId === r.id" @click="onDeleteRoutine(r)">
                       <span class="i-carbon-trash-can w-3 h-3 block" />
                     </button>
                   </div>
@@ -373,6 +415,76 @@ async function onRunNow(r: RoutineRow) {
           </button>
         </div>
         <pre class="text-xs text-foreground whitespace-pre-wrap break-all leading-relaxed">{{ detailPopup.content }}</pre>
+      </div>
+    </div>
+
+    <!-- 日志弹窗 -->
+    <div
+      v-if="logPopup"
+      class="fixed inset-0 z-70 grid place-items-center"
+      style="background: rgba(70, 45, 20, 0.18)"
+      @mousedown.self="logPopup = null"
+    >
+      <div class="log-popup">
+        <!-- 标题栏 -->
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-border">
+          <span class="text-xs font-semibold">{{ $t('automation.logs.title', { name: logPopup.routine.name }) }}</span>
+          <button class="icon-btn icon-btn-sm" @click="logPopup = null">
+            <span class="i-carbon-close w-3.5 h-3.5 block" />
+          </button>
+        </div>
+
+        <!-- 加载中 -->
+        <div v-if="logPopup.loading" class="py-12 text-center text-xs text-muted-foreground">
+          {{ $t('common.loading') }}
+        </div>
+
+        <!-- 空态 -->
+        <div v-else-if="!logPopup.logs.length" class="py-12 text-center text-xs text-muted-foreground">
+          {{ $t('automation.logs.noLogs') }}
+        </div>
+
+        <!-- 左右分栏 -->
+        <div v-else class="log-body">
+          <!-- 左侧：执行列表 -->
+          <div class="log-list">
+            <button
+              v-for="(log, i) in logPopup.logs" :key="i"
+              :class="['log-list-item', { active: logPopup.selected === i }]"
+              @click="selectLog(i)"
+            >
+              <span class="log-status" :class="log.exitCode === 0 ? 'success' : log.exitCode == null ? 'running' : 'failed'" />
+              <span class="text-xs">{{ formatLogTime(log.startedAt) }}</span>
+              <span v-if="log.finishedAt" class="text-[10px] text-muted-foreground ml-auto">{{ formatDuration(log.startedAt, log.finishedAt) }}</span>
+              <span v-else class="text-[10px] text-accent ml-auto">{{ $t('automation.logs.running') }}</span>
+            </button>
+          </div>
+
+          <!-- 右侧：日志内容 -->
+          <div class="log-content">
+            <template v-if="logPopup.logs[logPopup.selected]">
+              <!-- 元信息条 -->
+              <div class="log-meta">
+                <span>{{ formatLogTime(logPopup.logs[logPopup.selected].startedAt) }}</span>
+                <span v-if="logPopup.logs[logPopup.selected].finishedAt">
+                  {{ $t('automation.logs.duration', { duration: formatDuration(logPopup.logs[logPopup.selected].startedAt, logPopup.logs[logPopup.selected].finishedAt) }) }}
+                </span>
+                <span v-if="logPopup.logs[logPopup.selected].exitCode != null" :class="logPopup.logs[logPopup.selected].exitCode === 0 ? 'text-success' : 'text-destructive'">
+                  {{ $t('automation.logs.exitCode', { code: logPopup.logs[logPopup.selected].exitCode }) }}
+                </span>
+              </div>
+
+              <!-- stdout (Markdown) -->
+              <div class="log-md prose prose-sm" v-html="renderLogContent(logPopup.logs[logPopup.selected])" />
+
+              <!-- stderr -->
+              <div v-if="logPopup.logs[logPopup.selected].stderr" class="mt-3">
+                <div class="text-[10px] font-medium text-destructive mb-1">{{ $t('automation.logs.stderr') }}</div>
+                <pre class="log-stderr">{{ logPopup.logs[logPopup.selected].stderr }}</pre>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -480,9 +592,45 @@ async function onRunNow(r: RoutineRow) {
   vertical-align: middle;
 }
 
+.routine-table {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) minmax(72px, 1fr) minmax(0, 3fr) auto auto auto;
+  min-width: 0;
+}
+
+.routine-table thead,
+.routine-table tbody {
+  display: contents;
+}
+
+.routine-table tr {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+}
+
+.routine-table td:nth-child(3) {
+  overflow: hidden;
+}
+
+.routine-table td:nth-child(4),
+.routine-table td:nth-child(5),
+.routine-table td:last-child {
+  white-space: nowrap;
+}
+
+.routine-table td:last-child {
+  padding: 6px 4px;
+}
+
+.routine-actions {
+  display: flex;
+  gap: 2px;
+}
+
 .truncate-cmd {
   display: block;
-  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -546,5 +694,133 @@ async function onRunNow(r: RoutineRow) {
   border: 1px solid var(--border);
   background: var(--popover);
   box-shadow: var(--shadow-paper-lifted, 0 4px 16px rgba(0,0,0,0.12));
+}
+
+/* 日志弹窗 */
+.log-popup {
+  width: 780px;
+  max-width: 92vw;
+  height: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-paper-lifted, 0 4px 16px rgba(0,0,0,0.12));
+}
+
+.log-body {
+  flex: 1;
+  display: flex;
+  gap: 1px;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.log-list {
+  width: 180px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--muted);
+  padding: 4px;
+}
+
+.log-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  text-align: left;
+}
+
+.log-list-item:hover {
+  background: var(--background);
+}
+
+.log-list-item.active {
+  background: var(--card);
+  box-shadow: var(--shadow-paper);
+}
+
+.log-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.log-status.success { background: var(--success, #2d7d3a); }
+.log-status.failed { background: var(--destructive); }
+.log-status.running { background: var(--accent); animation: pulse 1.5s infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.log-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+  background: var(--card);
+}
+
+.log-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.log-md {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+.log-md :deep(table) {
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 8px 0;
+}
+.log-md :deep(th),
+.log-md :deep(td) {
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+}
+.log-md :deep(th) {
+  background: var(--muted);
+  font-weight: 500;
+}
+.log-md :deep(p) {
+  margin: 4px 0;
+}
+.log-md :deep(strong) {
+  font-weight: 600;
+}
+
+.log-stderr {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--destructive);
+  background: var(--muted);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
 }
 </style>
