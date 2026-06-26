@@ -41,9 +41,11 @@ import PermissionCard from './PermissionCard.vue'
 import QuestionCard from './QuestionCard.vue'
 import PlanApprovalCard from './PlanApprovalCard.vue'
 import MsgClamp from './MsgClamp.vue'
+import UserMsgContent from './UserMsgContent.vue'
 import { useImageInput } from '@/composables/useImageInput'
 import { useHtmlVisual, HTML_VISUAL_PROMPT } from '@/features'
 import SessionBanner from './SessionBanner.vue'
+import SessionAnchorNav, { type AnchorItem } from './SessionAnchorNav.vue'
 import {
   usePermissionRequests,
   currentForSession,
@@ -441,6 +443,19 @@ const lastAssistantContextSize = computed<number>(() => {
   return u.input_tokens + u.cache_read_input_tokens
 })
 
+const pendingUserBlocks = computed<ContentBlock[]>(() => {
+  const blocks: ContentBlock[] = []
+  if (stream.value.pendingImages?.length) {
+    for (const img of stream.value.pendingImages) {
+      blocks.push({ type: 'image', source: img.source } as ContentBlock)
+    }
+  }
+  if (stream.value.pendingUserMessage) {
+    blocks.push({ type: 'text', text: stream.value.pendingUserMessage })
+  }
+  return blocks
+})
+
 /** 流式区当前渲染的 message id 集合(用于历史区过滤,避免与流式区重复显示) */
 const streamingMessageIds = computed(() =>
   new Set(stream.value.streamingTurns.map(t => t.messageId)),
@@ -453,7 +468,7 @@ const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
  *  从后向前扫描所有 user record 做文本匹配，跳过纯 tool_result 的中间记录，
  *  找到文本一致的那条返回其 uuid。 */
 const pendingUserUuid = computed(() => {
-  if (!stream.value.pendingUserMessage || !stream.value.streamingTurns.length) return null
+  if (!stream.value.pendingUserMessage) return null
   const pendingText = stream.value.pendingUserMessage
   for (let i = records.value.length - 1; i >= 0; i--) {
     const r = records.value[i]
@@ -535,6 +550,34 @@ const messageGroups = computed(() => {
   }
   if (cur.user || cur.responses.length) groups.push(cur)
   return groups.map(g => ({ ...g, responses: mergeResponses(g.responses) }))
+})
+
+function userTextPreview(record: VisibleRecord): string {
+  if (record.type !== 'user' || !record.message) return ''
+  const content = record.message.content
+  if (typeof content === 'string') return content.slice(0, 120)
+  const texts: string[] = []
+  for (const b of content) {
+    if (b.type === 'text' && (b as any).text) {
+      const raw = (b as any).text as string
+      const clean = raw.replace(/<[^>]+>/g, '').trim()
+      if (clean) texts.push(clean)
+    }
+  }
+  return texts.join(' ').slice(0, 120)
+}
+
+const anchorItems = computed<AnchorItem[]>(() => {
+  const items: AnchorItem[] = []
+  for (let i = 0; i < messageGroups.value.length; i++) {
+    const g = messageGroups.value[i]
+    if (!g.user || g.user.type !== 'user') continue
+    if (isSystemOnlyUser(g.user)) continue
+    const text = userTextPreview(g.user)
+    if (!text) continue
+    items.push({ index: i, text })
+  }
+  return items
 })
 
 /** 解析私有标签,转为特殊渲染块 */
@@ -878,6 +921,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (effectiveSessionId.value !== sid) return
     console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     if (newRecords) records.value = newRecords
+    clearStreamingTurns(sid)
     if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)
   }
 })
@@ -1090,10 +1134,14 @@ async function onReload() {
     </div>
 
     <!-- 对话消息流 -->
+    <div v-else class="flex-1 min-h-0 relative">
+    <SessionAnchorNav
+      :anchors="anchorItems"
+      :scroll-container="scrollContainer"
+    />
     <div
-      v-else
       ref="scrollContainer"
-      class="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain relative"
+      class="h-full overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain relative"
       @wheel.passive="onScrollWheel"
       @scroll.passive="onScroll"
     >
@@ -1113,6 +1161,7 @@ async function onReload() {
         <div
           v-for="(group, gi) in messageGroups"
           :key="group.user?.uuid || `group-${gi}`"
+          :data-anchor-index="gi"
           class="space-y-4"
         >
           <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
@@ -1131,11 +1180,7 @@ async function onReload() {
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
                 <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
                 <MsgClamp>
-                  <MessageBlock
-                    v-for="(block, bi) in contentBlocks(group.user as any)"
-                    :key="bi"
-                    :block="block"
-                  />
+                  <UserMsgContent :blocks="contentBlocks(group.user as any)" />
                 </MsgClamp>
               </div>
             </div>
@@ -1224,15 +1269,7 @@ async function onReload() {
             <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
               <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
               <MsgClamp>
-                <div v-if="stream.pendingImages?.length" class="flex gap-2 flex-wrap mb-1">
-                  <img
-                    v-for="(img, ii) in stream.pendingImages"
-                    :key="ii"
-                    :src="`data:${img.source.media_type};base64,${img.source.data}`"
-                    class="max-w-60 max-h-40 rounded border border-border object-contain"
-                  />
-                </div>
-                <div v-if="stream.pendingUserMessage" class="whitespace-pre-wrap break-words text-sm">{{ stream.pendingUserMessage }}</div>
+                <UserMsgContent :blocks="pendingUserBlocks" />
               </MsgClamp>
             </div>
           </div>
@@ -1290,6 +1327,7 @@ async function onReload() {
           {{ $t('session.backToBottom') }}
         </button>
       </div>
+    </div>
     </div>
 
     <!-- 工作台列:权限/提问/计划卡片(固定在输入栏上方,按工具分发) -->
