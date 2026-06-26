@@ -57,3 +57,7 @@ tauri-plugin-dialog = "2.7.1"
 [[bin]]
 name = "cc-space-routine-runner"
 path = "src/bin/cc_space_routine_runner.rs"
+
+[[bin]]
+name = "widget-updater"
+path = "src/bin/widget_updater.rs"

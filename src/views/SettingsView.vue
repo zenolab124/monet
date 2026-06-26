@@ -98,6 +98,18 @@ const editing = ref<'new' | ChannelInfo | null>(null)
 const { appDefaults, setDefaultEffort } = useAppDefaults()
 const rcEnabled = ref(true)
 const wakePolicy = ref('passive')
+const widgetDayStart = ref(0)
+
+async function loadWidgetConfig() {
+  try {
+    const cfg = await invoke<{ dayStartHour: number }>('get_widget_config')
+    widgetDayStart.value = cfg.dayStartHour
+  } catch {}
+}
+async function setWidgetDayStart(hour: number) {
+  widgetDayStart.value = hour
+  await invoke('set_widget_config', { dayStartHour: hour }).catch(() => {})
+}
 
 async function loadWakePolicy() {
   try {
@@ -119,7 +131,7 @@ const advisorModel = ref('claude-fable-5')
 const hideCreditsModels = ref(false)
 const autoDetectModels = ref(false)
 
-onMounted(() => { refreshChannels(); loadAgentToggles(); loadWakePolicy() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadWakePolicy(); loadWidgetConfig() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -395,6 +407,19 @@ function onSaved() {
                 <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground ml-5">{{ $t('settings.routineWakeActiveSub') }}</span>
               </div>
               <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
+            </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
+              <select
+                :value="widgetDayStart"
+                class="form-select w-full"
+                @change="setWidgetDayStart(Number(($event.target as HTMLSelectElement).value))"
+              >
+                <option :value="0">{{ $t('settings.widgetMidnight') }}</option>
+                <option :value="5">{{ $t('settings.widgetFiveAm') }}</option>
+                <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
             </div>
           </div>
         </section>

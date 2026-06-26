@@ -1,0 +1,7 @@
+"widget.title" = "CC Space";
+"widget.today" = "今天";
+"widget.sessions" = "会话";
+"widget.tokens" = "tokens";
+"widget.empty" = "打开 CC Space";
+"widget.displayName" = "今日总结";
+"widget.description" = "一览今日 Claude Code 使用情况";

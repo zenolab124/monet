@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.ccspace.widget-updater</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Applications/CC Space.app/Contents/MacOS/widget-updater</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/tmp/cc-space-widget-updater.log</string>
+</dict>
+</plist>

@@ -63,6 +63,8 @@ pub fn run() {
             routines::startup_sync();
             // 后台刷新 CLI settings schema
             cli_settings::refresh_settings_schema();
+            // Widget LaunchAgent 自动安装
+            widget::ensure_launch_agent();
 
             // 应用退出时 SIGTERM 所有长活会话进程
             let handle = app.handle().clone();
@@ -144,6 +146,8 @@ pub fn run() {
             translate::list_external_locales,
             translate::delete_external_locale,
             widget::update_widget,
+            widget::get_widget_config,
+            widget::set_widget_config,
             dashboard::list_dashboard_widgets,
             dashboard::delete_dashboard_widget,
         ])

@@ -57,23 +57,38 @@ watch(
 
 watch(
   [usage, projects],
-  ([u, p]) => {
+  async ([u, p]) => {
     if (!u || !p.length) return
+    const cfg = await invoke<{ dayStartHour: number }>('get_widget_config').catch(() => ({ dayStartHour: 0 }))
     const now = new Date()
-    const todayDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    const todayTokens = u.daily.find(d => d.date === todayDate)?.total ?? 0
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000
+    let startTs: number
+    let dateKey: string
+    if (cfg.dayStartHour < 0) {
+      startTs = (now.getTime() - 86400000) / 1000
+      dateKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    } else {
+      const h = cfg.dayStartHour
+      const boundary = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h)
+      if (now.getTime() < boundary.getTime()) boundary.setDate(boundary.getDate() - 1)
+      startTs = boundary.getTime() / 1000
+      dateKey = `${boundary.getFullYear()}-${String(boundary.getMonth() + 1).padStart(2, '0')}-${String(boundary.getDate()).padStart(2, '0')}`
+    }
+    let todayTokens = 0
+    if (cfg.dayStartHour < 0) {
+      const yesterday = new Date(now.getTime() - 86400000)
+      const yd = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
+      todayTokens = (u.daily.find(d => d.date === dateKey)?.total ?? 0) + (u.daily.find(d => d.date === yd)?.total ?? 0)
+    } else {
+      todayTokens = u.daily.find(d => d.date === dateKey)?.total ?? 0
+    }
     let sessions = 0
-    const models = new Set<string>()
     for (const proj of p) {
       for (const s of proj.sessions) {
-        if (s.last_modified >= startOfDay) {
-          sessions++
-          if (s.model) models.add(s.model.replace(/^claude-/, ''))
-        }
+        if (s.last_modified >= startTs) sessions++
       }
     }
-    invoke('update_widget', { todaySessions: sessions, todayTokens: todayTokens, models: [...models] }).catch(() => {})
+    const models = u.month.byModel.map(m => m.model)
+    invoke('update_widget', { todaySessions: sessions, todayTokens: todayTokens, models }).catch(() => {})
   },
 )
 

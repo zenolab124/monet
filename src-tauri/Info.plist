@@ -15,5 +15,17 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>CC Space</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ccspace</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

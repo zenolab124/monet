@@ -11,3 +11,7 @@ src-tauri/target/
 CLAUDE.md
 docs/
 .playwright-mcp/
+
+# Widget Extension build artifacts
+src-widget/build/
+src-widget/CCSpaceWidget.xcodeproj/

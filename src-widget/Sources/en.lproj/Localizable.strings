@@ -1,0 +1,7 @@
+"widget.title" = "CC Space";
+"widget.today" = "Today";
+"widget.sessions" = "sessions";
+"widget.tokens" = "tokens";
+"widget.empty" = "Open CC Space";
+"widget.displayName" = "Today's Summary";
+"widget.description" = "Today's Claude Code usage at a glance";
