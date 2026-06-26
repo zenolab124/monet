@@ -427,6 +427,19 @@ mod platform {
     // Wake schedule (pmset)
     // -----------------------------------------------------------------------
 
+    fn wake_cache_path() -> PathBuf {
+        config::data_dir().join("wake_cache.json")
+    }
+
+    fn read_wake_cache() -> Option<Vec<(u32, u32)>> {
+        let data = std::fs::read_to_string(wake_cache_path()).ok()?;
+        serde_json::from_str(&data).ok()
+    }
+
+    fn write_wake_cache(times: &[(u32, u32)]) {
+        let _ = std::fs::write(wake_cache_path(), serde_json::to_string(times).unwrap_or_default());
+    }
+
     pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) {
         if policy != "active" {
             cancel_wake();
@@ -439,7 +452,7 @@ mod platform {
             return;
         }
 
-        if is_wake_current(&wake_times) {
+        if read_wake_cache().as_deref() == Some(wake_times.as_slice()) {
             return;
         }
 
@@ -460,6 +473,7 @@ mod platform {
         match output {
             Ok(o) if o.status.success() => {
                 log::info!("wake schedule set: {:?}", wake_times);
+                write_wake_cache(&wake_times);
             }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);
@@ -472,14 +486,7 @@ mod platform {
     }
 
     fn cancel_wake() {
-        let current = Command::new("pmset")
-            .args(["-g", "sched"])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_default();
-
-        if !current.contains("Repeating") {
+        if read_wake_cache().map_or(true, |c| c.is_empty()) {
             return;
         }
 
@@ -487,6 +494,7 @@ mod platform {
             .arg("-e")
             .arg("do shell script \"pmset repeat cancel\" with administrator privileges")
             .output();
+        write_wake_cache(&[]);
     }
 
     fn compute_wake_times(routines: &[RoutineDefinition]) -> Vec<(u32, u32)> {
@@ -522,17 +530,6 @@ mod platform {
         wake
     }
 
-    fn is_wake_current(expected: &[(u32, u32)]) -> bool {
-        let output = Command::new("pmset")
-            .args(["-g", "sched"])
-            .output();
-        let Ok(output) = output else { return false };
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        expected
-            .iter()
-            .all(|(h, m)| stdout.contains(&format!("{:02}:{:02}:00", h, m)))
-    }
 
     use chrono::Timelike;
     use chrono::Datelike;
