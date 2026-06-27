@@ -153,9 +153,8 @@ watch(focusColumnRequest, async (req) => {
     >
       <template #default="{ isDragging: colDragging, handleRef }">
         <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" @start-race="onStartRace(col.sessionId)" />
-        <!-- 列间 resize 手柄（绝对定位在右边界，不参与 flex 布局） -->
+        <!-- 列右边缘 resize 手柄（绝对定位，不参与 flex 布局） -->
         <div
-          v-if="i < activeTab.columns.length - 1"
           class="absolute top-0 bottom-0 -right-[7px] w-[14px] cursor-col-resize z-20"
           @pointerdown.stop
           @mousedown="onDividerMouseDown($event, i)"

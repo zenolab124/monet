@@ -508,37 +508,52 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
   return { collapsedSessionIds: [], focusedExisting: false }
 }
 
-/** 收起列回左列(仍激活,「收起非退出」),释放的空间分给相邻列 */
+/**
+ * 移除列并智能回收宽度:
+ * - 溢出态(有滚动):直接丢弃宽度,总宽减少;若丢弃后能 fit 则按比例填满
+ * - 非溢出态:邻居吃掉宽度,保持填满容器
+ */
+function reclaimColumnWidth(tab: WorkbenchTab, removedIndex: number) {
+  const freed = tab.columnSizes[removedIndex]
+  const totalBefore = tab.columnSizes.reduce((s, w) => s + w, 0)
+  const freeBefore = containerFreeWidth(tab.columns.length)
+  const wasOverflowing = totalBefore > freeBefore
+
+  tab.columns.splice(removedIndex, 1)
+  tab.columnSizes.splice(removedIndex, 1)
+
+  if (tab.columnSizes.length === 0) return
+
+  if (wasOverflowing) {
+    const newTotal = totalBefore - freed
+    const newFree = containerFreeWidth(tab.columnSizes.length)
+    if (newTotal < newFree) {
+      const scale = newFree / newTotal
+      tab.columnSizes = tab.columnSizes.map(w => Math.max(MIN_COLUMN_WIDTH, Math.round(w * scale)))
+    }
+  } else {
+    const neighbor = Math.min(removedIndex, tab.columnSizes.length - 1)
+    tab.columnSizes[neighbor] += freed
+  }
+}
+
+/** 收起列回左列(仍激活,「收起非退出」) */
 function collapseColumn(tabId: string, sessionId: string) {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab) return
   const idx = tab.columns.findIndex(c => c.sessionId === sessionId)
   if (idx < 0) return
-  const freed = tab.columnSizes[idx]
-  tab.columns.splice(idx, 1)
-  tab.columnSizes.splice(idx, 1)
-  if (tab.columnSizes.length > 0) {
-    const neighbor = Math.min(idx, tab.columnSizes.length - 1)
-    tab.columnSizes[neighbor] += freed
-  }
+  reclaimColumnWidth(tab, idx)
 }
 
-/** 退出工作台(左列 × / 列头 ×):从归属 tab 移除,展开列一并收回,释放空间分给相邻列 */
+/** 退出工作台(左列 × / 列头 ×):从归属 tab 移除,展开列一并收回 */
 function removeSession(sessionId: string) {
   for (const tab of state.value.tabs) {
     const i = tab.sessionIds.indexOf(sessionId)
     if (i >= 0) {
       tab.sessionIds.splice(i, 1)
       const ci = tab.columns.findIndex(c => c.sessionId === sessionId)
-      if (ci >= 0) {
-        const freed = tab.columnSizes[ci]
-        tab.columns.splice(ci, 1)
-        tab.columnSizes.splice(ci, 1)
-        if (tab.columnSizes.length > 0) {
-          const neighbor = Math.min(ci, tab.columnSizes.length - 1)
-          tab.columnSizes[neighbor] += freed
-        }
-      }
+      if (ci >= 0) reclaimColumnWidth(tab, ci)
     }
   }
   teardownSession(sessionId)
@@ -572,14 +587,19 @@ function reorderColumns(tabId: string, fromIndex: number, toIndex: number) {
 
 /**
  * 拖动第 index 条分隔线(像素宽度模型):
- * 有余量时左右列此消彼长;右列顶到 MIN_COLUMN_WIDTH 后切换为独立拉宽(触发滚动)。
+ * - 最后一列:独立调整宽度(无右邻,拉宽触发滚动)
+ * - 中间列:有余量时此消彼长;右列顶到 MIN_COLUMN_WIDTH 后独立拉宽
  */
 function updateColumnSize(tabId: string, index: number, desiredLeftWidth: number) {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab) return
   const sizes = tab.columnSizes
-  if (index < 0 || index >= sizes.length - 1) return
+  if (index < 0 || index >= sizes.length) return
   const left = Math.max(MIN_COLUMN_WIDTH, Math.round(desiredLeftWidth))
+  if (index === sizes.length - 1) {
+    sizes[index] = left
+    return
+  }
   const combined = sizes[index] + sizes[index + 1]
   const rightFromZeroSum = combined - left
   if (rightFromZeroSum >= MIN_COLUMN_WIDTH) {
