@@ -1,6 +1,6 @@
 //! 多渠道(profile)配置域:`~/.claude/cc-space/`
 //!
-//! - `settings.json`        应用设置:sessionChain/agentChain + 渠道展示元数据
+//! - `settings.json`        应用设置:默认会话/Agent 渠道 + 渠道展示元数据
 //! - `channels/<id>.json`   纯净 Claude Code settings 格式(顶层 env 块等),
 //!                          终端可直接 `claude --settings <路径>` 复用同一渠道
 //! - `runtime/<sid>-<ns>.json` per-spawn 合成产物(渠道内容 + 防御空值 + ultracode),
@@ -23,7 +23,7 @@ pub const OFFICIAL_ID: &str = "official";
 
 /// Apple Foundation Models 虚拟渠道 id
 pub const APPLE_FM_ID: &str = "apple-fm";
-const APPLE_FM_PORT: u16 = 8179;
+const APPLE_FM_PORT: u16 = 39175;
 
 /// 注入渠道时无条件压制的认证/路由残留键
 pub const DEFENSE_ENV_KEYS: [&str; 4] = [
@@ -73,12 +73,27 @@ pub fn validate_id(id: &str) -> Result<(), String> {
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase", default)]
+pub struct CcSpaceExt {
+    pub available_models: Vec<String>,
+    pub agent_model: Option<String>,
+}
+
+pub(crate) fn read_cc_space_ext(id: &str) -> Option<CcSpaceExt> {
+    let text = fs::read_to_string(channel_file_path(id)).ok()?;
+    let root: Value = serde_json::from_str(&text).ok()?;
+    root.get("_ccSpace")
+        .and_then(|v| serde_json::from_value::<CcSpaceExt>(v.clone()).ok())
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(rename_all = "camelCase", default)]
 pub struct ChannelMeta {
     pub name: Option<String>,
     pub note: Option<String>,
     pub enabled: Option<bool>,
     pub protocol: Option<String>,
     pub scope: Option<String>,
+    pub agent_model: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -102,6 +117,7 @@ impl ChannelMeta {
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentFeaturePrefs {
     pub preferred_channel: Option<String>,
+    pub preferred_model: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -109,8 +125,13 @@ pub struct AgentFeaturePrefs {
 pub struct AppSettings {
     #[serde(skip_serializing)]
     pub default_channel_id: Option<String>,
+    #[serde(skip_serializing)]
     pub session_chain: Vec<String>,
+    #[serde(skip_serializing)]
     pub agent_chain: Vec<String>,
+    pub default_session_channel: Option<String>,
+    pub default_agent_channel: Option<String>,
+    pub default_agent_model: Option<String>,
     pub channels: BTreeMap<String, ChannelMeta>,
     pub agent_toggles: BTreeMap<String, bool>,
     pub agent_preferences: BTreeMap<String, AgentFeaturePrefs>,
@@ -124,50 +145,35 @@ pub(crate) fn load_app_settings() -> AppSettings {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    // 迁移：旧 defaultChannelId → sessionChain/agentChain
-    if settings.session_chain.is_empty() && settings.default_channel_id.is_some() {
-        let old_default = settings.default_channel_id.take().unwrap();
-        let mut file_ids = scan_channel_ids();
+    let mut migrated = false;
 
-        let mut chain = Vec::new();
-        if old_default != OFFICIAL_ID && file_ids.contains(&old_default) {
-            chain.push(old_default.clone());
-            file_ids.retain(|id| id != &old_default);
+    // 迁移：旧 defaultChannelId → default_session_channel
+    if let Some(old_id) = settings.default_channel_id.take() {
+        if old_id != OFFICIAL_ID && settings.default_session_channel.is_none() {
+            settings.default_session_channel = Some(old_id);
         }
-        chain.push(OFFICIAL_ID.to_string());
-        chain.extend(file_ids);
+        migrated = true;
+    }
 
-        settings.session_chain = chain.clone();
-        settings.agent_chain = chain;
+    // 迁移：旧 session_chain → default_session_channel
+    if !settings.session_chain.is_empty() {
+        if settings.default_session_channel.is_none() {
+            if let Some(first) = settings.session_chain.iter().find(|id| *id != OFFICIAL_ID) {
+                settings.default_session_channel = Some(first.clone());
+            }
+        }
+        if settings.default_agent_channel.is_none() {
+            if let Some(first) = settings.agent_chain.iter().find(|id| *id != OFFICIAL_ID) {
+                settings.default_agent_channel = Some(first.clone());
+            }
+        }
+        settings.session_chain.clear();
+        settings.agent_chain.clear();
+        migrated = true;
+    }
+
+    if migrated {
         let _ = save_app_settings(&settings);
-    }
-
-    // 首次使用：给默认链
-    if settings.session_chain.is_empty() {
-        settings.session_chain = vec![OFFICIAL_ID.to_string()];
-    }
-    if settings.agent_chain.is_empty() {
-        settings.agent_chain = vec![OFFICIAL_ID.to_string()];
-    }
-
-    // 修复：去重 + 补齐未入链的文件渠道
-    fn dedup(chain: &mut Vec<String>) {
-        let mut seen = std::collections::HashSet::new();
-        chain.retain(|id| seen.insert(id.clone()));
-    }
-    dedup(&mut settings.session_chain);
-    dedup(&mut settings.agent_chain);
-
-    let file_ids = scan_channel_ids();
-    let all_ids = std::iter::once(OFFICIAL_ID.to_string()).chain(file_ids.into_iter());
-    for id in all_ids {
-        let is_agent_only = settings.channels.get(&id).map_or(false, |m| m.is_agent_only());
-        if !is_agent_only && !settings.session_chain.contains(&id) {
-            settings.session_chain.push(id.clone());
-        }
-        if !settings.agent_chain.contains(&id) {
-            settings.agent_chain.push(id);
-        }
     }
 
     settings
@@ -221,9 +227,9 @@ fn mask_token(token: &str) -> String {
     }
 }
 
-// ---- 链解析(内部 API) ----
+// ---- 渠道解析(内部 API) ----
 
-/// 从会话链解析第一个可用渠道 ID。
+/// 解析会话渠道。
 /// override_id 非空时直接使用(per-session 覆盖)。
 /// 返回 None 表示走官方态(零注入)。
 pub fn resolve_session_channel(override_id: Option<&str>) -> Option<String> {
@@ -232,14 +238,10 @@ pub fn resolve_session_channel(override_id: Option<&str>) -> Option<String> {
         return Some(id.to_string());
     }
     let settings = load_app_settings();
-    for id in &settings.session_chain {
-        if id == OFFICIAL_ID { return None; }
-        let meta = settings.channels.get(id);
-        if meta.map_or(true, |m| m.is_enabled()) && channel_file_path(id).is_file() {
-            return Some(id.clone());
-        }
-    }
-    None
+    settings.default_session_channel.filter(|id| {
+        let meta = settings.channels.get(id.as_str());
+        meta.map_or(true, |m| m.is_enabled()) && (id == APPLE_FM_ID || channel_file_path(id).is_file())
+    })
 }
 
 pub struct AgentChannelCredentials {
@@ -248,78 +250,70 @@ pub struct AgentChannelCredentials {
     pub base_url: Option<String>,
     pub token: Option<String>,
     pub protocol: String,
+    pub agent_model: Option<String>,
 }
 
-pub fn resolve_agent_chain() -> Vec<AgentChannelCredentials> {
+/// Resolve single agent credentials from default settings
+pub fn resolve_agent_credentials() -> Option<AgentChannelCredentials> {
     let settings = load_app_settings();
-    let mut result = Vec::new();
-    for id in &settings.agent_chain {
-        let meta = settings.channels.get(id);
-        if !meta.map_or(true, |m| m.is_enabled()) { continue; }
-        if id == OFFICIAL_ID {
-            result.push(AgentChannelCredentials {
-                id: id.clone(), is_official: true,
-                base_url: None, token: None,
-                protocol: "anthropic".to_string(),
-            });
-            continue;
-        }
-        if id == APPLE_FM_ID {
-            result.push(AgentChannelCredentials {
-                id: id.clone(), is_official: false,
-                base_url: Some(format!("http://localhost:{}", APPLE_FM_PORT)),
-                token: Some(String::new()),
-                protocol: "openai".to_string(),
-            });
-            continue;
-        }
-        let protocol = meta.map_or("anthropic", |m| m.protocol()).to_string();
-        if let Some((base_url, token)) = read_channel_credentials(id) {
-            result.push(AgentChannelCredentials {
-                id: id.clone(), is_official: false,
-                base_url: Some(base_url), token: Some(token),
-                protocol,
-            });
+    let channel_id = settings.default_agent_channel.as_deref()?;
+    let model = settings.default_agent_model.clone();
+    resolve_channel_credentials(channel_id, &settings, model)
+}
+
+/// Resolve agent credentials for a specific feature, with fallback to default
+pub fn resolve_agent_for_feature(key: &str) -> Option<AgentChannelCredentials> {
+    let settings = load_app_settings();
+    // Per-feature override
+    if let Some(prefs) = settings.agent_preferences.get(key) {
+        if let Some(ch) = prefs.preferred_channel.as_deref() {
+            return resolve_channel_credentials(ch, &settings, prefs.preferred_model.clone());
         }
     }
-    result
+    // Fall back to default agent
+    let channel_id = settings.default_agent_channel.as_deref()?;
+    let model = settings.default_agent_model.clone();
+    resolve_channel_credentials(channel_id, &settings, model)
 }
 
-pub fn resolve_preferred_channel(channel_id: &str) -> Option<AgentChannelCredentials> {
+/// Resolve session channel credentials (for agent fallback)
+pub fn resolve_session_fallback() -> Option<AgentChannelCredentials> {
     let settings = load_app_settings();
+    let channel_id = settings.default_session_channel.as_deref()?;
+    resolve_channel_credentials(channel_id, &settings, None)
+}
+
+fn resolve_channel_credentials(channel_id: &str, settings: &AppSettings, model_override: Option<String>) -> Option<AgentChannelCredentials> {
+    let meta = settings.channels.get(channel_id);
+    if !meta.map_or(true, |m| m.is_enabled()) { return None; }
+
     if channel_id == OFFICIAL_ID {
         return Some(AgentChannelCredentials {
             id: OFFICIAL_ID.to_string(), is_official: true,
             base_url: None, token: None,
             protocol: "anthropic".to_string(),
+            agent_model: None,
         });
     }
     if channel_id == APPLE_FM_ID {
-        let meta = settings.channels.get(APPLE_FM_ID);
-        if !meta.map_or(true, |m| m.is_enabled()) { return None; }
+        let agent_model = model_override.or_else(|| meta.and_then(|m| m.agent_model.clone()));
         return Some(AgentChannelCredentials {
             id: APPLE_FM_ID.to_string(), is_official: false,
             base_url: Some(format!("http://localhost:{}", APPLE_FM_PORT)),
             token: Some(String::new()),
             protocol: "openai".to_string(),
+            agent_model,
         });
     }
-    let meta = settings.channels.get(channel_id);
-    if !meta.map_or(true, |m| m.is_enabled()) { return None; }
     let protocol = meta.map_or("anthropic", |m| m.protocol()).to_string();
     let (base_url, token) = read_channel_credentials(channel_id)?;
+    let agent_model = model_override
+        .or_else(|| read_cc_space_ext(channel_id).and_then(|e| e.agent_model));
     Some(AgentChannelCredentials {
         id: channel_id.to_string(), is_official: false,
         base_url: Some(base_url), token: Some(token),
-        protocol,
+        protocol, agent_model,
     })
-}
-
-pub fn preferred_for(agent_key: &str) -> Option<String> {
-    load_app_settings()
-        .agent_preferences
-        .get(agent_key)
-        .and_then(|p| p.preferred_channel.clone())
 }
 
 pub(crate) fn read_channel_credentials(id: &str) -> Option<(String, String)> {
@@ -343,7 +337,7 @@ pub(crate) fn read_channel_credentials(id: &str) -> Option<(String, String)> {
     None
 }
 
-// ---- Fallback 执行器 ----
+// ---- 错误分类(agent.rs 消费) ----
 
 pub fn is_retryable_error(e: &str) -> bool {
     e.contains("connect") || e.contains("timeout") || e.contains("timed out")
@@ -355,32 +349,6 @@ pub fn is_retryable_error(e: &str) -> bool {
 pub fn is_auth_error(e: &str) -> bool {
     e.contains("401") || e.contains("403")
         || e.contains("Unauthorized") || e.contains("Forbidden")
-}
-
-pub fn try_agent_chain<F, T>(chain: &[AgentChannelCredentials], mut f: F) -> Result<T, String>
-where
-    F: FnMut(&AgentChannelCredentials) -> Result<T, String>,
-{
-    let mut last_err = "Agent chain 为空".to_string();
-    for cred in chain {
-        match f(cred) {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                if is_auth_error(&e) {
-                    eprintln!("[fallback] 跳过渠道 {} (auth error): {}", cred.id, e);
-                    last_err = e;
-                    continue;
-                }
-                if is_retryable_error(&e) {
-                    eprintln!("[fallback] 渠道 {} 失败, fallback: {}", cred.id, e);
-                    last_err = e;
-                    continue;
-                }
-                return Err(e);
-            }
-        }
-    }
-    Err(format!("所有渠道均失败。最后错误: {}", last_err))
 }
 
 // ---- 前端命令 ----
@@ -398,14 +366,17 @@ pub struct ChannelView {
     pub enabled: bool,
     pub protocol: String,
     pub scope: String,
+    pub agent_model: Option<String>,
+    pub available_models: Vec<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelListResult {
     pub channels: Vec<ChannelView>,
-    pub session_chain: Vec<String>,
-    pub agent_chain: Vec<String>,
+    pub default_session_channel: Option<String>,
+    pub default_agent_channel: Option<String>,
+    pub default_agent_model: Option<String>,
 }
 
 fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
@@ -421,6 +392,8 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             enabled: meta.is_enabled(),
             protocol: "anthropic".to_string(),
             scope: "full".to_string(),
+            agent_model: None,
+            available_models: vec![],
         };
     }
     if id == APPLE_FM_ID {
@@ -435,6 +408,8 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             enabled: meta.is_enabled(),
             protocol: "openai".to_string(),
             scope: "agent-only".to_string(),
+            agent_model: meta.agent_model.clone(),
+            available_models: vec![],
         };
     }
     let path = channel_file_path(id);
@@ -473,6 +448,10 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
                 .collect()
         })
         .unwrap_or_default();
+    let cc_ext = parsed.as_ref()
+        .and_then(|v| v.get("_ccSpace"))
+        .and_then(|v| serde_json::from_value::<CcSpaceExt>(v.clone()).ok())
+        .unwrap_or_default();
     ChannelView {
         name: meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| id.to_string()),
         note: meta.note.clone().filter(|s| !s.is_empty()),
@@ -484,38 +463,38 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         id: id.to_string(),
         protocol: meta.protocol().to_string(),
         scope: meta.scope().to_string(),
+        agent_model: cc_ext.agent_model,
+        available_models: cc_ext.available_models,
     }
 }
 
 #[tauri::command]
 pub fn list_channels() -> ChannelListResult {
     let settings = load_app_settings();
-
-    // 收集所有渠道 ID（文件 + official）
     let file_ids = scan_channel_ids();
-    let mut seen = std::collections::HashSet::new();
     let mut channels = Vec::new();
 
-    // 按 session_chain 顺序优先
-    for id in settings.session_chain.iter().chain(settings.agent_chain.iter()) {
-        if !seen.insert(id.clone()) { continue; }
-        let meta = settings.channels.get(id).cloned().unwrap_or_default();
-        if id == OFFICIAL_ID || id == APPLE_FM_ID || file_ids.contains(id) {
-            channels.push(build_channel_view(id, &meta));
-        }
+    // Official always first
+    let official_meta = settings.channels.get(OFFICIAL_ID).cloned().unwrap_or_default();
+    channels.push(build_channel_view(OFFICIAL_ID, &official_meta));
+
+    // Apple FM if registered
+    if settings.channels.contains_key(APPLE_FM_ID) {
+        let meta = settings.channels.get(APPLE_FM_ID).cloned().unwrap_or_default();
+        channels.push(build_channel_view(APPLE_FM_ID, &meta));
     }
-    // 追加未入链的文件渠道
+
+    // File channels sorted
     for id in &file_ids {
-        if seen.insert(id.clone()) {
-            let meta = settings.channels.get(id).cloned().unwrap_or_default();
-            channels.push(build_channel_view(id, &meta));
-        }
+        let meta = settings.channels.get(id).cloned().unwrap_or_default();
+        channels.push(build_channel_view(id, &meta));
     }
 
     ChannelListResult {
         channels,
-        session_chain: settings.session_chain,
-        agent_chain: settings.agent_chain,
+        default_session_channel: settings.default_session_channel,
+        default_agent_channel: settings.default_agent_channel,
+        default_agent_model: settings.default_agent_model,
     }
 }
 
@@ -528,47 +507,63 @@ pub fn save_channel(
     note: Option<String>,
     protocol: Option<String>,
     scope: Option<String>,
+    agent_model: Option<String>,
+    available_models: Option<Vec<String>>,
 ) -> Result<(), String> {
     validate_id(&id)?;
+    let is_virtual = id == APPLE_FM_ID;
     let base_url = base_url.trim().to_string();
-    if base_url.is_empty() {
+    if !is_virtual && base_url.is_empty() {
         return Err("Base URL 不能为空".to_string());
     }
     let is_openai = protocol.as_deref() == Some("openai");
-    fs::create_dir_all(channels_dir()).map_err(|e| e.to_string())?;
-    let path = channel_file_path(&id);
 
-    let mut root: Value = match fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).map_err(|e| {
-            format!("渠道文件已存在但 JSON 解析失败,请先手动修复后重试({}): {}", path.display(), e)
-        })?,
-        Err(_) => json!({}),
-    };
-    let obj = root
-        .as_object_mut()
-        .ok_or("渠道文件顶层不是 JSON 对象,请手动修复后重试")?;
-    let env = obj.entry("env").or_insert_with(|| json!({}));
-    let env_obj = env.as_object_mut().ok_or("渠道文件 env 字段不是对象")?;
-    let token = auth_token.as_deref().map(str::trim).filter(|t| !t.is_empty());
-    if is_openai {
-        env_obj.insert("OPENAI_BASE_URL".to_string(), json!(base_url));
-        if let Some(t) = token {
-            env_obj.insert("OPENAI_API_KEY".to_string(), json!(t));
+    if !is_virtual {
+        fs::create_dir_all(channels_dir()).map_err(|e| e.to_string())?;
+        let path = channel_file_path(&id);
+
+        let mut root: Value = match fs::read_to_string(&path) {
+            Ok(s) => serde_json::from_str(&s).map_err(|e| {
+                format!("渠道文件已存在但 JSON 解析失败,请先手动修复后重试({}): {}", path.display(), e)
+            })?,
+            Err(_) => json!({}),
+        };
+        let obj = root
+            .as_object_mut()
+            .ok_or("渠道文件顶层不是 JSON 对象,请手动修复后重试")?;
+        let env = obj.entry("env").or_insert_with(|| json!({}));
+        let env_obj = env.as_object_mut().ok_or("渠道文件 env 字段不是对象")?;
+        let token = auth_token.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        if is_openai {
+            env_obj.insert("OPENAI_BASE_URL".to_string(), json!(base_url));
+            if let Some(t) = token {
+                env_obj.insert("OPENAI_API_KEY".to_string(), json!(t));
+            }
+        } else {
+            env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(base_url));
+            if let Some(t) = token {
+                env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), json!(t));
+            } else if env_obj
+                .get("ANTHROPIC_AUTH_TOKEN")
+                .and_then(|v| v.as_str())
+                .filter(|t| !t.is_empty())
+                .is_none()
+            {
+                return Err("新建渠道必须提供 Auth Token".to_string());
+            }
         }
-    } else {
-        env_obj.insert("ANTHROPIC_BASE_URL".to_string(), json!(base_url));
-        if let Some(t) = token {
-            env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), json!(t));
-        } else if env_obj
-            .get("ANTHROPIC_AUTH_TOKEN")
-            .and_then(|v| v.as_str())
-            .filter(|t| !t.is_empty())
-            .is_none()
-        {
-            return Err("新建渠道必须提供 Auth Token".to_string());
+
+        let am = agent_model.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let av = available_models.as_deref().unwrap_or(&[]);
+        if am.is_some() || !av.is_empty() {
+            obj.insert("_ccSpace".to_string(), json!({
+                "agentModel": am,
+                "availableModels": av,
+            }));
         }
+
+        write_json_0600(&path, &root)?;
     }
-    write_json_0600(&path, &root)?;
 
     let mut settings = load_app_settings();
     let meta = settings.channels.entry(id.clone()).or_default();
@@ -576,16 +571,8 @@ pub fn save_channel(
     meta.note = note.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     meta.protocol = protocol;
     meta.scope = scope;
+    meta.agent_model = agent_model.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
-    let is_agent_only = meta.is_agent_only();
-    if is_agent_only {
-        settings.session_chain.retain(|x| x != &id);
-    } else if !settings.session_chain.contains(&id) {
-        settings.session_chain.push(id.clone());
-    }
-    if !settings.agent_chain.contains(&id) {
-        settings.agent_chain.push(id.clone());
-    }
     save_app_settings(&settings)
 }
 
@@ -598,8 +585,13 @@ pub fn delete_channel(id: String) -> Result<(), String> {
     }
     let mut settings = load_app_settings();
     settings.channels.remove(&id);
-    settings.session_chain.retain(|x| x != &id);
-    settings.agent_chain.retain(|x| x != &id);
+    if settings.default_session_channel.as_deref() == Some(&id) {
+        settings.default_session_channel = None;
+    }
+    if settings.default_agent_channel.as_deref() == Some(&id) {
+        settings.default_agent_channel = None;
+        settings.default_agent_model = None;
+    }
     save_app_settings(&settings)
 }
 
@@ -612,16 +604,17 @@ pub fn set_channel_enabled(id: String, enabled: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_session_chain(chain: Vec<String>) -> Result<(), String> {
+pub fn set_default_session_channel(id: Option<String>) -> Result<(), String> {
     let mut settings = load_app_settings();
-    settings.session_chain = chain;
+    settings.default_session_channel = id.filter(|s| !s.is_empty() && s != OFFICIAL_ID);
     save_app_settings(&settings)
 }
 
 #[tauri::command]
-pub fn set_agent_chain(chain: Vec<String>) -> Result<(), String> {
+pub fn set_default_agent_model(channel: Option<String>, model: Option<String>) -> Result<(), String> {
     let mut settings = load_app_settings();
-    settings.agent_chain = chain;
+    settings.default_agent_channel = channel.filter(|s| !s.is_empty());
+    settings.default_agent_model = model.filter(|s| !s.is_empty());
     save_app_settings(&settings)
 }
 
@@ -647,10 +640,11 @@ pub fn get_agent_preferences() -> BTreeMap<String, AgentFeaturePrefs> {
 }
 
 #[tauri::command]
-pub fn set_agent_preferred_channel(key: String, channel_id: Option<String>) -> Result<(), String> {
+pub fn set_agent_feature_model(key: String, channel: Option<String>, model: Option<String>) -> Result<(), String> {
     let mut settings = load_app_settings();
     let prefs = settings.agent_preferences.entry(key).or_default();
-    prefs.preferred_channel = channel_id.filter(|s| !s.is_empty());
+    prefs.preferred_channel = channel.filter(|s| !s.is_empty());
+    prefs.preferred_model = model.filter(|s| !s.is_empty());
     save_app_settings(&settings)
 }
 
@@ -761,6 +755,7 @@ pub fn prepare_injection(
     if ultracode {
         obj.insert("ultracode".to_string(), json!(true));
     }
+    obj.remove("_ccSpace");
 
     fs::create_dir_all(runtime_dir()).map_err(|e| e.to_string())?;
     let nanos = std::time::SystemTime::now()
@@ -834,7 +829,8 @@ pub async fn probe_channel(id: String) -> Result<ProbeResult, String> {
         settings.channels.get(&id).map_or("anthropic", |m| m.protocol()).to_string()
     };
 
-    let (base_url, token) = if id == APPLE_FM_ID {
+    let is_apple_fm = id == APPLE_FM_ID;
+    let (base_url, token) = if is_apple_fm {
         (format!("http://localhost:{}", APPLE_FM_PORT), String::new())
     } else {
         read_channel_credentials(&id)
@@ -842,6 +838,9 @@ pub async fn probe_channel(id: String) -> Result<ProbeResult, String> {
     };
 
     tauri::async_runtime::spawn_blocking(move || {
+        if is_apple_fm {
+            let _ = ensure_fm_serve_running();
+        }
         probe_channel_blocking(&base_url, &token, &protocol)
     })
     .await
@@ -946,9 +945,6 @@ pub fn register_apple_fm_if_available() {
         ..Default::default()
     };
     settings.channels.insert(APPLE_FM_ID.to_string(), meta);
-    if !settings.agent_chain.contains(&APPLE_FM_ID.to_string()) {
-        settings.agent_chain.push(APPLE_FM_ID.to_string());
-    }
     let _ = save_app_settings(&settings);
     eprintln!("[apple-fm] 检测到 fm 命令，已注册 Apple FM 渠道");
 }

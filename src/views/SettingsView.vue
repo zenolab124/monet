@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
-import { DragDropProvider } from '@dnd-kit/vue'
-import { move } from '@dnd-kit/helpers'
-import SortableChainItem from '@/components/settings/SortableChainItem.vue'
 import {
   useChannels,
   refreshChannels,
@@ -17,6 +14,7 @@ import { useNotifications } from '@/composables/useNotifications'
 import { useLocale } from '@/composables/useLocale'
 import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
+import PaperSelect from '@/components/settings/PaperSelect.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
@@ -26,10 +24,12 @@ import { useTheme } from '@/composables/useTheme'
 
 const { t } = useI18n()
 const {
-  channels, sessionChain, agentChain, probeResults, probing,
+  channels, defaultSessionChannel, defaultAgentChannel, defaultAgentModel,
+  probeResults, probing,
   revealedTokens, revealToken, hideToken, agentPreferences,
-  deleteChannel, setChannelEnabled, setSessionChain, setAgentChain, revealChannelsDir,
-  probeChannel, probeAllChannels, loadAgentPreferences, setAgentPreferredChannel,
+  deleteChannel, setChannelEnabled, setDefaultSessionChannel, setDefaultAgentModel,
+  setAgentFeatureModel, revealChannelsDir,
+  probeChannel, probeAllChannels, loadAgentPreferences,
 } = useChannels()
 const { activeSection } = useUiState()
 const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
@@ -155,49 +155,73 @@ async function onDelete(ch: ChannelInfo) {
   }
 }
 
-// ---- 渠道链拖拽排序（@dnd-kit/vue） ----
-function channelById(id: string): ChannelInfo {
-  return channels.value.find(c => c.id === id) || {
-    id, name: id === OFFICIAL_CHANNEL_ID ? t('channel.official') : id,
-    enabled: true, valid: true, note: null, baseUrl: null,
-    authTokenMasked: null, extraEnvKeys: [],
-    protocol: 'anthropic', scope: 'full',
-  } as ChannelInfo
+const sessionChannels = () => channels.value.filter(c => c.scope !== 'agent-only')
+const agentOnlyChannels = () => channels.value.filter(c => c.scope === 'agent-only')
+
+const OFFICIAL_MODELS = [
+  'claude-haiku-4-5',
+  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
+  'claude-opus-4-6',
+  'claude-opus-4-8',
+  'claude-fable-5',
+]
+
+const agentChannelId = ref(defaultAgentChannel.value ?? OFFICIAL_CHANNEL_ID)
+watch(defaultAgentChannel, (v) => { agentChannelId.value = v ?? OFFICIAL_CHANNEL_ID })
+
+const agentModelsForChannel = computed(() => {
+  if (agentChannelId.value === OFFICIAL_CHANNEL_ID) return OFFICIAL_MODELS
+  const ch = channels.value.find(c => c.id === agentChannelId.value)
+  const probeModels = probeResults.value[agentChannelId.value]?.models ?? []
+  const saved = ch ? [...ch.availableModels, ...(ch.agentModel ? [ch.agentModel] : [])] : []
+  const all = [...new Set([...probeModels, ...saved])]
+  return all.length ? all.sort() : []
+})
+
+const agentChannelSelectOptions = computed(() => {
+  const opts = [{ value: OFFICIAL_CHANNEL_ID, label: 'Official' }]
+  for (const ch of channels.value) {
+    if (ch.id !== OFFICIAL_CHANNEL_ID && ch.enabled) {
+      opts.push({ value: ch.id, label: ch.name })
+    }
+  }
+  return opts
+})
+
+const agentModelSelectOptions = computed(() =>
+  agentModelsForChannel.value.map(m => ({ value: m, label: m }))
+)
+
+function onAgentChannelChange(id: string) {
+  agentChannelId.value = id
+  const models = id === OFFICIAL_CHANNEL_ID ? OFFICIAL_MODELS : agentModelsForChannel.value
+  setDefaultAgentModel(
+    id === OFFICIAL_CHANNEL_ID ? null : id,
+    models[0] ?? null,
+  )
 }
 
-const sessionPrefixed = ref<string[]>([])
-const agentPrefixed = ref<string[]>([])
-
-watch(sessionChain, (ids) => {
-  sessionPrefixed.value = ids
-    .filter(id => channelById(id).scope !== 'agent-only')
-    .map(id => `session:${id}`)
-}, { immediate: true })
-watch(agentChain, (ids) => { agentPrefixed.value = ids.map(id => `agent:${id}`) }, { immediate: true })
-
-function stripPrefix(prefixedId: string): string {
-  const idx = prefixedId.indexOf(':')
-  return idx >= 0 ? prefixedId.slice(idx + 1) : prefixedId
+function onAgentModelChange(model: string) {
+  setDefaultAgentModel(
+    agentChannelId.value === OFFICIAL_CHANNEL_ID ? null : agentChannelId.value,
+    model || null,
+  )
 }
 
-function onDragEnd(event: any) {
-  const chainMap: Record<string, string[]> = {
-    session: [...sessionPrefixed.value],
-    agent: [...agentPrefixed.value],
+const agentModelOptions = () => {
+  const opts: { channel: string; channelName: string; model: string }[] = []
+  for (const m of OFFICIAL_MODELS) {
+    opts.push({ channel: OFFICIAL_CHANNEL_ID, channelName: 'Official', model: m })
   }
-  const updated = move(chainMap, event)
-
-  const newSession = (updated.session ?? []).map(stripPrefix)
-  const newAgent = (updated.agent ?? []).map(stripPrefix)
-
-  if (JSON.stringify(newSession) !== JSON.stringify(sessionChain.value)) {
-    sessionChain.value = newSession
-    setSessionChain(newSession)
+  for (const ch of channels.value) {
+    if (!ch.enabled || ch.id === OFFICIAL_CHANNEL_ID) continue
+    const models = new Set([...ch.availableModels, ...(ch.agentModel ? [ch.agentModel] : [])])
+    for (const m of models) {
+      opts.push({ channel: ch.id, channelName: ch.name, model: m })
+    }
   }
-  if (JSON.stringify(newAgent) !== JSON.stringify(agentChain.value)) {
-    agentChain.value = newAgent
-    setAgentChain(newAgent)
-  }
+  return opts
 }
 
 async function onReveal() {
@@ -437,148 +461,102 @@ function onSaved() {
             <span class="font-mono">--settings</span> {{ $t('settings.channelDesc2') }}
           </p>
 
-          <!-- 双列 chain -->
-          <DragDropProvider @drag-end="onDragEnd">
+          <!-- 双列渠道 -->
           <div class="settings-grid">
-            <!-- 会话链 -->
+            <!-- 左列：会话渠道 -->
             <div>
-              <div class="chain-title">{{ $t('settings.sessionChain') }}</div>
-              <div class="chain-hint">{{ $t('settings.sessionChainHint') }}</div>
+              <div class="chain-title">{{ $t('settings.defaultSessionChannel') }}</div>
               <div class="chain-list">
-                <SortableChainItem
-                  v-for="(pid, idx) in sessionPrefixed"
-                  :key="pid"
-                  :id="pid"
-                  :index="idx"
-                  group="session"
+                <div
+                  v-for="ch in sessionChannels()"
+                  :key="ch.id"
+                  class="chain-item"
+                  :class="{ 'chain-item-active': (defaultSessionChannel ?? OFFICIAL_CHANNEL_ID) === ch.id }"
+                  @click="setDefaultSessionChannel(ch.id === OFFICIAL_CHANNEL_ID ? null : ch.id)"
                 >
                   <div class="chain-content">
                     <div class="chain-row-1">
-                      <span class="truncate font-medium text-xs">{{ channelById(stripPrefix(pid)).name }}</span>
+                      <span class="truncate font-medium text-xs">{{ ch.name }}</span>
                       <div class="chain-actions">
-                        <button
-                          :class="['form-toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
-                          @pointerdown.stop
-                          @click="setChannelEnabled(stripPrefix(pid), !channelById(stripPrefix(pid)).enabled)"
-                        >
-                          <span class="form-toggle-knob" />
-                        </button>
-                        <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
-                          <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
-                          <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
+                        <button :class="['form-toggle-sm', { on: ch.enabled }]" @click.stop="setChannelEnabled(ch.id, !ch.enabled)"><span class="form-toggle-knob" /></button>
+                        <template v-if="ch.id !== OFFICIAL_CHANNEL_ID">
+                          <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @click.stop="editing = ch"><span class="i-carbon-edit w-3 h-3" /></button>
+                          <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @click.stop="onDelete(ch)"><span class="i-carbon-trash-can w-3 h-3" /></button>
                         </template>
                       </div>
                     </div>
                     <div class="chain-row-2">
-                      <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
-                        <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
+                      <template v-if="ch.id !== OFFICIAL_CHANNEL_ID">
+                        <span v-if="ch.baseUrl" class="font-mono truncate">{{ ch.baseUrl }}</span>
                       </template>
                       <span v-else class="text-muted-foreground/60 italic">OAuth</span>
+                      <span v-if="ch.agentModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0">{{ ch.agentModel }}</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">
-                        <template v-if="probing[stripPrefix(pid)]">
-                          <span class="i-carbon-renew w-2.5 h-2.5 animate-spin" />
+                        <template v-if="probing[ch.id]"><span class="i-carbon-renew w-2.5 h-2.5 animate-spin" /></template>
+                        <template v-else-if="probeResults[ch.id]">
+                          <span class="inline-block w-1.5 h-1.5 rounded-full" :class="probeResults[ch.id].online ? 'bg-green-600' : 'bg-destructive'" />
+                          <span v-if="probeResults[ch.id].online && probeResults[ch.id].models.length" v-tooltip="probeResults[ch.id].models.join('\n')">{{ probeResults[ch.id].models.length }} models</span>
+                          <span v-else-if="!probeResults[ch.id].online">{{ probeResults[ch.id].status === 'auth_error' ? '401' : probeResults[ch.id].status }}</span>
+                          <span v-if="probeResults[ch.id].latencyMs" class="text-muted-foreground/50">{{ probeResults[ch.id].latencyMs }}ms</span>
                         </template>
-                        <template v-else-if="probeResults[stripPrefix(pid)]">
-                          <span
-                            class="inline-block w-1.5 h-1.5 rounded-full"
-                            :class="probeResults[stripPrefix(pid)].online ? 'bg-green-600' : 'bg-destructive'"
-                          />
-                          <span v-if="probeResults[stripPrefix(pid)].online && probeResults[stripPrefix(pid)].models.length">
-                            {{ probeResults[stripPrefix(pid)].models.length }} {{ $t('common.model').toLowerCase() }}s
-                          </span>
-                          <span v-else-if="!probeResults[stripPrefix(pid)].online">
-                            {{ probeResults[stripPrefix(pid)].status === 'auth_error' ? '401' : probeResults[stripPrefix(pid)].status }}
-                          </span>
-                          <span v-if="probeResults[stripPrefix(pid)].latencyMs" class="text-muted-foreground/50">
-                            {{ probeResults[stripPrefix(pid)].latencyMs }}ms
-                          </span>
-                        </template>
-                        <button
-                          v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID"
-                          class="icon-btn icon-btn-sm icon-btn-ghost"
-                          v-tooltip="$t('settings.probeChannel')"
-                          @pointerdown.stop
-                          @click="probeChannel(stripPrefix(pid))"
-                        >
-                          <span class="i-carbon-activity w-3 h-3" />
-                        </button>
+                        <button v-if="ch.id !== OFFICIAL_CHANNEL_ID" class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('settings.probeChannel')" @click.stop="probeChannel(ch.id)"><span class="i-carbon-activity w-3 h-3" /></button>
                       </span>
                     </div>
                   </div>
-                </SortableChainItem>
+                </div>
               </div>
             </div>
 
-            <!-- Agent 链 -->
+            <!-- 右列：Agent 渠道 -->
             <div>
-              <div class="chain-title">{{ $t('settings.agentChain') }}</div>
-              <div class="chain-hint">{{ $t('settings.agentChainHint') }}</div>
+              <div class="chain-title">{{ $t('settings.defaultAgentModel') }}</div>
+              <!-- 级联下拉 -->
+              <div class="flex gap-1.5 mb-2">
+                <PaperSelect
+                  :options="agentChannelSelectOptions"
+                  :model-value="agentChannelId"
+                  @update:model-value="onAgentChannelChange"
+                />
+                <PaperSelect
+                  :options="agentModelSelectOptions"
+                  :model-value="defaultAgentModel ?? ''"
+                  mono
+                  editable
+                  placeholder="model name"
+                  @update:model-value="onAgentModelChange"
+                />
+              </div>
+              <!-- Agent-only 渠道列表 -->
               <div class="chain-list">
-                <SortableChainItem
-                  v-for="(pid, idx) in agentPrefixed"
-                  :key="pid"
-                  :id="pid"
-                  :index="idx"
-                  group="agent"
-                >
+                <div v-for="ch in agentOnlyChannels()" :key="ch.id" class="chain-item">
                   <div class="chain-content">
                     <div class="chain-row-1">
-                      <span class="truncate font-medium text-xs">{{ channelById(stripPrefix(pid)).name }}</span>
+                      <span class="truncate font-medium text-xs">{{ ch.name }}</span>
                       <div class="chain-actions">
-                        <button
-                          :class="['form-toggle-sm', { on: channelById(stripPrefix(pid)).enabled }]"
-                          @pointerdown.stop
-                          @click="setChannelEnabled(stripPrefix(pid), !channelById(stripPrefix(pid)).enabled)"
-                        >
-                          <span class="form-toggle-knob" />
-                        </button>
-                        <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
-                          <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @pointerdown.stop @click="editing = channelById(stripPrefix(pid))"><span class="i-carbon-edit w-3 h-3" /></button>
-                          <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @pointerdown.stop @click="onDelete(channelById(stripPrefix(pid)))"><span class="i-carbon-trash-can w-3 h-3" /></button>
-                        </template>
+                        <button :class="['form-toggle-sm', { on: ch.enabled }]" @click="setChannelEnabled(ch.id, !ch.enabled)"><span class="form-toggle-knob" /></button>
+                        <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @click="editing = ch"><span class="i-carbon-edit w-3 h-3" /></button>
+                        <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @click="onDelete(ch)"><span class="i-carbon-trash-can w-3 h-3" /></button>
                       </div>
                     </div>
                     <div class="chain-row-2">
-                      <template v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID">
-                        <span v-if="channelById(stripPrefix(pid)).baseUrl" class="font-mono truncate">{{ channelById(stripPrefix(pid)).baseUrl }}</span>
-                      </template>
-                      <span v-else class="text-muted-foreground/60 italic">OAuth</span>
+                      <span v-if="ch.baseUrl" class="font-mono truncate">{{ ch.baseUrl }}</span>
+                      <span v-if="ch.agentModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0">{{ ch.agentModel }}</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">
-                        <template v-if="probing[stripPrefix(pid)]">
-                          <span class="i-carbon-renew w-2.5 h-2.5 animate-spin" />
+                        <template v-if="probing[ch.id]"><span class="i-carbon-renew w-2.5 h-2.5 animate-spin" /></template>
+                        <template v-else-if="probeResults[ch.id]">
+                          <span class="inline-block w-1.5 h-1.5 rounded-full" :class="probeResults[ch.id].online ? 'bg-green-600' : 'bg-destructive'" />
+                          <span v-if="probeResults[ch.id].online && probeResults[ch.id].models.length" v-tooltip="probeResults[ch.id].models.join('\n')">{{ probeResults[ch.id].models.length }} models</span>
+                          <span v-else-if="!probeResults[ch.id].online">{{ probeResults[ch.id].status === 'auth_error' ? '401' : probeResults[ch.id].status }}</span>
+                          <span v-if="probeResults[ch.id].latencyMs" class="text-muted-foreground/50">{{ probeResults[ch.id].latencyMs }}ms</span>
                         </template>
-                        <template v-else-if="probeResults[stripPrefix(pid)]">
-                          <span
-                            class="inline-block w-1.5 h-1.5 rounded-full"
-                            :class="probeResults[stripPrefix(pid)].online ? 'bg-green-600' : 'bg-destructive'"
-                          />
-                          <span v-if="probeResults[stripPrefix(pid)].online && probeResults[stripPrefix(pid)].models.length">
-                            {{ probeResults[stripPrefix(pid)].models.length }} {{ $t('common.model').toLowerCase() }}s
-                          </span>
-                          <span v-else-if="!probeResults[stripPrefix(pid)].online">
-                            {{ probeResults[stripPrefix(pid)].status === 'auth_error' ? '401' : probeResults[stripPrefix(pid)].status }}
-                          </span>
-                          <span v-if="probeResults[stripPrefix(pid)].latencyMs" class="text-muted-foreground/50">
-                            {{ probeResults[stripPrefix(pid)].latencyMs }}ms
-                          </span>
-                        </template>
-                        <button
-                          v-if="stripPrefix(pid) !== OFFICIAL_CHANNEL_ID"
-                          class="icon-btn icon-btn-sm icon-btn-ghost"
-                          v-tooltip="$t('settings.probeChannel')"
-                          @pointerdown.stop
-                          @click="probeChannel(stripPrefix(pid))"
-                        >
-                          <span class="i-carbon-activity w-3 h-3" />
-                        </button>
+                        <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('settings.probeChannel')" @click="probeChannel(ch.id)"><span class="i-carbon-activity w-3 h-3" /></button>
                       </span>
                     </div>
                   </div>
-                </SortableChainItem>
+                </div>
               </div>
             </div>
           </div>
-          </DragDropProvider>
 
           <ChannelForm
             v-if="editing"
@@ -659,13 +637,13 @@ function onSaved() {
                 <div class="text-[11px] text-muted-foreground mt-0.5">{{ $t(a.desc) }}</div>
                 <select
                   v-if="isAgentEnabled(a.key)"
-                  class="form-input text-[11px] mt-1.5 w-auto max-w-48 h-6 py-0"
-                  :value="agentPreferences[a.key]?.preferredChannel ?? ''"
-                  @change="setAgentPreferredChannel(a.key, ($event.target as HTMLSelectElement).value || null)"
+                  class="form-input text-[11px] font-mono mt-1.5 w-auto max-w-56 h-6 py-0"
+                  :value="agentPreferences[a.key]?.preferredChannel && agentPreferences[a.key]?.preferredModel ? `${agentPreferences[a.key].preferredChannel}:${agentPreferences[a.key].preferredModel}` : ''"
+                  @change="{ const v = ($event.target as HTMLSelectElement).value; if (!v) { setAgentFeatureModel(a.key, null, null) } else { const [ch, ...rest] = v.split(':'); setAgentFeatureModel(a.key, ch, rest.join(':')) } }"
                 >
                   <option value="">{{ $t('settings.agentAutoChannel') }}</option>
-                  <option v-for="ch in channels.filter(c => c.enabled && c.id !== OFFICIAL_CHANNEL_ID)" :key="ch.id" :value="ch.id">
-                    {{ ch.name }}
+                  <option v-for="opt in agentModelOptions()" :key="`${opt.channel}:${opt.model}`" :value="`${opt.channel}:${opt.model}`">
+                    {{ opt.channelName }} / {{ opt.model }}
                   </option>
                 </select>
               </div>
@@ -877,6 +855,23 @@ function onSaved() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.chain-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chain-item:hover {
+  background: var(--muted);
+}
+.chain-item-active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
 .chain-content {
   flex: 1;

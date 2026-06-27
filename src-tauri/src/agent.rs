@@ -171,23 +171,20 @@ fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, m
 }
 
 fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<String, String> {
-    let chain = crate::channels::resolve_agent_chain();
-    if chain.is_empty() {
-        return request_via_cli(prompt);
+    if let Some(cred) = crate::channels::resolve_agent_credentials() {
+        let effective_model = cred.agent_model.as_deref().unwrap_or(model);
+        return call_channel(&cred, prompt, effective_model, max_tokens);
     }
-    crate::channels::try_agent_chain(&chain, |cred| {
-        call_channel(cred, prompt, model, max_tokens)
-    })
+    request_via_cli(prompt)
 }
 
 fn request_for_agent(prompt: &str, agent_key: &str) -> Result<String, String> {
-    if let Some(pref_id) = crate::channels::preferred_for(agent_key) {
-        if let Some(cred) = crate::channels::resolve_preferred_channel(&pref_id) {
-            match call_channel(&cred, prompt, "claude-haiku-4-5-20251001", 2048) {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    eprintln!("[agent] preferred channel {} failed for {}, fallback: {}", pref_id, agent_key, e);
-                }
+    if let Some(cred) = crate::channels::resolve_agent_for_feature(agent_key) {
+        let effective_model = cred.agent_model.as_deref().unwrap_or("claude-haiku-4-5-20251001");
+        match call_channel(&cred, prompt, effective_model, 2048) {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                eprintln!("[agent] channel {} failed for {}, fallback: {}", cred.id, agent_key, e);
             }
         }
     }

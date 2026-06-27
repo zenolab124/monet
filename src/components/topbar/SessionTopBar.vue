@@ -185,7 +185,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
 // --- 二级菜单 ---
 
-const { channels, sessionChain } = useChannels()
+const { channels, defaultSessionChannel } = useChannels()
 
 const EFFORT_OPTIONS: { value: NonNullable<EffortSetting>; label: string }[] = [
   { value: 'low', label: 'Low' },
@@ -197,13 +197,12 @@ const EFFORT_OPTIONS: { value: NonNullable<EffortSetting>; label: string }[] = [
 ]
 
 const channelOptions = computed(() => {
-  const result: { value: string; label: string }[] = []
-  for (const id of sessionChain.value) {
-    if (id === OFFICIAL_CHANNEL_ID) {
-      result.push({ value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') })
-    } else {
-      const ch = channels.value.find(c => c.id === id)
-      if (ch?.enabled) result.push({ value: id, label: ch.name })
+  const result: { value: string; label: string }[] = [
+    { value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') },
+  ]
+  for (const ch of channels.value) {
+    if (ch.id !== OFFICIAL_CHANNEL_ID && ch.enabled && ch.scope !== 'agent-only') {
+      result.push({ value: ch.id, label: ch.name })
     }
   }
   return result
@@ -215,7 +214,7 @@ const effortLabel = computed(() => {
 })
 
 const channelLabel = computed(() => {
-  const id = props.selectedChannelId ?? sessionChain.value[0] ?? OFFICIAL_CHANNEL_ID
+  const id = props.selectedChannelId ?? defaultSessionChannel.value ?? OFFICIAL_CHANNEL_ID
   if (id === OFFICIAL_CHANNEL_ID) return t('topbar.channelOfficial')
   const ch = channels.value.find(c => c.id === id)
   return ch?.name ?? channelDisplayName(id)
@@ -431,12 +430,12 @@ function onPermissionModeChange(mode: PermissionMode) {
                 v-for="o in channelOptions"
                 :key="o.value"
                 class="menu-item"
-                :class="{ 'text-primary!': o.value === (selectedChannelId ?? sessionChain[0] ?? OFFICIAL_CHANNEL_ID) }"
+                :class="{ 'text-primary!': o.value === (selectedChannelId ?? defaultSessionChannel ?? OFFICIAL_CHANNEL_ID) }"
                 @click="selectChannel(o.value)"
               >
                 <span
                   class="w-3 h-3 shrink-0"
-                  :class="o.value === (selectedChannelId ?? sessionChain[0] ?? OFFICIAL_CHANNEL_ID) ? 'i-carbon-checkmark text-primary' : ''"
+                  :class="o.value === (selectedChannelId ?? defaultSessionChannel ?? OFFICIAL_CHANNEL_ID) ? 'i-carbon-checkmark text-primary' : ''"
                 />
                 {{ o.label }}
               </button>

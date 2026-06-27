@@ -19,7 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { channels, sessionChain } = useChannels()
+const { channels, defaultSessionChannel } = useChannels()
 const { switchSection } = useUiState()
 
 /** 「跟随默认」在选项列表中的占位值(null 不能做 v-for key)。
@@ -32,28 +32,26 @@ interface ChannelOption {
 }
 
 function chainFirstName(): string {
-  for (const id of sessionChain.value) {
-    if (id === OFFICIAL_CHANNEL_ID) return channelDisplayName(null)
-    const ch = channels.value.find(c => c.id === id)
+  if (defaultSessionChannel.value) {
+    const ch = channels.value.find(c => c.id === defaultSessionChannel.value)
     if (ch?.enabled) return ch.name
   }
   return channelDisplayName(null)
 }
 
 const options = computed<ChannelOption[]>(() => {
-  const result: ChannelOption[] = []
-  for (const id of sessionChain.value) {
-    if (id === OFFICIAL_CHANNEL_ID) {
-      result.push({ value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') })
-    } else {
-      const ch = channels.value.find(c => c.id === id)
-      if (ch?.enabled && ch.scope !== 'agent-only') result.push({ value: id, label: ch.name })
+  const result: ChannelOption[] = [
+    { value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') },
+  ]
+  for (const ch of channels.value) {
+    if (ch.id !== OFFICIAL_CHANNEL_ID && ch.enabled && ch.scope !== 'agent-only') {
+      result.push({ value: ch.id, label: ch.name })
     }
   }
   return result
 })
 
-const resolvedChannel = computed(() => props.current ?? sessionChain.value[0] ?? OFFICIAL_CHANNEL_ID)
+const resolvedChannel = computed(() => props.current ?? defaultSessionChannel.value ?? OFFICIAL_CHANNEL_ID)
 
 const currentIndex = computed(() =>
   options.value.findIndex(o => o.value === resolvedChannel.value),

@@ -444,10 +444,8 @@
     "widgetRolling24h": "滚动 24 小时",
     "channelDesc1": "每个渠道是一份标准 Claude Code settings 格式的 JSON 文件，发送消息时经",
     "channelDesc2": "注入。高级 env 可直接手编文件，本页改动不会抹掉手编字段。",
-    "sessionChain": "会话渠道",
-    "sessionChainHint": "发送消息时按顺序尝试，失败自动切下一个",
-    "agentChain": "Agent 渠道",
-    "agentChainHint": "AI 翻译、标题生成等内部调用的 fallback 链",
+    "defaultSessionChannel": "默认会话渠道",
+    "defaultAgentModel": "默认 Agent 模型",
     "jsonParseFailed": "JSON 解析失败",
     "noBaseUrl": "(未配置 ANTHROPIC_BASE_URL)",
     "tokenPrefix": "token ",
@@ -509,7 +507,8 @@
       "scopeLabel": "可用范围",
       "scopeFullHint": "会话 + Agent",
       "scopeAgentOnlyHint": "仅限 Agent",
-      "tokenOptional": "（可选）"
+      "tokenOptional": "（可选）",
+      "agentModelHint": "Agent 调用（翻译/摘要/标签）使用的模型名，留空走默认 Claude 模型"
     },
     "mcp": {
       "title": "MCP 工具服务",

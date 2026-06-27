@@ -4,7 +4,7 @@ use std::process::Command;
 
 use serde_json::{json, Value};
 
-use crate::channels::{resolve_agent_chain, try_agent_chain, AgentChannelCredentials};
+use crate::channels::{resolve_agent_for_feature, AgentChannelCredentials};
 use crate::config;
 use crate::streaming::{enhanced_path, find_claude};
 
@@ -193,10 +193,11 @@ fn do_translate(
         translate_via_cli(source_json, target_lang, target_native)
     } else {
         let prompt = build_translate_prompt(source_json, target_lang, target_native);
+        let model = cred.agent_model.as_deref().unwrap_or("claude-sonnet-4-6-20250514");
         http_call_by_protocol(
             cred.base_url.as_deref().unwrap(),
             cred.token.as_deref().unwrap_or(""),
-            &prompt, "claude-sonnet-4-6-20250514", 16000,
+            &prompt, model, 16000,
             &cred.protocol,
         )
     }
@@ -236,11 +237,10 @@ pub async fn translate_locale(
     tauri::async_runtime::spawn_blocking(move || {
         eprintln!("[translate] target={} ({}) code={}", target_lang, target_native, lang_code);
 
-        let chain = resolve_agent_chain();
-        let raw = if chain.is_empty() {
-            translate_via_cli(&source_json, &target_lang, &target_native)?
+        let raw = if let Some(cred) = resolve_agent_for_feature("translate") {
+            do_translate(&cred, &source_json, &target_lang, &target_native)?
         } else {
-            try_agent_chain(&chain, |cred| do_translate(cred, &source_json, &target_lang, &target_native))?
+            translate_via_cli(&source_json, &target_lang, &target_native)?
         };
 
         let clean = strip_markdown_fence(&raw);

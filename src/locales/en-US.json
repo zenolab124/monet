@@ -444,10 +444,8 @@
     "widgetRolling24h": "Rolling 24 hours",
     "channelDesc1": "Each channel is a standard Claude Code settings JSON file, injected when sending messages via ",
     "channelDesc2": ". Advanced env can be edited directly — changes here won't overwrite manual edits.",
-    "sessionChain": "Session Channels",
-    "sessionChainHint": "Tried in order when sending messages, auto-fallback on failure",
-    "agentChain": "Agent Channels",
-    "agentChainHint": "Fallback chain for AI translation, title generation, etc.",
+    "defaultSessionChannel": "Default Session Channel",
+    "defaultAgentModel": "Default Agent Model",
     "jsonParseFailed": "JSON parse failed",
     "noBaseUrl": "(ANTHROPIC_BASE_URL not configured)",
     "tokenPrefix": "token ",
@@ -509,7 +507,8 @@
       "scopeLabel": "Scope",
       "scopeFullHint": "Session + Agent",
       "scopeAgentOnlyHint": "Agent only",
-      "tokenOptional": "(optional)"
+      "tokenOptional": "(optional)",
+      "agentModelHint": "Model for agent calls (translate/summary/tags). Leave empty to use default Claude models"
     },
     "mcp": {
       "title": "MCP Tool Service",

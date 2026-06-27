@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useChannels, type ChannelInfo } from '@/composables/useChannels'
+import { useChannels, type ChannelInfo, APPLE_FM_CHANNEL_ID } from '@/composables/useChannels'
 
 const props = defineProps<{
   channel: ChannelInfo | null
@@ -13,7 +13,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { saveChannel, revealToken } = useChannels()
+const { saveChannel, revealToken, probeResults } = useChannels()
 
 const isNew = computed(() => props.channel === null)
 
@@ -24,7 +24,17 @@ const authToken = ref('')
 const note = ref(props.channel?.note ?? '')
 const protocol = ref(props.channel?.protocol ?? 'anthropic')
 const scope = ref(props.channel?.scope ?? 'full')
+const agentModel = ref(props.channel?.agentModel ?? '')
 const tokenVisible = ref(false)
+
+const isVirtual = computed(() => props.channel?.id === APPLE_FM_CHANNEL_ID)
+
+const modelOptions = computed(() => {
+  const channelId = props.channel?.id ?? id.value
+  const probeModels = probeResults.value[channelId]?.models ?? []
+  const savedModels = props.channel?.availableModels ?? []
+  return [...new Set([...probeModels, ...savedModels])].sort()
+})
 
 const saving = ref(false)
 const formError = ref<string | null>(null)
@@ -49,11 +59,11 @@ async function onSave() {
     formError.value = t('settings.channelForm.nameError')
     return
   }
-  if (!baseUrl.value.trim()) {
+  if (!isVirtual.value && !baseUrl.value.trim()) {
     formError.value = t('settings.channelForm.baseUrlError')
     return
   }
-  if (protocol.value !== 'openai' && !authToken.value.trim()) {
+  if (!isVirtual.value && protocol.value !== 'openai' && !authToken.value.trim()) {
     formError.value = t('settings.channelForm.tokenError')
     return
   }
@@ -62,11 +72,13 @@ async function onSave() {
     await saveChannel({
       id: trimmedId,
       name: name.value.trim(),
-      baseUrl: baseUrl.value.trim().replace(/\/+$/, ''),
+      baseUrl: isVirtual.value ? '' : baseUrl.value.trim().replace(/\/+$/, ''),
       authToken: authToken.value.trim() || undefined,
       note: note.value.trim() || undefined,
       protocol: protocol.value,
       scope: scope.value,
+      agentModel: agentModel.value.trim() || undefined,
+      availableModels: modelOptions.value.length > 0 ? modelOptions.value : undefined,
     })
     emit('saved')
   } catch (e) {
@@ -144,6 +156,22 @@ async function onSave() {
         <option value="agent-only">{{ $t('settings.channelForm.scopeAgentOnlyHint') }}</option>
       </select>
     </label>
+
+    <div class="form-field">
+      <span class="form-label">Agent Model <span class="text-muted-foreground/60 font-normal italic">{{ $t('common.optional') }}</span></span>
+      <input
+        v-model="agentModel"
+        type="text"
+        :list="`agent-model-opts-${id}`"
+        placeholder="e.g. gpt-4o-mini"
+        class="form-input font-mono"
+        spellcheck="false"
+      />
+      <datalist :id="`agent-model-opts-${id}`">
+        <option v-for="m in modelOptions" :key="m" :value="m" />
+      </datalist>
+      <span class="text-[10px] text-muted-foreground/70">{{ $t('settings.channelForm.agentModelHint') }}</span>
+    </div>
 
     <label class="form-field">
       <span class="form-label">{{ $t('settings.channelForm.noteLabel') }}</span>

@@ -13,28 +13,33 @@ export interface ChannelInfo {
   enabled: boolean
   protocol: string
   scope: string
+  agentModel: string | null
+  availableModels: string[]
 }
 
 export const APPLE_FM_CHANNEL_ID = 'apple-fm'
 
 interface ChannelListResult {
   channels: ChannelInfo[]
-  sessionChain: string[]
-  agentChain: string[]
+  defaultSessionChannel: string | null
+  defaultAgentChannel: string | null
+  defaultAgentModel: string | null
 }
 
 export const OFFICIAL_CHANNEL_ID = 'official'
 
 const channels = ref<ChannelInfo[]>([])
-const sessionChain = ref<string[]>([])
-const agentChain = ref<string[]>([])
+const defaultSessionChannel = ref<string | null>(null)
+const defaultAgentChannel = ref<string | null>(null)
+const defaultAgentModel = ref<string | null>(null)
 
 export async function refreshChannels(): Promise<void> {
   try {
     const r = await invoke<ChannelListResult>('list_channels')
     channels.value = r.channels
-    sessionChain.value = r.sessionChain
-    agentChain.value = r.agentChain
+    defaultSessionChannel.value = r.defaultSessionChannel
+    defaultAgentChannel.value = r.defaultAgentChannel
+    defaultAgentModel.value = r.defaultAgentModel
   } catch {
     // 读取失败保留旧值
   }
@@ -48,12 +53,7 @@ export function channelDisplayName(id: string | null): string {
 export function resolveChannel(selected: string | null): string | null {
   if (selected === OFFICIAL_CHANNEL_ID) return null
   if (selected) return selected
-  for (const id of sessionChain.value) {
-    if (id === OFFICIAL_CHANNEL_ID) return null
-    const ch = channels.value.find(c => c.id === id)
-    if (ch?.enabled !== false) return id
-  }
-  return null
+  return defaultSessionChannel.value ?? null
 }
 
 export interface SaveChannelPayload {
@@ -64,6 +64,8 @@ export interface SaveChannelPayload {
   note?: string
   protocol?: string
   scope?: string
+  agentModel?: string
+  availableModels?: string[]
 }
 
 async function saveChannel(payload: SaveChannelPayload): Promise<void> {
@@ -75,12 +77,15 @@ async function saveChannel(payload: SaveChannelPayload): Promise<void> {
     note: payload.note ?? null,
     protocol: payload.protocol ?? null,
     scope: payload.scope ?? null,
+    agentModel: payload.agentModel ?? null,
+    availableModels: payload.availableModels ?? null,
   })
   await refreshChannels()
 }
 
 export interface AgentFeaturePrefs {
   preferredChannel: string | null
+  preferredModel: string | null
 }
 
 const agentPreferences = ref<Record<string, AgentFeaturePrefs>>({})
@@ -93,11 +98,22 @@ async function loadAgentPreferences(): Promise<void> {
   }
 }
 
-async function setAgentPreferredChannel(key: string, channelId: string | null): Promise<void> {
-  await invoke('set_agent_preferred_channel', { key, channelId })
+async function setDefaultSessionChannel(id: string | null): Promise<void> {
+  await invoke('set_default_session_channel', { id })
+  defaultSessionChannel.value = id
+}
+
+async function setDefaultAgentModel(channel: string | null, model: string | null): Promise<void> {
+  await invoke('set_default_agent_model', { channel, model })
+  defaultAgentChannel.value = channel
+  defaultAgentModel.value = model
+}
+
+async function setAgentFeatureModel(key: string, channel: string | null, model: string | null): Promise<void> {
+  await invoke('set_agent_feature_model', { key, channel, model })
   agentPreferences.value = {
     ...agentPreferences.value,
-    [key]: { preferredChannel: channelId },
+    [key]: { preferredChannel: channel, preferredModel: model },
   }
 }
 
@@ -108,16 +124,6 @@ async function deleteChannel(id: string): Promise<void> {
 
 async function setChannelEnabled(id: string, enabled: boolean): Promise<void> {
   await invoke('set_channel_enabled', { id, enabled })
-  await refreshChannels()
-}
-
-async function setSessionChain(chain: string[]): Promise<void> {
-  await invoke('set_session_chain', { chain })
-  await refreshChannels()
-}
-
-async function setAgentChain(chain: string[]): Promise<void> {
-  await invoke('set_agent_chain', { chain })
   await refreshChannels()
 }
 
@@ -172,8 +178,9 @@ async function probeAllChannels(): Promise<void> {
 export function useChannels() {
   return {
     channels,
-    sessionChain,
-    agentChain,
+    defaultSessionChannel,
+    defaultAgentChannel,
+    defaultAgentModel,
     probeResults,
     probing,
     agentPreferences,
@@ -181,8 +188,9 @@ export function useChannels() {
     saveChannel,
     deleteChannel,
     setChannelEnabled,
-    setSessionChain,
-    setAgentChain,
+    setDefaultSessionChannel,
+    setDefaultAgentModel,
+    setAgentFeatureModel,
     revealChannelsDir,
     probeChannel,
     probeAllChannels,
@@ -190,6 +198,5 @@ export function useChannels() {
     revealToken,
     hideToken,
     loadAgentPreferences,
-    setAgentPreferredChannel,
   }
 }
