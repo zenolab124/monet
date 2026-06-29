@@ -505,6 +505,7 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
   const idx = atIndex === undefined ? tab.columns.length : Math.max(0, Math.min(atIndex, tab.columns.length))
   tab.columns.splice(idx, 0, column)
   tab.columnSizes = equalSizes(tab.columns.length)
+  requestFocusColumn(sessionId)
   return { collapsedSessionIds: [], focusedExisting: false }
 }
 
