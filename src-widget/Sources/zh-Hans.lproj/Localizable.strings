@@ -1,7 +1,90 @@
+// Common
 "widget.title" = "CC Space";
 "widget.today" = "今天";
 "widget.sessions" = "会话";
 "widget.tokens" = "tokens";
 "widget.empty" = "打开 CC Space";
+
+// Today Summary (Small)
 "widget.displayName" = "今日总结";
 "widget.description" = "一览今日 Claude Code 使用情况";
+
+// Streak (Small)
+"streak.title" = "连续活跃";
+"streak.days" = "天";
+"streak.longest" = "最长记录";
+"streak.active" = "活跃天数";
+"streak.displayName" = "连续活跃";
+"streak.description" = "追踪连续编码天数";
+
+// Cost (Small)
+"cost.title" = "费用";
+"cost.badge" = "本月";
+"cost.disclaimer" = "按官方定价估算";
+"cost.displayName" = "费用估算";
+"cost.description" = "本月 API 费用估算";
+
+// Token Pulse (Small)
+"pulse.title" = "Token 脉搏";
+"pulse.ofMonthly" = "占月用量";
+"pulse.displayName" = "Token 脉搏";
+"pulse.description" = "今日 Token 占月度进度";
+
+// Active Projects (Small)
+"projects.title" = "项目";
+"projects.activeToday" = "今日活跃";
+"projects.displayName" = "活跃项目";
+"projects.description" = "今日有活动的项目";
+
+// Token Trend (Medium)
+"trend.title" = "Token 趋势";
+"trend.thisMonth" = "本月";
+"trend.displayName" = "Token 趋势";
+"trend.description" = "每周 Token 用量与月度总量";
+
+// Model Mix (Medium)
+"models.title" = "模型分布";
+"models.badge" = "本月";
+"models.displayName" = "模型分布";
+"models.description" = "各模型 Token 用量分布";
+
+// Project Board (Medium)
+"board.title" = "项目排行";
+"board.total" = "总计";
+"board.displayName" = "项目排行";
+"board.description" = "按会话数排列的项目";
+
+// Work Rhythm (Medium)
+"rhythm.title" = "作息节奏";
+"rhythm.peak" = "高峰";
+"rhythm.displayName" = "作息节奏";
+"rhythm.description" = "24 小时编码活跃分布";
+
+// Weekly Summary (Medium)
+"weekly.title" = "本周";
+"weekly.badge" = "7 天";
+"weekly.tokens" = "Token";
+"weekly.sessions" = "会话";
+"weekly.activeDays" = "活跃";
+"weekly.displayName" = "本周总结";
+"weekly.description" = "本周编码统计一览";
+
+// Monthly Dashboard (Large)
+"dashboard.title" = "月度总览";
+"dashboard.tokens" = "Token";
+"dashboard.cost" = "费用";
+"dashboard.streak" = "连续";
+"dashboard.sessions" = "会话";
+"dashboard.displayName" = "月度总览";
+"dashboard.description" = "完整月度数据与趋势";
+
+// Heatmap (Large)
+"heatmap.title" = "活跃图谱";
+"heatmap.badge" = "近 4 周";
+"heatmap.monthTokens" = "月 Token";
+"heatmap.activeDays" = "活跃天数";
+"heatmap.streak" = "连续";
+"heatmap.less" = "少";
+"heatmap.more" = "多";
+"heatmap.displayName" = "活跃热力图";
+"heatmap.description" = "4 周活跃热力图与统计";

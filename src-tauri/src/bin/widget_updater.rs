@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use chrono::{Duration, Local, NaiveTime, Timelike};
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -12,6 +13,50 @@ struct WidgetSnapshot {
     today_tokens: u64,
     models: Vec<String>,
     updated_at: String,
+    // Streak
+    current_streak: u32,
+    longest_streak: u32,
+    active_days: u32,
+    // Monthly
+    monthly_tokens: u64,
+    last_month_tokens: u64,
+    monthly_models: Vec<ModelStat>,
+    // Cost
+    estimated_cost_usd: f64,
+    // Weekly (last 7 days)
+    weekly_tokens: Vec<DayTokens>,
+    // Projects
+    active_projects_today: u32,
+    top_projects: Vec<ProjectStat>,
+    // Hourly distribution (24 entries)
+    hourly_distribution: Vec<u32>,
+    // Heatmap (last 28 days)
+    daily_heatmap: Vec<DayTokens>,
+    // Totals
+    total_sessions: u32,
+    total_tokens: u64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ModelStat {
+    model: String,
+    count: u32,
+    tokens: u64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DayTokens {
+    date: String,
+    tokens: u64,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectStat {
+    name: String,
+    sessions: u32,
 }
 
 #[derive(Deserialize, Default)]
@@ -52,7 +97,6 @@ fn compute_day_boundary(day_start_hour: i8) -> (u64, String) {
     let now = Local::now();
 
     if day_start_hour < 0 {
-        // 滚动 24 小时
         let start = now - Duration::hours(24);
         let ts = start.timestamp() as u64;
         let date_str = now.format("%Y-%m-%d").to_string();
@@ -74,8 +118,6 @@ fn compute_day_boundary(day_start_hour: i8) -> (u64, String) {
     };
 
     let ts = boundary.timestamp() as u64;
-    // 对于 token 统计，用 boundary 所在日期查 usage_stats 的 daily
-    // usage_stats 按自然日统计（0 点切割），这里近似取 boundary 日期
     let date_str = if now.hour() < hour {
         (today - chrono::Duration::days(1))
             .format("%Y-%m-%d")
@@ -85,46 +127,6 @@ fn compute_day_boundary(day_start_hour: i8) -> (u64, String) {
     };
 
     (ts, date_str)
-}
-
-fn collect_today_stats(day_start_hour: i8) -> (u32, u64, Vec<String>) {
-    let (start_ts, today_str) = compute_day_boundary(day_start_hour);
-
-    let mut jsonl_files = Vec::new();
-    collect_jsonl(&projects_dir(), &mut jsonl_files);
-    let sessions = jsonl_files
-        .iter()
-        .filter(|p| {
-            fs::metadata(p)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                .is_some_and(|d| d.as_secs() >= start_ts)
-        })
-        .count() as u32;
-
-    let mut tokens = 0u64;
-    let mut models = Vec::new();
-    if let Ok(stats) = app_lib::usage_stats::collect_usage_stats() {
-        if day_start_hour < 0 {
-            // 滚动 24h：累加最近两天的 daily
-            let yesterday = (Local::now() - Duration::days(1))
-                .format("%Y-%m-%d")
-                .to_string();
-            for d in &stats.daily {
-                if d.date == today_str || d.date == yesterday {
-                    tokens += d.total;
-                }
-            }
-        } else {
-            if let Some(day) = stats.daily.iter().find(|d| d.date == today_str) {
-                tokens = day.total;
-            }
-        }
-        models = stats.month.by_model.into_iter().map(|m| m.model).collect();
-    }
-
-    (sessions, tokens, models)
 }
 
 fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
@@ -145,15 +147,218 @@ fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+fn compute_streak(daily: &[app_lib::usage_stats::DailyUsage]) -> (u32, u32, u32) {
+    let today = Local::now().date_naive();
+    let active_dates: std::collections::HashSet<NaiveDate> = daily
+        .iter()
+        .filter(|d| d.total > 0)
+        .filter_map(|d| NaiveDate::parse_from_str(&d.date, "%Y-%m-%d").ok())
+        .collect();
+
+    let active_days = active_dates.len() as u32;
+
+    let mut current = 0u32;
+    let mut day = today;
+    if !active_dates.contains(&day) {
+        day -= Duration::days(1);
+    }
+    while active_dates.contains(&day) {
+        current += 1;
+        day -= Duration::days(1);
+    }
+
+    let mut longest = 0u32;
+    let mut sorted: Vec<NaiveDate> = active_dates.into_iter().collect();
+    sorted.sort();
+    let mut streak = 0u32;
+    for (i, d) in sorted.iter().enumerate() {
+        if i == 0 || *d != sorted[i - 1] + Duration::days(1) {
+            streak = 1;
+        } else {
+            streak += 1;
+        }
+        longest = longest.max(streak);
+    }
+
+    (current, longest, active_days)
+}
+
+fn estimate_cost(models: &[app_lib::usage_stats::ModelUsage]) -> f64 {
+    let mut cost = 0.0;
+    for m in models {
+        let per_million = if m.model.contains("opus") {
+            15.0 + 75.0
+        } else if m.model.contains("sonnet") {
+            3.0 + 15.0
+        } else if m.model.contains("haiku") {
+            0.25 + 1.25
+        } else if m.model.contains("fable") {
+            15.0 + 75.0
+        } else {
+            5.0 + 25.0
+        };
+        cost += (m.total as f64 / 1_000_000.0) * per_million;
+    }
+    (cost * 100.0).round() / 100.0
+}
+
+fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>) {
+    let mut project_counts: HashMap<String, u32> = HashMap::new();
+    let mut active_today = std::collections::HashSet::new();
+    let mut hourly = vec![0u32; 24];
+    let mut total_sessions = 0u32;
+
+    let Ok(entries) = fs::read_dir(projects_dir()) else {
+        return (0, Vec::new(), 0, hourly);
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() { continue; }
+        let proj_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let display = proj_name.rsplit('-').last().unwrap_or(&proj_name);
+        let display = display.rsplit('/').next().unwrap_or(display);
+
+        let mut jsonls = Vec::new();
+        collect_jsonl(&path, &mut jsonls);
+        let count = jsonls.len() as u32;
+        total_sessions += count;
+        *project_counts.entry(display.to_string()).or_default() += count;
+
+        for jf in &jsonls {
+            if let Ok(meta) = fs::metadata(jf) {
+                if let Ok(modified) = meta.modified() {
+                    if let Ok(dur) = modified.duration_since(SystemTime::UNIX_EPOCH) {
+                        let ts = dur.as_secs();
+                        if ts >= start_ts {
+                            active_today.insert(proj_name.clone());
+                        }
+                        let dt = chrono::DateTime::from_timestamp(ts as i64, 0);
+                        if let Some(dt) = dt {
+                            let local = dt.with_timezone(&Local);
+                            hourly[local.hour() as usize] += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut top: Vec<ProjectStat> = project_counts
+        .into_iter()
+        .map(|(name, sessions)| ProjectStat { name, sessions })
+        .collect();
+    top.sort_by(|a, b| b.sessions.cmp(&a.sessions));
+    top.truncate(8);
+
+    (active_today.len() as u32, top, total_sessions, hourly)
+}
+
 fn main() {
     let cfg = read_config();
-    let (sessions, tokens, models) = collect_today_stats(cfg.day_start_hour);
+    let (start_ts, today_str) = compute_day_boundary(cfg.day_start_hour);
+
+    let mut jsonl_files = Vec::new();
+    collect_jsonl(&projects_dir(), &mut jsonl_files);
+    let today_sessions = jsonl_files
+        .iter()
+        .filter(|p| {
+            fs::metadata(p)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .is_some_and(|d| d.as_secs() >= start_ts)
+        })
+        .count() as u32;
+
+    let (today_tokens, models, monthly_tokens, last_month_tokens, monthly_models,
+         estimated_cost, weekly_tokens, daily_heatmap, current_streak, longest_streak,
+         active_days, total_tokens) =
+        if let Ok(stats) = app_lib::usage_stats::collect_usage_stats() {
+            let now = Local::now();
+            let today_date = now.date_naive();
+
+            // Today tokens
+            let mut tt = 0u64;
+            if cfg.day_start_hour < 0 {
+                let yesterday = (now - Duration::days(1)).format("%Y-%m-%d").to_string();
+                for d in &stats.daily {
+                    if d.date == today_str || d.date == yesterday { tt += d.total; }
+                }
+            } else if let Some(day) = stats.daily.iter().find(|d| d.date == today_str) {
+                tt = day.total;
+            }
+
+            // Last month tokens
+            let lm = if now.month() == 1 { 12 } else { now.month() - 1 };
+            let ly = if now.month() == 1 { now.year() - 1 } else { now.year() };
+            let lmt: u64 = stats.daily.iter()
+                .filter(|d| {
+                    if let Ok(nd) = NaiveDate::parse_from_str(&d.date, "%Y-%m-%d") {
+                        nd.year() == ly && nd.month() == lm
+                    } else { false }
+                })
+                .map(|d| d.total)
+                .sum();
+
+            // Monthly models with count
+            let mm: Vec<ModelStat> = stats.month.by_model.iter().map(|m| ModelStat {
+                model: m.model.clone(),
+                count: 0,
+                tokens: m.total,
+            }).collect();
+
+            let cost = estimate_cost(&stats.month.by_model);
+
+            // Weekly (last 7 days)
+            let weekly: Vec<DayTokens> = (0..7).rev().map(|i| {
+                let d = today_date - Duration::days(i);
+                let ds = d.format("%Y-%m-%d").to_string();
+                let t = stats.daily.iter().find(|x| x.date == ds).map(|x| x.total).unwrap_or(0);
+                DayTokens { date: ds, tokens: t }
+            }).collect();
+
+            // Heatmap (last 28 days)
+            let heatmap: Vec<DayTokens> = (0..28).rev().map(|i| {
+                let d = today_date - Duration::days(i);
+                let ds = d.format("%Y-%m-%d").to_string();
+                let t = stats.daily.iter().find(|x| x.date == ds).map(|x| x.total).unwrap_or(0);
+                DayTokens { date: ds, tokens: t }
+            }).collect();
+
+            let (cs, ls, ad) = compute_streak(&stats.daily);
+            let total_t: u64 = stats.daily.iter().map(|d| d.total).sum();
+
+            let models_list: Vec<String> = stats.month.by_model.iter().map(|m| m.model.clone()).collect();
+
+            (tt, models_list, stats.month.total, lmt, mm, cost, weekly, heatmap, cs, ls, ad, total_t)
+        } else {
+            (0, Vec::new(), 0, 0, Vec::new(), 0.0, Vec::new(), Vec::new(), 0, 0, 0, 0)
+        };
+
+    let (active_projects, top_projects, total_sessions, hourly) = collect_project_stats(start_ts);
+
     let snap = WidgetSnapshot {
-        today_sessions: sessions,
-        today_tokens: tokens,
+        today_sessions,
+        today_tokens,
         models,
         updated_at: Local::now().to_rfc3339(),
+        current_streak,
+        longest_streak,
+        active_days,
+        monthly_tokens,
+        last_month_tokens,
+        monthly_models,
+        estimated_cost_usd: estimated_cost,
+        weekly_tokens,
+        active_projects_today: active_projects,
+        top_projects,
+        hourly_distribution: hourly,
+        daily_heatmap,
+        total_sessions,
+        total_tokens,
     };
+
     let json = serde_json::to_string_pretty(&snap).unwrap_or_default();
 
     let wp = widget_path();
