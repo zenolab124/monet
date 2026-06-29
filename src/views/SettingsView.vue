@@ -20,6 +20,7 @@ import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import { useAppDefaults } from '@/composables/useAppDefaults'
 import { useWorkbench } from '@/composables/useWorkbench'
+import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
 import { useTheme } from '@/composables/useTheme'
 
@@ -42,6 +43,7 @@ const {
 } = useLocale()
 
 const { minColumnWidth, setMinColumnWidth } = useWorkbench()
+const { zoomLevel, setZoom, MIN_ZOOM, MAX_ZOOM, STEP } = useZoom()
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const { config: themeConfig, themes: themeList, setLightTheme, setDarkTheme } = useTheme()
 
@@ -439,6 +441,23 @@ function onSaved() {
               </div>
               <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.zoomLevel') }}</div>
+              <div class="flex items-center gap-2.5">
+                <input
+                  type="range"
+                  :value="zoomLevel"
+                  :min="MIN_ZOOM"
+                  :max="MAX_ZOOM"
+                  :step="STEP"
+                  class="flex-1 accent-primary"
+                  @input="setZoom(Number(($event.target as HTMLInputElement).value))"
+                />
+                <span class="text-xs tabular-nums text-muted-foreground w-9 text-right">{{ Math.round(zoomLevel * 100) }}%</span>
+              </div>
+              <div class="setting-hint">{{ $t('settings.zoomLevelHint') }}</div>
+            </div>
+
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.minColumnWidth') }}</div>
               <div class="flex items-center gap-2">

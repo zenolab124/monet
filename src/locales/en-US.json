@@ -392,6 +392,8 @@
     "defaultEffort": "Default Effort Level",
     "defaultEffortHint": "Effort level for sessions without per-session override",
     "followCli": "Follow CLI",
+    "zoomLevel": "Zoom Level",
+    "zoomLevelHint": "Adjust global UI scale (70% – 150%)",
     "minColumnWidth": "Min Column Width",
     "minColumnWidthHint": "Minimum width per workbench column. Hold Shift while dragging a divider to adjust.",
     "remoteControl": "Remote Control",

@@ -21,6 +21,7 @@ import { initNotificationLayer, useNotifications } from '@/composables/useNotifi
 import { useRoutines } from '@/composables/useRoutines'
 import { initShortcuts } from '@/composables/useShortcuts'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
+import { applyZoom, useZoom } from '@/composables/useZoom'
 import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 
 const { projects, loadProjects } = useProjects()
@@ -28,6 +29,7 @@ const { selectSession } = useSessions()
 const { activeSection } = useUiState()
 const { state, activeTab, pruneDrafts, reorderTabs, reorderSessions, moveSessionToTab, reorderColumns, expandSession } = useWorkbench()
 const { t } = useI18n()
+const { zoomLevel, setZoom, STEP } = useZoom()
 
 // 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉
 watch(projects, (list) => {
@@ -40,6 +42,19 @@ function onKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
     e.preventDefault()
     loadProjects()
+  }
+  // Cmd+=/- : 缩放, Cmd+0 : 重置
+  if (e.metaKey || e.ctrlKey) {
+    if (e.key === '=' || e.key === '+') {
+      e.preventDefault()
+      setZoom(zoomLevel.value + STEP)
+    } else if (e.key === '-') {
+      e.preventDefault()
+      setZoom(zoomLevel.value - STEP)
+    } else if (e.key === '0') {
+      e.preventDefault()
+      setZoom(1)
+    }
   }
   // Esc: 取消档案馆选择
   if (e.key === 'Escape' && activeSection.value === 'sessions') {
@@ -139,6 +154,7 @@ onMounted(async () => {
   await initNotificationLayer()
   await initShortcuts()
   await useRoutines().initRoutineListener()
+  applyZoom()
   // 档案馆预加载:v-show 保活但数据要提前拉，首次切换零等待
   loadProjects()
   // 工作台持久化损坏回退提示(NFR-002)

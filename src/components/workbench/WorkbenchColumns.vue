@@ -16,7 +16,6 @@ const {
   reorderColumns,
   focusColumnRequest,
   createRaceTab,
-  resetColumnSizes,
   setMinColumnWidth,
   minColumnWidth,
   draftCwd,
@@ -188,17 +187,6 @@ watch(focusColumnRequest, async (req) => {
           />
         </template>
       </SortableColumn>
-    </div>
-
-    <!-- 右上角工具按钮 -->
-    <div v-if="activeTab.columns.length >= 2" class="absolute top-1 right-3 z-30 flex gap-1">
-      <button
-        v-tooltip="$t('workbench.columns.resetWidths')"
-        class="icon-btn icon-btn-sm icon-btn-ghost"
-        @click="resetColumnSizes(activeTab.id)"
-      >
-        <span class="i-carbon-fit-to-width w-3.5 h-3.5" />
-      </button>
     </div>
   </div>
 </template>

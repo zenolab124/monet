@@ -6,9 +6,11 @@ import { useUiState } from '@/composables/useUiState'
 import { useSessions } from '@/composables/useSessions'
 import { useHomeStats } from '@/composables/useHomeStats'
 import { useAutomation } from '@/composables/useAutomation'
+import { useWorkbench } from '@/composables/useWorkbench'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
+const { activeTab, resetColumnSizes } = useWorkbench()
 
 // --- 档案馆搜索 ---
 const { searchQuery } = useSessions()
@@ -51,6 +53,16 @@ async function openGlobalConfig() {
 </script>
 
 <template>
+  <!-- 工作台 -->
+  <button
+    v-if="activeSection === 'workbench' && activeTab.columns.length >= 2"
+    class="icon-btn icon-btn-sm"
+    v-tooltip="$t('workbench.columns.resetWidths')"
+    @click="resetColumnSizes(activeTab.id)"
+  >
+    <span class="i-carbon-fit-to-width w-3.5 h-3.5" />
+  </button>
+
   <!-- 档案馆 -->
   <template v-if="activeSection === 'sessions'">
     <div class="relative">
