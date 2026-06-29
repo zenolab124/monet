@@ -59,9 +59,13 @@ interface WorkbenchState {
 }
 
 const STORAGE_KEY = 'cc-space-workbench'
+const MIN_WIDTH_KEY = 'cc-space-min-column-width'
+const DEFAULT_MIN_COLUMN_WIDTH = 360
+const ABSOLUTE_MIN_COLUMN_WIDTH = 200
 
-/** 单列最小可用宽度(px):低于此值会话可读性崩坏(顶栏全折叠、输入框过窄) */
-export const MIN_COLUMN_WIDTH = 360
+const minColumnWidth = ref(
+  Math.max(ABSOLUTE_MIN_COLUMN_WIDTH, Number(localStorage.getItem(MIN_WIDTH_KEY)) || DEFAULT_MIN_COLUMN_WIDTH)
+)
 
 /** 右区四周边距与列间隙(与 WorkbenchColumns 的 PAD/GAP 一致) */
 const COLUMN_GAP = 10
@@ -70,7 +74,7 @@ const COLUMN_GAP = 10
  * 右区容器实测宽度:WorkbenchColumns 挂载后经 ResizeObserver 维护。
  * v-show 隐藏报 0 不更新(保留最后有效值);初始按窗口减 ActivityBar(48)+左列(256) 估算。
  */
-const rightZoneWidth = ref(Math.max(MIN_COLUMN_WIDTH, window.innerWidth - 48 - 256))
+const rightZoneWidth = ref(Math.max(minColumnWidth.value, window.innerWidth - 48 - 256))
 
 export function setRightZoneWidth(w: number) {
   if (w <= 0) return
@@ -91,7 +95,7 @@ function redistributeOnGrow() {
     const total = tab.columnSizes.reduce((s, w) => s + w, 0)
     if (total <= 0 || total > free) continue
     const scale = free / total
-    tab.columnSizes = tab.columnSizes.map(w => Math.max(MIN_COLUMN_WIDTH, Math.round(w * scale)))
+    tab.columnSizes = tab.columnSizes.map(w => Math.max(minColumnWidth.value, Math.round(w * scale)))
   }
 }
 
@@ -103,7 +107,7 @@ function genId(prefix: string) {
 function equalSizes(n: number): number[] {
   if (n <= 0) return []
   const free = containerFreeWidth(n)
-  const w = Math.max(MIN_COLUMN_WIDTH, Math.round(free / n))
+  const w = Math.max(minColumnWidth.value, Math.round(free / n))
   return Array(n).fill(w)
 }
 
@@ -187,12 +191,12 @@ function loadState(): WorkbenchState | null {
 
 const loaded = loadState()
 
-// ratio → pixel 迁移:旧版 columnSizes 为比例(均 < MIN_COLUMN_WIDTH),转为像素宽度
+// ratio → pixel 迁移:旧版 columnSizes 为比例(均 < minColumnWidth.value),转为像素宽度
 if (loaded) {
   for (const tab of loaded.tabs) {
-    if (tab.columns.length > 0 && tab.columnSizes.length > 0 && Math.max(...tab.columnSizes) < MIN_COLUMN_WIDTH) {
-      const free = Math.max(MIN_COLUMN_WIDTH, window.innerWidth - 48 - 256) - COLUMN_GAP * Math.max(0, tab.columns.length - 1) - COLUMN_GAP * 2
-      tab.columnSizes = tab.columnSizes.map(r => Math.max(MIN_COLUMN_WIDTH, Math.round(r * free)))
+    if (tab.columns.length > 0 && tab.columnSizes.length > 0 && Math.max(...tab.columnSizes) < minColumnWidth.value) {
+      const free = Math.max(minColumnWidth.value, window.innerWidth - 48 - 256) - COLUMN_GAP * Math.max(0, tab.columns.length - 1) - COLUMN_GAP * 2
+      tab.columnSizes = tab.columnSizes.map(r => Math.max(minColumnWidth.value, Math.round(r * free)))
     }
   }
 }
@@ -530,7 +534,7 @@ function reclaimColumnWidth(tab: WorkbenchTab, removedIndex: number) {
     const newFree = containerFreeWidth(tab.columnSizes.length)
     if (newTotal < newFree) {
       const scale = newFree / newTotal
-      tab.columnSizes = tab.columnSizes.map(w => Math.max(MIN_COLUMN_WIDTH, Math.round(w * scale)))
+      tab.columnSizes = tab.columnSizes.map(w => Math.max(minColumnWidth.value, Math.round(w * scale)))
     }
   } else {
     const neighbor = Math.min(removedIndex, tab.columnSizes.length - 1)
@@ -589,26 +593,26 @@ function reorderColumns(tabId: string, fromIndex: number, toIndex: number) {
 /**
  * 拖动第 index 条分隔线(像素宽度模型):
  * - 最后一列:独立调整宽度(无右邻,拉宽触发滚动)
- * - 中间列:有余量时此消彼长;右列顶到 MIN_COLUMN_WIDTH 后独立拉宽
+ * - 中间列:有余量时此消彼长;右列顶到 minColumnWidth.value 后独立拉宽
  */
 function updateColumnSize(tabId: string, index: number, desiredLeftWidth: number) {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab) return
   const sizes = tab.columnSizes
   if (index < 0 || index >= sizes.length) return
-  const left = Math.max(MIN_COLUMN_WIDTH, Math.round(desiredLeftWidth))
+  const left = Math.max(minColumnWidth.value, Math.round(desiredLeftWidth))
   if (index === sizes.length - 1) {
     sizes[index] = left
     return
   }
   const combined = sizes[index] + sizes[index + 1]
   const rightFromZeroSum = combined - left
-  if (rightFromZeroSum >= MIN_COLUMN_WIDTH) {
+  if (rightFromZeroSum >= minColumnWidth.value) {
     sizes[index] = left
     sizes[index + 1] = rightFromZeroSum
   } else {
     sizes[index] = left
-    sizes[index + 1] = MIN_COLUMN_WIDTH
+    sizes[index + 1] = minColumnWidth.value
   }
 }
 
@@ -620,10 +624,23 @@ function teardownSession(sessionId: string) {
   }
 }
 
+function resetColumnSizes(tabId: string) {
+  const tab = state.value.tabs.find(t => t.id === tabId)
+  if (!tab || tab.columns.length === 0) return
+  tab.columnSizes = equalSizes(tab.columns.length)
+}
+
+function setMinColumnWidth(w: number) {
+  const clamped = Math.max(ABSOLUTE_MIN_COLUMN_WIDTH, Math.round(w))
+  minColumnWidth.value = clamped
+  localStorage.setItem(MIN_WIDTH_KEY, String(clamped))
+}
+
 export function useWorkbench() {
   return {
     state,
     activeTab,
+    minColumnWidth,
     flashSessionId,
     focusColumnRequest,
     findSession,
@@ -649,5 +666,7 @@ export function useWorkbench() {
     moveSessionToTab,
     reorderColumns,
     updateColumnSize,
+    resetColumnSizes,
+    setMinColumnWidth,
   }
 }

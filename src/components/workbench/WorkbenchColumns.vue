@@ -16,6 +16,9 @@ const {
   reorderColumns,
   focusColumnRequest,
   createRaceTab,
+  resetColumnSizes,
+  setMinColumnWidth,
+  minColumnWidth,
   draftCwd,
   state,
 } = useWorkbench()
@@ -90,26 +93,48 @@ onUnmounted(() => {
   zoneResizeObserver = null
 })
 
-/** 拖动第 index 条分隔线:像素级调整左列宽度 */
+const shiftDragging = ref(false)
+
+/** 拖动第 index 条分隔线:像素级调整左列宽度;Shift 按住时调整全局最小列宽 */
 function onDividerMouseDown(e: MouseEvent, index: number) {
   e.preventDefault()
   dragging.value = true
+  const isShift = e.shiftKey
+  shiftDragging.value = isShift
 
   const tab = activeTab.value
   const startX = e.clientX
-  const startWidth = tab.columnSizes[index]
 
-  const onMouseMove = (ev: MouseEvent) => {
-    const delta = ev.clientX - startX
-    updateColumnSize(tab.id, index, startWidth + delta)
+  if (isShift) {
+    const startMin = minColumnWidth.value
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX
+      const newMin = startMin + delta
+      setMinColumnWidth(newMin)
+      tab.columnSizes = tab.columnSizes.map(() => minColumnWidth.value)
+    }
+    const onMouseUp = () => {
+      dragging.value = false
+      shiftDragging.value = false
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  } else {
+    const startWidth = tab.columnSizes[index]
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX
+      updateColumnSize(tab.id, index, startWidth + delta)
+    }
+    const onMouseUp = () => {
+      dragging.value = false
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
   }
-  const onMouseUp = () => {
-    dragging.value = false
-    document.removeEventListener('mousemove', onMouseMove)
-    document.removeEventListener('mouseup', onMouseUp)
-  }
-  document.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('mouseup', onMouseUp)
 }
 
 // --- 幂等展开的滚动聚焦(FR-003:点击已展开卡 → 聚焦该列) ---
@@ -131,36 +156,50 @@ watch(focusColumnRequest, async (req) => {
 </script>
 
 <template>
-  <div
-    ref="containerRef"
-    class="flex-1 min-w-0 h-full flex flex-row p-2.5 gap-2.5 overflow-x-auto"
-    :class="{ 'drop-target-highlight': isDropTarget }"
-  >
-    <!-- 空态(FR-004) -->
+  <div class="flex-1 min-w-0 h-full relative">
     <div
-      v-if="activeTab.columns.length === 0"
-      class="flex-1 grid place-items-center text-xs text-muted-foreground"
+      ref="containerRef"
+      class="h-full flex flex-row p-2.5 gap-2.5 overflow-x-auto"
+      :class="{ 'drop-target-highlight': isDropTarget }"
     >
-      {{ $t('workbench.columns.empty') }}
+      <!-- 空态(FR-004) -->
+      <div
+        v-if="activeTab.columns.length === 0"
+        class="flex-1 grid place-items-center text-xs text-muted-foreground"
+      >
+        {{ $t('workbench.columns.empty') }}
+      </div>
+
+      <SortableColumn
+        v-for="(col, i) in activeTab.columns"
+        :key="col.id"
+        :tab-id="activeTab.id"
+        :index="i"
+        :flex="activeTab.columnSizes[i]"
+      >
+        <template #default="{ isDragging: colDragging, handleRef }">
+          <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" @start-race="onStartRace(col.sessionId)" />
+          <!-- 列右边缘 resize 手柄（绝对定位，不参与 flex 布局） -->
+          <div
+            class="absolute top-0 bottom-0 -right-[7px] w-[14px] cursor-col-resize z-20"
+            :class="{ 'divider-shift': shiftDragging }"
+            @pointerdown.stop
+            @mousedown="onDividerMouseDown($event, i)"
+          />
+        </template>
+      </SortableColumn>
     </div>
 
-    <SortableColumn
-      v-for="(col, i) in activeTab.columns"
-      :key="col.id"
-      :tab-id="activeTab.id"
-      :index="i"
-      :flex="activeTab.columnSizes[i]"
-    >
-      <template #default="{ isDragging: colDragging, handleRef }">
-        <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" @start-race="onStartRace(col.sessionId)" />
-        <!-- 列右边缘 resize 手柄（绝对定位，不参与 flex 布局） -->
-        <div
-          class="absolute top-0 bottom-0 -right-[7px] w-[14px] cursor-col-resize z-20"
-          @pointerdown.stop
-          @mousedown="onDividerMouseDown($event, i)"
-        />
-      </template>
-    </SortableColumn>
+    <!-- 右上角工具按钮 -->
+    <div v-if="activeTab.columns.length >= 2" class="absolute top-1 right-3 z-30 flex gap-1">
+      <button
+        v-tooltip="$t('workbench.columns.resetWidths')"
+        class="icon-btn icon-btn-sm icon-btn-ghost"
+        @click="resetColumnSizes(activeTab.id)"
+      >
+        <span class="i-carbon-fit-to-width w-3.5 h-3.5" />
+      </button>
+    </div>
   </div>
 </template>
 
@@ -169,5 +208,8 @@ watch(focusColumnRequest, async (req) => {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
   border-radius: 6px;
+}
+.divider-shift {
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
 }
 </style>

@@ -19,6 +19,7 @@ import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import { useAppDefaults } from '@/composables/useAppDefaults'
+import { useWorkbench } from '@/composables/useWorkbench'
 import { useHtmlVisual } from '@/features'
 import { useTheme } from '@/composables/useTheme'
 
@@ -40,6 +41,7 @@ const {
   translating, translateError, parseLanguageIntent, translateLocale, deleteLocale, isBuiltin,
 } = useLocale()
 
+const { minColumnWidth, setMinColumnWidth } = useWorkbench()
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const { config: themeConfig, themes: themeList, setLightTheme, setDarkTheme } = useTheme()
 
@@ -437,6 +439,22 @@ function onSaved() {
               </div>
               <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.minColumnWidth') }}</div>
+              <div class="flex items-center gap-2">
+                <input
+                  type="number"
+                  :value="minColumnWidth"
+                  min="200"
+                  step="10"
+                  class="form-input w-24 tabular-nums"
+                  @change="setMinColumnWidth(Number(($event.target as HTMLInputElement).value))"
+                />
+                <span class="text-[11px] text-muted-foreground">px</span>
+              </div>
+              <div class="setting-hint">{{ $t('settings.minColumnWidthHint') }}</div>
+            </div>
+
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
               <select

@@ -204,7 +204,8 @@
     "columns": {
       "empty": "Select a session from the left rail to expand",
       "noSpace": "Not enough space, collapsed: {names}",
-      "collapsed": "Collapsed: {names}"
+      "collapsed": "Collapsed: {names}",
+      "resetWidths": "Reset column widths"
     },
     "column": {
       "rcEnabled": "Remote Control enabled (click to disable)",
@@ -391,6 +392,8 @@
     "defaultEffort": "Default Effort Level",
     "defaultEffortHint": "Effort level for sessions without per-session override",
     "followCli": "Follow CLI",
+    "minColumnWidth": "Min Column Width",
+    "minColumnWidthHint": "Minimum width per workbench column. Hold Shift while dragging a divider to adjust.",
     "remoteControl": "Remote Control",
     "remoteControlHint": "Auto-enable remote control for new sessions",
     "remoteControlSub": "Visible to devices on the same account",

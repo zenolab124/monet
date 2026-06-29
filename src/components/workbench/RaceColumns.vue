@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useWorkbench, setRightZoneWidth, MIN_COLUMN_WIDTH } from '@/composables/useWorkbench'
+import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useRaceInput } from '@/composables/useRaceInput'
 import { useProjects } from '@/composables/useProjects'
 import { useConfirm } from '@/composables/useConfirm'
 import { shortModel, formatTokens, type TokenUsage, type SessionSummary } from '@/types'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 
-const { activeTab, resetRaceLanes } = useWorkbench()
+const { activeTab, resetRaceLanes, minColumnWidth } = useWorkbench()
 const { t } = useI18n()
 const { projects } = useProjects()
 const { confirm } = useConfirm()
@@ -108,7 +108,7 @@ function onInputKeydown(e: KeyboardEvent) {
           v-for="(col, i) in activeTab.columns"
           :key="col.id"
           class="h-full relative"
-          :style="{ flex: `1 0 ${MIN_COLUMN_WIDTH}px` }"
+          :style="{ flex: `1 0 ${minColumnWidth}px` }"
         >
           <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" />
 

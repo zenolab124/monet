@@ -204,7 +204,8 @@
     "columns": {
       "empty": "从左列选择会话展开",
       "noSpace": "空间不足，已收起:{names}",
-      "collapsed": "已收起:{names}"
+      "collapsed": "已收起:{names}",
+      "resetWidths": "重置列宽"
     },
     "column": {
       "rcEnabled": "Remote Control 已开启（点击关闭）",
@@ -391,6 +392,8 @@
     "defaultEffort": "默认努力等级",
     "defaultEffortHint": "无 per-session 记录的会话发送档位",
     "followCli": "跟随 CLI",
+    "minColumnWidth": "工作台最小列宽",
+    "minColumnWidthHint": "工作台每列的最小宽度，也可按住 Shift 拖动分隔线调整",
     "remoteControl": "Remote Control",
     "remoteControlHint": "新会话自动启用远程操控",
     "remoteControlSub": "登录同账号设备可见",
