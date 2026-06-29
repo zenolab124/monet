@@ -321,27 +321,6 @@
     }
   },
   "home": {
-    "grid": {
-      "edit": "Edit layout",
-      "done": "Done editing",
-      "reset": "Reset to default layout",
-      "hide": "Hide card",
-      "show": "Show card"
-    },
-    "branchActivity": {
-      "title": "Branch Activity",
-      "badge": "By recent activity",
-      "noBranches": "No branch data",
-      "nSessions": "{count} sessions"
-    },
-    "costEstimate": {
-      "title": "Cost Estimate",
-      "badge": "This month",
-      "counting": "Calculating…",
-      "estimate": "Est.",
-      "noUsage": "No usage this month",
-      "disclaimer": "Rough estimate based on official pricing · No discounts"
-    },
     "diagnosis": {
       "title": "Compatibility Diagnosis",
       "supportedTypes": "Supported record types",
@@ -367,27 +346,10 @@
       "noProjects": "No projects",
       "nSessions": "{count} sessions"
     },
-    "recentSessions": {
-      "title": "Recent Sessions",
-      "badge": "All projects",
-      "noSessions": "No sessions"
-    },
     "sessionDepth": {
       "title": "Session Depth",
       "badge": "By messages",
       "avgMessages": "Average {avg} messages per session"
-    },
-    "streak": {
-      "title": "Activity Streak",
-      "badge": "Last 16 weeks",
-      "counting": "Calculating…",
-      "currentStreak": "Current streak",
-      "longestStreak": "Longest streak",
-      "activeDays": "Active days"
-    },
-    "todaySummary": {
-      "title": "Today's Summary",
-      "badge": "Today"
     },
     "token": {
       "title": "Token Usage",

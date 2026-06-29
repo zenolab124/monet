@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { UsageStats } from '../../types'
 import { formatTokens } from '../../types'
-import HomeCard from './HomeCard.vue'
+import DashboardSection from './DashboardSection.vue'
 
 /**
  * 活跃热力卡（v2.2.0 FR-003）：近 16 周按天 token 量五档格子。
@@ -67,7 +67,7 @@ const rows = computed<Cell[][]>(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-grid" :title="$t('home.heatmap.title')" :badge="$t('home.heatmap.badge')" wide>
+  <DashboardSection icon="i-carbon-grid" :title="$t('home.heatmap.title')" :badge="$t('home.heatmap.badge')">
     <template v-if="error">
       <div class="py-3 text-xs text-muted-foreground">{{ $t('common.loadFailed') }}</div>
       <button class="retry-btn" @click="emit('retry')">{{ $t('common.retry') }}</button>
@@ -94,7 +94,7 @@ const rows = computed<Cell[][]>(() => {
         {{ $t('home.heatmap.more') }}
       </div>
     </template>
-  </HomeCard>
+  </DashboardSection>
 </template>
 
 <style scoped>

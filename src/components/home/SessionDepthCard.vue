@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Project } from '../../types'
-import HomeCard from './HomeCard.vue'
+import DashboardSection from './DashboardSection.vue'
 
 const props = defineProps<{
   projects: Project[]
@@ -51,23 +51,24 @@ const avgDepth = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-chart-histogram" :title="$t('home.sessionDepth.title')" :badge="$t('home.sessionDepth.badge')">
+  <DashboardSection icon="i-carbon-chart-histogram" :title="$t('home.sessionDepth.title')" :badge="$t('home.sessionDepth.badge')">
     <div v-if="loading && !distribution.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
-      <div class="flex items-end gap-3 flex-1 min-h-10 px-2">
+      <div class="depth-chart">
         <div v-for="d in distribution" :key="d.label" class="bucket">
           <div class="bucket-bar-wrap">
-            <div class="bucket-bar" :style="{ height: `${Math.max(d.pct, 3)}%` }" />
+            <div class="bucket-bar" :style="{ height: `${Math.max(d.pct, 3)}%` }">
+              <span v-if="d.count > 0" class="bucket-count-inner">{{ d.count }}</span>
+            </div>
           </div>
           <div class="bucket-label">{{ d.label }}</div>
-          <div class="bucket-count">{{ d.count }}</div>
         </div>
       </div>
-      <div class="text-2xs text-muted-foreground mt-2.5">
+      <div class="text-2xs text-muted-foreground mt-3">
         {{ $t('home.sessionDepth.avgMessages', { avg: avgDepth }) }}
       </div>
     </template>
-  </HomeCard>
+  </DashboardSection>
 </template>
 
 <style scoped>
@@ -75,37 +76,48 @@ const avgDepth = computed(() => {
   font-size: 10px;
   line-height: 1.4;
 }
+.depth-chart {
+  display: flex;
+  gap: 12px;
+  height: 140px;
+  padding: 0 8px;
+}
 .bucket {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
 }
 .bucket-bar-wrap {
   width: 100%;
   flex: 1;
-  min-height: 24px;
   display: flex;
   align-items: flex-end;
 }
 .bucket-bar {
   width: 100%;
-  border-radius: 2px 2px 0 0;
+  border-radius: 3px 3px 0 0;
   background: color-mix(in oklch, var(--primary) 45%, var(--card));
   transition: height 0.2s;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4px;
+  min-height: 20px;
 }
 .bucket:hover .bucket-bar {
   background: var(--primary);
 }
-.bucket-label {
-  font-size: 10px;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono, monospace);
-}
-.bucket-count {
+.bucket-count-inner {
   font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  color: var(--card);
+}
+.bucket-label {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono, monospace);
 }
 </style>

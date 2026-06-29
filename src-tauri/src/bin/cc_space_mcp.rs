@@ -36,65 +36,6 @@ fn data_dir() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Widget data structures
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WidgetDefinition {
-    id: String,
-    name: String,
-    description: String,
-    width: u32,
-    height: u32,
-    created_at: String,
-    updated_at: String,
-}
-
-// ---------------------------------------------------------------------------
-// Widget file operations
-// ---------------------------------------------------------------------------
-
-fn widgets_meta_path() -> PathBuf {
-    data_dir().join("widgets.json")
-}
-
-fn widgets_dir() -> PathBuf {
-    data_dir().join("widgets")
-}
-
-fn load_widgets() -> Vec<WidgetDefinition> {
-    let path = widgets_meta_path();
-    if !path.exists() {
-        return Vec::new();
-    }
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn save_widgets(data: &[WidgetDefinition]) {
-    let path = widgets_meta_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(json_str) = serde_json::to_string_pretty(data) {
-        let _ = std::fs::write(&path, json_str);
-    }
-}
-
-fn save_widget_html(id: &str, html: &str) {
-    let dir = widgets_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join(format!("{}.html", id)), html);
-}
-
-fn delete_widget_html(id: &str) {
-    let _ = std::fs::remove_file(widgets_dir().join(format!("{}.html", id)));
-}
-
-// ---------------------------------------------------------------------------
 // Routine data structures (mirrors routines.rs)
 // ---------------------------------------------------------------------------
 
@@ -226,7 +167,7 @@ fn handle_initialize(id: Value) -> Value {
             "protocolVersion": PROTOCOL_VERSION,
             "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
             "capabilities": { "tools": {} },
-            "instructions": "CC Space provides two capabilities:\n\n1. **Routines** (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them.\n\n2. **Widgets** (自定义仪表盘卡片): When the user asks to create a dashboard card, home page widget, or visual display for their CC Space home screen, use widget_create. Generate complete, self-contained HTML with inline styles. The widget renders in an iframe sandbox on a 4-column grid (cell ~250-500px wide × 180px tall). Use the Paper theme CSS variables for visual consistency. Use widget_list to show existing widgets, widget_update to modify them, and widget_delete to remove them."
+            "instructions": "CC Space provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them."
         }
     })
 }
@@ -300,80 +241,6 @@ fn handle_tools_list(id: Value) -> Value {
         }
     }));
 
-    // Widget tools
-    tools.push(json!({
-        "name": "widget_list",
-        "description": "List all custom dashboard widgets on the CC Space home page.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {}
-        }
-    }));
-
-    tools.push(json!({
-        "name": "widget_create",
-        "description": "Create a custom dashboard widget card for the CC Space home page. The HTML renders in an iframe sandbox with theme CSS variables auto-injected.\n\nDesign guidelines (follow by default; the user may override):\n- Font: system-ui 13px, already set on body. Titles: 14px semibold. Secondary text: 12px.\n- Colors: use var(--foreground), var(--muted-foreground), var(--primary), var(--accent), var(--border), var(--card). These auto-switch with light/dark/theme changes.\n- Responsive: width varies with column count (1col ~130px, 2col ~280px, 4col ~580px). Use percentage widths and flexbox, never fixed px widths. Height is ~160px per row (180px cell minus margin). Design for the default size first, then ensure it degrades gracefully when resized.\n- Layout: body has 6px 12px 10px padding. Keep content compact, high-density.\n- <style> tags and inline styles both work. No external resources (<link>, <script src>, CDN images/fonts). Self-contained HTML only.\n- Inline <script> is allowed for dynamic content.\n- Do NOT add a card border/shadow/background — the outer shell provides those.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Display name for the widget"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Short description of what the widget shows"
-                },
-                "html": {
-                    "type": "string",
-                    "description": "HTML body content (no <html>/<head>/<body> wrapper needed). Use inline styles and var(--foreground) etc. for theme colors. Keep it self-contained."
-                },
-                "width": {
-                    "type": "integer",
-                    "description": "Grid width in columns (1-4, default 2)",
-                    "minimum": 1,
-                    "maximum": 4
-                },
-                "height": {
-                    "type": "integer",
-                    "description": "Grid height in rows (1-3, default 1)",
-                    "minimum": 1,
-                    "maximum": 3
-                }
-            },
-            "required": ["name", "html"]
-        }
-    }));
-
-    tools.push(json!({
-        "name": "widget_update",
-        "description": "Update an existing custom widget by ID.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "id": { "type": "string", "description": "Widget ID to update" },
-                "name": { "type": "string", "description": "New display name (optional)" },
-                "description": { "type": "string", "description": "New description (optional)" },
-                "html": { "type": "string", "description": "New HTML content (optional)" },
-                "width": { "type": "integer", "minimum": 1, "maximum": 4 },
-                "height": { "type": "integer", "minimum": 1, "maximum": 3 }
-            },
-            "required": ["id"]
-        }
-    }));
-
-    tools.push(json!({
-        "name": "widget_delete",
-        "description": "Delete a custom widget by ID.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "id": { "type": "string", "description": "Widget ID to delete" }
-            },
-            "required": ["id"]
-        }
-    }));
-
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -391,10 +258,6 @@ fn handle_tools_call(id: Value, req: &Value) -> Value {
         "routine_list" => handle_routine_list(),
         "routine_create" => handle_routine_create(&arguments),
         "routine_delete" => handle_routine_delete(&arguments),
-        "widget_list" => handle_widget_list(),
-        "widget_create" => handle_widget_create(&arguments),
-        "widget_update" => handle_widget_update(&arguments),
-        "widget_delete" => handle_widget_delete(&arguments),
         _ => Err(format!("Unknown tool: {}", name)),
     };
 
@@ -592,131 +455,6 @@ fn handle_routine_delete(arguments: &Value) -> Result<String, String> {
     }
 
     save_routines(&routines);
-    Ok(json!({ "deleted": id }).to_string())
-}
-
-// ---------------------------------------------------------------------------
-// Tool: widget_list
-// ---------------------------------------------------------------------------
-
-fn handle_widget_list() -> Result<String, String> {
-    let widgets = load_widgets();
-    serde_json::to_string_pretty(&widgets).map_err(|e| e.to_string())
-}
-
-// ---------------------------------------------------------------------------
-// Tool: widget_create
-// ---------------------------------------------------------------------------
-
-fn handle_widget_create(arguments: &Value) -> Result<String, String> {
-    let name = arguments
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or("缺少参数: name")?
-        .to_string();
-    let html = arguments
-        .get("html")
-        .and_then(Value::as_str)
-        .ok_or("缺少参数: html")?
-        .to_string();
-    let description = arguments
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let width = arguments
-        .get("width")
-        .and_then(Value::as_u64)
-        .unwrap_or(2)
-        .min(4)
-        .max(1) as u32;
-    let height = arguments
-        .get("height")
-        .and_then(Value::as_u64)
-        .unwrap_or(1)
-        .min(3)
-        .max(1) as u32;
-
-    let id = uuid::Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-
-    save_widget_html(&id, &html);
-
-    let widget = WidgetDefinition {
-        id: id.clone(),
-        name,
-        description,
-        width,
-        height,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-
-    let mut widgets = load_widgets();
-    widgets.push(widget.clone());
-    save_widgets(&widgets);
-
-    serde_json::to_string_pretty(&widget).map_err(|e| e.to_string())
-}
-
-// ---------------------------------------------------------------------------
-// Tool: widget_update
-// ---------------------------------------------------------------------------
-
-fn handle_widget_update(arguments: &Value) -> Result<String, String> {
-    let id = arguments
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("缺少参数: id")?;
-
-    let mut widgets = load_widgets();
-    let widget = widgets
-        .iter_mut()
-        .find(|w| w.id == id)
-        .ok_or_else(|| format!("未找到 widget: {}", id))?;
-
-    if let Some(name) = arguments.get("name").and_then(Value::as_str) {
-        widget.name = name.to_string();
-    }
-    if let Some(desc) = arguments.get("description").and_then(Value::as_str) {
-        widget.description = desc.to_string();
-    }
-    if let Some(w) = arguments.get("width").and_then(Value::as_u64) {
-        widget.width = w.min(4).max(1) as u32;
-    }
-    if let Some(h) = arguments.get("height").and_then(Value::as_u64) {
-        widget.height = h.min(3).max(1) as u32;
-    }
-    if let Some(html) = arguments.get("html").and_then(Value::as_str) {
-        save_widget_html(id, html);
-    }
-    widget.updated_at = Utc::now().to_rfc3339();
-
-    let result = serde_json::to_string_pretty(widget).map_err(|e| e.to_string())?;
-    save_widgets(&widgets);
-    Ok(result)
-}
-
-// ---------------------------------------------------------------------------
-// Tool: widget_delete
-// ---------------------------------------------------------------------------
-
-fn handle_widget_delete(arguments: &Value) -> Result<String, String> {
-    let id = arguments
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("缺少参数: id")?;
-
-    let mut widgets = load_widgets();
-    let before = widgets.len();
-    widgets.retain(|w| w.id != id);
-
-    if widgets.len() == before {
-        return Err(format!("未找到 widget: {}", id));
-    }
-
-    delete_widget_html(id);
-    save_widgets(&widgets);
     Ok(json!({ "deleted": id }).to_string())
 }
 

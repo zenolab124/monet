@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Project } from '../../types'
-import HomeCard from './HomeCard.vue'
+import DashboardSection from './DashboardSection.vue'
 
 const props = defineProps<{
   projects: Project[]
@@ -31,31 +31,28 @@ const peakHour = computed(() => {
 </script>
 
 <template>
-  <HomeCard icon="i-carbon-time" :title="$t('home.workRhythm.title')" :badge="$t('home.workRhythm.badge')">
+  <DashboardSection icon="i-carbon-time" :title="$t('home.workRhythm.title')" :badge="$t('home.workRhythm.badge')">
     <div v-if="loading && !hours.length" class="text-2xs text-muted-foreground py-2">{{ $t('common.loading') }}</div>
     <template v-else>
-      <div class="flex items-end gap-px flex-1 min-h-8">
+      <div class="rhythm-chart">
         <div
           v-for="h in hours"
           :key="h.hour"
           class="bar-col"
           :title="$t('home.workRhythm.barTitle', { hour: h.hour, count: h.count })"
         >
-          <div class="bar" :class="h.hour === peakHour ? 'peak' : ''" :style="{ height: `${Math.max(h.pct, 2)}%` }" />
+          <div class="bar-space">
+            <div class="bar" :class="h.hour === peakHour ? 'peak' : ''" :style="{ height: `${Math.max(h.pct, 2)}%` }" />
+          </div>
+          <div v-if="h.hour % 3 === 0" class="hour-label">{{ h.hour }}</div>
+          <div v-else class="hour-label" />
         </div>
       </div>
-      <div class="flex justify-between mt-1 text-2xs text-muted-foreground tabular-nums">
-        <span>{{ $t('home.workRhythm.hour0') }}</span>
-        <span>{{ $t('home.workRhythm.hour6') }}</span>
-        <span>{{ $t('home.workRhythm.hour12') }}</span>
-        <span>{{ $t('home.workRhythm.hour18') }}</span>
-        <span>{{ $t('home.workRhythm.hour24') }}</span>
-      </div>
-      <div v-if="peakHour !== null" class="text-2xs text-muted-foreground mt-1.5">
+      <div v-if="peakHour !== null" class="text-2xs text-muted-foreground mt-2">
         {{ $t('home.workRhythm.peakHour', { start: peakHour, end: peakHour + 1 }) }}
       </div>
     </template>
-  </HomeCard>
+  </DashboardSection>
 </template>
 
 <style scoped>
@@ -63,16 +60,26 @@ const peakHour = computed(() => {
   font-size: 10px;
   line-height: 1.4;
 }
+.rhythm-chart {
+  display: flex;
+  gap: 2px;
+  height: 140px;
+}
 .bar-col {
   flex: 1;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   min-width: 0;
+}
+.bar-space {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
 }
 .bar {
   width: 100%;
-  border-radius: 1px 1px 0 0;
-  background: color-mix(in oklch, var(--primary) 50%, var(--card));
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in oklch, var(--primary) 45%, var(--card));
   transition: height 0.2s;
 }
 .bar.peak {
@@ -80,5 +87,13 @@ const peakHour = computed(() => {
 }
 .bar-col:hover .bar {
   background: var(--primary);
+}
+.hour-label {
+  font-size: 9px;
+  color: var(--muted-foreground);
+  text-align: center;
+  margin-top: 4px;
+  height: 12px;
+  font-variant-numeric: tabular-nums;
 }
 </style>

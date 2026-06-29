@@ -24,7 +24,7 @@ mod workshop;
 mod cli_settings;
 mod translate;
 mod widget;
-mod dashboard;
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -164,8 +164,6 @@ pub fn run() {
             widget::update_widget,
             widget::get_widget_config,
             widget::set_widget_config,
-            dashboard::list_dashboard_widgets,
-            dashboard::delete_dashboard_widget,
             menu::hide_main_window,
             menu::quit_app,
         ])

@@ -321,27 +321,6 @@
     }
   },
   "home": {
-    "grid": {
-      "edit": "编辑布局",
-      "done": "完成编辑",
-      "reset": "恢复默认布局",
-      "hide": "隐藏卡片",
-      "show": "显示卡片"
-    },
-    "branchActivity": {
-      "title": "分支活跃",
-      "badge": "按最近活跃",
-      "noBranches": "暂无分支数据",
-      "nSessions": "{count} 会话"
-    },
-    "costEstimate": {
-      "title": "费用估算",
-      "badge": "本月",
-      "counting": "统计中…",
-      "estimate": "估算",
-      "noUsage": "本月暂无用量",
-      "disclaimer": "按官方定价粗估 · 不含折扣"
-    },
     "diagnosis": {
       "title": "兼容性诊断",
       "supportedTypes": "已支持记录类型",
@@ -367,27 +346,10 @@
       "noProjects": "暂无项目",
       "nSessions": "{count} 会话"
     },
-    "recentSessions": {
-      "title": "最近会话",
-      "badge": "全部项目",
-      "noSessions": "暂无会话"
-    },
     "sessionDepth": {
       "title": "会话深度",
       "badge": "按消息数",
       "avgMessages": "平均每会话 {avg} 条消息"
-    },
-    "streak": {
-      "title": "连续活跃",
-      "badge": "近 16 周",
-      "counting": "统计中…",
-      "currentStreak": "当前连续天",
-      "longestStreak": "最长记录",
-      "activeDays": "活跃天数"
-    },
-    "todaySummary": {
-      "title": "今日概要",
-      "badge": "今天"
     },
     "token": {
       "title": "Token 消耗",
