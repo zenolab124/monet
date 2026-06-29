@@ -6,15 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WidgetSnapshot {
-    today_sessions: u32,
-    today_tokens: u64,
-    models: Vec<String>,
-    updated_at: String,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WidgetConfig {
@@ -115,21 +106,27 @@ pub fn update_widget(
     today_tokens: u64,
     models: Vec<String>,
 ) -> Result<(), String> {
-    let snap = WidgetSnapshot {
-        today_sessions,
-        today_tokens,
-        models,
-        updated_at: Local::now().to_rfc3339(),
-    };
-    let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
+    let backup_path = config::data_dir().join("widget-data.json");
+
+    let mut doc: serde_json::Value = std::fs::read_to_string(&backup_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let obj = doc.as_object_mut().ok_or("invalid widget data")?;
+    obj.insert("todaySessions".into(), today_sessions.into());
+    obj.insert("todayTokens".into(), today_tokens.into());
+    obj.insert("models".into(), serde_json::json!(models));
+    obj.insert("updatedAt".into(), Local::now().to_rfc3339().into());
+
+    let json = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
 
     if let Some(path) = widget_container_path() {
         let _ = std::fs::write(&path, &json);
     }
 
-    let path = config::data_dir().join("widget-data.json");
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = backup_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, &json).map_err(|e| e.to_string())
+    std::fs::write(&backup_path, &json).map_err(|e| e.to_string())
 }

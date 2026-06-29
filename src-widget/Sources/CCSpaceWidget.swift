@@ -4,182 +4,154 @@ import SwiftUI
 @main
 struct CCSpaceWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Small
         TodaySummaryWidget()
+        TokenWidget()
         StreakWidget()
-        CostWidget()
-        TokenPulseWidget()
-        ActiveProjectsWidget()
-        // Medium
-        TokenTrendWidget()
-        ModelMixWidget()
-        ProjectBoardWidget()
-        WorkRhythmWidget()
-        WeeklySummaryWidget()
-        // Large
-        MonthlyDashboardWidget()
-        HeatmapWidget()
+        ProjectWidget()
+        ActivityWidget()
     }
 }
 
-// MARK: - Small Widgets
+// MARK: - Today Summary: Small=今日概要, Medium=本周总结
 
 struct TodaySummaryWidget: Widget {
     let kind = "TodaySummary"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            TodaySummaryView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
+            TodaySummaryMultiView(entry: entry)
+                .containerBackground(.ultraThinMaterial, for: .widget)
         }
         .configurationDisplayName(Text("widget.displayName"))
         .description(Text("widget.description"))
-        .supportedFamilies([.systemSmall])
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
+
+struct TodaySummaryMultiView: View {
+    let entry: TodaySummaryEntry
+    @Environment(\.widgetFamily) var family
+    var body: some View {
+        switch family {
+        case .systemMedium:
+            WeeklySummaryView(entry: entry)
+        default:
+            TodaySummaryView(entry: entry)
+        }
+    }
+}
+
+// MARK: - Token: Small=脉搏, Medium=趋势, Large=月度总览
+
+struct TokenWidget: Widget {
+    let kind = "Token"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
+            TokenMultiView(entry: entry)
+                .containerBackground(.ultraThinMaterial, for: .widget)
+        }
+        .configurationDisplayName(Text("pulse.displayName"))
+        .description(Text("trend.description"))
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    }
+}
+
+struct TokenMultiView: View {
+    let entry: TodaySummaryEntry
+    @Environment(\.widgetFamily) var family
+    var body: some View {
+        switch family {
+        case .systemMedium:
+            TokenTrendView(entry: entry)
+        case .systemLarge:
+            MonthlyDashboardView(entry: entry)
+        default:
+            TokenPulseView(entry: entry)
+        }
+    }
+}
+
+// MARK: - Streak: Small=连续天数, Medium=费用+模型
 
 struct StreakWidget: Widget {
     let kind = "Streak"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            StreakView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
+            StreakMultiView(entry: entry)
+                .containerBackground(.ultraThinMaterial, for: .widget)
         }
         .configurationDisplayName(Text("streak.displayName"))
         .description(Text("streak.description"))
-        .supportedFamilies([.systemSmall])
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
-struct CostWidget: Widget {
-    let kind = "Cost"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            CostView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
+struct StreakMultiView: View {
+    let entry: TodaySummaryEntry
+    @Environment(\.widgetFamily) var family
+    var body: some View {
+        switch family {
+        case .systemMedium:
+            ModelMixView(entry: entry)
+        default:
+            StreakView(entry: entry)
         }
-        .configurationDisplayName(Text("cost.displayName"))
-        .description(Text("cost.description"))
-        .supportedFamilies([.systemSmall])
     }
 }
 
-struct TokenPulseWidget: Widget {
-    let kind = "TokenPulse"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            TokenPulseView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("pulse.displayName"))
-        .description(Text("pulse.description"))
-        .supportedFamilies([.systemSmall])
-    }
-}
+// MARK: - Project: Small=活跃项目, Medium=项目排行
 
-struct ActiveProjectsWidget: Widget {
-    let kind = "ActiveProjects"
+struct ProjectWidget: Widget {
+    let kind = "Project"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            ActiveProjectsView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
+            ProjectMultiView(entry: entry)
+                .containerBackground(.ultraThinMaterial, for: .widget)
         }
         .configurationDisplayName(Text("projects.displayName"))
-        .description(Text("projects.description"))
-        .supportedFamilies([.systemSmall])
-    }
-}
-
-// MARK: - Medium Widgets
-
-struct TokenTrendWidget: Widget {
-    let kind = "TokenTrend"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            TokenTrendView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("trend.displayName"))
-        .description(Text("trend.description"))
-        .supportedFamilies([.systemMedium])
-    }
-}
-
-struct ModelMixWidget: Widget {
-    let kind = "ModelMix"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            ModelMixView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("models.displayName"))
-        .description(Text("models.description"))
-        .supportedFamilies([.systemMedium])
-    }
-}
-
-struct ProjectBoardWidget: Widget {
-    let kind = "ProjectBoard"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            ProjectBoardView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("board.displayName"))
         .description(Text("board.description"))
-        .supportedFamilies([.systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
-struct WorkRhythmWidget: Widget {
-    let kind = "WorkRhythm"
+struct ProjectMultiView: View {
+    let entry: TodaySummaryEntry
+    @Environment(\.widgetFamily) var family
+    var body: some View {
+        switch family {
+        case .systemMedium:
+            ProjectBoardView(entry: entry)
+        default:
+            ActiveProjectsView(entry: entry)
+        }
+    }
+}
+
+// MARK: - Activity: Small=费用, Medium=作息节奏, Large=热力图
+
+struct ActivityWidget: Widget {
+    let kind = "Activity"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            WorkRhythmView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
+            ActivityMultiView(entry: entry)
+                .containerBackground(.ultraThinMaterial, for: .widget)
         }
         .configurationDisplayName(Text("rhythm.displayName"))
-        .description(Text("rhythm.description"))
-        .supportedFamilies([.systemMedium])
-    }
-}
-
-struct WeeklySummaryWidget: Widget {
-    let kind = "WeeklySummary"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            WeeklySummaryView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("weekly.displayName"))
-        .description(Text("weekly.description"))
-        .supportedFamilies([.systemMedium])
-    }
-}
-
-// MARK: - Large Widgets
-
-struct MonthlyDashboardWidget: Widget {
-    let kind = "MonthlyDashboard"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            MonthlyDashboardView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("dashboard.displayName"))
-        .description(Text("dashboard.description"))
-        .supportedFamilies([.systemLarge])
-    }
-}
-
-struct HeatmapWidget: Widget {
-    let kind = "Heatmap"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            HeatmapView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-        }
-        .configurationDisplayName(Text("heatmap.displayName"))
         .description(Text("heatmap.description"))
-        .supportedFamilies([.systemLarge])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    }
+}
+
+struct ActivityMultiView: View {
+    let entry: TodaySummaryEntry
+    @Environment(\.widgetFamily) var family
+    var body: some View {
+        switch family {
+        case .systemMedium:
+            WorkRhythmView(entry: entry)
+        case .systemLarge:
+            HeatmapView(entry: entry)
+        default:
+            CostView(entry: entry)
+        }
     }
 }
