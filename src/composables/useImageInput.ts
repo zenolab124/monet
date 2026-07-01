@@ -21,8 +21,8 @@ import {
   blobToDataUrl,
 } from '@/utils/imageCompress'
 
-/** 单张消息最多图片数,PRD 硬性限制 */
-export const MAX_IMAGES_PER_MESSAGE = 5
+/** @deprecated 不再限制单条消息图片数 */
+export const MAX_IMAGES_PER_MESSAGE = Infinity
 
 /** 输入框暂存的图片(已校验并按需压缩) */
 export interface PendingImage {
@@ -100,11 +100,8 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
   /** 拖拽进入态(用于显示蓝色高亮提示) */
   const isDragging = ref(false)
 
-  /** 是否还能再添加图片 */
-  const canAddMore = computed(() => images.value.length < MAX_IMAGES_PER_MESSAGE)
-
-  /** 剩余可添加数量 */
-  const remainingSlots = computed(() => MAX_IMAGES_PER_MESSAGE - images.value.length)
+  const canAddMore = computed(() => true)
+  const remainingSlots = computed(() => Infinity)
 
   /**
    * 添加单个文件(File 或 Blob 均可)
@@ -112,11 +109,6 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
    * 失败时设置 lastError,不抛异常
    */
   async function addFile(file: File | Blob): Promise<boolean> {
-    // 容量预检查
-    if (!canAddMore.value) {
-      lastError.value = { kind: 'limit', message: i18n.global.t('image.maxCount') }
-      return false
-    }
 
     const hintedMime = (file as File).type ?? ''
 
@@ -180,13 +172,7 @@ export function useImageInput(opts: UseImageInputOptions = {}) {
   }> {
     let added = 0
     let rejected = 0
-    // 容量超限:接受前 remainingSlots 张
-    const list = Array.from(files)
-    if (list.length > remainingSlots.value) {
-      rejected += list.length - remainingSlots.value
-      lastError.value = { kind: 'limit', message: i18n.global.t('image.maxCount') }
-    }
-    const acceptable = list.slice(0, remainingSlots.value)
+    const acceptable = Array.from(files)
     for (const f of acceptable) {
       const ok = await addFile(f)
       if (ok) added += 1

@@ -104,6 +104,16 @@ pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 在 Finder 中打开目录
+#[tauri::command]
+pub fn open_in_finder(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 发送消息（长活进程：自动 open + stdin 写入；替代旧 per-message spawn）。
 /// async + spawn_blocking：open_session 的初始化握手是阻塞 I/O，不能卡 IPC 主线程
 #[tauri::command]
@@ -291,6 +301,40 @@ pub fn check_session_running(session_id: String) -> bool {
         })
 }
 
+/// 终止指定会话的外部 CLI 进程（用户在 CC Space 点"停止"时调用）。
+/// 排除 CC Space 自身持有的长活进程,只 kill 终端 / VS Code 等外部进程。
+#[tauri::command]
+pub fn kill_external_session(session_id: String) -> bool {
+    let own_pid = crate::streaming::get_own_pid(&session_id);
+
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-axo", "pid,command"])
+        .output()
+    else {
+        return false;
+    };
+    let mut killed = false;
+    for l in String::from_utf8_lossy(&output.stdout).lines() {
+        if !l.contains(&session_id) || !l.contains("claude") {
+            continue;
+        }
+        let Some(pid) = l.trim().split_whitespace().next().and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if let Some(own) = own_pid {
+            if pid == own {
+                continue;
+            }
+        }
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .output();
+        killed = true;
+    }
+    killed
+}
+
 /// 全项目 token 用量聚合（v2.2.0 FR-001）：首页 Token 卡 / 活跃热力图数据源。
 /// 全量扫描秒级耗时，丢 blocking 线程池跑，不占 IPC 主线程
 #[tauri::command]
@@ -402,6 +446,69 @@ pub(crate) fn projects_dir() -> PathBuf {
         .unwrap_or_default()
         .join(".claude")
         .join("projects")
+}
+
+// ---------- 子 Agent ----------
+
+#[derive(serde::Serialize)]
+pub struct SubAgentMeta {
+    pub agent_id: String,
+    pub tool_use_id: String,
+    pub agent_type: Option<String>,
+    pub description: Option<String>,
+}
+
+#[tauri::command]
+pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMeta> {
+    let dir = projects_dir()
+        .join(&project_id)
+        .join(&session_id)
+        .join("subagents");
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+    let mut result = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with(".meta.json") {
+            continue;
+        }
+        let agent_id = name
+            .strip_prefix("agent-")
+            .and_then(|s| s.strip_suffix(".meta.json"))
+            .unwrap_or("")
+            .to_string();
+        if agent_id.is_empty() {
+            continue;
+        }
+        if let Ok(bytes) = fs::read(entry.path()) {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                result.push(SubAgentMeta {
+                    agent_id,
+                    tool_use_id: v["toolUseId"].as_str().unwrap_or("").to_string(),
+                    agent_type: v["agentType"].as_str().map(String::from),
+                    description: v["description"].as_str().map(String::from),
+                });
+            }
+        }
+    }
+    result
+}
+
+#[tauri::command]
+pub fn get_subagent_records(
+    project_id: String,
+    session_id: String,
+    agent_id: String,
+) -> Vec<SessionRecord> {
+    let path = projects_dir()
+        .join(&project_id)
+        .join(&session_id)
+        .join("subagents")
+        .join(format!("agent-{}.jsonl", agent_id));
+    parser::parse_messages(&path)
 }
 
 #[tauri::command]

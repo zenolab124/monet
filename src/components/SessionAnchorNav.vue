@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 export interface AnchorItem {
   index: number
@@ -13,6 +13,37 @@ const props = defineProps<{
 
 const activeIndex = ref(-1)
 let observer: IntersectionObserver | null = null
+
+const railRef = ref<HTMLElement>()
+const railHeight = ref(0)
+let resizeObs: ResizeObserver | null = null
+
+const MAX_GAP = 6
+const MIN_GAP = 2
+const MAX_WRAP = 14
+const MIN_WRAP = 8
+
+const layout = computed(() => {
+  const n = props.anchors.length
+  if (n <= 1) return { gap: MAX_GAP, wrap: MAX_WRAP }
+  const avail = railHeight.value // contentRect 已排除 padding
+  if (avail <= 0) return { gap: MAX_GAP, wrap: MAX_WRAP }
+  const needed = n * MAX_WRAP + (n - 1) * MAX_GAP
+  if (needed <= avail) return { gap: MAX_GAP, wrap: MAX_WRAP }
+  // 先压 gap
+  const gapRoom = (avail - n * MAX_WRAP) / (n - 1)
+  if (gapRoom >= MIN_GAP) return { gap: Math.floor(gapRoom), wrap: MAX_WRAP }
+  // gap 到底，压 wrap
+  const wrapRoom = (avail - (n - 1) * MIN_GAP) / n
+  return { gap: MIN_GAP, wrap: Math.max(MIN_WRAP, Math.floor(wrapRoom)) }
+})
+
+onMounted(() => {
+  resizeObs = new ResizeObserver(([e]) => { railHeight.value = e.contentRect.height })
+  if (railRef.value) resizeObs.observe(railRef.value)
+})
+watch(railRef, (el) => { if (el && resizeObs) resizeObs.observe(el) })
+onUnmounted(() => resizeObs?.disconnect())
 
 function resolveEl(index: number): HTMLElement | null {
   return props.scrollContainer?.querySelector<HTMLElement>(`[data-anchor-index="${index}"]`) ?? null
@@ -71,11 +102,12 @@ const showNav = computed(() => props.anchors.length > 1)
 </script>
 
 <template>
-  <div v-if="showNav" class="anchor-rail">
+  <div v-if="showNav" ref="railRef" class="anchor-rail" :style="{ gap: layout.gap + 'px' }">
     <div
       v-for="a in anchors"
       :key="a.index"
       class="anchor-dot-wrap"
+      :style="{ width: layout.wrap + 'px', height: layout.wrap + 'px' }"
       @mouseenter="onDotEnter($event, a.index)"
       @mouseleave="hoveredIndex = -1"
       @click="scrollTo(a)"
@@ -109,7 +141,6 @@ const showNav = computed(() => props.anchors.length > 1)
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
   padding: 12px 0;
   width: 20px;
   overflow-y: auto;
@@ -124,8 +155,6 @@ const showNav = computed(() => props.anchors.length > 1)
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
   cursor: pointer;
   flex-shrink: 0;
   pointer-events: auto;
@@ -136,7 +165,7 @@ const showNav = computed(() => props.anchors.length > 1)
   height: 5px;
   border-radius: 50%;
   background: var(--muted-foreground);
-  opacity: 0.15;
+  opacity: 0.25;
   transition: all 0.15s ease;
 }
 .anchor-dot-wrap:hover .anchor-dot {

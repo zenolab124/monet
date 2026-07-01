@@ -14,7 +14,6 @@
  */
 import InputImageThumbnail from './InputImageThumbnail.vue'
 import type { PendingImage } from '@/composables/useImageInput'
-import { MAX_IMAGES_PER_MESSAGE } from '@/composables/useImageInput'
 
 defineProps<{
   /** 暂存的图片队列 */
@@ -39,8 +38,8 @@ const emit = defineEmits<{
       :mime="img.mime"
       @remove="emit('remove', img.id)"
     />
-    <span class="text-2xs text-muted-foreground ml-1">
-      {{ images.length }} / {{ MAX_IMAGES_PER_MESSAGE }}
+    <span v-if="images.length > 1" class="text-2xs text-muted-foreground ml-1">
+      {{ images.length }}
     </span>
   </div>
 </template>

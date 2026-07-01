@@ -33,6 +33,8 @@ const setHandle = (node: any) => { handleEl.value = node }
   min-width: 0;
   height: 100%;
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 .sortable-col-dragging {
   opacity: 0.4;

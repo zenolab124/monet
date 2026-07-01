@@ -267,6 +267,16 @@ function onReload() {
   emit('reload')
 }
 
+async function openInFinder() {
+  menuOpen.value = false
+  if (!props.cwd) return
+  try {
+    await invoke('open_in_finder', { path: props.cwd })
+  } catch (e) {
+    notifyTransient(t('topbar.openFailed'), String(e))
+  }
+}
+
 async function openInTerminal() {
   menuOpen.value = false
   if (!props.cwd) return
@@ -521,6 +531,9 @@ function onPermissionModeChange(mode: PermissionMode) {
         <div class="py-1 flex flex-col">
           <button class="menu-item" @click="onReload">
             <span class="i-carbon-renew w-3.5 h-3.5" />{{ $t('topbar.refreshSession') }}
+          </button>
+          <button v-if="cwd" class="menu-item" @click="openInFinder">
+            <span class="i-carbon-folder w-3.5 h-3.5" />{{ $t('topbar.openInFinder') }}
           </button>
           <button v-if="cwd" class="menu-item" @click="openInTerminal">
             <span class="i-carbon-terminal w-3.5 h-3.5" />{{ $t('topbar.openInTerminal') }}

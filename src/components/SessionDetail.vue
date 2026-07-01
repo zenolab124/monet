@@ -51,6 +51,9 @@ import {
   currentForSession,
   type RespondExtra,
 } from '@/composables/usePermissionRequests'
+import { createSubAgentContext } from '@/composables/useSubAgents'
+import type { SubAgentMeta } from '@/types'
+import SubAgentPanel from './SubAgentPanel.vue'
 
 /**
  * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
@@ -169,6 +172,42 @@ const toolResultMap = computed(() => {
 })
 provide('toolResultMap', toolResultMap)
 
+// --- 子 Agent 侧面板 ---
+const {
+  subAgentMap,
+  openAgents: subAgentTabs,
+  panelVisible: subAgentPanelVisible,
+  activeTab: subAgentActiveTab,
+  activeTabId: subAgentActiveTabId,
+  loadSubAgentList,
+  findByToolUseId,
+  toggleSubAgent,
+  closeTab: closeSubAgentTab,
+  closeAllTabs: closeAllSubAgents,
+  isAgentOpen,
+  startPolling,
+} = createSubAgentContext()
+
+provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
+provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
+provide('isSubAgentOpen', (agentId: string) => isAgentOpen(agentId))
+
+function hasUnmatchedAgentToolUse(): boolean {
+  for (const turn of stream.value.streamingTurns) {
+    for (const b of turn.content) {
+      if (b.type === 'tool_use' && ((b as any).name === 'Agent' || (b as any).name === 'Task')) {
+        if (!subAgentMap.value.has((b as any).id)) return true
+      }
+    }
+  }
+  return false
+}
+
+startPolling(
+  () => stream.value.streaming,
+  hasUnmatchedAgentToolUse,
+)
+
 // --- 斜杠命令(FR-004)状态 ---
 
 /** 当前输入框光标位置(用于 shouldTriggerPanel 判定) */
@@ -239,9 +278,13 @@ async function onPermissionDecide(
   if (req) await respondRequest(req.requestId, decision, extra)
 }
 
-async function onStopStreaming() {
+async function onStop() {
   const sid = effectiveSessionId.value
   if (!sid) return
+  if (externalRunning.value) {
+    await invoke('kill_external_session', { sessionId: sid })
+    return
+  }
   await denyAllForSession(sid)
   await stopStreaming(sid)
 }
@@ -784,14 +827,19 @@ async function handleSend() {
   const images = imageInput.images.value.length ? await imageInput.toImageBlocks() : undefined
   imageInput.clearImages()
   await refreshChannels()
-  await sendMessage(cs.summary.id, cs.summary.cwd, text, {
+  const opts = {
     model: advisor ? ADVISOR_MAIN_MODEL : (settings.value.modelId ?? undefined),
     effort: settings.value.effort ?? appDefaults.value.effort,
     channel: resolvedChannelId.value,
     advisor,
     images,
     permissionMode: settings.value.permissionMode,
-  })
+  }
+  if (externalRunning.value) {
+    stream.value.pendingQueue.push({ message: text, opts })
+    return
+  }
+  await sendMessage(cs.summary.id, cs.summary.cwd, text, opts)
 }
 
 function onInputKeydown(e: KeyboardEvent) {
@@ -807,6 +855,7 @@ let resumedAt = 0
 let scrollCoalesced = false
 let scrollRafId = 0
 let programmaticScroll = false
+let programmaticTimer = 0
 
 function onScrollWheel(e: WheelEvent) {
   if (e.deltaY < -3) {
@@ -829,16 +878,21 @@ function onScroll() {
     }
     const delta = el.scrollTop - lastScrollTop
     lastScrollTop = el.scrollTop
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (performance.now() - resumedAt < 300) return
-    if (delta < 0 && el.scrollHeight - el.scrollTop - el.clientHeight > 5) {
+    if (delta < 0 && distFromBottom > 5) {
       followStreaming.value = false
     } else if (delta > 0 && !followStreaming.value) {
-      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
       const threshold = Math.max(el.clientHeight * 0.5, 400)
       if (distFromBottom < threshold) {
         followStreaming.value = true
         resumedAt = performance.now()
       }
+    }
+    // 兜底：到底部就恢复，不依赖 delta 方向
+    if (!followStreaming.value && distFromBottom < 2) {
+      followStreaming.value = true
+      resumedAt = performance.now()
     }
   })
 }
@@ -859,11 +913,15 @@ function scrollToBottom(force = false) {
       const el = scrollContainer.value
       if (!el) return
       programmaticScroll = true
+      clearTimeout(programmaticTimer)
+      programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
       el.scrollTop = el.scrollHeight
       // 内容刚挂载时 scrollHeight 可能还是 0，延迟重试一次
       if (el.scrollHeight <= el.clientHeight) {
         requestAnimationFrame(() => {
           programmaticScroll = true
+          clearTimeout(programmaticTimer)
+          programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
           el.scrollTop = el.scrollHeight
         })
       }
@@ -994,11 +1052,13 @@ async function probeExternal() {
         followStreaming.value = true
       }
     } else if (externalRunning.value) {
-      // 进程退出:收尾 reload 拿最终落账,结束跟随
+      // 进程退出:收尾 reload 拿最终落账,结束跟随,消费排队消息
       externalRunning.value = false
       externalIdleTicks = 0
       await silentReloadRecords()
       stopExternalFollow()
+      const cs = currentSession.value
+      if (cs?.summary.cwd) consumePendingQueue(effectiveSessionId.value!, cs.summary.cwd)
     } else {
       // 进程未运行且从未标记过运行态,累积空轮次后停止探测
       externalIdleTicks++
@@ -1051,7 +1111,9 @@ watch(
       // 只有切换会话或 force(后台流式落账)才刷新
       if (cs.summary.id !== loadedSessionId || force) {
         loadedSessionId = cs.summary.id
+        closeAllSubAgents()
         await loadRecords(cs.projectId, cs.summary.id, force)
+        loadSubAgentList(cs.projectId, cs.summary.id)
         if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
           clearStreamingTurns(cs.summary.id)
         }
@@ -1088,7 +1150,9 @@ async function onReload() {
     <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? $t('session.notExist') : $t('archive.selectSession') }}</p>
   </div>
 
-  <div v-else class="h-full flex flex-col">
+  <div v-else class="h-full flex min-h-0">
+    <!-- 主内容区 -->
+    <div class="flex-1 min-w-0 flex flex-col">
     <!-- 会话顶栏(单行极简:标题由列头/列表承担,不重复显示) -->
     <SessionTopBar
       :session-id="currentSession.summary.id"
@@ -1305,6 +1369,10 @@ async function onReload() {
         </div>
       </div>
 
+      <div v-if="stream.streaming || externalRunning" class="flex items-center gap-1 py-2 pl-5">
+        <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
+      </div>
+
       <div v-if="stream.streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">
         {{ stream.streamError }}
       </div>
@@ -1349,7 +1417,7 @@ async function onReload() {
         {{ slashError }}
       </div>
 
-      <!-- 外部运行跟随提示:CLI 进程在应用外继续跑,期间禁发(同 session 双进程会冲突) -->
+      <!-- 外部运行跟随提示 -->
       <div v-if="externalRunning" class="mb-1 text-xs text-muted-foreground flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-claude animate-pulse shrink-0" />
         {{ $t('session.externalRunning') }}
@@ -1405,13 +1473,11 @@ async function onReload() {
         <textarea
           ref="textareaRef"
           v-model="inputText"
-          :disabled="externalRunning"
-          :placeholder="externalRunning ? $t('session.externalRunningPlaceholder') : $t('session.inputPlaceholder')"
+          :placeholder="$t('session.inputPlaceholder')"
           rows="1"
           class="flex-1 px-3 py-2 text-sm rounded-md bg-popover border border-border
                  text-foreground placeholder-muted-foreground resize-none
-                 focus:outline-none focus:border-ring transition-colors
-                 disabled:opacity-50"
+                 focus:outline-none focus:border-ring transition-colors"
           @keydown="onInputKeydown"
           @input="onInputChange"
           @keyup="syncCursor"
@@ -1419,15 +1485,15 @@ async function onReload() {
           @select="syncCursor"
         />
         <button
-          v-if="stream.streaming && !inputText.trim() && !imageInput.images.value.length"
+          v-if="(stream.streaming || externalRunning) && !inputText.trim() && !imageInput.images.value.length"
           class="px-3 py-2 text-xs rounded-md bg-accent text-accent-foreground hover:shadow-paper transition-shadow shrink-0"
-          @click="onStopStreaming"
+          @click="onStop"
         >
           {{ $t('common.stop') }}
         </button>
         <button
           v-else
-          :disabled="(!inputText.trim() && !imageInput.images.value.length) || externalRunning"
+          :disabled="!inputText.trim() && !imageInput.images.value.length"
           class="px-3 py-2 text-xs rounded-md bg-primary text-primary-foreground hover:shadow-paper transition-shadow shrink-0
                  disabled:opacity-30 disabled:cursor-not-allowed"
           @click="handleSend"
@@ -1461,10 +1527,37 @@ async function onReload() {
         {{ workbenchHome ? $t('session.goTo') : $t('session.openInWorkbench') }}
       </button>
     </div>
+    </div>
+    <!-- 子 Agent 侧面板 -->
+    <Transition name="subagent-slide">
+      <div
+        v-if="subAgentPanelVisible"
+        class="shrink-0 border-l border-border overflow-hidden"
+        :style="{ width: '45%', maxWidth: '520px' }"
+      >
+        <SubAgentPanel
+          :tabs="subAgentTabs"
+          :active-tab-id="subAgentActiveTabId"
+          @select="subAgentActiveTabId = $event"
+          @close-tab="closeSubAgentTab($event)"
+          @close-all="closeAllSubAgents()"
+        />
+      </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
+.subagent-slide-enter-active,
+.subagent-slide-leave-active {
+  transition: width 220ms cubic-bezier(0.32, 0.72, 0, 1), opacity 220ms ease;
+  overflow: hidden;
+}
+.subagent-slide-enter-from,
+.subagent-slide-leave-to {
+  width: 0 !important;
+  opacity: 0;
+}
 .msg-block {
   contain: layout style;
 }
@@ -1481,5 +1574,19 @@ async function onReload() {
   font-size: 10px;
   color: var(--muted-foreground);
   user-select: none;
+}
+.typing-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  opacity: 0.4;
+  animation: typing-blink 1.4s infinite both;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-blink {
+  0%, 80%, 100% { opacity: 0.15; }
+  40% { opacity: 0.6; }
 }
 </style>
