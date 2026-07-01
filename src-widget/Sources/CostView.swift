@@ -31,6 +31,8 @@ struct CostView: View {
                 Text(WidgetData.formatCost(data.estimatedCostUsd ?? 0))
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
                 Text("USD")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)

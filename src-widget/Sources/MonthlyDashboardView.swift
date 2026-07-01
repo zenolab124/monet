@@ -101,6 +101,8 @@ struct MonthlyDashboardView: View {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
                 if let pct = trend {
                     Text("\(pct >= 0 ? "↑" : "↓")\(abs(pct))%")
                         .font(.system(size: 8, weight: .medium))

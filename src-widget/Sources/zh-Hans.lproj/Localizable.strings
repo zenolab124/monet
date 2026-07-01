@@ -80,7 +80,7 @@
 
 // Heatmap (Large)
 "heatmap.title" = "活跃图谱";
-"heatmap.badge" = "近 4 周";
+"heatmap.badge" = "本月";
 "heatmap.monthTokens" = "月 Token";
 "heatmap.activeDays" = "活跃天数";
 "heatmap.streak" = "连续";

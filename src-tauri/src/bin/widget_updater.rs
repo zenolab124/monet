@@ -186,18 +186,19 @@ fn compute_streak(daily: &[app_lib::usage_stats::DailyUsage]) -> (u32, u32, u32)
 fn estimate_cost(models: &[app_lib::usage_stats::ModelUsage]) -> f64 {
     let mut cost = 0.0;
     for m in models {
-        let per_million = if m.model.contains("opus") {
-            15.0 + 75.0
+        // 加权混合价：约 80% input + 20% output
+        let blended_per_million = if m.model.contains("opus") {
+            15.0 * 0.8 + 75.0 * 0.2 // 27.0
         } else if m.model.contains("sonnet") {
-            3.0 + 15.0
+            3.0 * 0.8 + 15.0 * 0.2 // 5.4
         } else if m.model.contains("haiku") {
-            0.25 + 1.25
+            0.25 * 0.8 + 1.25 * 0.2 // 0.45
         } else if m.model.contains("fable") {
-            15.0 + 75.0
+            15.0 * 0.8 + 75.0 * 0.2 // 27.0
         } else {
-            5.0 + 25.0
+            5.0 * 0.8 + 25.0 * 0.2 // 9.0
         };
-        cost += (m.total as f64 / 1_000_000.0) * per_million;
+        cost += (m.total as f64 / 1_000_000.0) * blended_per_million;
     }
     (cost * 100.0).round() / 100.0
 }
@@ -216,8 +217,13 @@ fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>
         let path = entry.path();
         if !path.is_dir() { continue; }
         let proj_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        let display = proj_name.rsplit('-').last().unwrap_or(&proj_name);
-        let display = display.rsplit('/').next().unwrap_or(display);
+        // 目录名编码规则：首个 `-` 是根 `/`，其余 `-` 是路径分隔符
+        let decoded_path = if proj_name.starts_with('-') {
+            proj_name[1..].replace('-', "/")
+        } else {
+            proj_name.replace('-', "/")
+        };
+        let display = decoded_path.rsplit('/').next().unwrap_or(&proj_name);
 
         let mut jsonls = Vec::new();
         collect_jsonl(&path, &mut jsonls);
@@ -318,9 +324,16 @@ fn main() {
                 DayTokens { date: ds, tokens: t }
             }).collect();
 
-            // Heatmap (last 28 days)
-            let heatmap: Vec<DayTokens> = (0..28).rev().map(|i| {
-                let d = today_date - Duration::days(i);
+            // Heatmap: 当前自然月（1 号到月末）
+            let month_start = NaiveDate::from_ymd_opt(today_date.year(), today_date.month(), 1).unwrap();
+            let next_month = if today_date.month() == 12 {
+                NaiveDate::from_ymd_opt(today_date.year() + 1, 1, 1).unwrap()
+            } else {
+                NaiveDate::from_ymd_opt(today_date.year(), today_date.month() + 1, 1).unwrap()
+            };
+            let days_in_month = (next_month - month_start).num_days();
+            let heatmap: Vec<DayTokens> = (0..days_in_month).map(|i| {
+                let d = month_start + Duration::days(i);
                 let ds = d.format("%Y-%m-%d").to_string();
                 let t = stats.daily.iter().find(|x| x.date == ds).map(|x| x.total).unwrap_or(0);
                 DayTokens { date: ds, tokens: t }

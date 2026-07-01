@@ -31,6 +31,8 @@ struct TokenPulseView: View {
                 Text(data.formattedTokens)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
                 Text("widget.tokens")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)

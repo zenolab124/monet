@@ -80,7 +80,7 @@
 
 // Heatmap (Large)
 "heatmap.title" = "Activity Map";
-"heatmap.badge" = "4 weeks";
+"heatmap.badge" = "This month";
 "heatmap.monthTokens" = "Month tokens";
 "heatmap.activeDays" = "Active days";
 "heatmap.streak" = "Streak";

@@ -27,7 +27,7 @@ struct WorkRhythmView: View {
                     .foregroundStyle(.primary.opacity(0.8))
                 Spacer()
                 if let peak = peakHour, hours[peak] > 0 {
-                    Text("rhythm.peak \(peak):00")
+                    Text("\(String(localized: "rhythm.peak")) \(peak):00")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }

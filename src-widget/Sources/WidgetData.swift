@@ -101,10 +101,11 @@ struct WidgetData: Codable {
     }
 
     static func formatCost(_ value: Double) -> String {
-        if value >= 100 {
-            return String(format: "$%.0f", value)
-        }
-        return String(format: "$%.2f", value)
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = value >= 100 ? 0 : 2
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "$%.0f", value)
     }
 
     static func shortDate(_ dateStr: String) -> String {
