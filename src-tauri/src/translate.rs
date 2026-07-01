@@ -37,6 +37,28 @@ fn strip_markdown_fence(text: &str) -> &str {
     }
 }
 
+#[derive(Default, Clone)]
+pub(crate) struct ApiUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+fn extract_usage(v: &Value) -> Option<ApiUsage> {
+    let u = v.get("usage")?;
+    Some(ApiUsage {
+        input_tokens: u.get("input_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+        output_tokens: u.get("output_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+    })
+}
+
+fn extract_usage_openai(v: &Value) -> Option<ApiUsage> {
+    let u = v.get("usage")?;
+    Some(ApiUsage {
+        input_tokens: u.get("prompt_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+        output_tokens: u.get("completion_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+    })
+}
+
 pub(crate) fn http_call_messages(
     base_url: &str,
     token: &str,
@@ -44,11 +66,22 @@ pub(crate) fn http_call_messages(
     model: &str,
     max_tokens: u32,
 ) -> Result<String, String> {
+    http_call_messages_with_usage(base_url, token, prompt, model, max_tokens).map(|(text, _)| text)
+}
+
+pub(crate) fn http_call_messages_with_usage(
+    base_url: &str,
+    token: &str,
+    prompt: &str,
+    model: &str,
+    max_tokens: u32,
+) -> Result<(String, Option<ApiUsage>), String> {
     let client = reqwest::blocking::Client::new();
     let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
     let body = json!({
         "model": model,
         "max_tokens": max_tokens,
+        "stream": false,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -68,15 +101,19 @@ pub(crate) fn http_call_messages(
         return Err(format!("API {} — {}", status, body_text));
     }
 
-    let resp_json: Value = resp.json().map_err(|e| format!("响应解析失败: {}", e))?;
-    resp_json
+    let body_text = resp.text().map_err(|e| format!("响应读取失败: {}", e))?;
+    let resp_json: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("响应解析失败: {} — body: {}", e, &body_text[..body_text.len().min(200)]))?;
+    let usage = extract_usage(&resp_json);
+    let text = resp_json
         .get("content")
         .and_then(|c| c.as_array())
         .and_then(|a| a.first())
         .and_then(|b| b.get("text"))
         .and_then(|t| t.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| "API 响应格式异常".to_string())
+        .ok_or_else(|| "API 响应格式异常".to_string())?;
+    Ok((text, usage))
 }
 
 pub(crate) fn http_call_openai(
@@ -86,11 +123,22 @@ pub(crate) fn http_call_openai(
     model: &str,
     max_tokens: u32,
 ) -> Result<String, String> {
+    http_call_openai_with_usage(base_url, token, prompt, model, max_tokens).map(|(text, _)| text)
+}
+
+pub(crate) fn http_call_openai_with_usage(
+    base_url: &str,
+    token: &str,
+    prompt: &str,
+    model: &str,
+    max_tokens: u32,
+) -> Result<(String, Option<ApiUsage>), String> {
     let client = reqwest::blocking::Client::new();
     let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
     let body = json!({
         "model": model,
         "max_tokens": max_tokens,
+        "stream": false,
         "messages": [{"role": "user", "content": prompt}]
     });
 
@@ -114,8 +162,11 @@ pub(crate) fn http_call_openai(
         return Err(format!("API {} — {}", status, body_text));
     }
 
-    let resp_json: Value = resp.json().map_err(|e| format!("响应解析失败: {}", e))?;
-    resp_json
+    let body_text = resp.text().map_err(|e| format!("响应读取失败: {}", e))?;
+    let resp_json: Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("响应解析失败: {} — body: {}", e, &body_text[..body_text.len().min(200)]))?;
+    let usage = extract_usage_openai(&resp_json);
+    let text = resp_json
         .get("choices")
         .and_then(|c| c.as_array())
         .and_then(|a| a.first())
@@ -123,7 +174,8 @@ pub(crate) fn http_call_openai(
         .and_then(|msg| msg.get("content"))
         .and_then(|t| t.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| "API 响应格式异常".to_string())
+        .ok_or_else(|| "API 响应格式异常".to_string())?;
+    Ok((text, usage))
 }
 
 pub(crate) fn http_call_by_protocol(
@@ -134,9 +186,21 @@ pub(crate) fn http_call_by_protocol(
     max_tokens: u32,
     protocol: &str,
 ) -> Result<String, String> {
+    http_call_by_protocol_with_usage(base_url, token, prompt, model, max_tokens, protocol)
+        .map(|(text, _)| text)
+}
+
+pub(crate) fn http_call_by_protocol_with_usage(
+    base_url: &str,
+    token: &str,
+    prompt: &str,
+    model: &str,
+    max_tokens: u32,
+    protocol: &str,
+) -> Result<(String, Option<ApiUsage>), String> {
     match protocol {
-        "openai" => http_call_openai(base_url, token, prompt, model, max_tokens),
-        _ => http_call_messages(base_url, token, prompt, model, max_tokens),
+        "openai" => http_call_openai_with_usage(base_url, token, prompt, model, max_tokens),
+        _ => http_call_messages_with_usage(base_url, token, prompt, model, max_tokens),
     }
 }
 

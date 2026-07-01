@@ -7,6 +7,7 @@ import {
   refreshChannels,
   OFFICIAL_CHANNEL_ID,
   type ChannelInfo,
+  type CcSwitchProvider,
 } from '@/composables/useChannels'
 import { useUiState } from '@/composables/useUiState'
 import { useConfirm } from '@/composables/useConfirm'
@@ -32,6 +33,7 @@ const {
   deleteChannel, setChannelEnabled, setDefaultSessionChannel, setDefaultAgentModel,
   setAgentFeatureModel, revealChannelsDir,
   probeChannel, probeAllChannels, loadAgentPreferences,
+  scanCcSwitch, importCcSwitch,
 } = useChannels()
 const { activeSection } = useUiState()
 const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
@@ -94,10 +96,115 @@ async function onCustomTranslate() {
   }
 }
 
+// --- Agent 渠道测试 ---
+interface AgentTestResult {
+  success: boolean
+  channelId: string
+  model: string
+  durationMs: number
+  inputTokens: number
+  outputTokens: number
+  reply: string
+  error?: string
+}
+const agentTesting = ref(false)
+const agentTestResult = ref<AgentTestResult | null>(null)
+
+async function onTestAgent() {
+  agentTesting.value = true
+  agentTestResult.value = null
+  try {
+    agentTestResult.value = await invoke<AgentTestResult>('test_agent_channel')
+  } catch (e) {
+    agentTestResult.value = { success: false, channelId: '', model: '', durationMs: 0, inputTokens: 0, outputTokens: 0, reply: '', error: String(e) }
+  } finally {
+    agentTesting.value = false
+  }
+}
+
+// --- Agent 调用日志 ---
+interface AgentLogEntry {
+  timestamp: string
+  feature: string
+  channelId: string
+  model: string
+  durationMs: number
+  inputTokens: number
+  outputTokens: number
+  success: boolean
+  error?: string
+}
+const agentLogs = ref<AgentLogEntry[]>([])
+const agentLogsLoading = ref(false)
+const showAgentLogs = ref(false)
+
+async function loadAgentLogs() {
+  agentLogsLoading.value = true
+  try {
+    agentLogs.value = await invoke<AgentLogEntry[]>('get_agent_logs')
+  } finally {
+    agentLogsLoading.value = false
+  }
+}
+
+async function clearAgentLogs() {
+  const ok = await confirm(t('settings.agentLogsClearConfirm'))
+  if (!ok) return
+  await invoke('clear_agent_logs')
+  agentLogs.value = []
+}
+
+const agentLogsSorted = computed(() => [...agentLogs.value].reverse())
+
+const agentLogsStats = computed(() => {
+  const logs = agentLogs.value
+  const totalInput = logs.reduce((s, l) => s + l.inputTokens, 0)
+  const totalOutput = logs.reduce((s, l) => s + l.outputTokens, 0)
+  const successCount = logs.filter(l => l.success).length
+  return { total: logs.length, totalInput, totalOutput, successCount }
+})
+
 type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'lab' | 'diag'
 const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
+
+const ccSwitchProviders = ref<CcSwitchProvider[]>([])
+const ccSwitchSelected = ref<Set<string>>(new Set())
+const ccSwitchScanning = ref(false)
+const ccSwitchOpen = ref(false)
+
+async function onScanCcSwitch() {
+  ccSwitchScanning.value = true
+  try {
+    const list = await scanCcSwitch()
+    ccSwitchProviders.value = list
+    ccSwitchSelected.value = new Set(list.filter(p => !p.alreadyImported).map(p => p.id))
+    ccSwitchOpen.value = true
+  } catch {
+    notifyTransient(t('settings.ccSwitchNotFound'))
+  } finally {
+    ccSwitchScanning.value = false
+  }
+}
+
+async function onImportCcSwitch() {
+  const ids = [...ccSwitchSelected.value]
+  if (!ids.length) return
+  const count = await importCcSwitch(ids)
+  notifyTransient(t('settings.ccSwitchImported', { count }))
+  ccSwitchOpen.value = false
+  ccSwitchProviders.value = []
+}
+
+function toggleCcSwitchAll() {
+  const importable = ccSwitchProviders.value.filter(p => !p.alreadyImported)
+  if (ccSwitchSelected.value.size === importable.length) {
+    ccSwitchSelected.value = new Set()
+  } else {
+    ccSwitchSelected.value = new Set(importable.map(p => p.id))
+  }
+}
 
 const { appDefaults, setDefaultEffort } = useAppDefaults()
 const rcEnabled = ref(true)
@@ -614,11 +721,58 @@ function onSaved() {
             </button>
             <button
               class="px-2.5 py-1 text-xs rounded-md text-muted-foreground border border-border hover:text-foreground hover:bg-muted transition-colors"
+              :disabled="ccSwitchScanning"
+              @click="onScanCcSwitch"
+            >
+              <span v-if="ccSwitchScanning" class="i-carbon-renew w-3 h-3 animate-spin mr-1 inline-block align-[-2px]" />
+              {{ ccSwitchScanning ? $t('settings.ccSwitchScanning') : $t('settings.ccSwitchImport') }}
+            </button>
+            <button
+              class="px-2.5 py-1 text-xs rounded-md text-muted-foreground border border-border hover:text-foreground hover:bg-muted transition-colors"
               @click="onReveal"
             >
               {{ $t('common.openConfigDir') }}
             </button>
           </div>
+
+          <!-- CC Switch 导入列表 -->
+          <div v-if="ccSwitchOpen && ccSwitchProviders.length" class="mt-3 rounded-md border border-border bg-popover p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium">CC Switch ({{ ccSwitchProviders.length }})</span>
+              <div class="flex items-center gap-2">
+                <button class="text-[10px] text-muted-foreground hover:text-foreground" @click="toggleCcSwitchAll">{{ $t('settings.ccSwitchSelectAll') }}</button>
+                <button
+                  class="px-2 py-0.5 text-[11px] rounded bg-primary text-primary-foreground disabled:opacity-40"
+                  :disabled="ccSwitchSelected.size === 0"
+                  @click="onImportCcSwitch"
+                >
+                  {{ $t('settings.ccSwitchImportSelected') }} ({{ ccSwitchSelected.size }})
+                </button>
+                <button class="icon-btn icon-btn-sm icon-btn-ghost" @click="ccSwitchOpen = false"><span class="i-carbon-close w-3 h-3" /></button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1 max-h-48 overflow-y-auto">
+              <label
+                v-for="p in ccSwitchProviders"
+                :key="p.id"
+                class="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-muted/50 cursor-pointer"
+                :class="{ 'opacity-50': p.alreadyImported }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="ccSwitchSelected.has(p.id)"
+                  :disabled="p.alreadyImported"
+                  class="accent-primary"
+                  @change="p.alreadyImported ? null : (ccSwitchSelected.has(p.id) ? ccSwitchSelected.delete(p.id) : ccSwitchSelected.add(p.id))"
+                />
+                <span class="font-medium truncate">{{ p.name }}</span>
+                <span v-if="p.isCurrent" class="text-[10px] text-green-600 shrink-0">{{ $t('settings.ccSwitchCurrent') }}</span>
+                <span v-if="p.alreadyImported" class="text-[10px] text-muted-foreground shrink-0">{{ $t('settings.ccSwitchAlready') }}</span>
+                <span v-if="p.baseUrl" class="ml-auto text-[10px] font-mono text-muted-foreground truncate max-w-48">{{ p.baseUrl }}</span>
+              </label>
+            </div>
+          </div>
+          <p v-else-if="ccSwitchOpen && !ccSwitchProviders.length && !ccSwitchScanning" class="mt-2 text-xs text-muted-foreground">{{ $t('settings.ccSwitchEmpty') }}</p>
         </section>
 
         <!-- ====== 模型 ====== -->
@@ -692,6 +846,35 @@ function onSaved() {
               </button>
             </div>
           </div>
+
+          <!-- Agent 操作栏 -->
+          <div class="mt-6 pt-4 border-t border-border flex items-center gap-4">
+            <button
+              class="px-2.5 py-1 text-xs rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              :disabled="agentTesting"
+              @click="onTestAgent"
+            >
+              <span v-if="agentTesting" class="i-carbon-renew w-3 h-3 animate-spin mr-1 inline-block align-[-2px]" />
+              {{ $t('settings.agentTest') }}
+            </button>
+            <button
+              class="text-xs text-primary hover:underline"
+              @click="showAgentLogs = true; loadAgentLogs()"
+            >{{ $t('settings.agentLogs') }}</button>
+          </div>
+          <!-- 测试结果 -->
+          <div v-if="agentTestResult" class="mt-2 px-3 py-2 rounded-md border text-[11px]"
+            :class="agentTestResult.success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5'"
+          >
+            <div v-if="agentTestResult.success" class="flex items-center gap-3 text-foreground">
+              <span class="text-emerald-600 dark:text-emerald-400 font-medium">OK</span>
+              <span class="text-muted-foreground">{{ agentTestResult.channelId }}</span>
+              <span class="font-mono text-muted-foreground">{{ agentTestResult.model }}</span>
+              <span class="font-mono text-muted-foreground">{{ agentTestResult.durationMs >= 1000 ? `${(agentTestResult.durationMs / 1000).toFixed(1)}s` : `${agentTestResult.durationMs}ms` }}</span>
+              <span v-if="agentTestResult.inputTokens" class="font-mono text-muted-foreground">↑{{ agentTestResult.inputTokens }} ↓{{ agentTestResult.outputTokens }}</span>
+            </div>
+            <div v-else class="text-destructive">{{ agentTestResult.error }}</div>
+          </div>
         </section>
 
         <!-- ====== Claude Code 配置 ====== -->
@@ -738,6 +921,81 @@ function onSaved() {
       </div>
     </div>
     </div>
+
+    <!-- Agent 日志弹窗 -->
+  <div
+    v-if="showAgentLogs"
+    class="fixed inset-0 z-70 grid place-items-center"
+    style="background: rgba(70, 45, 20, 0.18)"
+    @mousedown.self="showAgentLogs = false"
+  >
+    <div class="w-[720px] max-w-[90vw] max-h-[80vh] rounded-lg bg-popover border border-border shadow-paper-lifted flex flex-col">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        <h3 class="text-sm font-medium">{{ $t('settings.agentLogs') }}</h3>
+        <div class="flex items-center gap-3">
+          <button
+            v-if="agentLogs.length"
+            class="text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+            @click="clearAgentLogs"
+          >{{ $t('common.clear') }}</button>
+          <button
+            class="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            @click="loadAgentLogs"
+          >↻</button>
+          <button
+            class="i-carbon-close w-4 h-4 text-muted-foreground hover:text-foreground transition-colors"
+            @click="showAgentLogs = false"
+          />
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-auto">
+        <div v-if="agentLogsLoading" class="text-xs text-muted-foreground py-8 text-center">
+          {{ $t('common.loading') }}
+        </div>
+        <template v-else-if="agentLogs.length">
+          <div class="flex gap-4 px-4 py-2 text-[11px] text-muted-foreground border-b border-border bg-muted/30">
+            <span>{{ $t('settings.agentLogsTotal', { n: agentLogsStats.total }) }}</span>
+            <span>{{ $t('settings.agentLogsSuccess', { n: agentLogsStats.successCount }) }}</span>
+            <span>↑{{ agentLogsStats.totalInput.toLocaleString() }} ↓{{ agentLogsStats.totalOutput.toLocaleString() }} tokens</span>
+          </div>
+          <table class="agent-logs-table">
+            <thead>
+              <tr>
+                <th>{{ $t('settings.agentLogsTime') }}</th>
+                <th>{{ $t('settings.agentLogsFeature') }}</th>
+                <th>{{ $t('settings.agentLogsChannel') }}</th>
+                <th>{{ $t('settings.agentLogsModel') }}</th>
+                <th class="text-right">{{ $t('settings.agentLogsDuration') }}</th>
+                <th class="text-right">Tokens</th>
+                <th>{{ $t('settings.agentLogsStatus') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(log, i) in agentLogsSorted" :key="i" :class="{ 'opacity-60': !log.success }">
+                <td class="font-mono whitespace-nowrap">{{ new Date(log.timestamp).toLocaleString() }}</td>
+                <td>{{ $t(`settings.agentFeature_${log.feature}`, log.feature) }}</td>
+                <td class="font-mono">{{ log.channelId || 'official' }}</td>
+                <td class="font-mono truncate max-w-32" :title="log.model">{{ log.model }}</td>
+                <td class="text-right font-mono">{{ log.durationMs >= 1000 ? `${(log.durationMs / 1000).toFixed(1)}s` : `${log.durationMs}ms` }}</td>
+                <td class="text-right font-mono">
+                  <template v-if="log.inputTokens || log.outputTokens">↑{{ log.inputTokens }} ↓{{ log.outputTokens }}</template>
+                  <span v-else class="text-muted-foreground">—</span>
+                </td>
+                <td>
+                  <span v-if="log.success" class="text-emerald-600 dark:text-emerald-400">OK</span>
+                  <span v-else class="text-destructive cursor-help" :title="log.error">FAIL</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <div v-else class="text-xs text-muted-foreground py-8 text-center">
+          {{ $t('settings.agentLogsEmpty') }}
+        </div>
+      </div>
+    </div>
+  </div>
   </div>
 </template>
 
@@ -955,5 +1213,31 @@ function onSaved() {
   color: var(--primary);
   border-radius: calc(var(--radius) - 2px);
   flex-shrink: 0;
+}
+
+/* Agent 日志表格 */
+.agent-logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.agent-logs-table th {
+  position: sticky;
+  top: 0;
+  background: var(--muted);
+  padding: 4px 8px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.agent-logs-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
+.agent-logs-table tbody tr:hover {
+  background: var(--muted);
 }
 </style>

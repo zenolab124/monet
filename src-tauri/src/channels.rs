@@ -997,3 +997,128 @@ pub fn shutdown_fm_serve() {
     }
 }
 
+// ---- CC Switch 导入 ----
+
+fn cc_switch_db_path() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let path = home.join(".cc-switch").join("cc-switch.db");
+    if path.is_file() { Some(path) } else { None }
+}
+
+fn cc_switch_channel_id(cc_switch_id: &str) -> String {
+    let sanitized: String = cc_switch_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(59)
+        .collect();
+    format!("ccs-{}", sanitized)
+}
+
+fn query_cc_switch_providers() -> Result<Vec<Value>, String> {
+    let db_path = cc_switch_db_path().ok_or("CC Switch 数据库不存在")?;
+    let output = Command::new("sqlite3")
+        .args([
+            "-json",
+            &db_path.to_string_lossy(),
+            "SELECT id, name, settings_config, category, is_current, notes FROM providers WHERE app_type = 'claude' AND id NOT IN ('claude-official', 'claude-desktop-official')",
+        ])
+        .output()
+        .map_err(|e| format!("sqlite3 执行失败: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("sqlite3 查询失败: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    serde_json::from_str(&stdout).map_err(|e| format!("解析失败: {}", e))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CcSwitchProvider {
+    pub id: String,
+    pub name: String,
+    pub base_url: Option<String>,
+    pub has_token: bool,
+    pub category: Option<String>,
+    pub is_current: bool,
+    pub notes: Option<String>,
+    pub already_imported: bool,
+}
+
+#[tauri::command]
+pub fn scan_cc_switch() -> Result<Vec<CcSwitchProvider>, String> {
+    let rows = query_cc_switch_providers()?;
+    let existing = scan_channel_ids();
+    let mut out = Vec::new();
+    for row in &rows {
+        let id = row.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let name = row.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+        let sc_str = row.get("settings_config").and_then(|v| v.as_str()).unwrap_or("{}");
+        let sc: Value = serde_json::from_str(sc_str).unwrap_or(json!({}));
+        let env = sc.get("env").and_then(|v| v.as_object());
+        let base_url = env
+            .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let has_token = env
+            .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|t| !t.is_empty());
+        let channel_id = cc_switch_channel_id(id);
+        out.push(CcSwitchProvider {
+            id: id.to_string(),
+            name: name.to_string(),
+            base_url,
+            has_token,
+            category: row.get("category").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
+            is_current: row.get("is_current").and_then(|v| v.as_i64()).unwrap_or(0) == 1,
+            notes: row.get("notes").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
+            already_imported: existing.contains(&channel_id),
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn import_cc_switch(ids: Vec<String>) -> Result<u32, String> {
+    let rows = query_cc_switch_providers()?;
+    let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+    let mut settings = load_app_settings();
+    let mut imported = 0u32;
+
+    for row in &rows {
+        let id = row.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        if !id_set.contains(id) { continue; }
+
+        let name = row.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let sc_str = row.get("settings_config").and_then(|v| v.as_str()).unwrap_or("{}");
+        let sc: Value = serde_json::from_str(sc_str).unwrap_or(json!({}));
+        let env = match sc.get("env").and_then(|v| v.as_object()) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+
+        let channel_id = cc_switch_channel_id(id);
+        if validate_id(&channel_id).is_err() { continue; }
+
+        fs::create_dir_all(channels_dir()).map_err(|e| e.to_string())?;
+        write_json_0600(&channel_file_path(&channel_id), &json!({ "env": env }))?;
+
+        let notes = row.get("notes").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from);
+        let meta = settings.channels.entry(channel_id).or_default();
+        meta.name = Some(name).filter(|s| !s.is_empty());
+        meta.note = notes;
+        meta.enabled = Some(true);
+        meta.protocol = Some("anthropic".to_string());
+        meta.scope = Some("full".to_string());
+        imported += 1;
+    }
+
+    if imported > 0 {
+        save_app_settings(&settings)?;
+    }
+    Ok(imported)
+}
+

@@ -2,10 +2,12 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::metadata::agent_cwd;
 use crate::streaming::{enhanced_path, find_claude};
+use crate::translate::ApiUsage;
 
 static LOCALE: Mutex<String> = Mutex::new(String::new());
 
@@ -149,59 +151,109 @@ fn write_line(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
         .map_err(|e| format!("agent stdin 写入失败: {}", e))
 }
 
+struct AgentCallResult {
+    text: String,
+    channel_id: String,
+    model: String,
+    usage: Option<ApiUsage>,
+}
+
 /// Agent 服务的公开入口——经 fallback 链调度
 pub(crate) fn request_blocking_pub(prompt: &str) -> Result<String, String> {
     request_with_fallback(prompt, "claude-haiku-4-5-20251001", 2048)
+        .map(|r| r.text)
 }
 
-fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, model: &str, max_tokens: u32) -> Result<String, String> {
+fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, String> {
+    let channel_id = cred.id.clone();
     if cred.is_official {
-        request_via_cli(prompt)
+        let r = request_blocking(prompt)?;
+        Ok(AgentCallResult {
+            text: r.text,
+            channel_id,
+            model: "claude-haiku-4-5-20251001".to_string(),
+            usage: r.usage,
+        })
     } else {
         if cred.id == crate::channels::APPLE_FM_ID {
             crate::channels::ensure_fm_serve_running()?;
         }
-        crate::translate::http_call_by_protocol(
+        let (text, usage) = crate::translate::http_call_by_protocol_with_usage(
             cred.base_url.as_deref().unwrap(),
             cred.token.as_deref().unwrap_or(""),
             prompt, model, max_tokens,
             &cred.protocol,
-        )
+        )?;
+        Ok(AgentCallResult {
+            text,
+            channel_id,
+            model: model.to_string(),
+            usage,
+        })
     }
 }
 
-fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<String, String> {
+fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, String> {
     if let Some(cred) = crate::channels::resolve_agent_credentials() {
         let effective_model = cred.agent_model.as_deref().unwrap_or(model);
         return call_channel(&cred, prompt, effective_model, max_tokens);
     }
-    request_via_cli(prompt)
+    let r = request_blocking(prompt)?;
+    Ok(AgentCallResult {
+        text: r.text,
+        channel_id: "official".to_string(),
+        model: "claude-haiku-4-5-20251001".to_string(),
+        usage: r.usage,
+    })
 }
 
 fn request_for_agent(prompt: &str, agent_key: &str) -> Result<String, String> {
+    let start = std::time::Instant::now();
+    let result = request_for_agent_inner(prompt, agent_key);
+    let duration_ms = start.elapsed().as_millis() as u64;
+    match &result {
+        Ok(r) => {
+            record_log(agent_key, &r.channel_id, &r.model, duration_ms, r.usage.as_ref(), true, None);
+            Ok(r.text.clone())
+        }
+        Err(e) => {
+            record_log(agent_key, "", "", duration_ms, None, false, Some(e));
+            Err(e.clone())
+        }
+    }
+}
+
+fn request_for_agent_inner(prompt: &str, agent_key: &str) -> Result<AgentCallResult, String> {
     if let Some(cred) = crate::channels::resolve_agent_for_feature(agent_key) {
-        let effective_model = cred.agent_model.as_deref().unwrap_or("claude-haiku-4-5-20251001");
-        match call_channel(&cred, prompt, effective_model, 2048) {
+        let channel_id = cred.id.clone();
+        let effective_model = cred.agent_model.as_deref().unwrap_or("claude-haiku-4-5-20251001").to_string();
+        match call_channel(&cred, prompt, &effective_model, 2048) {
             Ok(result) => return Ok(result),
             Err(e) => {
-                eprintln!("[agent] channel {} failed for {}, fallback: {}", cred.id, agent_key, e);
+                eprintln!("[agent] channel {} failed for {}, fallback: {}", channel_id, agent_key, e);
+                record_log(agent_key, &channel_id, &effective_model, 0, None, false, Some(&e));
             }
         }
     }
-    request_blocking(prompt)
+    let r = request_blocking(prompt)?;
+    Ok(AgentCallResult {
+        text: r.text,
+        channel_id: "official(fallback)".to_string(),
+        model: "claude-haiku-4-5-20251001".to_string(),
+        usage: r.usage,
+    })
 }
 
 fn request_via_cli(prompt: &str) -> Result<String, String> {
-    request_blocking(prompt)
+    request_blocking(prompt).map(|r| r.text)
 }
 
-fn request_blocking(prompt: &str) -> Result<String, String> {
+fn request_blocking(prompt: &str) -> Result<CliCallResult, String> {
     let start = std::time::Instant::now();
     let preview: String = prompt.chars().take(40).collect();
     eprintln!("[agent-service] request: prompt={}...", preview);
     let mut guard = AGENT.lock().unwrap_or_else(|e| e.into_inner());
 
-    // 检查进程是否存活，不存活则重新 spawn
     let need_spawn = match &mut *guard {
         Some(agent) => {
             let dead = agent.child.try_wait().ok().flatten().is_some();
@@ -220,7 +272,6 @@ fn request_blocking(prompt: &str) -> Result<String, String> {
     let agent = guard.as_mut().unwrap();
     agent.request_count += 1;
 
-    // 每 100 次重启清上下文
     if agent.request_count > 100 {
         eprintln!("[agent-service] 达到 100 次请求，重启清上下文");
         let _ = agent.child.kill();
@@ -232,7 +283,12 @@ fn request_blocking(prompt: &str) -> Result<String, String> {
     send_and_collect(agent, prompt)
 }
 
-fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<String, String> {
+struct CliCallResult {
+    text: String,
+    usage: Option<ApiUsage>,
+}
+
+fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<CliCallResult, String> {
     let start = std::time::Instant::now();
     let msg = json!({
         "type": "user",
@@ -246,10 +302,10 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<String, St
     write_line(&mut agent.stdin, &msg)?;
     eprintln!("[agent-service] 已发送 prompt，等待响应...");
 
-    // 读取 stdout 直到收到 result 事件
     let mut text_parts: Vec<String> = Vec::new();
     let mut buf = String::new();
     let mut event_count = 0u32;
+    let mut usage: Option<ApiUsage> = None;
 
     loop {
         buf.clear();
@@ -288,7 +344,6 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<String, St
                 }
             }
             "assistant" | "progress" => {
-                // 非流式模式下文本可能整块到达
                 let msg_obj = if event_type == "assistant" {
                     v.get("message")
                 } else {
@@ -312,10 +367,16 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<String, St
                 let preview: String = result_text.chars().take(80).collect();
                 eprintln!("[agent-service] result: is_error={} text={}... elapsed={:?}",
                     is_error, preview, start.elapsed());
+                // 提取 token 用量
+                if let Some(cw) = v.get("context_window") {
+                    usage = Some(ApiUsage {
+                        input_tokens: cw.get("input_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+                        output_tokens: cw.get("output_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+                    });
+                }
                 if is_error {
                     return Err(format!("agent 返回错误: {}", result_text));
                 }
-                // result.result 作为最终 fallback
                 if text_parts.is_empty() && !result_text.is_empty() {
                     text_parts.push(result_text.to_string());
                 }
@@ -331,7 +392,7 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<String, St
     if result.is_empty() {
         return Err("agent 返回为空".to_string());
     }
-    Ok(result)
+    Ok(CliCallResult { text: result, usage })
 }
 
 /// 初始化 AgentService（app 启动时调用）
@@ -493,4 +554,143 @@ pub fn parse_cron(text: &str) -> Result<String, String> {
         return Err(format!("返回的不是有效 cron 表达式: {}", result));
     }
     Ok(result)
+}
+
+// --- Agent 调用日志 ---
+
+const MAX_LOGS: usize = 500;
+
+fn logs_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("agent-logs.json")
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLog {
+    pub timestamp: String,
+    pub feature: String,
+    pub channel_id: String,
+    pub model: String,
+    pub duration_ms: u64,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+static LOGS: Mutex<Option<Vec<AgentLog>>> = Mutex::new(None);
+
+fn with_logs<R>(f: impl FnOnce(&mut Vec<AgentLog>) -> R) -> R {
+    let mut guard = LOGS.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        let loaded = std::fs::read_to_string(logs_path())
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<AgentLog>>(&s).ok())
+            .unwrap_or_default();
+        *guard = Some(loaded);
+    }
+    f(guard.as_mut().unwrap())
+}
+
+fn save_logs(logs: &[AgentLog]) {
+    if let Ok(json) = serde_json::to_string(logs) {
+        let _ = std::fs::write(logs_path(), json);
+    }
+}
+
+fn record_log(
+    feature: &str,
+    channel_id: &str,
+    model: &str,
+    duration_ms: u64,
+    usage: Option<&ApiUsage>,
+    success: bool,
+    error: Option<&String>,
+) {
+    let log = AgentLog {
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        feature: feature.to_string(),
+        channel_id: channel_id.to_string(),
+        model: model.to_string(),
+        duration_ms,
+        input_tokens: usage.map(|u| u.input_tokens).unwrap_or(0),
+        output_tokens: usage.map(|u| u.output_tokens).unwrap_or(0),
+        success,
+        error: error.cloned(),
+    };
+    with_logs(|logs| {
+        logs.push(log);
+        if logs.len() > MAX_LOGS {
+            let drain = logs.len() - MAX_LOGS;
+            logs.drain(..drain);
+        }
+        save_logs(logs);
+    });
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTestResult {
+    pub success: bool,
+    pub channel_id: String,
+    pub model: String,
+    pub duration_ms: u64,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub reply: String,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn test_agent_channel() -> AgentTestResult {
+    let start = std::time::Instant::now();
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        request_with_fallback("Reply with exactly: OK", "claude-haiku-4-5-20251001", 32)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    let duration_ms = start.elapsed().as_millis() as u64;
+    match result {
+        Ok(r) => {
+            record_log("test", &r.channel_id, &r.model, duration_ms, r.usage.as_ref(), true, None);
+            AgentTestResult {
+                success: true,
+                channel_id: r.channel_id,
+                model: r.model,
+                duration_ms,
+                input_tokens: r.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+                output_tokens: r.usage.as_ref().map(|u| u.output_tokens).unwrap_or(0),
+                reply: r.text,
+                error: None,
+            }
+        }
+        Err(e) => {
+            record_log("test", "", "", duration_ms, None, false, Some(&e));
+            AgentTestResult {
+                success: false,
+                channel_id: String::new(),
+                model: String::new(),
+                duration_ms,
+                input_tokens: 0,
+                output_tokens: 0,
+                reply: String::new(),
+                error: Some(e),
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_agent_logs() -> Vec<AgentLog> {
+    with_logs(|logs| logs.clone())
+}
+
+#[tauri::command]
+pub fn clear_agent_logs() {
+    with_logs(|logs| {
+        logs.clear();
+        save_logs(logs);
+    });
 }

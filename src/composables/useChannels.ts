@@ -175,6 +175,27 @@ async function probeAllChannels(): Promise<void> {
   await Promise.allSettled(ids.map(id => probeChannel(id)))
 }
 
+export interface CcSwitchProvider {
+  id: string
+  name: string
+  baseUrl: string | null
+  hasToken: boolean
+  category: string | null
+  isCurrent: boolean
+  notes: string | null
+  alreadyImported: boolean
+}
+
+async function scanCcSwitch(): Promise<CcSwitchProvider[]> {
+  return invoke<CcSwitchProvider[]>('scan_cc_switch')
+}
+
+async function importCcSwitch(ids: string[]): Promise<number> {
+  const count = await invoke<number>('import_cc_switch', { ids })
+  await refreshChannels()
+  return count
+}
+
 export function useChannels() {
   return {
     channels,
@@ -198,5 +219,7 @@ export function useChannels() {
     revealToken,
     hideToken,
     loadAgentPreferences,
+    scanCcSwitch,
+    importCcSwitch,
   }
 }
