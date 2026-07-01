@@ -127,6 +127,15 @@ export interface WorkshopAgent {
   path: string
 }
 
+// --- 子 Agent 元数据(list_subagents 返回) ---
+
+export interface SubAgentMeta {
+  agent_id: string
+  tool_use_id: string
+  agent_type: string | null
+  description: string | null
+}
+
 /** 常见三值（PRD 口径）；Rust 端对配置显式 type 原样透传，运行时可能出现其他字符串 */
 export type McpTransport = 'stdio' | 'http' | 'sse' | (string & {})
 
