@@ -23,6 +23,7 @@
     "stop": "停止",
     "collapse": "收起",
     "expand": "展开",
+    "clear": "清空",
     "back": "返回",
     "add": "添加",
     "remove": "移出",
@@ -123,6 +124,9 @@
     "generateSummary": "生成摘要",
     "refreshSummary": "刷新摘要",
     "generatingSummary": "正在生成…"
+  },
+  "subAgent": {
+    "panel": "子 Agent"
   },
   "session": {
     "notExist": "会话不存在或已删除",
@@ -426,6 +430,15 @@
     "setDefaultFailed": "设置默认渠道失败",
     "openDirFailed": "打开目录失败",
     "channelSaved": "渠道已保存",
+    "ccSwitchImport": "从 CC Switch 导入",
+    "ccSwitchScanning": "扫描中…",
+    "ccSwitchEmpty": "未找到可导入的渠道",
+    "ccSwitchNotFound": "未检测到 CC Switch",
+    "ccSwitchImported": "已导入 {count} 个渠道",
+    "ccSwitchAlready": "已导入",
+    "ccSwitchCurrent": "当前使用",
+    "ccSwitchImportSelected": "导入选中",
+    "ccSwitchSelectAll": "全选",
     "advisorMode": "顾问模式",
     "primaryModel": "主模型",
     "advisorModel": "顾问模型",
@@ -450,6 +463,26 @@
     "agentTranslate": "AI 翻译",
     "agentTranslateDesc": "将界面翻译为用户自定义的新语言",
     "agentAutoChannel": "自动（按链顺序）",
+    "agentTest": "测试渠道",
+    "agentLogs": "调用日志",
+    "agentLogsClearConfirm": "确认清空所有 Agent 调用日志？",
+    "agentLogsTotal": "共 {n} 次调用",
+    "agentLogsSuccess": "成功 {n} 次",
+    "agentLogsTime": "时间",
+    "agentLogsFeature": "功能",
+    "agentLogsChannel": "渠道",
+    "agentLogsModel": "模型",
+    "agentLogsDuration": "耗时",
+    "agentLogsStatus": "状态",
+    "agentLogsEmpty": "暂无调用记录",
+    "agentFeature_title": "标题生成",
+    "agentFeature_permission_hint": "权限批注",
+    "agentFeature_settings_explain": "设置解读",
+    "agentFeature_cron_parse": "Cron 解析",
+    "agentFeature_tags": "标签生成",
+    "agentFeature_summary": "摘要生成",
+    "agentFeature_translate": "翻译",
+    "agentFeature_test": "渠道测试",
     "labDesc": "实验性功能，可能不稳定。",
     "htmlVisual": "HTML 增强渲染",
     "htmlVisualDesc": "引导 AI 在 Markdown 中嵌入 HTML 实现横向对比、信息卡片、折叠块等富表达。通过 --append-system-prompt 注入提示词，仅影响 CC Space 工作台会话。",
@@ -620,6 +653,7 @@
     "sessionMenu": "会话信息与操作",
     "copySessionId": "复制完整会话 ID",
     "refreshSession": "刷新会话",
+    "openInFinder": "在 Finder 中打开",
     "openInTerminal": "在终端打开",
     "openInVscode": "在 VS Code 打开",
     "deleteSession": "删除会话",
@@ -733,7 +767,8 @@
     },
     "toolTask": {
       "collapse": "收起",
-      "expand": "展开"
+      "expand": "展开",
+      "viewAgent": "查看执行"
     },
     "toolTodo": {
       "empty": "（无待办项）"

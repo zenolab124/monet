@@ -23,6 +23,7 @@
     "stop": "Stop",
     "collapse": "Collapse",
     "expand": "Expand",
+    "clear": "Clear",
     "back": "Back",
     "add": "Add",
     "remove": "Remove",
@@ -123,6 +124,9 @@
     "generateSummary": "Generate summary",
     "refreshSummary": "Refresh summary",
     "generatingSummary": "Generating…"
+  },
+  "subAgent": {
+    "panel": "Sub Agent"
   },
   "session": {
     "notExist": "Session does not exist or has been deleted",
@@ -426,6 +430,15 @@
     "setDefaultFailed": "Failed to set default channel",
     "openDirFailed": "Failed to open directory",
     "channelSaved": "Channel saved",
+    "ccSwitchImport": "Import from CC Switch",
+    "ccSwitchScanning": "Scanning…",
+    "ccSwitchEmpty": "No importable channels found",
+    "ccSwitchNotFound": "CC Switch not detected",
+    "ccSwitchImported": "Imported {count} channel(s)",
+    "ccSwitchAlready": "Imported",
+    "ccSwitchCurrent": "Active",
+    "ccSwitchImportSelected": "Import selected",
+    "ccSwitchSelectAll": "Select all",
     "advisorMode": "Advisor Mode",
     "primaryModel": "Primary Model",
     "advisorModel": "Advisor Model",
@@ -450,6 +463,26 @@
     "agentTranslate": "AI Translate",
     "agentTranslateDesc": "Translate the UI into user-defined languages",
     "agentAutoChannel": "Auto (chain order)",
+    "agentTest": "Test Channel",
+    "agentLogs": "Call Logs",
+    "agentLogsClearConfirm": "Clear all Agent call logs?",
+    "agentLogsTotal": "{n} calls",
+    "agentLogsSuccess": "{n} succeeded",
+    "agentLogsTime": "Time",
+    "agentLogsFeature": "Feature",
+    "agentLogsChannel": "Channel",
+    "agentLogsModel": "Model",
+    "agentLogsDuration": "Duration",
+    "agentLogsStatus": "Status",
+    "agentLogsEmpty": "No call logs yet",
+    "agentFeature_title": "Title",
+    "agentFeature_permission_hint": "Permission Hint",
+    "agentFeature_settings_explain": "Settings Explain",
+    "agentFeature_cron_parse": "Cron Parse",
+    "agentFeature_tags": "Tags",
+    "agentFeature_summary": "Summary",
+    "agentFeature_translate": "Translate",
+    "agentFeature_test": "Channel Test",
     "labDesc": "Experimental features, may be unstable.",
     "htmlVisual": "HTML Visual Enhancement",
     "htmlVisualDesc": "Guide AI to embed HTML in Markdown for side-by-side comparisons, info cards, collapsible sections, etc. Injects prompt via --append-system-prompt, only affects CC Space workbench sessions.",
@@ -620,6 +653,7 @@
     "sessionMenu": "Session info & actions",
     "copySessionId": "Copy full session ID",
     "refreshSession": "Refresh session",
+    "openInFinder": "Open in Finder",
     "openInTerminal": "Open in terminal",
     "openInVscode": "Open in VS Code",
     "deleteSession": "Delete session",
@@ -733,7 +767,8 @@
     },
     "toolTask": {
       "collapse": "Collapse",
-      "expand": "Expand"
+      "expand": "Expand",
+      "viewAgent": "View"
     },
     "toolTodo": {
       "empty": "(No todo items)"
