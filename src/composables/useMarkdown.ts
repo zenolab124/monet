@@ -61,7 +61,10 @@ markdownItShiki({
 export function renderMarkdownPlain(text: string): string {
   const t0 = performance.now()
   const html = sanitizeHtml(wrapCodeBlocks(plainMd.render(text)))
-  probeMd('plain', performance.now() - t0)
+  const dt = performance.now() - t0
+  probeMd('plain', dt)
+  // HUD 长帧归因埋点(生产常开,measure 开销微秒级)
+  performance.measure('md-plain', { start: t0, duration: dt })
   return html
 }
 
@@ -81,7 +84,9 @@ export function renderMarkdownCached(text: string): string {
   }
   const t0 = performance.now()
   const html = sanitizeHtml(wrapCodeBlocks(activeMd.render(text)))
-  probeMd('miss', performance.now() - t0)
+  const dt = performance.now() - t0
+  probeMd('miss', dt)
+  performance.measure('md-shiki', { start: t0, duration: dt })
   // shiki 就绪前的结果是无高亮版,不入缓存,避免固化素色 HTML
   if (shikiReady) {
     htmlCache.set(text, html)

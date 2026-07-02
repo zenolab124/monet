@@ -11,6 +11,7 @@ const {
   baselineFps,
   jankCount,
   maxBlockMs,
+  longFrames,
   clickLatencyLast,
   clickLatencyP95,
   domNodes,
@@ -84,6 +85,19 @@ function grade(v: number, warn: number, bad: number): string {
         <span class="font-sans text-muted-foreground">{{ t('perf.maxBlock') }}</span>
         <span :class="grade(maxBlockMs, 50, 200)">{{ maxBlockMs }} ms</span>
       </div>
+
+      <!-- 长帧归因:JS 占比低=渲染管线(layout/paint),高则看 top 段名 -->
+      <template v-if="longFrames.length">
+        <div class="font-sans text-muted-foreground border-t border-border pt-1">{{ t('perf.longFrames') }}</div>
+        <div
+          v-for="(lf, i) in [...longFrames].reverse()"
+          :key="i"
+          class="text-[10px] flex items-center justify-between"
+        >
+          <span :class="grade(lf.total, 50, 100)">{{ lf.total }}ms</span>
+          <span class="text-muted-foreground">js {{ lf.js }}ms · {{ lf.top }}</span>
+        </div>
+      </template>
 
       <!-- 点击延迟 -->
       <div class="flex items-center justify-between border-t border-border pt-1">

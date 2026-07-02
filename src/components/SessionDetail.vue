@@ -619,6 +619,80 @@ const messageGroups = computed(() => {
   return groups.map(g => ({ ...g, responses: mergeResponses(g.responses) }))
 })
 
+// ---- 滚动锚定补偿（WebKit 无原生 scroll anchoring）----
+// 消息组解冻（content-visibility 估算高度→真实高度）与图片按需加载都会改变
+// 视口上方内容的总高度；Chrome 有 scroll anchoring 自动补偿，WebKit 没有——
+// 表现为滚动中内容"顿一下"。用 ResizeObserver 观察每个消息组，完全位于视口
+// 上方的组高度变化时同帧补偿 scrollTop（RO 回调在 layout 后 paint 前，写
+// scrollTop 不触发重排，视口内容保持视觉稳定）。
+const groupHeights = new WeakMap<Element, number>()
+let anchorRO: ResizeObserver | null = null
+
+// ---- 组位置分类（锚定补偿的零布局读数据源）----
+// 历史教训（HUD 长帧归因实测）：cv 的手工 hidden/visible 管理在 WebKit 上是
+// 负优化（"渲染状态保留"实现不达标，批量切换 = 批量全价 layout，743ms 帧）；
+// 补偿回调里读 offsetTop 在布局脏时强制同步 layout（278ms）。故：cv 交还
+// 浏览器 auto 自管；组的"是否在视口上方"用 IO 自带几何信息维护（回调 entry
+// 的 boundingClientRect/rootBounds 是浏览器附送的，零强制布局读）。
+// 分类有一帧异步延迟，边缘组偶发误差可接受。
+let posIO: IntersectionObserver | null = null
+const groupAbove = new WeakMap<Element, boolean>()
+
+function observeAnchorGroups() {
+  const sc = scrollContainer.value
+  if (!sc) return
+  if (!posIO) {
+    posIO = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const above =
+          !e.isIntersecting &&
+          e.boundingClientRect.bottom <= (e.rootBounds?.top ?? 0)
+        groupAbove.set(e.target, above)
+      }
+    }, { root: sc, threshold: 0 })
+  }
+  // WeakMap 基线保留：重挂后首次回调 diff=0 不误补偿；断连期间的变化照常补偿
+  anchorRO?.disconnect()
+  posIO.disconnect()
+  for (const el of sc.querySelectorAll('.msg-group-cv')) {
+    anchorRO?.observe(el)
+    posIO.observe(el)
+  }
+}
+
+onMounted(() => {
+  anchorRO = new ResizeObserver((entries) => {
+    const sc = scrollContainer.value
+    if (!sc) return
+    const perfT0 = performance.now()
+    let delta = 0
+    for (const entry of entries) {
+      const el = entry.target as HTMLElement
+      const newH = entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight
+      const oldH = groupHeights.get(el)
+      groupHeights.set(el, newH)
+      if (oldH === undefined) continue // 首次观测：建立基线
+      const diff = newH - oldH
+      if (diff === 0) continue
+      // 仅补偿视口上方的组（分类由 posIO 免费维护，本回调零布局属性读——
+      // 读 offsetTop 会在布局脏时强制同步 layout，实测 278ms，已废弃该写法）
+      if (groupAbove.get(el)) {
+        delta += diff
+      }
+    }
+    if (delta !== 0) sc.scrollTop += delta
+    performance.measure('anchor-comp', { start: perfT0, duration: performance.now() - perfT0 })
+  })
+  observeAnchorGroups()
+})
+onUnmounted(() => {
+  anchorRO?.disconnect()
+  anchorRO = null
+  posIO?.disconnect()
+  posIO = null
+})
+watch(messageGroups, () => nextTick(observeAnchorGroups))
+
 function userTextPreview(record: VisibleRecord): string {
   if (record.type !== 'user' || !record.message) return ''
   const content = record.message.content
@@ -1250,7 +1324,7 @@ async function onReload() {
           v-for="(group, gi) in messageGroups"
           :key="group.user?.uuid || `group-${gi}`"
           :data-anchor-index="gi"
-          class="space-y-4"
+          class="space-y-4 msg-group-cv"
         >
           <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
           <!-- 纯系统注入(无真实用户输入):降级为系统注解样式 -->
@@ -1588,6 +1662,13 @@ async function onReload() {
 }
 .msg-block {
   contain: layout style;
+}
+/* 消息组级按需渲染:屏外轮次跳过 style/layout/paint,把横滚整列解冻的尖峰
+   降为单轮次粒度(审计 P1-2 第一步;列级 content-visibility 在 SortableColumn 互补保留)。
+   auto 关键字记住实际渲染高度,首次以 300px 估算——组高度差异大,记忆后滚动条稳定 */
+.msg-group-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 .user-msg-sticky {
   position: sticky;

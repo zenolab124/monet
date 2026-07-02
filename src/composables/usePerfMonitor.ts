@@ -34,6 +34,13 @@ const memStats = ref<PerfStats | null>(null)
 const projEvents = reactive({ incremental: 0, full: 0 })
 /** 每秒一个 FPS 采样点，最多 60 个（sparkline 数据） */
 const fpsHistory = ref<number[]>([])
+/** 长帧归因记录：帧总时长、其中 JS 埋点段合计、最耗时的埋点段 */
+export interface LongFrame {
+  total: number
+  js: number
+  top: string
+}
+const longFrames = ref<LongFrame[]>([])
 
 let running = false
 let rafId = 0
@@ -60,10 +67,30 @@ function frameLoop(ts: number) {
     // 丢帧阈值随基线刷新率校准：60Hz→41.7ms、120Hz→20.8ms（均为连丢 2 帧）
     if (interval > 2500 / baselineFps.value) bucketJank++
     if (interval > bucketMaxBlock) bucketMaxBlock = interval
+    // 长帧归因：>50ms 的帧，分解窗口内 performance.measure 埋点段——
+    // JS 合计占比低说明大头在 layout/paint（渲染管线），高则看 top 段名定位脚本源
+    if (interval > 50) {
+      const measures = performance
+        .getEntriesByType('measure')
+        .filter(m => m.startTime + m.duration >= lastFrameTs)
+      const js = measures.reduce((s, m) => s + m.duration, 0)
+      const top = [...measures].sort((a, b) => b.duration - a.duration)[0]
+      longFrames.value = [
+        ...longFrames.value.slice(-4),
+        {
+          total: Math.round(interval),
+          js: Math.round(js),
+          top: top ? `${top.name} ${Math.round(top.duration)}ms` : '—',
+        },
+      ]
+      performance.clearMeasures()
+    }
     framesThisSecond++
     if (ts - secondStartTs >= 1000) {
       fps.value = framesThisSecond
       if (framesThisSecond > baselineFps.value) baselineFps.value = framesThisSecond
+      // 每秒清一次 measure 缓冲，防条目无限积累（长帧路径已即时消费）
+      performance.clearMeasures()
       fpsHistory.value = [...fpsHistory.value.slice(-59), framesThisSecond]
       jankBuckets.push(bucketJank)
       blockBuckets.push(bucketMaxBlock)
@@ -155,6 +182,7 @@ export function usePerfMonitor() {
     baselineFps,
     jankCount,
     maxBlockMs,
+    longFrames,
     clickLatencyLast,
     clickLatencyP95,
     domNodes,

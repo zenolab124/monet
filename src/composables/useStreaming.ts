@@ -230,6 +230,16 @@ function totalPendingChars(): number {
  */
 function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
   if (pendingTextDeltas.size === 0) return false
+  // HUD 长帧归因埋点:打字机 flush 是流式期主线程的最大嫌疑段
+  const perfT0 = performance.now()
+  try {
+    return flushTextDeltasInner(allAtOnce, onlySession)
+  } finally {
+    performance.measure('stream-flush', { start: perfT0, duration: performance.now() - perfT0 })
+  }
+}
+
+function flushTextDeltasInner(allAtOnce = false, onlySession?: string): boolean {
   const pending = totalPendingChars()
   if (pending > 5000) allAtOnce = true
   let hasRemaining = false
@@ -749,6 +759,14 @@ function completeFinish(sessionId: string) {
   // jsonl 落账后同 batch 清,避免窗口期空白闪烁;无详情挂载的会话等下次发送时重置。
   if (state.lastSent) {
     triggerMetaGeneration(sessionId, state.lastSent.cwd)
+    // 成功落账后剥离图片 base64:重试(retrySession)只服务失败场景,成功后这批
+    // base64 会钉死在 streams 单例直到下次发送——多图会话可达数十 MB(审计 P1 尾项)
+    if (state.lastSent.opts.images?.length) {
+      state.lastSent = {
+        ...state.lastSent,
+        opts: { ...state.lastSent.opts, images: undefined },
+      }
+    }
   }
 }
 

@@ -841,6 +841,7 @@
     "memTotal": "Total",
     "projEvents": "Project events",
     "incremental": "incr",
-    "full": "full"
+    "full": "full",
+    "longFrames": "Long frames"
   }
 }

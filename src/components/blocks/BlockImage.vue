@@ -10,6 +10,9 @@ const props = defineProps<{
 }>()
 
 const expanded = ref(false)
+// 协议路径按需加载：完成前给占位高度，减小加载完成时的布局突变
+// （剩余位移由 SessionDetail 的滚动锚定补偿兜底）
+const loaded = ref(false)
 
 // 会话级定位上下文(projectId/sessionId/agentId);pending 预览等无宿主场景可能为 null
 const locator = inject(IMAGE_LOCATOR, null)
@@ -34,7 +37,11 @@ function onKeydown(e: KeyboardEvent) {
       :src="imgUrl"
       :alt="$t('block.image', { mime: block.source.media_type, size: block.source.data?.length ?? '?' })"
       class="block-image-thumb"
+      :class="{ 'block-image-loading': !loaded && !block.source.data }"
       loading="lazy"
+      decoding="async"
+      @load="loaded = true"
+      @error="loaded = true"
       @click="expanded = true"
     />
     <Teleport to="body">
@@ -66,6 +73,11 @@ function onKeydown(e: KeyboardEvent) {
   cursor: zoom-in;
   object-fit: contain;
   background: var(--muted);
+}
+/* 协议路径加载中的骨架占位（120×160 接近缩略图典型尺寸，减小 0→实际高的突变） */
+.block-image-loading {
+  min-height: 120px;
+  min-width: 160px;
 }
 .block-image-overlay {
   position: fixed;
