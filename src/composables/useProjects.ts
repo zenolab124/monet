@@ -10,6 +10,16 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 let watcherSetup = false
 
+/** watcher 增量变更 payload（src-tauri/src/watcher.rs emit_pending_changes） */
+interface SessionChange {
+  projectId: string
+  sessionId: string
+}
+interface ProjectsChangedPayload {
+  full: boolean
+  changes: SessionChange[]
+}
+
 /** 加载所有项目 */
 async function loadProjects() {
   const hasCached = projects.value.length > 0
@@ -23,22 +33,77 @@ async function loadProjects() {
     loading.value = false
   }
 
-  // 首次加载后注册文件监控监听
+  // 首次加载后注册文件监控监听：按会话增量 patch，避免每秒全量整树替换
+  // （docs/research/perf-audit-2026-07.md · P0-2）
   if (!watcherSetup) {
     watcherSetup = true
-    listen('projects-changed', () => {
-      reloadProjectsSilently()
+    listen<ProjectsChangedPayload>('projects-changed', (event) => {
+      const payload = event.payload
+      if (!payload || payload.full || !Array.isArray(payload.changes) || payload.changes.length === 0) {
+        reloadProjectsSilently()
+      } else {
+        applySessionChanges(payload.changes)
+      }
     })
   }
 }
 
+// 数据代际：每次增量变异 +1。全量拉取在途期间若有增量落地，
+// 扫描结果可能比已落地的增量陈旧，检测到代际变化则重拉一次（无条件应用，避免循环）
+let dataGen = 0
+
 /** 静默重新加载（不显示 loading 状态） */
 async function reloadProjectsSilently() {
   try {
-    projects.value = await invoke<Project[]>('get_projects')
+    const genAtStart = dataGen
+    const result = await invoke<Project[]>('get_projects')
+    if (dataGen !== genAtStart) {
+      projects.value = await invoke<Project[]>('get_projects')
+    } else {
+      projects.value = result
+    }
   } catch (_) {
     // 静默失败
   }
+}
+
+/** 按会话增量更新项目树；遇到未知项目（新建项目目录）回退全量 */
+async function applySessionChanges(changes: SessionChange[]) {
+  for (const { projectId, sessionId } of changes) {
+    const proj = projects.value.find(p => p.id === projectId)
+    if (!proj) {
+      reloadProjectsSilently()
+      return
+    }
+    try {
+      const summary = await invoke<SessionSummary | null>('get_session_summary', {
+        projectId,
+        sessionId,
+      })
+      dataGen++
+      const idx = proj.sessions.findIndex(s => s.id === sessionId)
+      if (!summary) {
+        // 会话文件已删除
+        if (idx >= 0) proj.sessions.splice(idx, 1)
+        if (proj.sessions.length === 0) {
+          // 与全量扫描一致：零会话项目不展示
+          const pIdx = projects.value.findIndex(p => p.id === projectId)
+          if (pIdx >= 0) projects.value.splice(pIdx, 1)
+          continue
+        }
+      } else if (idx >= 0) {
+        proj.sessions[idx] = summary
+      } else {
+        proj.sessions.push(summary)
+      }
+      proj.session_count = proj.sessions.length
+      proj.sessions.sort((a, b) => (b.last_modified ?? 0) - (a.last_modified ?? 0))
+      proj.last_active = proj.sessions[0]?.last_modified ?? proj.last_active
+    } catch (_) {
+      // 单条失败不阻塞其余变更
+    }
+  }
+  projects.value.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
 }
 
 /** 切换项目选中状态 */

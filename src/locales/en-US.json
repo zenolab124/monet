@@ -826,5 +826,21 @@
     "planA": "Plan A",
     "planB": "Plan B",
     "planC": "Plan C"
+  },
+  "perf": {
+    "title": "Performance",
+    "streaming": "streaming",
+    "fps": "FPS",
+    "jank": "Dropped (10s)",
+    "maxBlock": "Max block",
+    "click": "Click latency",
+    "dom": "DOM nodes",
+    "memMain": "Main process",
+    "memWeb": "WebView",
+    "memCli": "CLI children ×{count}",
+    "memTotal": "Total",
+    "projEvents": "Project events",
+    "incremental": "incr",
+    "full": "full"
   }
 }

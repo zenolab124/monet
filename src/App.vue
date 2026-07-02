@@ -12,6 +12,7 @@ import WorkshopView from '@/views/WorkshopView.vue'
 import AutomationView from '@/views/AutomationView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import PerfHud from '@/components/PerfHud.vue'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { useUiState } from '@/composables/useUiState'
@@ -37,11 +38,19 @@ watch(projects, (list) => {
   pruneDrafts(sid => ids.has(sid))
 })
 
+// 性能监视 HUD：v-if 懒挂载，关闭时零采样开销
+const showPerfHud = ref(false)
+
 function onKeydown(e: KeyboardEvent) {
   // Cmd+R: 刷新项目列表
   if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
     e.preventDefault()
     loadProjects()
+  }
+  // Cmd+Shift+M: 性能监视 HUD（e.repeat 守卫：按住不连续 toggle）
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'm' || e.key === 'M') && !e.repeat) {
+    e.preventDefault()
+    showPerfHud.value = !showPerfHud.value
   }
   // Cmd+=/- : 缩放, Cmd+0 : 重置
   if (e.metaKey || e.ctrlKey) {
@@ -191,6 +200,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </DragOverlay>
 
       <ConfirmDialog />
+      <PerfHud v-if="showPerfHud" @close="showPerfHud = false" />
     </DragDropProvider>
   </div>
 </template>

@@ -826,5 +826,21 @@
     "planA": "方案 A",
     "planB": "方案 B",
     "planC": "方案 C"
+  },
+  "perf": {
+    "title": "性能监视",
+    "streaming": "流式中",
+    "fps": "帧率",
+    "jank": "丢帧 (10s)",
+    "maxBlock": "最长阻塞",
+    "click": "点击延迟",
+    "dom": "DOM 节点",
+    "memMain": "主进程",
+    "memWeb": "WebView",
+    "memCli": "CLI 子进程 ×{count}",
+    "memTotal": "合计",
+    "projEvents": "项目事件",
+    "incremental": "增量",
+    "full": "全量"
   }
 }

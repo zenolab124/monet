@@ -14,6 +14,7 @@ mod streaming;
 mod menu;
 mod tray;
 pub mod usage_stats;
+mod perf;
 mod watcher;
 mod agent;
 mod automation;
@@ -26,8 +27,19 @@ mod translate;
 mod widget;
 
 
+#[cfg(target_os = "macos")]
+extern "C" {
+    /// src/native/high_refresh.m：swizzle WKWebView 初始化器解锁 ProMotion 高刷。
+    /// 必须先于任何 WKWebView 创建执行——feature 仅在创建时刻读取
+    fn cc_space_install_high_refresh_unlock();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        cc_space_install_high_refresh_unlock();
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -97,6 +109,7 @@ pub fn run() {
             commands::get_projects,
             commands::get_session_records,
             commands::get_session_summary,
+            commands::get_perf_stats,
             commands::delete_session,
             commands::resume_in_terminal,
             commands::resume_in_vscode,

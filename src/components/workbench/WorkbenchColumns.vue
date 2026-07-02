@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
 import { useNotifications } from '@/composables/useNotifications'
+import { useHorizontalWheelScroll } from '@/composables/useHorizontalWheelScroll'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 import SortableColumn from './SortableColumn.vue'
 
@@ -63,19 +64,12 @@ const dragging = ref(false)
 
 let zoneResizeObserver: ResizeObserver | null = null
 
-function onWheelCapture(e: WheelEvent) {
-  const el = containerRef.value
-  if (!el || el.scrollWidth <= el.clientWidth) return
-  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
-  e.preventDefault()
-  el.scrollLeft += e.deltaX
-}
+useHorizontalWheelScroll(containerRef)
 
 onMounted(() => {
   const el = containerRef.value
   if (!el) return
   setRightZoneWidth(el.clientWidth)
-  el.addEventListener('wheel', onWheelCapture, { capture: true, passive: false })
   zoneResizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (entry.contentRect.width > 0) {
@@ -87,7 +81,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  containerRef.value?.removeEventListener('wheel', onWheelCapture, { capture: true } as EventListenerOptions)
   zoneResizeObserver?.disconnect()
   zoneResizeObserver = null
 })

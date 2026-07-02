@@ -9,15 +9,21 @@ use crate::probe;
 use crate::streaming;
 use crate::usage_stats;
 
-/// 获取所有项目（含会话摘要）
+/// 获取所有项目（含会话摘要）。async：全量扫描属重活，避免阻塞主线程排队其他 IPC
 #[tauri::command]
-pub fn get_projects() -> Vec<Project> {
+pub async fn get_projects() -> Vec<Project> {
     discovery::discover_all()
 }
 
-/// 获取会话消息记录（仅 user/assistant，跳过 snapshot 等大型记录）
+/// 性能监视 HUD 数据源：app 相关进程的真实内存足迹
 #[tauri::command]
-pub fn get_session_records(project_id: String, session_id: String) -> Vec<SessionRecord> {
+pub async fn get_perf_stats() -> crate::perf::PerfStats {
+    crate::perf::collect()
+}
+
+/// 获取会话消息记录（仅 user/assistant，跳过 snapshot 等大型记录）。async 同上
+#[tauri::command]
+pub async fn get_session_records(project_id: String, session_id: String) -> Vec<SessionRecord> {
     let path = session_path(&project_id, &session_id);
     let t0 = std::time::Instant::now();
     let records = parser::parse_messages(&path);
@@ -33,11 +39,15 @@ pub fn get_session_records(project_id: String, session_id: String) -> Vec<Sessio
     records
 }
 
-/// 获取单个会话的摘要信息
+/// 获取单个会话的摘要信息。走摘要缓存：projects-changed 增量路径高频调用，
+/// 顺带热缓存使下次全量扫描免于重复解析
 #[tauri::command]
-pub fn get_session_summary(project_id: String, session_id: String) -> Option<SessionSummary> {
+pub async fn get_session_summary(
+    project_id: String,
+    session_id: String,
+) -> Option<SessionSummary> {
     let path = session_path(&project_id, &session_id);
-    parser::parse_summary(&path, 50)
+    crate::cache::get_summary(&path)
 }
 
 /// 删除会话（.jsonl 文件 + 子会话目录）

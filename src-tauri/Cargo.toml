@@ -27,6 +27,8 @@ path = "src/bin/schema_probe.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
+# ProMotion 高刷解锁:编译 src/native/high_refresh.m(swizzle 需在 WKWebView 创建前就位)
+cc = "1"
 
 [dependencies]
 serde_json = "1.0"

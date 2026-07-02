@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 /// 启动文件监控，检测 ~/.claude/projects/ 下的变化
-/// - 防抖 1 秒后向前端发送 "projects-changed" 事件
+/// - 变更按 (project, session) 聚合，节流 1 秒发送 "projects-changed" 事件，
+///   payload 携带变更集合供前端增量更新；项目目录级事件（新建/删除/重命名）
+///   置 full=true 让前端全量兜底。窗口内积压的末批变更由 500ms tick 补发，不丢失
 /// - 增量探测会话 jsonl 新增的 api_error 记录，发送 "session-api-error" 事件
 ///   （FR-010 外部会话出错兜底；是否属于工作台由前端判定过滤）
 /// - 监控 data_dir/routines.json 变化，发送 "routines-changed" 事件（MCP 外部写入感知）
@@ -60,9 +62,12 @@ pub fn start(app: &AppHandle) {
 
         let mut last_emit = Instant::now() - Duration::from_secs(10);
         let mut last_routines_emit = Instant::now() - Duration::from_secs(10);
+        // 节流窗口内累积的会话变更 (project_id, session_id)；full 表示需要全量刷新
+        let mut pending_changes: HashSet<(String, String)> = HashSet::new();
+        let mut pending_full = false;
 
         loop {
-            // 阻塞等待事件，超时 500ms
+            // 阻塞等待事件，超时 500ms（tick 兼作积压变更的补发时机）
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(event) => {
                     let is_routine = event.paths.iter().any(|p| p == &routines_file);
@@ -84,20 +89,66 @@ pub fn start(app: &AppHandle) {
                         }
                     }
 
-                    // projects-changed 防抖：距离上次发射不足 1 秒则跳过
                     if !is_routine {
-                        let now = Instant::now();
-                        if now.duration_since(last_emit) >= Duration::from_secs(1) {
-                            last_emit = now;
-                            let _ = handle.emit("projects-changed", ());
+                        for path in &event.paths {
+                            if let Some((sid, pid)) = session_file_ids(&root, path) {
+                                // 与 discovery 的会话定义保持一致：排除 agent- 前缀，
+                                // 否则增量路径会把全量扫描不认的文件 push 成幽灵会话
+                                if !sid.starts_with("agent-") {
+                                    pending_changes.insert((pid, sid));
+                                }
+                            } else if path.parent() == Some(root.as_path()) {
+                                // 项目目录本身的创建/删除/重命名：无法增量定位
+                                pending_full = true;
+                            }
+                            // 其余路径（subagents 深层文件、data_dir 内缓存写入等）
+                            // 不影响项目列表，不触发事件
                         }
                     }
+
+                    emit_pending_changes(
+                        &handle,
+                        &mut pending_changes,
+                        &mut pending_full,
+                        &mut last_emit,
+                    );
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    emit_pending_changes(
+                        &handle,
+                        &mut pending_changes,
+                        &mut pending_full,
+                        &mut last_emit,
+                    );
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
     });
+}
+
+/// 距上次发射满 1 秒且有积压变更时，发送 projects-changed 并清空积压
+fn emit_pending_changes(
+    app: &AppHandle,
+    pending: &mut HashSet<(String, String)>,
+    full: &mut bool,
+    last_emit: &mut Instant,
+) {
+    if pending.is_empty() && !*full {
+        return;
+    }
+    let now = Instant::now();
+    if now.duration_since(*last_emit) < Duration::from_secs(1) {
+        return;
+    }
+    *last_emit = now;
+    let changes: Vec<Value> = pending
+        .drain()
+        .map(|(pid, sid)| json!({ "projectId": pid, "sessionId": sid }))
+        .collect();
+    let payload = json!({ "full": *full, "changes": changes });
+    *full = false;
+    let _ = app.emit("projects-changed", payload);
 }
 
 /// 启动时记录所有项目目录直接子级 .jsonl 的当前大小

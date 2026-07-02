@@ -80,6 +80,7 @@ name = "app"
 version = "2.4.0"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "chrono",
  "cron",
  "dirs",

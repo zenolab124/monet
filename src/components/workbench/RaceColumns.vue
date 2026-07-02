@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
+import { useHorizontalWheelScroll } from '@/composables/useHorizontalWheelScroll'
 import { useRaceInput } from '@/composables/useRaceInput'
 import { useProjects } from '@/composables/useProjects'
 import { useConfirm } from '@/composables/useConfirm'
@@ -56,19 +57,12 @@ function cacheOverallRate(t: TokenUsage): string {
 
 let resizeObserver: ResizeObserver | null = null
 
-function onWheelCapture(e: WheelEvent) {
-  const el = containerRef.value
-  if (!el || el.scrollWidth <= el.clientWidth) return
-  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
-  e.preventDefault()
-  el.scrollLeft += e.deltaX
-}
+useHorizontalWheelScroll(containerRef)
 
 onMounted(() => {
   const el = containerRef.value
   if (!el) return
   setRightZoneWidth(el.clientWidth)
-  el.addEventListener('wheel', onWheelCapture, { capture: true, passive: false })
   resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (entry.contentRect.width > 0) setRightZoneWidth(entry.contentRect.width)
@@ -79,7 +73,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  containerRef.value?.removeEventListener('wheel', onWheelCapture, { capture: true } as EventListenerOptions)
   resizeObserver?.disconnect()
   resizeObserver = null
 })
