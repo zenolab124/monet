@@ -164,6 +164,8 @@ const partialJsonKey = (messageId: string, index: number) => `${messageId}#${ind
 
 // messageId → { turn, sessionId }：flush 时 O(1) 反查（跨会话）
 const turnIndex = new Map<string, { turn: StreamingTurn; sessionId: string }>()
+// thinking 块计时：block_start 记时刻，block_stop 算差值
+const thinkingStartTimes = new Map<string, number>()
 
 /** 丢弃某 turn 的全部传输态(索引 + 残余 pending):防死 key 让节奏档位虚高 */
 function dropTurnTransients(messageId: string) {
@@ -174,6 +176,9 @@ function dropTurnTransients(messageId: string) {
   }
   for (const key of toolPartialJson.keys()) {
     if (key.startsWith(prefix)) toolPartialJson.delete(key)
+  }
+  for (const key of thinkingStartTimes.keys()) {
+    if (key.startsWith(prefix)) thinkingStartTimes.delete(key)
   }
 }
 
@@ -527,6 +532,10 @@ export async function initStreamListeners(): Promise<void> {
             turnIndex.set(payload.message_id, entry)
           }
           ;(entry.turn.content as ContentBlock[])[payload.index] = payload.content_block
+          // thinking 块计时起点
+          if (payload.content_block.type === 'thinking') {
+            thinkingStartTimes.set(partialJsonKey(payload.message_id, payload.index), Date.now())
+          }
           // 新块到达:之前等待执行的工具已经返回(开始下一段输出)
           if (payload.content_block.type === 'tool_use') {
             const name = (payload.content_block as { name?: string }).name ?? i18n.global.t('block.tool')
@@ -594,6 +603,14 @@ export async function initStreamListeners(): Promise<void> {
               }
             }
             toolPartialJson.delete(key)
+          }
+          // thinking 块计时终点
+          if (block?.type === 'thinking') {
+            const startTime = thinkingStartTimes.get(key)
+            if (startTime) {
+              ;(block as { _thinkingMs?: number })._thinkingMs = Date.now() - startTime
+              thinkingStartTimes.delete(key)
+            }
           }
           // 工具块结束 = CLI 即将执行该工具:尾部工具行补目标摘要,状态转「等待工具」
           if (block?.type === 'tool_use') {

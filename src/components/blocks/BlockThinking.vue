@@ -7,18 +7,19 @@ const props = defineProps<{
   block: Extract<ContentBlock, { type: 'thinking' }>
 }>()
 
-// 展开状态全局联动:点开一个 = 全部展开并记住,所有实例消费同一份状态
 const { thinkingExpanded: expanded, toggle } = useThinkingExpand()
 
-/**
- * 三态判断:
- * - 有明文 → 可折叠展示
- * - 无明文但有 signature → redacted(已加密)
- * - 都没有 → 流式中尚未拿到 delta,显示"思考中..."
- */
 const hasPlainText = computed(() => props.block.thinking.length > 0)
 const isRedacted = computed(() => !hasPlainText.value && !!props.block.signature)
 const isThinking = computed(() => !hasPlainText.value && !props.block.signature)
+
+const durationLabel = computed(() => {
+  const ms = props.block._thinkingMs
+  if (!ms || ms < 1000) return ''
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+})
 </script>
 
 <template>
@@ -31,6 +32,7 @@ const isThinking = computed(() => !hasPlainText.value && !props.block.signature)
       >
         <span class="i-carbon-chevron-right w-3 h-3 transition-transform" :class="{ 'rotate-90': expanded }" />
         {{ $t('block.thinking', { length: block.thinking.length }) }}
+        <span v-if="durationLabel" class="text-muted-foreground/60">· {{ durationLabel }}</span>
       </button>
       <div v-if="expanded" class="mt-1 pl-3 border-l-2 border-border text-xs text-muted-foreground whitespace-pre-wrap">
         {{ block.thinking }}
@@ -47,6 +49,7 @@ const isThinking = computed(() => !hasPlainText.value && !props.block.signature)
     <div v-else-if="isRedacted" class="text-xs text-muted-foreground flex items-center gap-1">
       <span class="i-carbon-locked w-3 h-3 shrink-0" />
       {{ $t('block.thinkingRedacted') }}
+      <span v-if="durationLabel" class="text-muted-foreground/60">· {{ durationLabel }}</span>
     </div>
   </div>
 </template>

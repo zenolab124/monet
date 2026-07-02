@@ -571,6 +571,17 @@ function mergeResponses(responses: VisibleRecord[]): VisibleRecord[] {
     if (msgId && prev?.type === 'assistant' && (prev as any).message?.id === msgId) {
       const prevMsg = (prev as any).message
       const curMsg = (r as any).message
+      // 合并前：用两条记录的时间戳差值标注 thinking 块耗时
+      const prevTs = (prev as any).timestamp as string | null
+      const curTs = (r as any).timestamp as string | null
+      if (prevTs && curTs) {
+        const ms = new Date(curTs).getTime() - new Date(prevTs).getTime()
+        if (ms > 0) {
+          for (const b of prevMsg.content) {
+            if (b.type === 'thinking' && !b._thinkingMs) b._thinkingMs = ms
+          }
+        }
+      }
       prevMsg.content = [...prevMsg.content, ...curMsg.content]
       if (curMsg.usage) prevMsg.usage = curMsg.usage
     } else {
