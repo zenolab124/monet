@@ -27,6 +27,8 @@ pub enum ContentBlock {
         is_error: bool,
     },
     Image {
+        // default：source 整个缺失的畸形块也必须进本变体（见 ImageSource 注释的计数口径）
+        #[serde(default)]
         source: ImageSource,
     },
     /// PDF 等文档附件。source.data 的完整 base64 不在字段中声明，
@@ -56,11 +58,20 @@ pub struct DocumentSource {
     pub media_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// image 块的来源描述。学 DocumentSource 的做法：base64 原文（source.data）
+/// 刻意不声明为字段——serde 反序列化时直接丢弃，避免几百 KB 的 base64 落进内存/穿透 IPC。
+/// 历史区图片改由 ccimg:// 自定义协议按需取，前端凭 img_index 拼 URL。
+/// 全字段 default：任何 `type=="image"` 的块（含缺 media_type / 缺 source 的畸形块）
+/// 都必须进 Image 变体——与协议 handler raw 遍历「只看 type」的计数口径严格一致
+/// （否则 img_index 序号两侧错位），同时防畸形块落 Unknown(Value) 携 base64 穿透 IPC。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImageSource {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub source_type: String,
-    pub media_type: String,
     #[serde(default)]
-    pub data: String,
+    pub media_type: String,
+    /// record 内第 N 个 image block（0 起，深度优先遍历序，见 parser::inject_image_indices）。
+    /// 由 Rust 解析时注入，前端直接读取零计算，用于拼 ccimg:// 协议 URL 的 img_index 段。
+    #[serde(default)]
+    pub img_index: u32,
 }

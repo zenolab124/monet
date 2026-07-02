@@ -5,6 +5,7 @@ mod channels;
 pub mod config;
 mod commands;
 mod discovery;
+mod image_protocol;
 mod models;
 mod parser;
 mod permission;
@@ -41,6 +42,11 @@ pub fn run() {
         cc_space_install_high_refresh_unlock();
     }
     tauri::Builder::default()
+        // ccimg 自定义协议：历史区图片按需取（base64 已从 records 剥离）。
+        // 异步 responder：读 JSONL/decode 走 tauri 线程池，不阻塞主线程。
+        .register_asynchronous_uri_scheme_protocol("ccimg", |_ctx, request, responder| {
+            image_protocol::handle_request(request, responder);
+        })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())

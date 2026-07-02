@@ -79,9 +79,9 @@ const outputExpanded = ref(false)
       >{{ resultText }}</pre>
     </div>
 
-    <!-- 结果图片 -->
+    <!-- 结果图片(嵌套 tool_result,record_uuid 取 result 所在 record) -->
     <div v-if="resultImages.length">
-      <BlockImage v-for="(img, i) in resultImages" :key="i" :block="img" />
+      <BlockImage v-for="(img, i) in resultImages" :key="i" :block="img" :record-uuid="result?.recordUuid" />
     </div>
   </div>
 </template>

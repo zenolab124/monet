@@ -9,6 +9,8 @@ function isInlineTool(name: string): boolean {
 export interface ToolResultData {
   content: string | ContentBlock[]
   is_error: boolean
+  /** tool_result 所在 record 的 uuid;嵌套图片(如 MCP 截图)拼 ccimg 协议 URL 用。流式内存路径无落盘 uuid 故可空 */
+  recordUuid?: string | null
 }
 
 export function flattenResultText(content: string | ContentBlock[]): string {

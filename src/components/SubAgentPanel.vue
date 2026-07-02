@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SubAgentState } from '@/composables/useSubAgents'
 import type { SessionRecord, ContentBlock } from '@/types'
 import { shortModel, formatTokens } from '@/types'
 import { filterConsumedResults } from '@/utils/toolPair'
+import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
 import MessageBlock from './MessageBlock.vue'
 import MsgClamp from './MsgClamp.vue'
 import UserMsgContent from './UserMsgContent.vue'
@@ -12,7 +13,17 @@ import UserMsgContent from './UserMsgContent.vue'
 const props = defineProps<{
   tabs: SubAgentState[]
   activeTabId: string | null
+  /** 父会话定位坐标:子 agent 图片协议 URL 需父 projectId/sessionId + agentId(=activeTabId) */
+  projectId?: string | null
+  sessionId?: string | null
 }>()
+
+// 子 agent 会话级图片定位上下文;agentId 取当前激活 tab,协议 URL 追加 ?agent=
+const imageLocator = computed<ImageLocator | null>(() => {
+  if (!props.projectId || !props.sessionId || !props.activeTabId) return null
+  return { projectId: props.projectId, sessionId: props.sessionId, agentId: props.activeTabId }
+})
+provide(IMAGE_LOCATOR, imageLocator)
 
 const emit = defineEmits<{
   select: [agentId: string]
@@ -116,7 +127,7 @@ const messageGroups = computed<MessageGroup[]>(() =>
             <div class="min-w-0 flex-1 bg-background border border-border rounded px-2.5 py-1.5">
               <div class="text-[10px] font-medium mb-0.5 text-primary">Prompt</div>
               <MsgClamp>
-                <UserMsgContent :blocks="contentBlocks(group.user as any)" />
+                <UserMsgContent :blocks="contentBlocks(group.user as any)" :record-uuid="(group.user as any).uuid" />
               </MsgClamp>
             </div>
           </div>
@@ -142,6 +153,7 @@ const messageGroups = computed<MessageGroup[]>(() =>
                   v-for="(block, bi) in contentBlocks(resp as any)"
                   :key="bi"
                   :block="block"
+                  :record-uuid="(resp as any).uuid"
                 />
               </div>
             </div>

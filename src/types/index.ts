@@ -56,7 +56,9 @@ export type ContentBlock =
   | { type: 'thinking'; thinking: string; signature?: string; _thinkingMs?: number }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string | ContentBlock[]; is_error: boolean }
-  | { type: 'image'; source: { source_type: string; media_type: string; data: string } }
+  // img_index: record 内第 N 个 image block(0 起,深度优先),Rust 解析时注入,前端拼 ccimg 协议 URL 用
+  // data: 仅 pending/流式区(JSONL 未落盘)的内存路径存在;历史区已落盘,走协议 URL,data 缺省
+  | { type: 'image'; source: { source_type: string; media_type: string; img_index: number; data?: string } }
   | { type: 'document'; source: { source_type: string; media_type: string }; title: string | null }
   | { type: string; [key: string]: unknown }
 

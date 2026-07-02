@@ -51,12 +51,69 @@ pub fn parse_messages(path: &Path) -> Vec<SessionRecord> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        if let Some(record) = SessionRecord::from_json_owned(value) {
+        if let Some(mut record) = SessionRecord::from_json_owned(value) {
+            // 为每个 image block 注入深度优先序号（ccimg 协议按此 img_index 反查 base64）
+            inject_image_indices(&mut record);
             results.push(record);
         }
     }
 
     results
+}
+
+// ============================================================================
+// image block 深度优先遍历 —— img_index 的单一权威定义
+// ----------------------------------------------------------------------------
+// img_index = record 内第 N 个 image block（0 起）。遍历顺序（深度优先）：
+//   顶层 message.content 数组按序遍历；遇到 tool_result 且其 content 为 Blocks
+//   时，先递归遍历其内嵌 blocks，再继续外层。
+//
+// 这套顺序是 Rust parser（注入序号）与 ccimg 协议 handler（按序号反查 base64）
+// 的共同契约。parser 走 typed 结构注入，handler 走 raw JSON 提取——两条路径必须
+// 产出完全一致的序号。计数口径 = 「type == "image" 即计数」：typed 侧靠 ImageSource
+// 全字段 default 保证畸形块（缺 media_type / 缺 source）也进 Image 变体不落 Unknown。
+// 交叉验证测试：image_protocol::tests::traversal_order_matches_typed_injection。
+// ============================================================================
+
+/// 给一条记录内所有 image block 按深度优先序注入 img_index（typed 路径）。
+/// 仅 User / Assistant 记录携带 message.content，其余记录无 image，跳过。
+fn inject_image_indices(record: &mut SessionRecord) {
+    let counter = &mut 0u32;
+    match record {
+        SessionRecord::User(u) => {
+            if let Some(msg) = u.message.as_mut() {
+                if let MessageContent::Blocks(blocks) = &mut msg.content {
+                    walk_blocks_assign(blocks, counter);
+                }
+            }
+        }
+        SessionRecord::Assistant(a) => {
+            if let Some(msg) = a.message.as_mut() {
+                walk_blocks_assign(&mut msg.content, counter);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 深度优先遍历 typed blocks，为遇到的每个 Image 赋递增 img_index。
+/// pub(crate)：image_protocol 的交叉验证测试直接调用，确保与 raw 遍历序号一致
+pub(crate) fn walk_blocks_assign(blocks: &mut [ContentBlock], counter: &mut u32) {
+    for block in blocks.iter_mut() {
+        match block {
+            ContentBlock::Image { source } => {
+                source.img_index = *counter;
+                *counter += 1;
+            }
+            ContentBlock::ToolResult {
+                content: ToolResultContent::Blocks(inner),
+                ..
+            } => {
+                walk_blocks_assign(inner, counter);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// 懒解析：提取摘要信息，不加载完整对话

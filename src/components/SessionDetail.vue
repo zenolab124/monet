@@ -54,6 +54,7 @@ import {
 import { createSubAgentContext } from '@/composables/useSubAgents'
 import type { SubAgentMeta } from '@/types'
 import SubAgentPanel from './SubAgentPanel.vue'
+import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
 
 /**
  * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
@@ -156,7 +157,8 @@ const toolResultMap = computed(() => {
     for (const b of content) {
       if (b.type === 'tool_result') {
         const tr = b as Extract<ContentBlock, { type: 'tool_result' }>
-        map.set(tr.tool_use_id, { content: tr.content, is_error: tr.is_error })
+        // recordUuid = tool_result 所在 user record 的 uuid;嵌套图片按此拼协议 URL
+        map.set(tr.tool_use_id, { content: tr.content, is_error: tr.is_error, recordUuid: r.uuid })
       }
     }
   }
@@ -164,7 +166,10 @@ const toolResultMap = computed(() => {
     for (const b of turn.content) {
       if (b.type === 'tool_result') {
         const tr = b as Extract<ContentBlock, { type: 'tool_result' }>
-        map.set(tr.tool_use_id, { content: tr.content, is_error: tr.is_error })
+        // 流式 turns 经 typed 反序列化,图片 data 已剥离;但 assistant 消息不含
+        // tool_result,此分支对图片实际不可达——流式期 tool_result 图片由 records
+        // 重载走协议 URL。recordUuid 置 null 仅为类型完整
+        map.set(tr.tool_use_id, { content: tr.content, is_error: tr.is_error, recordUuid: null })
       }
     }
   }
@@ -410,6 +415,14 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
   if (cwd) return { summary: draftSummary(sid, cwd), projectId: cwd.replace(/\//g, '-') }
   return null
 })
+
+// 会话级图片定位上下文(主会话,无 agentId);历史区图片按此拼 ccimg 协议 URL
+const imageLocator = computed<ImageLocator | null>(() => {
+  const cs = currentSession.value
+  if (!cs) return null
+  return { projectId: cs.projectId, sessionId: cs.summary.id }
+})
+provide(IMAGE_LOCATOR, imageLocator)
 
 // --- 只读条(FR-009,仅档案馆) ---
 
@@ -1246,6 +1259,7 @@ async function onReload() {
               v-for="(block, bi) in contentBlocks(group.user as any)"
               :key="bi"
               :block="block"
+              :record-uuid="group.user.uuid"
             />
           </div>
           <!-- 正常用户消息 -->
@@ -1255,7 +1269,7 @@ async function onReload() {
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
                 <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
                 <MsgClamp>
-                  <UserMsgContent :blocks="contentBlocks(group.user as any)" />
+                  <UserMsgContent :blocks="contentBlocks(group.user as any)" :record-uuid="group.user.uuid" />
                 </MsgClamp>
               </div>
             </div>
@@ -1296,6 +1310,7 @@ async function onReload() {
                     v-for="(block, bi) in contentBlocks(resp as any)"
                     :key="bi"
                     :block="block"
+                    :record-uuid="(resp as any).uuid"
                   />
                 </div>
               </div>
@@ -1549,6 +1564,8 @@ async function onReload() {
         <SubAgentPanel
           :tabs="subAgentTabs"
           :active-tab-id="subAgentActiveTabId"
+          :project-id="currentSession?.projectId ?? null"
+          :session-id="currentSession?.summary.id ?? null"
           @select="subAgentActiveTabId = $event"
           @close-tab="closeSubAgentTab($event)"
           @close-all="closeAllSubAgents()"
