@@ -508,7 +508,25 @@
       "scopeFullHint": "会话 + Agent",
       "scopeAgentOnlyHint": "仅限 Agent",
       "tokenOptional": "（可选）",
-      "agentModelHint": "Agent 调用（翻译/摘要/标签）使用的模型名，留空走默认 Claude 模型"
+      "agentModelHint": "Agent 调用（翻译/摘要/标签）使用的模型名，留空走默认 Claude 模型",
+      "modelMap": {
+        "title": "高级选项 · 模型映射",
+        "badge": "参照 CC Switch",
+        "intro": "把官方角色（Fable/Opus/Sonnet/Haiku）重定向到该渠道的实际模型，会话下拉将显示这些角色。留空则不映射，走渠道默认。",
+        "fetchModels": "获取模型列表",
+        "fetching": "获取中…",
+        "fetchHint": "探活渠道 /v1/models，成功后候选自动补全",
+        "roleCol": "角色",
+        "modelCol": "实际请求模型",
+        "nameCol": "显示名称",
+        "customRole": "自定义",
+        "modelPlaceholder": "模型 ID",
+        "namePlaceholder": "可空",
+        "oneMHint": "勾选表示该模型用 1M 上下文（存储时追加 [1m] 后缀）",
+        "customHint": "自定义槽的值会进入 CLI /model 菜单，并直接通过模型校验。",
+        "fallbackLabel": "默认兜底模型",
+        "fallbackHint": "仅当请求未落到任何角色时使用，通常留空。"
+      }
     },
     "mcp": {
       "title": "MCP 工具服务",
@@ -667,7 +685,10 @@
     "tokenTotalOutput": "总输出",
     "tokenCacheHitRate": "输入缓存率",
     "tokenCacheRatio": "总体缓存率",
-    "tokenTotal": "合计"
+    "roleFable": "Fable · 最新",
+    "roleOpus": "Opus · 最新",
+    "roleSonnet": "Sonnet · 最新",
+    "roleHaiku": "Haiku · 最新"
   },
   "slash": {
     "title": "斜杠命令",

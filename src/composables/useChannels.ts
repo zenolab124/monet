@@ -15,6 +15,8 @@ export interface ChannelInfo {
   scope: string
   agentModel: string | null
   availableModels: string[]
+  /** CC Space 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传) */
+  modelEnv: Record<string, string>
 }
 
 export const APPLE_FM_CHANNEL_ID = 'apple-fm'
@@ -66,6 +68,8 @@ export interface SaveChannelPayload {
   scope?: string
   agentModel?: string
   availableModels?: string[]
+  /** 整命名空间替换语义:传对象=先移除全部 21 托管键再写非空值;不传/undefined=不动这些键 */
+  modelEnv?: Record<string, string>
 }
 
 async function saveChannel(payload: SaveChannelPayload): Promise<void> {
@@ -79,6 +83,7 @@ async function saveChannel(payload: SaveChannelPayload): Promise<void> {
     scope: payload.scope ?? null,
     agentModel: payload.agentModel ?? null,
     availableModels: payload.availableModels ?? null,
+    modelEnv: payload.modelEnv ?? null,
   })
   await refreshChannels()
 }

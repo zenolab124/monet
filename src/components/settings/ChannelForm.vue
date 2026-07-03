@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChannels, type ChannelInfo, APPLE_FM_CHANNEL_ID } from '@/composables/useChannels'
+import ChannelModelMap from './ChannelModelMap.vue'
 
 const props = defineProps<{
   channel: ChannelInfo | null
@@ -13,7 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { saveChannel, revealToken, probeResults } = useChannels()
+const { saveChannel, revealToken, probeResults, probing, probeChannel } = useChannels()
 
 const isNew = computed(() => props.channel === null)
 
@@ -27,7 +28,24 @@ const scope = ref(props.channel?.scope ?? 'full')
 const agentModel = ref(props.channel?.agentModel ?? '')
 const tokenVisible = ref(false)
 
+/** 模型映射 env(编辑回显源 = 渠道当前 modelEnv;子组件变更时更新) */
+const sourceModelEnv = computed<Record<string, string>>(() => props.channel?.modelEnv ?? {})
+/** 子组件构建出的 env 键值(整命名空间替换语义:保存时随 modelEnv 传出) */
+const modelEnv = ref<Record<string, string>>({ ...(props.channel?.modelEnv ?? {}) })
+function onModelEnvUpdate(env: Record<string, string>) {
+  modelEnv.value = env
+}
+
 const isVirtual = computed(() => props.channel?.id === APPLE_FM_CHANNEL_ID)
+
+/** 「获取模型列表」:探活当前渠道(已保存渠道用其 id),转圈态复用 probing ref */
+const probeTargetId = computed(() => props.channel?.id ?? id.value)
+const modelMapProbing = computed(() => !!probing.value[probeTargetId.value])
+async function onProbe() {
+  const target = probeTargetId.value.trim()
+  if (!target) return
+  await probeChannel(target)
+}
 
 const modelOptions = computed(() => {
   const channelId = props.channel?.id ?? id.value
@@ -79,6 +97,8 @@ async function onSave() {
       scope: scope.value,
       agentModel: agentModel.value.trim() || undefined,
       availableModels: modelOptions.value.length > 0 ? modelOptions.value : undefined,
+      // 整命名空间替换语义:虚拟渠道不传(保持 undefined→null 不动 env);其余传构建后的 env(空对象=清除映射)
+      modelEnv: isVirtual.value ? undefined : modelEnv.value,
     })
     emit('saved')
   } catch (e) {
@@ -172,6 +192,17 @@ async function onSave() {
       </datalist>
       <span class="text-[10px] text-muted-foreground/70">{{ $t('settings.channelForm.agentModelHint') }}</span>
     </div>
+
+    <!-- 高级选项 · 模型映射(虚拟渠道隐藏) -->
+    <ChannelModelMap
+      v-if="!isVirtual"
+      :model-env="sourceModelEnv"
+      :model-options="modelOptions"
+      :probing="modelMapProbing"
+      :dom-key="id || 'new'"
+      @update:env="onModelEnvUpdate"
+      @probe="onProbe"
+    />
 
     <label class="form-field">
       <span class="form-label">{{ $t('settings.channelForm.noteLabel') }}</span>

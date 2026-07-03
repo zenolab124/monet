@@ -335,9 +335,10 @@ function onPermissionModeChange(mode: PermissionMode) {
     ref="containerRef"
     class="px-3 py-1 border-b border-border shrink-0 flex items-center gap-1.5"
   >
-    <!-- 模型切换(永不折叠) -->
+    <!-- 模型切换(永不折叠);渠道决定候选来源(官方=角色主区;第三方=映射角色) -->
     <ModelDropdown
       :current="effectiveModel?.id ?? effectiveModelStr"
+      :channel="resolvedChannelId"
       :disabled="selectedAdvisor"
       @select="onModelChange"
     />

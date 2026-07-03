@@ -2,11 +2,11 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  MODELS,
   inferModel,
   DEFAULT_CONTEXT,
   type ModelInfo,
 } from '@/utils/modelContext'
+import { useModelOptions } from '@/composables/useModelOptions'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 
 const props = defineProps<{
@@ -14,6 +14,8 @@ const props = defineProps<{
   current: string | null
   /** 禁用(顾问模式下主模型锁定为 Sonnet,不可改) */
   disabled?: boolean
+  /** 当前会话渠道(null / 'official' = 官方;其他 = 渠道 id):决定下拉候选来源 */
+  channel?: string | null
 }>()
 
 const { t } = useI18n()
@@ -49,18 +51,23 @@ const currentLabel = computed(() => {
   return cliDefaultModelLabel.value ?? t('topbar.modelDefault')
 })
 
+/** 渠道来源(按渠道产出候选:官方=角色主区+钉版本沉底;第三方=映射角色或回退全量) */
+const channelRef = computed<string | null>(() => props.channel ?? null)
+const { items: channelItems } = useModelOptions(channelRef)
+
 /**
- * 下拉项 = 模型清单 + 当前自定义模型(若清单外):
+ * 下拉项 = 渠道候选清单 + 当前自定义模型(若清单外):
  * 会话在用清单外模型(CLI 自定义设置/代理模型)时附加为可选项,原名展示。
  */
 const items = computed<ModelInfo[]>(() => {
-  if (props.current && !currentModel.value) {
+  const base = channelItems.value
+  if (props.current && !currentModel.value && !base.some(m => m.id === props.current!.toLowerCase())) {
     return [
-      ...MODELS,
+      ...base,
       { id: props.current, label: props.current, contextWindow: DEFAULT_CONTEXT },
     ]
   }
-  return MODELS
+  return base
 })
 
 /** 当前选中项在列表中的索引(用于打勾对比):优先原始字符串精确命中(自定义项) */

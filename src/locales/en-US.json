@@ -508,7 +508,25 @@
       "scopeFullHint": "Session + Agent",
       "scopeAgentOnlyHint": "Agent only",
       "tokenOptional": "(optional)",
-      "agentModelHint": "Model for agent calls (translate/summary/tags). Leave empty to use default Claude models"
+      "agentModelHint": "Model for agent calls (translate/summary/tags). Leave empty to use default Claude models",
+      "modelMap": {
+        "title": "Advanced · Model Mapping",
+        "badge": "à la CC Switch",
+        "intro": "Redirect the official roles (Fable/Opus/Sonnet/Haiku) to this channel’s actual models; the session dropdown will show these roles. Leave blank to skip mapping and use the channel default.",
+        "fetchModels": "Fetch models",
+        "fetching": "Fetching…",
+        "fetchHint": "Probes the channel’s /v1/models; candidates autocomplete on success",
+        "roleCol": "Role",
+        "modelCol": "Actual model",
+        "nameCol": "Display name",
+        "customRole": "Custom",
+        "modelPlaceholder": "Model ID",
+        "namePlaceholder": "Optional",
+        "oneMHint": "Check to use the 1M context for this model (appends the [1m] suffix on save)",
+        "customHint": "The custom slot’s value enters the CLI /model menu and passes model validation directly.",
+        "fallbackLabel": "Default fallback model",
+        "fallbackHint": "Used only when a request doesn’t resolve to any role; usually leave blank."
+      }
     },
     "mcp": {
       "title": "MCP Tool Service",
@@ -667,7 +685,10 @@
     "tokenTotalOutput": "Total output",
     "tokenCacheHitRate": "Input cache rate",
     "tokenCacheRatio": "Overall cache rate",
-    "tokenTotal": "Total"
+    "roleFable": "Fable · Latest",
+    "roleOpus": "Opus · Latest",
+    "roleSonnet": "Sonnet · Latest",
+    "roleHaiku": "Haiku · Latest"
   },
   "slash": {
     "title": "Slash Commands",

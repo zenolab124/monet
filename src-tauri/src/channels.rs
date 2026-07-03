@@ -33,6 +33,40 @@ pub const DEFENSE_ENV_KEYS: [&str; 4] = [
     "CLAUDE_CODE_USE_FOUNDRY",
 ];
 
+/// CC Space 托管的「模型角色映射」env 键(共 21 个),存于 channels/<id>.json 顶层 env 块。
+/// 四角色 FABLE/OPUS/SONNET/HAIKU 各 4 键(重定向落点/显示名/描述/能力)+ 自定义第五槽 4 键 + 兜底 1 键。
+/// save_channel(model_env=Some) 时整命名空间替换:先移除全部 21 键再写入非空值;
+/// ChannelView.model_env 回传这些键的当前值(模型 ID 非敏感,明文回传)。
+pub const MODEL_ENV_KEYS: &[&str] = &[
+    // FABLE
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
+    // OPUS
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+    // SONNET
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+    // HAIKU
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+    // 自定义第五槽
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+    // 兜底
+    "ANTHROPIC_MODEL",
+];
+
 fn cc_space_dir() -> PathBuf {
     config::data_dir().to_path_buf()
 }
@@ -368,6 +402,8 @@ pub struct ChannelView {
     pub scope: String,
     pub agent_model: Option<String>,
     pub available_models: Vec<String>,
+    /// CC Space 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传)
+    pub model_env: BTreeMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -394,6 +430,7 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             scope: "full".to_string(),
             agent_model: None,
             available_models: vec![],
+            model_env: BTreeMap::new(),
         };
     }
     if id == APPLE_FM_ID {
@@ -410,6 +447,7 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             scope: "agent-only".to_string(),
             agent_model: meta.agent_model.clone(),
             available_models: vec![],
+            model_env: BTreeMap::new(),
         };
     }
     let path = channel_file_path(id);
@@ -452,6 +490,19 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         .and_then(|v| v.get("_ccSpace"))
         .and_then(|v| serde_json::from_value::<CcSpaceExt>(v.clone()).ok())
         .unwrap_or_default();
+    // 从 env 块过滤出 CC Space 托管的模型角色映射键(明文回传)
+    let model_env = env
+        .map(|e| {
+            MODEL_ENV_KEYS
+                .iter()
+                .filter_map(|k| {
+                    e.get(*k)
+                        .and_then(|v| v.as_str())
+                        .map(|s| (k.to_string(), s.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     ChannelView {
         name: meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| id.to_string()),
         note: meta.note.clone().filter(|s| !s.is_empty()),
@@ -465,6 +516,7 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         scope: meta.scope().to_string(),
         agent_model: cc_ext.agent_model,
         available_models: cc_ext.available_models,
+        model_env,
     }
 }
 
@@ -509,6 +561,7 @@ pub fn save_channel(
     scope: Option<String>,
     agent_model: Option<String>,
     available_models: Option<Vec<String>>,
+    model_env: Option<std::collections::HashMap<String, String>>,
 ) -> Result<(), String> {
     validate_id(&id)?;
     let is_virtual = id == APPLE_FM_ID;
@@ -550,6 +603,22 @@ pub fn save_channel(
                 .is_none()
             {
                 return Err("新建渠道必须提供 Auth Token".to_string());
+            }
+        }
+
+        // 模型角色映射:整命名空间替换语义。
+        // Some(map)=先移除全部 21 个托管键,再写入 map 中的非空值;None=完全不动这些键(向后兼容)。
+        if let Some(map) = model_env.as_ref() {
+            for k in MODEL_ENV_KEYS {
+                env_obj.remove(*k);
+            }
+            for k in MODEL_ENV_KEYS {
+                if let Some(v) = map.get(*k) {
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        env_obj.insert(k.to_string(), json!(v));
+                    }
+                }
             }
         }
 
@@ -920,9 +989,12 @@ fn detect_apple_fm() -> bool {
     #[cfg(not(target_os = "macos"))]
     return false;
 
+    // .app 环境 PATH 极简，which 依赖 PATH 查 fm，必须注入增强 PATH，
+    // 否则 homebrew 等用户级安装的 fm 会静默检测失败
     #[cfg(target_os = "macos")]
     Command::new("which")
         .arg("fm")
+        .env("PATH", crate::streaming::enhanced_path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -972,6 +1044,7 @@ pub fn ensure_fm_serve_running() -> Result<(), String> {
     eprintln!("[apple-fm] 启动 fm serve --port {}", APPLE_FM_PORT);
     let child = Command::new("fm")
         .args(["serve", "--port", &APPLE_FM_PORT.to_string()])
+        .env("PATH", crate::streaming::enhanced_path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

@@ -24,6 +24,7 @@ import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
 import { useTheme } from '@/composables/useTheme'
+import { MODELS } from '@/utils/modelContext'
 
 const { t } = useI18n()
 const {
@@ -242,6 +243,20 @@ const advisorModel = ref('claude-fable-5')
 const hideCreditsModels = ref(false)
 const autoDetectModels = ref(false)
 
+// 顾问主/顾问模型下拉:从 MODELS 非 legacy 项派生(单源,消灭硬编码 <option>)。
+// 行为兼容:若当前值不在派生列表(如默认 claude-sonnet-4-6 为 legacy 项),附加显示。
+const nonLegacyModels = computed(() =>
+  MODELS.filter(m => !m.legacy).map(m => ({ value: m.id, label: m.label })),
+)
+function withCurrent(list: { value: string; label: string }[], current: string) {
+  if (current && !list.some(o => o.value === current)) {
+    return [...list, { value: current, label: current }]
+  }
+  return list
+}
+const advisorMainOptions = computed(() => withCurrent(nonLegacyModels.value, advisorMain.value))
+const advisorModelOptions = computed(() => withCurrent(nonLegacyModels.value, advisorModel.value))
+
 onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig() })
 
 watch(activeSection, (s) => {
@@ -269,13 +284,10 @@ async function onDelete(ch: ChannelInfo) {
 const sessionChannels = () => channels.value.filter(c => c.scope !== 'agent-only')
 const agentOnlyChannels = () => channels.value.filter(c => c.scope === 'agent-only')
 
+// 官方渠道 Agent 可选模型:从 modelContext 的 MODELS 派生(单源,消灭第二份清单)。
+// 取具体版本 id 并剥 [1m] 后缀(Agent 用的是 API 模型名,1M 由 CLI/请求侧处理),去重。
 const OFFICIAL_MODELS = [
-  'claude-haiku-4-5',
-  'claude-sonnet-4-5',
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'claude-opus-4-8',
-  'claude-fable-5',
+  ...new Set(MODELS.map(m => m.id.replace(/\[1m\]$/i, ''))),
 ]
 
 const agentChannelId = ref(defaultAgentChannel.value ?? OFFICIAL_CHANNEL_ID)
@@ -785,16 +797,13 @@ function onSaved() {
               <div class="setting-cell mb-2">
                 <div class="setting-label">{{ $t('settings.primaryModel') }}</div>
                 <select v-model="advisorMain" class="form-select w-full">
-                  <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-                  <option value="claude-haiku-4-5">claude-haiku-4-5</option>
+                  <option v-for="o in advisorMainOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                 </select>
               </div>
               <div class="setting-cell">
                 <div class="setting-label">{{ $t('settings.advisorModel') }}</div>
                 <select v-model="advisorModel" class="form-select w-full">
-                  <option value="claude-fable-5">claude-fable-5</option>
-                  <option value="claude-opus-4-8">claude-opus-4-8</option>
-                  <option value="claude-opus-4-6">claude-opus-4-6</option>
+                  <option v-for="o in advisorModelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                 </select>
               </div>
               <p class="text-[11px] text-accent mt-2">{{ $t('settings.advisorWarning') }}</p>

@@ -58,7 +58,8 @@ fn spawn_agent() -> Result<AgentProcess, String> {
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--model".to_string(),
-        "claude-haiku-4-5-20251001".to_string(),
+        // alias 抗版本漂移(不写死带日期的完整 ID),且可被渠道 ANTHROPIC_DEFAULT_HAIKU_MODEL 模型映射重定向
+        "haiku".to_string(),
         "--effort".to_string(),
         "low".to_string(),
         "--tools".to_string(),

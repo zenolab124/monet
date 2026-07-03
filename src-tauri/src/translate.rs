@@ -217,7 +217,8 @@ fn translate_via_cli(
     args.extend([
         "-p".to_string(),
         "--model".to_string(),
-        "claude-sonnet-4-6-20250514".to_string(),
+        // alias 抗版本漂移(原带日期 ID 本身可疑),且可被渠道 ANTHROPIC_DEFAULT_SONNET_MODEL 模型映射重定向
+        "sonnet".to_string(),
         "--output-format".to_string(),
         "text".to_string(),
     ]);
