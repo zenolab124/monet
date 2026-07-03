@@ -51,6 +51,8 @@ export interface SessionStreamState {
   pendingUserMessage: string | null
   /** 发送时附带的图片（流式待发/发送中回显用） */
   pendingImages: SendOptions['images'] | null
+  /** 发送时刻(ms)：pending 落账匹配只认此后的记录，纯图片消息也靠它锚定 */
+  pendingSentAt: number | null
   /** BTW 预输入队列：流式中用户发的消息暂存于此，前一轮 result 落账后再逐条发送 */
   pendingQueue: PendingQueueItem[]
   streamError: string | null
@@ -109,6 +111,7 @@ function createState(): SessionStreamState {
     streamingTurns: [],
     pendingUserMessage: null,
     pendingImages: null,
+    pendingSentAt: null,
     pendingQueue: [],
     streamError: null,
     startedAt: null,
@@ -795,6 +798,7 @@ async function sendMessage(
   state.streamError = null
   state.pendingUserMessage = message
   state.pendingImages = opts.images?.length ? opts.images : null
+  state.pendingSentAt = Date.now()
   state.streamingTurns = []
   state.startedAt = Date.now()
   state.activeTool = null
@@ -831,16 +835,31 @@ async function retrySession(sessionId: string): Promise<boolean> {
   return true
 }
 
-/** 清空某会话的流式渲染区(不影响磁盘 jsonl)。供 /clear 与会话切换使用 */
-function clearStreamingTurns(sessionId: string) {
+/** 清空某会话的流式渲染区(不影响磁盘 jsonl)。供 /clear 与会话切换使用。
+ *  keepPending:保留 pending 用户消息——流结束 reload 场景用,气泡的退场由
+ *  「历史区落账匹配成功」驱动(clearPendingUserMessage),而非 reload 无条件批清;
+ *  否则守卫误判 reload 成功而用户消息未落账时,两个显示源皆空 = 消息凭空消失 */
+function clearStreamingTurns(sessionId: string, opts?: { keepPending?: boolean }) {
   const state = streams.get(sessionId)
   if (!state) return
   for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
   state.streamingTurns = []
-  state.pendingUserMessage = null
-  state.pendingImages = null
+  if (!opts?.keepPending) {
+    state.pendingUserMessage = null
+    state.pendingImages = null
+    state.pendingSentAt = null
+  }
   state.streamError = null
   markTailDirty(sessionId)
+}
+
+/** pending 用户消息已被历史区落账记录接管,清理流式区气泡状态 */
+function clearPendingUserMessage(sessionId: string) {
+  const state = streams.get(sessionId)
+  if (!state) return
+  state.pendingUserMessage = null
+  state.pendingImages = null
+  state.pendingSentAt = null
 }
 
 function removePendingQueueItem(sessionId: string, index: number) {
@@ -885,6 +904,7 @@ export function useStreaming() {
     stopStreaming,
     closeSession,
     clearStreamingTurns,
+    clearPendingUserMessage,
     removePendingQueueItem,
     consumePendingQueue,
   }

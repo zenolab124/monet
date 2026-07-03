@@ -9,7 +9,6 @@ import { createSessionDetail } from '@/composables/useSessionDetail'
 import {
   useStreaming,
   useSessionStream,
-  streamingTick,
   finishedDirty,
 } from '@/composables/useStreaming'
 import { useSessionSettings, ADVISOR_MAIN_MODEL, type ChannelMark } from '@/composables/useSessionSettings'
@@ -83,7 +82,7 @@ const { goToSession } = useNotifications()
 const detail = createSessionDetail()
 const { records, loading, error, loadRecords, reloadRecords, clearRecords } = detail
 
-const { sendMessage, stopStreaming, clearStreamingTurns, removePendingQueueItem, consumePendingQueue } = useStreaming()
+const { sendMessage, stopStreaming, clearStreamingTurns, clearPendingUserMessage, getStream, removePendingQueueItem, consumePendingQueue } = useStreaming()
 
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const featureBannerShown = ref(false)
@@ -100,6 +99,8 @@ const bannerHookEvents = ref<HookEvent[]>([])
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
+/** 滚动内容包裹层:布局层滚动跟随的 RO 观察对象(内容总高度的单一载体) */
+const scrollContentEl = ref<HTMLElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
 
 const imageInput = useImageInput({ pasteTarget: textareaRef })
@@ -121,7 +122,8 @@ listen<SessionConnectedPayload>('session-connected', (e) => {
     bannerCwd.value = p.cwd
     bannerHookEvents.value = []
     featureBannerShown.value = true
-    nextTick(() => scrollToBottom(true))
+    // 横幅出现/增高的贴底由 contentRO 兜(跟随态);脱离跟随时不强拽,
+    // 免得阅读历史的用户被新会话握手打断
   }
 }).then(fn => { unlistenConnected = fn })
 
@@ -520,28 +522,67 @@ const streamingMessageIds = computed(() =>
 /** 进入消息流的 system 子类型（其余 system 记录为噪音，不渲染） */
 const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
 
-/** 流式区 pendingUserMessage 对应的 user record uuid（防历史区双显）。
- *  从后向前扫描所有 user record 做文本匹配，跳过纯 tool_result 的中间记录，
- *  找到文本一致的那条返回其 uuid。 */
-const pendingUserUuid = computed(() => {
-  if (!stream.value.pendingUserMessage) return null
-  const pendingText = stream.value.pendingUserMessage
-  for (let i = records.value.length - 1; i >= 0; i--) {
-    const r = records.value[i]
+/** 剥离 CLI 落账时并入 user 消息的私有标签注入(hook additionalContext /
+ *  system-reminder / command 包装等),留下真实用户文本——落账匹配用。
+ *  精确全等对带注入的消息是结构性必然失配,不是偶发。 */
+function stripInjections(text: string): string {
+  return text.replace(TAG_RE, '')
+}
+
+/** 在 recs 中寻找 pending 用户消息对应的落账 user record uuid。
+ *  只认发送时刻之后的记录(5s 时钟容差,records 为追加序、扫到更早即停);
+ *  文本消息按剥离注入后 trim 相等匹配,纯图片消息按含 image 块匹配。 */
+function findLandedUserUuid(
+  recs: SessionRecord[],
+  pendingText: string | null,
+  hasImages: boolean,
+  sentAt: number,
+): string | null {
+  if (!pendingText && !hasImages) return null
+  const target = (pendingText ?? '').trim()
+  for (let i = recs.length - 1; i >= 0; i--) {
+    const r = recs[i]
     if (r.type !== 'user') continue
+    const ts = r.timestamp ? Date.parse(r.timestamp) : 0
+    if (ts && sentAt && ts < sentAt - 5000) break
     const content = r.message?.content
-    const text = typeof content === 'string'
-      ? content
-      : Array.isArray(content)
-        ? (content.find((b: ContentBlock) => b.type === 'text') as { text?: string } | undefined)?.text
-        : undefined
-    if (text === pendingText) return r.uuid
+    if (!content) continue
+    if (typeof content === 'string') {
+      if (target && stripInjections(content).trim() === target) return r.uuid
+      continue
+    }
+    if (target) {
+      const text = content
+        .filter((b: ContentBlock) => b.type === 'text')
+        .map(b => stripInjections((b as { text?: string }).text ?? ''))
+        .join('')
+        .trim()
+      if (text === target) return r.uuid
+    } else if (content.some((b: ContentBlock) => b.type === 'image')) {
+      return r.uuid
+    }
   }
   return null
+}
+
+/** pending 用户消息在历史区的落账 record uuid(落账接管信号)。
+ *  非 null = 历史条已可渲染:气泡同帧让位(模板 v-if),watch 随后清理状态。
+ *  与旧实现方向相反——旧逻辑匹配成功隐藏历史条、reload 无条件清气泡,
+ *  匹配失配 + 误清叠加出「两源皆空」的消息消失窗口。 */
+const pendingLandedUuid = computed(() => {
+  const s = stream.value
+  return findLandedUserUuid(records.value, s.pendingUserMessage, !!s.pendingImages?.length, s.pendingSentAt ?? 0)
+})
+
+// 落账接管后清理 pending 状态(显示切换已由 v-if 原子完成,这里只是后勤)
+watch(pendingLandedUuid, (uuid) => {
+  if (uuid) {
+    const sid = effectiveSessionId.value
+    if (sid) clearPendingUserMessage(sid)
+  }
 })
 
 const messages = computed(() => {
-  const pUuid = pendingUserUuid.value
   const visible = records.value.filter(
     (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' | 'system' }> => {
       if (r.type === 'assistant') {
@@ -553,8 +594,6 @@ const messages = computed(() => {
         return !!r.subtype && VISIBLE_SYSTEM_SUBTYPES.has(r.subtype)
       }
       if (r.type !== 'user') return false
-      // 流式区 pendingUserMessage 还在显示时,历史区跳过对应的 user record
-      if (pUuid && r.uuid === pUuid) return false
       const content = r.message?.content
       if (!content || typeof content === 'string') return true
       return content.some((b: ContentBlock) => b.type !== 'tool_result')
@@ -680,7 +719,13 @@ onMounted(() => {
         delta += diff
       }
     }
-    if (delta !== 0) sc.scrollTop += delta
+    if (delta !== 0) {
+      const before = sc.scrollTop
+      sc.scrollTop += delta
+      // 校正 onScroll 基线:补偿位移不计入用户手势 delta(负补偿曾被误判为
+      // "用户上滚"而静默关闭跟随);clamp 时以实际生效量为准
+      lastScrollTop += sc.scrollTop - before
+    }
     performance.measure('anchor-comp', { start: perfT0, duration: performance.now() - perfT0 })
   })
   observeAnchorGroups()
@@ -1031,9 +1076,31 @@ watch(() => stream.value.pendingUserMessage, (val) => {
   if (val) scrollToBottom(true)
 })
 
-watch(records, () => {
-  if (followStreaming.value) scrollToBottom(true)
-})
+// ---- 布局层滚动跟随(水平触发) ----
+// 跟随不再挂数据事件(watch streamingTick/records 已删),改挂"内容高度变化"本身:
+// 打字机、晚到子 Agent turn、records 落账替换、图片加载、cv 组解冻、横幅出现,
+// 任何增高源统一在此贴底——新增数据链路无需再记得挂滚动。
+// RO 回调在 layout 后 paint 前执行:读 scrollHeight 无强制布局,写 scrollTop 同帧生效。
+let contentRO: ResizeObserver | null = null
+watch(scrollContentEl, (el) => {
+  contentRO?.disconnect()
+  if (!el) return
+  if (!contentRO) {
+    contentRO = new ResizeObserver(() => {
+      if (!followStreaming.value) return
+      const sc = scrollContainer.value
+      if (!sc) return
+      const target = sc.scrollHeight - sc.clientHeight
+      if (sc.scrollTop < target) {
+        sc.scrollTop = target
+        // 同步基线:贴底位移不计入 onScroll 的手势 delta,不会被误判为用户滚动
+        lastScrollTop = sc.scrollTop
+      }
+    })
+  }
+  contentRO.observe(el)
+}, { immediate: true })
+onUnmounted(() => { contentRO?.disconnect(); contentRO = null })
 
 // ====== 排除法调试开关（定位闪烁根因后删除）======
 // 试法：先 SKIP_RECORDS_RELOAD=true 跑一次，看闪不闪；
@@ -1053,6 +1120,13 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
       console.log('%c ========== [detail] SKIP_RECORDS_RELOAD — 跳过 records 更新 ==========', 'color:#ef4444;font-weight:bold')
       return
     }
+    // pending 用户消息是否已在 recs 中落账(无 pending 视为已落账,不阻塞)。
+    // 用 sid 对应 state 而非 stream.value:守卫运行在异步窗口,用户可能已切会话
+    const pendingLanded = (recs: SessionRecord[] | null) => {
+      const s = getStream(sid)
+      if (!s.pendingUserMessage && !s.pendingImages?.length) return true
+      return !!recs && !!findLandedUserUuid(recs, s.pendingUserMessage, !!s.pendingImages?.length, s.pendingSentAt ?? 0)
+    }
     await new Promise(r => setTimeout(r, 300))
     let newRecords: SessionRecord[] | null = null
     try {
@@ -1063,7 +1137,9 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     } catch {
       // ignore
     }
-    if (!newRecords || newRecords.length === records.value.length) {
+    // 重试条件加"用户消息尚未落账":旧守卫只看总数增长,assistant 侧落账也会
+    // 使总数增长,曾把"用户 record 还没写进 jsonl"误判为 reload 成功
+    if (!newRecords || newRecords.length === records.value.length || !pendingLanded(newRecords)) {
       await new Promise(r => setTimeout(r, 400))
       try {
         newRecords = await invoke<SessionRecord[]>('get_session_records', {
@@ -1077,16 +1153,17 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (effectiveSessionId.value !== sid) return
     console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     if (newRecords) records.value = newRecords
-    clearStreamingTurns(sid)
+    // keepPending:气泡退场由落账匹配驱动(pendingLandedUuid watch),重试尽头仍未
+    // 落账时保留气泡等下一轮 reload——宁可气泡多活一会,不可消息凭空消失
+    clearStreamingTurns(sid, { keepPending: true })
     if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)
   }
 })
 
-// 滚动跟随:watch streamingTick(打字机每帧递增,统一覆盖各种 mutation),
-// 仅本会话流式中且用户未脱离跟随时才滚
-watch(streamingTick, () => {
-  if (stream.value.streaming && followStreaming.value) scrollToBottom()
-})
+// 滚动跟随已移交布局层 contentRO(见上方"布局层滚动跟随"):
+// 旧实现 watch(streamingTick) 带 streaming===true 守卫,回合结束后晚到的
+// 子 Agent 事件渲染时恒短路(Bug:不跟随滚动),且每 tick 读 scrollHeight
+// 是强制布局热点。contentRO 对增高源一视同仁,无此两病。
 
 // --- 外部运行跟随 ---
 //
@@ -1140,14 +1217,16 @@ async function probeExternal() {
     if (effectiveSessionId.value !== cs.summary.id) return
     if (running) {
       // 进程在跑就保持运行态,不做闲置退出(API 调用等响应可能 10-30s 无输出)
+      // 恢复跟随必须先于首批 reload:否则 watch 链在 follow=false 时错过唯一一发
+      // 贴底,且 false→true 沿过后不再有人补滚(resumeFollow 自带补滚,时序免疫)
+      if (!externalRunning.value) {
+        externalRunning.value = true
+        resumeFollow()
+      }
       const prevCount = records.value.length
       await silentReloadRecords()
       if (records.value.length > prevCount) {
         externalIdleTicks = 0
-      }
-      if (!externalRunning.value) {
-        externalRunning.value = true
-        followStreaming.value = true
       }
     } else if (externalRunning.value) {
       // 进程退出:收尾 reload 拿最终落账,结束跟随,消费排队消息
@@ -1303,10 +1382,13 @@ async function onReload() {
     />
     <div
       ref="scrollContainer"
-      class="h-full overflow-y-auto min-h-0 px-4 py-3 space-y-4 overscroll-contain relative"
+      class="h-full overflow-y-auto min-h-0 px-4 py-3 overscroll-contain relative"
       @wheel.passive="onScrollWheel"
       @scroll.passive="onScroll"
     >
+    <!-- 内容包裹层:所有增高源(打字机/晚到turn/落账替换/图片/cv解冻/横幅)都反映为它的高度变化,
+         contentRO 观察它实现水平触发的滚动跟随 -->
+    <div ref="scrollContentEl" class="space-y-4">
       <template v-if="!hideHistory">
         <!-- 渠道切换横线:会话起点的切换(本地记账,jsonl 无渠道信息) -->
         <div
@@ -1427,7 +1509,8 @@ async function onReload() {
           :features="htmlVisualEnabled ? [$t('settings.htmlVisual')] : []"
           :hook-events="bannerHookEvents"
         />
-        <div v-if="stream.pendingUserMessage || stream.pendingImages?.length" class="user-msg-sticky">
+        <!-- 落账接管即让位:pendingLandedUuid 非 null 时历史条与气泡同帧原子切换,无双显无空窗 -->
+        <div v-if="(stream.pendingUserMessage || stream.pendingImages?.length) && !pendingLandedUuid" class="user-msg-sticky">
           <div class="flex gap-3">
             <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
             <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
@@ -1495,6 +1578,7 @@ async function onReload() {
           {{ $t('session.backToBottom') }}
         </button>
       </div>
+    </div>
     </div>
     </div>
 

@@ -44,12 +44,15 @@ const currentIndex = computed(() => OPTIONS.findIndex(o => o.value === props.cur
 const { cliDefaults } = useCliDefaults()
 const { appDefaults } = useAppDefaults()
 
-/** 未设置时生效的档位名:app default → CLI effort_level → null */
+/** 未设置时生效的档位名:app default → CLI ultracode 开关 → CLI effort_level → null */
 const fallbackLabel = computed(() => {
   if (appDefaults.value.effort) {
     const o = OPTIONS.find(o => o.value === appDefaults.value.effort)
     if (o) return o.label
   }
+  // settings.json 的 ultracode 是独立开关,生效时覆盖 effortLevel——
+  // 不判它会显示 Max 实跑 Ultracode(超档 = xhigh + 自动 workflow)
+  if (cliDefaults.value.ultracode) return 'Ultracode'
   const lv = cliDefaults.value.effort_level
   return lv && lv in EFFORT_LABELS ? EFFORT_LABELS[lv as EffortLevel] : null
 })
