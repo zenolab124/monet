@@ -4,16 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime, formatTokens, type TokenUsage } from '@/types'
 import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
-import { ADVISOR_MAIN_MODEL, type EffortSetting, type EffortLevel } from '@/composables/useSessionSettings'
+import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
 import type { ResolvedRunConfig } from '@/composables/useRunConfig'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
-import { useChannels, OFFICIAL_CHANNEL_ID, channelDisplayName, refreshChannels } from '@/composables/useChannels'
-import ModelDropdown from './ModelDropdown.vue'
+import RunConfigCapsule from './RunConfigCapsule.vue'
 import ContextProgress from './ContextProgress.vue'
-import EffortDropdown from './EffortDropdown.vue'
-import ChannelDropdown from './ChannelDropdown.vue'
 import type { PermissionMode } from '@/composables/useSessionSettings'
 
 /**
@@ -74,26 +71,18 @@ const { notifyTransient } = useNotifications()
 
 // --- 派生数据 ---
 
-/** 用户在顶栏选的模型(用于下拉显示当前选中);顾问模式锁 Sonnet,未选则用 modelString 真实值 */
+/** 容量推断用的模型字符串:历史真值优先(容量语境),与胶囊的"下次发送"解析分离 */
 const effectiveModelStr = computed(() =>
   props.selectedAdvisor ? ADVISOR_MAIN_MODEL : (props.selectedModelId ?? props.modelString),
 )
 
-/** 顾问仅在官方渠道(firstParty)生效:非官方渠道下禁用并提示 */
-const advisorDisabled = computed(() => !!props.resolvedChannelId)
-
-/** 顾问开关 title 文案 */
-const advisorTitle = computed(() => {
-  if (advisorDisabled.value) return t('topbar.advisorDisabled')
-  return props.selectedAdvisor
-    ? t('topbar.advisorEnabled')
-    : t('topbar.advisorEnable')
-})
-
-function onAdvisorToggle() {
-  if (advisorDisabled.value) return
-  emit('advisorChange', !props.selectedAdvisor)
-}
+/** 胶囊消费的会话覆盖原值(重置钮显隐/顾问开关状态) */
+const capsuleSettings = computed(() => ({
+  modelId: props.selectedModelId,
+  effort: props.selectedEffort,
+  channelId: props.selectedChannelId,
+  advisor: props.selectedAdvisor,
+}))
 
 /** 解析后的 ModelInfo。API 模型名永远不带 [1m]，无法区分 200K/1M 变体——
  *  有真实容量时按真实值修正；无真实值时默认取 1M 变体（Claude Code CLI 默认 1M） */
@@ -120,20 +109,14 @@ const capacity = computed(() =>
     ?? getContextWindow(props.runConfig.model ?? cliDefaults.value.model),
 )
 
-// --- 窄列折叠 ---
+// --- 窄列折叠(胶囊化后仅一档) ---
 //
-// 进度条 flex-1 自适应可压很短,几乎不折叠。
-// 折叠顺序:渠道 → 努力等级,模型和进度条永不折叠,顾问始终在菜单。
-//   >= 280px : 全部展示
-//   >= 200px : 折叠渠道
-//   <  200px : 仅模型 + 进度 + 菜单
+// 胶囊三段 + 进度条自适应;窄列(< 280px)胶囊收起渠道段(点任意段开全景面板补齐)。
 
 const containerRef = ref<HTMLElement>()
 const containerWidth = ref(Number.POSITIVE_INFINITY)
 
 const showChannel = computed(() => containerWidth.value >= 280)
-const showProgress = true
-const showEffort = computed(() => containerWidth.value >= 200)
 
 let resizeObserver: ResizeObserver | null = null
 
@@ -166,13 +149,11 @@ function onDocClick(e: MouseEvent) {
   const target = e.target as Node
   if (menuRef.value && !menuRef.value.contains(target)) {
     menuOpen.value = false
-    activeSubmenu.value = null
   }
 }
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value
-  activeSubmenu.value = null
   if (menuOpen.value) {
     nextTick(() => {
       const panel = menuPanelRef.value
@@ -185,74 +166,6 @@ function toggleMenu() {
 
 onMounted(() => document.addEventListener('mousedown', onDocClick))
 onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
-
-// --- 二级菜单 ---
-
-const { channels, defaultSessionChannel } = useChannels()
-
-const EFFORT_OPTIONS: { value: NonNullable<EffortSetting>; label: string }[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'xHigh' },
-  { value: 'max', label: 'Max' },
-  { value: 'ultracode', label: 'Ultracode' },
-]
-
-const channelOptions = computed(() => {
-  const result: { value: string; label: string }[] = [
-    { value: OFFICIAL_CHANNEL_ID, label: t('topbar.channelOfficial') },
-  ]
-  for (const ch of channels.value) {
-    if (ch.id !== OFFICIAL_CHANNEL_ID && ch.enabled && ch.scope !== 'agent-only') {
-      result.push({ value: ch.id, label: ch.name })
-    }
-  }
-  return result
-})
-
-/** 菜单行右侧的当前值预览:解析后的下次发送档位(无 CLI 读数时显 Auto) */
-const effortLabel = computed(() => {
-  const o = EFFORT_OPTIONS.find(o => o.value === props.runConfig.effort)
-  return o?.label ?? 'Auto'
-})
-
-const channelLabel = computed(() => {
-  const id = props.selectedChannelId ?? defaultSessionChannel.value ?? OFFICIAL_CHANNEL_ID
-  if (id === OFFICIAL_CHANNEL_ID) return t('topbar.channelOfficial')
-  const ch = channels.value.find(c => c.id === id)
-  return ch?.name ?? channelDisplayName(id)
-})
-
-type SubmenuType = 'effort' | 'channel' | null
-const activeSubmenu = ref<SubmenuType>(null)
-const submenuAlignLeft = ref(false)
-
-function openSubmenu(type: SubmenuType, event: MouseEvent) {
-  activeSubmenu.value = type
-  if (type) {
-    if (type === 'channel') refreshChannels()
-    nextTick(() => {
-      const target = (event.currentTarget as HTMLElement)
-      const sub = target.querySelector('.submenu-panel') as HTMLElement
-      if (!sub) return
-      const rect = sub.getBoundingClientRect()
-      submenuAlignLeft.value = rect.right > window.innerWidth - 4
-    })
-  }
-}
-
-function selectEffort(value: EffortSetting) {
-  onEffortChange(value)
-  menuOpen.value = false
-  activeSubmenu.value = null
-}
-
-function selectChannel(value: string | null) {
-  onChannelChange(value)
-  menuOpen.value = false
-  activeSubmenu.value = null
-}
 
 // --- 菜单操作 ---
 
@@ -343,26 +256,15 @@ function onPermissionModeChange(mode: PermissionMode) {
     ref="containerRef"
     class="px-3 py-1 border-b border-border shrink-0 flex items-center gap-1.5"
   >
-    <!-- 模型切换(永不折叠);渠道决定候选来源(官方=角色主区;第三方=映射角色) -->
-    <ModelDropdown
-      :current="selectedModelId"
+    <!-- 运行配置胶囊:渠道·模型·强度三段一枚(点哪段开哪层渐进面板);窄列收渠道段 -->
+    <RunConfigCapsule
+      :settings="capsuleSettings"
       :run-config="runConfig"
-      @select="onModelChange"
-    />
-
-    <!-- 努力等级 -->
-    <EffortDropdown
-      v-if="showEffort"
-      :current="selectedEffort"
-      :run-config="runConfig"
-      @select="onEffortChange"
-    />
-
-    <!-- 渠道 -->
-    <ChannelDropdown
-      v-if="showChannel"
-      :current="selectedChannelId"
-      @select="onChannelChange"
+      :narrow="!showChannel"
+      @model-change="onModelChange"
+      @effort-change="onEffortChange"
+      @channel-change="onChannelChange"
+      @advisor-change="(v: boolean) => emit('advisorChange', v)"
     />
 
     <!-- token 进度(紧凑形态:条 + 百分比,永不折叠) -->
@@ -391,115 +293,6 @@ function onPermissionModeChange(mode: PermissionMode) {
                shadow-paper-lifted bg-popover w-52"
         :class="menuAlignLeft ? 'left-0' : 'right-0'"
       >
-        <!-- 折叠的下拉控件(二级菜单) + 进度 + 顾问 -->
-        <div class="py-0.5 border-b border-border">
-          <!-- 努力等级(二级菜单) -->
-          <div
-            v-if="!showEffort"
-            class="submenu-trigger"
-            @mouseenter="openSubmenu('effort', $event)"
-            @mouseleave="activeSubmenu === 'effort' && (activeSubmenu = null)"
-          >
-            <span class="menu-item">
-              <span class="i-carbon-meter w-3.5 h-3.5" />
-              <span class="flex-1">{{ $t('topbar.effortLabel') }}</span>
-              <span class="text-muted-foreground">{{ effortLabel }}</span>
-              <span class="i-carbon-chevron-right w-3 h-3 text-muted-foreground" />
-            </span>
-            <div
-              v-if="activeSubmenu === 'effort'"
-              class="submenu-panel"
-              :class="submenuAlignLeft ? 'right-full mr-1' : 'left-full ml-1'"
-            >
-              <button
-                class="menu-item"
-                :class="{ 'text-primary!': selectedEffort === null }"
-                @click="selectEffort(null)"
-              >
-                <span
-                  class="w-3 h-3 shrink-0"
-                  :class="selectedEffort === null ? 'i-carbon-checkmark text-primary' : ''"
-                />
-                {{ $t('topbar.effortDefault') }}
-              </button>
-              <button
-                v-for="o in EFFORT_OPTIONS"
-                :key="o.value"
-                class="menu-item"
-                :class="{ 'text-primary!': o.value === selectedEffort }"
-                @click="selectEffort(o.value)"
-              >
-                <span
-                  class="w-3 h-3 shrink-0"
-                  :class="o.value === selectedEffort ? 'i-carbon-checkmark text-primary' : ''"
-                />
-                {{ o.label }}
-              </button>
-            </div>
-          </div>
-
-          <!-- 渠道(二级菜单) -->
-          <div
-            v-if="!showChannel"
-            class="submenu-trigger"
-            @mouseenter="openSubmenu('channel', $event)"
-            @mouseleave="activeSubmenu === 'channel' && (activeSubmenu = null)"
-          >
-            <span class="menu-item">
-              <span class="i-carbon-cloud w-3.5 h-3.5" />
-              <span class="flex-1">{{ $t('topbar.channelLabel') }}</span>
-              <span class="text-muted-foreground">{{ channelLabel }}</span>
-              <span class="i-carbon-chevron-right w-3 h-3 text-muted-foreground" />
-            </span>
-            <div
-              v-if="activeSubmenu === 'channel'"
-              class="submenu-panel"
-              :class="submenuAlignLeft ? 'right-full mr-1' : 'left-full ml-1'"
-            >
-              <button
-                class="menu-item"
-                :class="{ 'text-primary!': selectedChannelId === null }"
-                @click="selectChannel(null)"
-              >
-                <span
-                  class="w-3 h-3 shrink-0"
-                  :class="selectedChannelId === null ? 'i-carbon-checkmark text-primary' : ''"
-                />
-                {{ $t('topbar.channelDefault') }}
-              </button>
-              <button
-                v-for="o in channelOptions"
-                :key="o.value"
-                class="menu-item"
-                :class="{ 'text-primary!': o.value === selectedChannelId }"
-                @click="selectChannel(o.value)"
-              >
-                <span
-                  class="w-3 h-3 shrink-0"
-                  :class="o.value === selectedChannelId ? 'i-carbon-checkmark text-primary' : ''"
-                />
-                {{ o.label }}
-              </button>
-            </div>
-          </div>
-
-          <!-- 顾问(始终在菜单) -->
-          <button
-            class="menu-item"
-            :disabled="advisorDisabled"
-            :class="advisorDisabled ? 'opacity-40 cursor-not-allowed' : ''"
-            :title="advisorTitle"
-            @click="onAdvisorToggle"
-          >
-            <span class="i-carbon-idea w-3.5 h-3.5" />
-            <span class="flex-1">{{ $t('topbar.advisorMode') }}</span>
-            <span
-              v-if="selectedAdvisor && !advisorDisabled"
-              class="i-carbon-checkmark w-3 h-3 text-primary"
-            />
-          </button>
-        </div>
-
         <!-- 元数据 -->
         <div class="px-3 py-1.5 text-xs text-muted-foreground flex flex-col gap-1 border-b border-border">
           <button

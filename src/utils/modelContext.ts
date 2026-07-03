@@ -168,3 +168,95 @@ export function getContextWindow(modelStr: string | null): number {
   if (hasOneMSuffix(modelStr)) return EXTENDED_CONTEXT
   return inferModel(modelStr)?.contextWindow ?? DEFAULT_CONTEXT
 }
+
+// ---- effort × 模型能力矩阵(UI 软提示用,不做发送拦截) ----
+//
+// CLI 真值(2.1.199 二进制实锤,函数 Hre/DHe/cV/VN):
+//   - 官方模型按内置名单判定,不支持的档位**静默降级到 high**(不报错)
+//   - xhigh 不支持:claude-3-* / opus-4-0/4-1/4-5/4-6 / sonnet-4-0/4-5/4-6 / haiku-4-5
+//   - max   不支持:claude-3-* / opus-4-0/4-1/4-5 / sonnet-4-0/4-5 / haiku-4-5
+//   - ultracode 要求 xhigh-capable 模型,否则静默不生效
+//   - 渠道映射的 _SUPPORTED_CAPABILITIES 声明:CLI 仅在 bedrock/vertex 等 provider
+//     下消费;firstParty(含 base_url 中转,即 CC Space 的渠道形态)下被忽略,
+//     第三方模型 effort 原样透传、由第三方 API 自行处理——故第三方模型不标注,
+//     除非渠道声明了能力(CC Space 自己消费声明作为 UI 标注,语义与 CLI 一致)
+//
+// 返回三态:true=支持 / false=不支持(CLI 会降级,UI 标「不支持」) / undefined=未知(不标注)。
+// 名单可能随 CLI 更新过时,故 UI 只做软提示不拦截选择。
+
+export interface EffortCapability {
+  xhigh: boolean | undefined
+  max: boolean | undefined
+  ultracode: boolean | undefined
+}
+
+/** xhigh 明确不支持的官方模型(版本级前缀) */
+const XHIGH_UNSUPPORTED = [
+  'claude-opus-4-0', 'claude-opus-4-1', 'claude-opus-4-5', 'claude-opus-4-6',
+  'claude-sonnet-4-0', 'claude-sonnet-4-5', 'claude-sonnet-4-6',
+  'claude-haiku-4-5',
+]
+/** max 明确不支持的官方模型(版本级前缀;sonnet-4-6/opus-4-6 支持 max——矩阵非单调) */
+const MAX_UNSUPPORTED = [
+  'claude-opus-4-0', 'claude-opus-4-1', 'claude-opus-4-5',
+  'claude-sonnet-4-0', 'claude-sonnet-4-5',
+  'claude-haiku-4-5',
+]
+
+function officialSupports(base: string, unsupported: string[]): boolean | undefined {
+  if (base.startsWith('claude-3-')) return false
+  if (unsupported.some(m => base === m || base.startsWith(`${m}-`))) return false
+  // claude-* 且不在排除名单:当代官方模型(fable-5/opus-4-7/4-8/sonnet-5 等)支持
+  if (base.startsWith('claude-')) return true
+  // 非 claude-*(第三方裸模型):CLI firstParty 下原样透传,未知
+  return undefined
+}
+
+/**
+ * 判定模型的 effort 高档能力。
+ * modelEnv 为当前渠道的托管映射键(可选)。有映射时下拉 id 是角色 alias('sonnet'),
+ * CLI 发送前经渠道 env 重定向到映射值再判能力——故槽匹配同时接受
+ * "modelStr == 槽映射值" 与 "modelStr == 槽角色 alias";命中槽后:
+ *   有 _SUPPORTED_CAPABILITIES 声明按声明(逗号分隔能力名,同 CLI cV 语义),
+ *   无声明则以**映射值**为实际模型走内置名单(第三方裸模型 → undefined 不标注)。
+ */
+export function effortCapabilities(
+  modelStr: string | null,
+  modelEnv?: Record<string, string>,
+): EffortCapability {
+  if (!modelStr) return { xhigh: undefined, max: undefined, ultracode: undefined }
+  const raw = modelStr.toLowerCase()
+  let base = raw.replace(/\[1m\]$/, '')
+
+  if (modelEnv) {
+    // [槽模型键, 槽能力键, 槽角色 alias(custom 槽无 alias)]
+    const slots: Array<[string, string, string | null]> = [
+      ['ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES', 'fable'],
+      ['ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES', 'opus'],
+      ['ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES', 'sonnet'],
+      ['ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES', 'haiku'],
+      ['ANTHROPIC_CUSTOM_MODEL_OPTION', 'ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES', null],
+    ]
+    for (const [modelKey, capsKey, roleAlias] of slots) {
+      const slotModel = modelEnv[modelKey]?.trim().toLowerCase()
+      if (!slotModel) continue
+      const hit = base === slotModel || raw === slotModel || (roleAlias !== null && base === roleAlias)
+      if (!hit) continue
+      const caps = modelEnv[capsKey]
+      if (caps !== undefined) {
+        const list = caps.toLowerCase().split(',').map(s => s.trim())
+        const xhigh = list.includes('xhigh_effort')
+        return { xhigh, max: list.includes('max_effort'), ultracode: xhigh }
+      }
+      // 无声明:实际模型是槽映射值,以它走内置名单
+      base = slotModel.replace(/\[1m\]$/, '')
+      break
+    }
+  }
+
+  // alias 归一化到版本级 id 再查内置名单
+  const normalized = MODEL_ALIASES[base] ?? base
+  const xhigh = officialSupports(normalized, XHIGH_UNSUPPORTED)
+  const max = officialSupports(normalized, MAX_UNSUPPORTED)
+  return { xhigh, max, ultracode: xhigh }
+}

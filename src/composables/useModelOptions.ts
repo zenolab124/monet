@@ -23,12 +23,12 @@ const EXTENDED_CONTEXT = 1_000_000
  * 按渠道产出模型下拉候选项。
  *
  * 输入:渠道 id 的 Ref。null / 'official' 视为官方渠道。
- * 输出:items —— 供 ModelDropdown 消费的 ModelInfo[]。
+ * 输出:items —— 供运行配置胶囊(RunConfigCapsule)模型列消费的 ModelInfo[]。
  *
  * 三分支:
  *   1. 官方渠道:OFFICIAL_ROLE_ITEMS(四角色主区) + MODELS 全量标 legacy 沉底
  *      (原本 legacy 与非 legacy 项在官方角色语境下统一视为「钉版本」沉底区,
- *       复用 ModelDropdown 现有 legacy 分割线渲染)。
+ *       复用模型列现有 legacy 分割线渲染)。
  *   2. 第三方且有映射(modelEnv 存在任一 ANTHROPIC_DEFAULT_*_MODEL 或 CUSTOM_MODEL_OPTION):
  *      每个已映射角色 → 裸 alias id(CLI 经渠道 env 重定向,无需 [1m]),
  *      label 取 _NAME 值 ?? 映射模型值,容量按映射值含 [1m] 与否;自定义槽殿后。
