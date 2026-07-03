@@ -4,9 +4,9 @@ import type { WorkbenchTab } from './useWorkbench'
 import { useWorkbench } from './useWorkbench'
 import { useStreaming, getStream } from './useStreaming'
 import { useImageInput } from './useImageInput'
-import { refreshChannels, resolveChannel } from './useChannels'
-import { useAppDefaults } from './useAppDefaults'
-import { getSessionSettings, ADVISOR_MAIN_MODEL } from './useSessionSettings'
+import { refreshChannels } from './useChannels'
+import { resolveRunConfig } from './useRunConfig'
+import { getSessionSettings } from './useSessionSettings'
 import { parseCommand } from './useSlashCommands'
 
 export function useRaceInput(tab: Ref<WorkbenchTab>) {
@@ -17,7 +17,6 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
 
   const { sendMessage, stopStreaming } = useStreaming()
   const { addRaceLane } = useWorkbench()
-  const { appDefaults } = useAppDefaults()
 
   const anyStreaming = computed(() => {
     const race = tab.value.race
@@ -54,12 +53,12 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
 
     const promises = race.lanes.map(lane => {
       const settings = getSessionSettings(lane.sessionId)
-      const advisor = settings.advisor
+      const rc = resolveRunConfig(settings)
       return sendMessage(lane.sessionId, race.cwd, text, {
-        model: advisor ? ADVISOR_MAIN_MODEL : (settings.modelId ?? undefined),
-        effort: settings.effort ?? appDefaults.value.effort,
-        channel: resolveChannel(settings.channelId),
-        advisor,
+        model: rc.model,
+        effort: rc.effort ?? null,
+        channel: rc.channelId,
+        advisor: settings.advisor,
         images,
         permissionMode: settings.permissionMode,
       })

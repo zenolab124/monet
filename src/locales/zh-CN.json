@@ -141,6 +141,7 @@
     "channelSwitchedDefault": "已切回默认渠道",
     "channelSwitchedOfficial": "已切换至官方渠道",
     "channelSwitched": "已切换至「{name}」渠道",
+    "modelSwitchMark": "模型切换至 {name}",
     "newSessionTitle": "新会话",
     "noTitleSession": "无标题会话",
     "slashNewInWorkbench": "工作台中请使用左列「＋」新建",
@@ -440,9 +441,6 @@
     "translating": "AI 正在翻译整个界面，大约需要一分钟…",
     "translateSuccess": "语言翻译完成，可在上方切换",
     "langNotRecognized": "无法识别目标语言，请换个说法",
-    "defaultEffort": "默认努力等级",
-    "defaultEffortHint": "无 per-session 记录的会话发送档位",
-    "followCli": "跟随 CLI",
     "zoomLevel": "界面缩放",
     "zoomLevelHint": "调整全局界面大小（70% ~ 150%）",
     "minColumnWidth": "工作台最小列宽",
@@ -556,6 +554,11 @@
       "scopeAgentOnlyHint": "仅限 Agent",
       "tokenOptional": "（可选）",
       "agentModelHint": "Agent 调用（翻译/摘要/标签）使用的模型名，留空走默认 Claude 模型",
+      "defaultModelLabel": "默认模型",
+      "defaultModelPlaceholder": "如 sonnet 或完整模型 ID",
+      "defaultEffortLabel": "默认思考强度",
+      "defaultEffortNone": "跟随 CLI 设置",
+      "defaultsHint": "会话未手动指定时使用的预设；写入渠道文件本身，终端 claude --settings 同样生效。",
       "modelMap": {
         "title": "高级选项 · 模型映射",
         "badge": "参照 CC Switch",
@@ -570,10 +573,13 @@
         "modelPlaceholder": "模型 ID",
         "namePlaceholder": "可空",
         "oneMHint": "勾选表示该模型用 1M 上下文（存储时追加 [1m] 后缀）",
-        "customHint": "自定义槽的值会进入 CLI /model 菜单，并直接通过模型校验。",
-        "fallbackLabel": "默认兜底模型",
-        "fallbackHint": "仅当请求未落到任何角色时使用，通常留空。"
+        "customHint": "自定义槽的值会进入 CLI /model 菜单，并直接通过模型校验。"
       }
+    },
+    "officialDefaults": {
+      "title": "官方渠道 · 默认值",
+      "intro": "官方渠道走 OAuth 零注入，此处仅配置会话预设（存应用设置，不写 ~/.claude/settings.json）。",
+      "edit": "配置默认模型 / 思考强度"
     },
     "mcp": {
       "title": "MCP 工具服务",
@@ -698,7 +704,6 @@
     }
   },
   "topbar": {
-    "channelFollow": "默认 · {name}",
     "channelOfficial": "官方",
     "channelTitle": "渠道:{name}",
     "channelLabel": "渠道",
@@ -707,9 +712,16 @@
     "contextNearFull": "上下文将满",
     "effortTitle": "努力等级:{name}",
     "effortLabel": "努力等级",
+    "effortDefault": "默认",
+    "channelDefault": "默认",
     "modelDefault": "默认",
     "modelAdvisorLocked": "顾问模式下主模型锁定为 Sonnet",
     "modelTitle": "模型:{name}",
+    "sourceChannel": "{name}（渠道默认）",
+    "sourceCli": "{name}（CLI 默认）",
+    "inheritFromChannel": "跟随渠道默认",
+    "inheritFromCli": "跟随 CLI 设置",
+    "inheritFromApp": "跟随应用默认渠道",
     "permApproval": "需审批",
     "permApprovalDesc": "每次工具调用前询问",
     "permAutoEdit": "自动编辑",

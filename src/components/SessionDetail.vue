@@ -11,11 +11,10 @@ import {
   useSessionStream,
   finishedDirty,
 } from '@/composables/useStreaming'
-import { useSessionSettings, ADVISOR_MAIN_MODEL, type ChannelMark } from '@/composables/useSessionSettings'
-import { useAppDefaults } from '@/composables/useAppDefaults'
+import { useSessionSettings, type ChannelMark } from '@/composables/useSessionSettings'
+import { useRunConfig } from '@/composables/useRunConfig'
 import {
   refreshChannels,
-  resolveChannel,
   channelDisplayName,
   OFFICIAL_CHANNEL_ID,
 } from '@/composables/useChannels'
@@ -29,6 +28,7 @@ import {
 } from '@/composables/useSlashCommands'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 import { shortId, shortModel, formatTokens } from '@/types'
+import { inferModel } from '@/utils/modelContext'
 import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
@@ -303,9 +303,11 @@ async function onStop() {
 
 // --- 会话级设置(模型 / 努力等级 / 渠道) ---
 const { settings, setModel, setEffort, setChannel, setAdvisor, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
-const { appDefaults } = useAppDefaults()
 
-function onModelChange(modelId: string) {
+// 运行配置同源解析:顶栏展示与发送参数共用同一解析结果(会话覆盖 > 渠道默认 > CLI 默认)
+const { runConfig } = useRunConfig(settings)
+
+function onModelChange(modelId: string | null) {
   setModel(modelId)
 }
 
@@ -319,7 +321,7 @@ function onEffortChange(effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'u
 refreshChannels()
 
 /** 解析后的最终注入渠道 id(null = 官方/零注入):发送与终端恢复共用 */
-const resolvedChannelId = computed(() => resolveChannel(settings.value.channelId))
+const resolvedChannelId = computed(() => runConfig.value.channelId)
 
 function onChannelChange(channelId: string | null) {
   const list = messages.value
@@ -588,6 +590,8 @@ watch(pendingLandedUuid, (uuid) => {
 })
 
 const messages = computed(() => {
+  // thinking 耗时标注:在过滤前的原始序列上算(前一行可能是不可见的 tool_result 行)
+  annotateThinkingMs(records.value)
   const visible = records.value.filter(
     (r): r is Extract<SessionRecord, { type: 'user' | 'assistant' | 'system' }> => {
       if (r.type === 'assistant') {
@@ -628,17 +632,6 @@ function mergeResponses(responses: VisibleRecord[]): VisibleRecord[] {
     if (msgId && prev?.type === 'assistant' && (prev as any).message?.id === msgId) {
       const prevMsg = (prev as any).message
       const curMsg = (r as any).message
-      // 合并前：用两条记录的时间戳差值标注 thinking 块耗时
-      const prevTs = (prev as any).timestamp as string | null
-      const curTs = (r as any).timestamp as string | null
-      if (prevTs && curTs) {
-        const ms = new Date(curTs).getTime() - new Date(prevTs).getTime()
-        if (ms > 0) {
-          for (const b of prevMsg.content) {
-            if (b.type === 'thinking' && !b._thinkingMs) b._thinkingMs = ms
-          }
-        }
-      }
       prevMsg.content = [...prevMsg.content, ...curMsg.content]
       if (curMsg.usage) prevMsg.usage = curMsg.usage
     } else {
@@ -646,6 +639,36 @@ function mergeResponses(responses: VisibleRecord[]): VisibleRecord[] {
     }
   }
   return merged
+}
+
+/** 思考耗时标注的合理上限:超过按异常丢弃(跨会话恢复/时钟漂移的脏差值) */
+const THINKING_MS_CAP = 600_000
+
+/**
+ * 历史区 thinking 块耗时标注:必须在**原始记录序列**上按「与前一行的时间戳差」计算——
+ * thinking 行落盘 ≈ 思考结束,前一行落盘 ≈ 思考开始(实测中位 10.8s,与思考时长量级吻合);
+ * 「与后一行的差」是下一块的生成间隔(中位 0.6s),曾错标于此导致耗时几乎全被 <1s 显示阈值吞掉。
+ * 前一行可能是 tool_result/user 行(过滤后不可见),故不能在 messages/mergeResponses 层算。
+ * 幂等:已有 _thinkingMs(流式期 Date.now() 实测值,更准)不覆盖。
+ */
+function annotateThinkingMs(rows: SessionRecord[]): void {
+  let prevTs: number | null = null
+  for (const r of rows) {
+    const tsStr = (r as any).timestamp as string | null
+    const ts = tsStr ? new Date(tsStr).getTime() : NaN
+    if (r.type === 'assistant' && prevTs !== null && Number.isFinite(ts)) {
+      const content = (r as any).message?.content
+      if (Array.isArray(content)) {
+        const ms = ts - prevTs
+        if (ms > 0 && ms < THINKING_MS_CAP) {
+          for (const b of content) {
+            if (b?.type === 'thinking' && !b._thinkingMs) b._thinkingMs = ms
+          }
+        }
+      }
+    }
+    if (Number.isFinite(ts)) prevTs = ts
+  }
 }
 
 const messageGroups = computed(() => {
@@ -797,7 +820,19 @@ function parsePrivateTags(text: string): ContentBlock[] {
   const after = cleaned.slice(lastIndex).trim()
   if (after) results.push({ type: 'text', text: after })
 
-  return results
+  // command-name 紧邻 command-args 时合并(args 挂到 name 块),渲染收成一行
+  const merged: ContentBlock[] = []
+  for (let i = 0; i < results.length; i++) {
+    const b = results[i] as any
+    const next = results[i + 1] as any
+    if (b.type === 'command-name' && next?.type === 'command-args') {
+      merged.push({ ...b, args: next.text } as any)
+      i++
+    } else {
+      merged.push(results[i])
+    }
+  }
+  return merged
 }
 
 function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistant' }>): ContentBlock[] {
@@ -848,11 +883,96 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
   return lifted
 }
 
+/**
+ * 该轮(组)回复是否足够长(组末尾补一行模型/token 标注)。
+ * 判定单位必须是整轮而非单条记录:CLI 落盘按 content block 拆行,
+ * 一轮长回复 = 多条 assistant 记录、每条常只有 1 个块——按单条判永不触发。
+ * 直接读原始 message.content 粗估,不走 contentBlocks 解析(渲染热路径零开销):
+ * 全轮块数 ≥ 5(多工具轮必长)或文本/思考字符总量超阈值(约 30+ 行)。
+ */
+function groupIsLong(group: { responses: unknown[] }): boolean {
+  let blocks = 0
+  let chars = 0
+  for (const r of group.responses) {
+    const rec = r as { type?: string; message?: { content?: unknown } }
+    if (rec.type !== 'assistant') continue
+    const content = rec.message?.content
+    if (!Array.isArray(content)) continue
+    blocks += content.length
+    for (const b of content) {
+      if (b?.type === 'text') chars += b.text?.length ?? 0
+      else if (b?.type === 'thinking') chars += b.thinking?.length ?? 0
+      else chars += 200
+    }
+    if (blocks >= 5 || chars > 1800) return true
+  }
+  return false
+}
+
+/**
+ * 组末尾标注整行文案(长轮次才有):数据取该轮最后一条有效 assistant 记录,
+ * 模型/token 与顶部标注同源。返回 null = 不渲染。
+ */
+function groupFooterText(group: { responses: unknown[] }): string | null {
+  if (!groupIsLong(group)) return null
+  for (let i = group.responses.length - 1; i >= 0; i--) {
+    const rec = group.responses[i] as { type?: string; message?: { model?: string; usage?: Record<string, number> } }
+    if (rec.type === 'assistant' && rec.message?.model && rec.message.model !== '<synthetic>') {
+      const parts = [shortModel(rec.message.model)]
+      const u = rec.message.usage
+      if (u) {
+        parts.push(
+          `${formatTokens(u.input_tokens ?? 0)} in`,
+          `${formatTokens(u.cache_read_input_tokens ?? 0)} cache`,
+          `${formatTokens(u.cache_creation_input_tokens ?? 0)} new`,
+          `${formatTokens(u.output_tokens ?? 0)} out`,
+        )
+      }
+      return parts.join(' · ')
+    }
+  }
+  return null
+}
+
 const USER_CONTENT_TYPES = new Set(['text', 'image', 'document'])
 
 function isSystemOnlyUser(record: Extract<SessionRecord, { type: 'user' }>): boolean {
   const blocks = contentBlocks(record as any)
   return blocks.length > 0 && blocks.every(b => !USER_CONTENT_TYPES.has(b.type))
+}
+
+/** 用户卡是否有可见内容:全空白时不渲染空卡壳(纯图片/文档消息不受影响) */
+function userHasVisibleContent(record: Extract<SessionRecord, { type: 'user' }>): boolean {
+  const blocks = contentBlocks(record as any)
+  return blocks.some(b =>
+    b.type === 'image' || b.type === 'document' || (b.type === 'text' && !!(b as any).text?.trim()),
+  )
+}
+
+/**
+ * /model 切换事件的横线文案:以 stdout 记录「Set model to X」为事实源——
+ * 它是 CLI 确认执行成功才落的输出,有参/无参/取消三种场景天然正确
+ * (取消时无 stdout,不留假横线)。文案不匹配时返回 null,安全降级为普通 stdout 行。
+ */
+function modelSwitchName(record: Extract<SessionRecord, { type: 'user' }>): string | null {
+  const blocks = contentBlocks(record as any)
+  for (const b of blocks) {
+    if (b.type === 'local-command-stdout') {
+      const m = (((b as any).text as string) ?? '').match(/^Set model to\s+(.+)$/)
+      if (m) {
+        const raw = m[1].trim()
+        return inferModel(raw)?.label ?? raw
+      }
+    }
+  }
+  return null
+}
+
+/** /model 命令记录本身(胶囊+参数):静默不渲染,事件由 stdout 横线承载 */
+function isModelCommandRecord(record: Extract<SessionRecord, { type: 'user' }>): boolean {
+  const blocks = contentBlocks(record as any)
+  const cmd = blocks.find(b => b.type === 'command-name')
+  return !!cmd && (((cmd as any).text as string) ?? '').trim() === '/model'
 }
 
 // --- 斜杠命令处理 ---
@@ -974,11 +1094,13 @@ async function handleSend() {
   const advisor = settings.value.advisor
   const images = imageInput.images.value.length ? await imageInput.toImageBlocks() : undefined
   imageInput.clearImages()
+  // 发送前重读渠道清单(活文件),runConfig 随之解析出最新的渠道默认
   await refreshChannels()
+  const rc = runConfig.value
   const opts = {
-    model: advisor ? ADVISOR_MAIN_MODEL : (settings.value.modelId ?? undefined),
-    effort: settings.value.effort ?? appDefaults.value.effort,
-    channel: resolvedChannelId.value,
+    model: rc.model,
+    effort: rc.effort ?? null,
+    channel: rc.channelId,
     advisor,
     images,
     permissionMode: settings.value.permissionMode,
@@ -1362,6 +1484,7 @@ async function onReload() {
       :selected-effort="settings.effort"
       :selected-channel-id="settings.channelId"
       :resolved-channel-id="resolvedChannelId"
+      :run-config="runConfig"
       :selected-advisor="settings.advisor"
       :selected-permission-mode="settings.permissionMode"
       @model-change="onModelChange"
@@ -1446,8 +1569,20 @@ async function onReload() {
           class="space-y-4 msg-group-cv"
         >
           <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
+          <!-- /model 切换成功(stdout 事实源):渲染成与渠道切换同款的配置分界横线 -->
+          <div
+            v-if="group.user && group.user.type === 'user' && modelSwitchName(group.user)"
+            class="channel-mark"
+          >
+            <div class="flex-1 h-px bg-border" />
+            <span class="i-carbon-model-alt w-3 h-3" />
+            <span>{{ $t('session.modelSwitchMark', { name: modelSwitchName(group.user) }) }}</span>
+            <div class="flex-1 h-px bg-border" />
+          </div>
+          <!-- /model 命令记录本身:静默(事件由上面的 stdout 横线承载;取消选择时无 stdout,不留痕) -->
+          <template v-else-if="group.user && group.user.type === 'user' && isModelCommandRecord(group.user)" />
           <!-- 纯系统注入(无真实用户输入):降级为系统注解样式 -->
-          <div v-if="group.user && group.user.type === 'user' && isSystemOnlyUser(group.user)" class="pl-3">
+          <div v-else-if="group.user && group.user.type === 'user' && isSystemOnlyUser(group.user)" class="pl-3">
             <MessageBlock
               v-for="(block, bi) in contentBlocks(group.user as any)"
               :key="bi"
@@ -1455,8 +1590,8 @@ async function onReload() {
               :record-uuid="group.user.uuid"
             />
           </div>
-          <!-- 正常用户消息 -->
-          <div v-else-if="group.user" :class="group.responses.some(r => r.type === 'assistant') ? 'user-msg-sticky' : ''">
+          <!-- 正常用户消息(全空白内容不渲染空卡壳) -->
+          <div v-else-if="group.user && group.user.type === 'user' && userHasVisibleContent(group.user)" :class="group.responses.some(r => r.type === 'assistant') ? 'user-msg-sticky' : ''">
             <div class="flex gap-3">
               <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
@@ -1520,6 +1655,13 @@ async function onReload() {
               <div class="flex-1 h-px bg-border" />
             </div>
           </template>
+          <!-- 长轮次组末尾补一行模型/token 标注:滚到底不用回头找归属(数据取该轮最后一条 assistant,与顶部标注同源) -->
+          <div
+            v-if="groupFooterText(group)"
+            class="pl-3.5 text-[11px] text-muted-foreground/70 tabular-nums"
+          >
+            {{ groupFooterText(group) }}
+          </div>
         </div>
         <!-- 锚点失效的切换横线兜底:末尾按序渲染,不静默消失 -->
         <div
@@ -1553,7 +1695,11 @@ async function onReload() {
           <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
           <div class="min-w-0 flex-1">
             <div class="text-xs font-medium mb-1 text-claude flex items-center gap-1.5">
-              <span>{{ $t('session.claude') }}</span>
+              <span>
+                {{ $t('session.claude') }}
+                <!-- 本轮实际运行模型的真值(message_start 回显),从首字起与落账后标注同源 -->
+                <span v-if="turn.model" class="text-muted-foreground font-normal">({{ shortModel(turn.model) }})</span>
+              </span>
               <span v-if="!stream.streaming && stream.realUsedTokens" class="text-muted-foreground/70 font-normal tabular-nums">
                 {{ formatTokens(stream.realUsedTokens) }} in
                 <template v-if="stream.realOutputTokens"> · {{ formatTokens(stream.realOutputTokens) }} out</template>

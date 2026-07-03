@@ -15,12 +15,12 @@ import { useNotifications } from '@/composables/useNotifications'
 import { useLocale } from '@/composables/useLocale'
 import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
+import OfficialDefaultsForm from '@/components/settings/OfficialDefaultsForm.vue'
 import PaperSelect from '@/components/settings/PaperSelect.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
-import { useAppDefaults } from '@/composables/useAppDefaults'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
@@ -170,6 +170,8 @@ type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'permis
 const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
+/** official 渠道轻量编辑(仅默认模型/思考强度两字段) */
+const editingOfficial = ref<ChannelInfo | null>(null)
 
 const ccSwitchProviders = ref<CcSwitchProvider[]>([])
 const ccSwitchSelected = ref<Set<string>>(new Set())
@@ -208,7 +210,6 @@ function toggleCcSwitchAll() {
   }
 }
 
-const { appDefaults, setDefaultEffort } = useAppDefaults()
 const rcEnabled = ref(true)
 const wakePolicy = ref('passive')
 const widgetDayStart = ref(0)
@@ -504,24 +505,6 @@ function onSaved() {
             </div>
 
             <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.defaultEffort') }}</div>
-              <select
-                :value="appDefaults.effort ?? 'cli'"
-                class="form-select w-full"
-                @change="setDefaultEffort(($event.target as HTMLSelectElement).value === 'cli' ? null : ($event.target as HTMLSelectElement).value as any)"
-              >
-                <option value="cli">{{ $t('settings.followCli') }}</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="xhigh">xHigh</option>
-                <option value="max">Max</option>
-                <option value="ultracode">Ultracode</option>
-              </select>
-              <div class="setting-hint">{{ $t('settings.defaultEffortHint') }}</div>
-            </div>
-
-            <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.remoteControl') }}</div>
               <div class="flex items-center gap-2.5">
                 <button
@@ -643,6 +626,7 @@ function onSaved() {
                           <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @click.stop="editing = ch"><span class="i-carbon-edit w-3 h-3" /></button>
                           <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @click.stop="onDelete(ch)"><span class="i-carbon-trash-can w-3 h-3" /></button>
                         </template>
+                        <button v-else class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('settings.officialDefaults.edit')" @click.stop="editingOfficial = ch"><span class="i-carbon-edit w-3 h-3" /></button>
                       </div>
                     </div>
                     <div class="chain-row-2">
@@ -650,6 +634,8 @@ function onSaved() {
                         <span v-if="ch.baseUrl" class="font-mono truncate">{{ ch.baseUrl }}</span>
                       </template>
                       <span v-else class="text-muted-foreground/60 italic">OAuth</span>
+                      <span v-if="ch.defaultModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0" v-tooltip="$t('settings.channelForm.defaultModelLabel')">{{ ch.defaultModel }}</span>
+                      <span v-if="ch.defaultEffort" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0" v-tooltip="$t('settings.channelForm.defaultEffortLabel')">{{ ch.defaultEffort }}</span>
                       <span v-if="ch.agentModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0">{{ ch.agentModel }}</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">
                         <template v-if="probing[ch.id]"><span class="i-carbon-renew w-2.5 h-2.5 animate-spin" /></template>
@@ -725,6 +711,14 @@ function onSaved() {
             class="mt-3"
             @saved="onSaved"
             @cancel="editing = null"
+          />
+
+          <OfficialDefaultsForm
+            v-if="editingOfficial"
+            :channel="editingOfficial"
+            class="mt-3"
+            @saved="editingOfficial = null"
+            @cancel="editingOfficial = null"
           />
 
           <div class="flex items-center gap-2 mt-3">

@@ -141,6 +141,7 @@
     "channelSwitchedDefault": "Switched back to default channel",
     "channelSwitchedOfficial": "Switched to official channel",
     "channelSwitched": "Switched to \"{name}\" channel",
+    "modelSwitchMark": "Model switched to {name}",
     "newSessionTitle": "New Session",
     "noTitleSession": "Untitled Session",
     "slashNewInWorkbench": "Use the + button in the left rail to create new sessions",
@@ -440,9 +441,6 @@
     "translating": "AI is translating the entire interface, this may take about a minute…",
     "translateSuccess": "Translation complete, switch above to use it",
     "langNotRecognized": "Could not recognize the target language, try rephrasing",
-    "defaultEffort": "Default Effort Level",
-    "defaultEffortHint": "Effort level for sessions without per-session override",
-    "followCli": "Follow CLI",
     "zoomLevel": "Zoom Level",
     "zoomLevelHint": "Adjust global UI scale (70% – 150%)",
     "minColumnWidth": "Min Column Width",
@@ -556,6 +554,11 @@
       "scopeAgentOnlyHint": "Agent only",
       "tokenOptional": "(optional)",
       "agentModelHint": "Model for agent calls (translate/summary/tags). Leave empty to use default Claude models",
+      "defaultModelLabel": "Default model",
+      "defaultModelPlaceholder": "e.g. sonnet or a full model ID",
+      "defaultEffortLabel": "Default effort",
+      "defaultEffortNone": "Follow CLI settings",
+      "defaultsHint": "Preset used when a session has no manual override; stored in the channel file itself, so terminal claude --settings behaves the same.",
       "modelMap": {
         "title": "Advanced · Model Mapping",
         "badge": "à la CC Switch",
@@ -570,10 +573,13 @@
         "modelPlaceholder": "Model ID",
         "namePlaceholder": "Optional",
         "oneMHint": "Check to use the 1M context for this model (appends the [1m] suffix on save)",
-        "customHint": "The custom slot’s value enters the CLI /model menu and passes model validation directly.",
-        "fallbackLabel": "Default fallback model",
-        "fallbackHint": "Used only when a request doesn’t resolve to any role; usually leave blank."
+        "customHint": "The custom slot’s value enters the CLI /model menu and passes model validation directly."
       }
+    },
+    "officialDefaults": {
+      "title": "Official Channel · Defaults",
+      "intro": "The official channel uses OAuth with zero injection; this only configures session presets (stored in app settings, never written to ~/.claude/settings.json).",
+      "edit": "Configure default model / effort"
     },
     "mcp": {
       "title": "MCP Tool Service",
@@ -698,7 +704,6 @@
     }
   },
   "topbar": {
-    "channelFollow": "Default · {name}",
     "channelOfficial": "Official",
     "channelTitle": "Channel: {name}",
     "channelLabel": "Channel",
@@ -707,9 +712,16 @@
     "contextNearFull": "Context nearly full",
     "effortTitle": "Effort level: {name}",
     "effortLabel": "Effort",
+    "effortDefault": "Default",
+    "channelDefault": "Default",
     "modelDefault": "Default",
     "modelAdvisorLocked": "Primary model locked to Sonnet in advisor mode",
     "modelTitle": "Model: {name}",
+    "sourceChannel": "{name} (channel default)",
+    "sourceCli": "{name} (CLI default)",
+    "inheritFromChannel": "Follow channel default",
+    "inheritFromCli": "Follow CLI settings",
+    "inheritFromApp": "Follow app default channel",
     "permApproval": "Approval",
     "permApprovalDesc": "Ask before each tool call",
     "permAutoEdit": "Auto-edit",

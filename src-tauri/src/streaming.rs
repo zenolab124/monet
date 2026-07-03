@@ -36,6 +36,11 @@ struct SessionProcess {
     request_counter: u64,
     channel: Option<String>,
     effort: Option<String>,
+    /// 进程当前生效的模型(spawn --model / set_model 下达值;None = CLI 默认)。
+    /// 复用判定用:意图回落 None 而进程钉着旧值时必须重启,set_model 无法"切回默认"
+    model: Option<String>,
+    /// spawn 时的顾问开关(advisor 经 --settings 注入,变更只能重启生效)
+    advisor: bool,
 }
 
 /// 活跃的长活进程表（sessionId → SessionProcess）
@@ -61,6 +66,8 @@ pub enum StreamEvent {
         session_id: String,
         message_id: String,
         content: Vec<ContentBlock>,
+        /// 本轮实际运行的模型(message.model 真值)
+        model: Option<String>,
     },
     /// 字符级增量到达——content_block_start：某个 index 上出现新块
     BlockStart {
@@ -68,6 +75,8 @@ pub enum StreamEvent {
         message_id: String,
         index: usize,
         content_block: ContentBlock,
+        /// 本轮实际运行的模型(message_start 事件 message.model 真值,随首块带出)
+        model: Option<String>,
     },
     /// 字符级增量到达——content_block_delta：某个 index 上的块字段增长
     /// delta 原样透传给前端，由前端按 delta.type 派发：
@@ -405,6 +414,8 @@ fn open_session(
         request_counter: 1,
         channel: channel.map(|s| s.to_string()),
         effort: effort.map(|s| s.to_string()),
+        model: model.filter(|s| !s.is_empty()).map(|s| s.to_string()),
+        advisor,
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -456,10 +467,16 @@ pub fn send_message(
             .and_then(|m| m.get(session_id).cloned())
             .map_or(false, |arc| {
                 let sp = arc.lock().unwrap();
-                sp.channel.as_deref() != channel || sp.effort.as_deref() != effort
+                sp.channel.as_deref() != channel
+                    || sp.effort.as_deref() != effort
+                    // advisor 经 --settings 注入,变更只能重启生效(否则只有主模型锁定生效、顾问没挂上)
+                    || sp.advisor != advisor
+                    // 模型意图回落默认(None)而进程钉着上次 set_model 的具体值:
+                    // set_model 无法"切回默认",不重启就是旧模型粘滞(界面默认、实跑旧值)
+                    || (model.is_none() && sp.model.is_some())
             });
         if needs_restart {
-            eprintln!("[long-lived] 渠道/effort 变更，重启进程 会话={}", &session_id[..session_id.len().min(8)]);
+            eprintln!("[long-lived] 渠道/effort/advisor/模型回落变更，重启进程 会话={}", &session_id[..session_id.len().min(8)]);
             close_session(session_id);
             exists = false;
         }
@@ -488,6 +505,7 @@ pub fn send_message(
                 "request": {"subtype": "set_model", "model": m}
             });
             write_stdin(&mut sp.stdin, &ctrl)?;
+            sp.model = Some(m.to_string());
         }
     }
 
@@ -714,7 +732,8 @@ fn read_stream(
     app: &AppHandle,
     session_id: &str,
 ) {
-    let mut current_message_id: Option<String> = None;
+    // (message_id, model):message_start 写入,后续 content_block_* 读取;model 是本轮真值
+    let mut current_message_id: Option<(String, Option<String>)> = None;
 
     for line in reader.lines() {
         let line = match line {
@@ -809,7 +828,7 @@ fn read_stream(
 fn decode_stream_event(
     value: &Value,
     session_id: &str,
-    current_message_id: &mut Option<String>,
+    current_message_id: &mut Option<(String, Option<String>)>,
 ) -> Option<StreamEvent> {
     let event_type = value.get("type")?.as_str()?;
     let sid = session_id.to_string();
@@ -821,17 +840,16 @@ fn decode_stream_event(
             let inner_type = inner.get("type")?.as_str()?;
             match inner_type {
                 "message_start" => {
-                    // 仅更新跨行状态,不 emit:让 content_block_start 自带建 turn 能力
-                    let id = inner
-                        .get("message")?
-                        .get("id")?
-                        .as_str()?
-                        .to_string();
-                    *current_message_id = Some(id);
+                    // 仅更新跨行状态,不 emit:让 content_block_start 自带建 turn 能力。
+                    // 顺带提取 message.model——本轮实际运行模型的最早真值来源
+                    let msg = inner.get("message")?;
+                    let id = msg.get("id")?.as_str()?.to_string();
+                    let model = msg.get("model").and_then(|v| v.as_str()).map(String::from);
+                    *current_message_id = Some((id, model));
                     None
                 }
                 "content_block_start" => {
-                    let mid = current_message_id.as_ref()?.clone();
+                    let (mid, model) = current_message_id.as_ref()?.clone();
                     let index = inner.get("index")?.as_u64()? as usize;
                     let cb_value = inner.get("content_block")?.clone();
                     let content_block: ContentBlock =
@@ -841,10 +859,11 @@ fn decode_stream_event(
                         message_id: mid,
                         index,
                         content_block,
+                        model,
                     })
                 }
                 "content_block_delta" => {
-                    let mid = current_message_id.as_ref()?.clone();
+                    let mid = current_message_id.as_ref()?.0.clone();
                     let index = inner.get("index")?.as_u64()? as usize;
                     let delta = inner.get("delta")?.clone();
                     Some(StreamEvent::BlockDelta {
@@ -855,7 +874,7 @@ fn decode_stream_event(
                     })
                 }
                 "content_block_stop" => {
-                    let mid = current_message_id.as_ref()?.clone();
+                    let mid = current_message_id.as_ref()?.0.clone();
                     let index = inner.get("index")?.as_u64()? as usize;
                     Some(StreamEvent::BlockStop {
                         session_id: sid,
@@ -879,10 +898,12 @@ fn decode_stream_event(
                 .get("content")
                 .and_then(|c| serde_json::from_value(c.clone()).ok())
                 .unwrap_or_default();
+            let model = msg.get("model").and_then(|v| v.as_str()).map(String::from);
             Some(StreamEvent::AssistantMessage {
                 session_id: sid,
                 message_id,
                 content,
+                model,
             })
         }
         "progress" => {
@@ -903,10 +924,12 @@ fn decode_stream_event(
                 .get("content")
                 .and_then(|c| serde_json::from_value(c.clone()).ok())
                 .unwrap_or_default();
+            let model = inner_msg.get("model").and_then(|v| v.as_str()).map(String::from);
             Some(StreamEvent::AssistantMessage {
                 session_id: sid,
                 message_id,
                 content,
+                model,
             })
         }
         "result" => {

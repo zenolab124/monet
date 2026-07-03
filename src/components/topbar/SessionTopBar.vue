@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime, formatTokens, type TokenUsage } from '@/types'
 import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
 import { ADVISOR_MAIN_MODEL, type EffortSetting, type EffortLevel } from '@/composables/useSessionSettings'
+import type { ResolvedRunConfig } from '@/composables/useRunConfig'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
@@ -47,6 +48,8 @@ const props = defineProps<{
   selectedChannelId: string | null
   /** 解析后的最终注入渠道 id(null = 官方):终端恢复带渠道用 */
   resolvedChannelId: string | null
+  /** 运行配置同源解析结果(下拉显示与发送参数共用,见 useRunConfig) */
+  runConfig: ResolvedRunConfig
   /** 顾问模式开关状态 */
   selectedAdvisor: boolean
   /** 权限模式 */
@@ -56,7 +59,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'modelChange', modelId: string): void
+  (e: 'modelChange', modelId: string | null): void
   (e: 'effortChange', effort: EffortSetting): void
   (e: 'channelChange', channelId: string | null): void
   (e: 'advisorChange', advisor: boolean): void
@@ -110,11 +113,11 @@ const { cliDefaults } = useCliDefaults()
 // 顶栏挂载即拉一次 CLI 默认值(settings.json 活文件,下拉打开时还会各自重读)
 onMounted(() => refreshCliDefaults(props.cwd ?? undefined))
 
-/** 上下文容量:API 真值 → effectiveModel 容量 → 模型名推断兜底 */
+/** 上下文容量:API 真值 → effectiveModel 容量 → 下次发送解析模型推断兜底 */
 const capacity = computed(() =>
   props.realContextWindow
     ?? effectiveModel.value?.contextWindow
-    ?? getContextWindow(props.selectedModelId ?? cliDefaults.value.model),
+    ?? getContextWindow(props.runConfig.model ?? cliDefaults.value.model),
 )
 
 // --- 窄列折叠 ---
@@ -208,8 +211,9 @@ const channelOptions = computed(() => {
   return result
 })
 
+/** 菜单行右侧的当前值预览:解析后的下次发送档位(无 CLI 读数时显 Auto) */
 const effortLabel = computed(() => {
-  const o = EFFORT_OPTIONS.find(o => o.value === props.selectedEffort)
+  const o = EFFORT_OPTIONS.find(o => o.value === props.runConfig.effort)
   return o?.label ?? 'Auto'
 })
 
@@ -238,13 +242,13 @@ function openSubmenu(type: SubmenuType, event: MouseEvent) {
   }
 }
 
-function selectEffort(value: NonNullable<EffortSetting>) {
+function selectEffort(value: EffortSetting) {
   onEffortChange(value)
   menuOpen.value = false
   activeSubmenu.value = null
 }
 
-function selectChannel(value: string) {
+function selectChannel(value: string | null) {
   onChannelChange(value)
   menuOpen.value = false
   activeSubmenu.value = null
@@ -320,7 +324,7 @@ async function onDelete() {
 
 // --- 事件转发 ---
 
-function onModelChange(id: string) {
+function onModelChange(id: string | null) {
   emit('modelChange', id)
 }
 function onEffortChange(level: EffortSetting) {
@@ -341,9 +345,8 @@ function onPermissionModeChange(mode: PermissionMode) {
   >
     <!-- 模型切换(永不折叠);渠道决定候选来源(官方=角色主区;第三方=映射角色) -->
     <ModelDropdown
-      :current="effectiveModel?.id ?? effectiveModelStr"
-      :channel="resolvedChannelId"
-      :disabled="selectedAdvisor"
+      :current="selectedModelId"
+      :run-config="runConfig"
       @select="onModelChange"
     />
 
@@ -351,6 +354,7 @@ function onPermissionModeChange(mode: PermissionMode) {
     <EffortDropdown
       v-if="showEffort"
       :current="selectedEffort"
+      :run-config="runConfig"
       @select="onEffortChange"
     />
 
@@ -408,6 +412,17 @@ function onPermissionModeChange(mode: PermissionMode) {
               :class="submenuAlignLeft ? 'right-full mr-1' : 'left-full ml-1'"
             >
               <button
+                class="menu-item"
+                :class="{ 'text-primary!': selectedEffort === null }"
+                @click="selectEffort(null)"
+              >
+                <span
+                  class="w-3 h-3 shrink-0"
+                  :class="selectedEffort === null ? 'i-carbon-checkmark text-primary' : ''"
+                />
+                {{ $t('topbar.effortDefault') }}
+              </button>
+              <button
                 v-for="o in EFFORT_OPTIONS"
                 :key="o.value"
                 class="menu-item"
@@ -442,15 +457,26 @@ function onPermissionModeChange(mode: PermissionMode) {
               :class="submenuAlignLeft ? 'right-full mr-1' : 'left-full ml-1'"
             >
               <button
+                class="menu-item"
+                :class="{ 'text-primary!': selectedChannelId === null }"
+                @click="selectChannel(null)"
+              >
+                <span
+                  class="w-3 h-3 shrink-0"
+                  :class="selectedChannelId === null ? 'i-carbon-checkmark text-primary' : ''"
+                />
+                {{ $t('topbar.channelDefault') }}
+              </button>
+              <button
                 v-for="o in channelOptions"
                 :key="o.value"
                 class="menu-item"
-                :class="{ 'text-primary!': o.value === (selectedChannelId ?? defaultSessionChannel ?? OFFICIAL_CHANNEL_ID) }"
+                :class="{ 'text-primary!': o.value === selectedChannelId }"
                 @click="selectChannel(o.value)"
               >
                 <span
                   class="w-3 h-3 shrink-0"
-                  :class="o.value === (selectedChannelId ?? defaultSessionChannel ?? OFFICIAL_CHANNEL_ID) ? 'i-carbon-checkmark text-primary' : ''"
+                  :class="o.value === selectedChannelId ? 'i-carbon-checkmark text-primary' : ''"
                 />
                 {{ o.label }}
               </button>

@@ -128,6 +128,11 @@ pub struct ChannelMeta {
     pub protocol: Option<String>,
     pub scope: Option<String>,
     pub agent_model: Option<String>,
+    /// 渠道默认模型/思考强度——仅 official 用此存储(无渠道文件可写);
+    /// 第三方渠道的默认存渠道文件本身(env.ANTHROPIC_MODEL / 顶层 effortLevel),
+    /// 终端 `claude --settings <渠道文件>` 可复用同一默认
+    pub default_model: Option<String>,
+    pub default_effort: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -262,21 +267,6 @@ fn mask_token(token: &str) -> String {
 
 // ---- 渠道解析(内部 API) ----
 
-/// 解析会话渠道。
-/// override_id 非空时直接使用(per-session 覆盖)。
-/// 返回 None 表示走官方态(零注入)。
-pub fn resolve_session_channel(override_id: Option<&str>) -> Option<String> {
-    if let Some(id) = override_id {
-        if id == OFFICIAL_ID { return None; }
-        return Some(id.to_string());
-    }
-    let settings = load_app_settings();
-    settings.default_session_channel.filter(|id| {
-        let meta = settings.channels.get(id.as_str());
-        meta.map_or(true, |m| m.is_enabled()) && (id == APPLE_FM_ID || channel_file_path(id).is_file())
-    })
-}
-
 pub struct AgentChannelCredentials {
     pub id: String,
     pub is_official: bool,
@@ -307,13 +297,6 @@ pub fn resolve_agent_for_feature(key: &str) -> Option<AgentChannelCredentials> {
     let channel_id = settings.default_agent_channel.as_deref()?;
     let model = settings.default_agent_model.clone();
     resolve_channel_credentials(channel_id, &settings, model)
-}
-
-/// Resolve session channel credentials (for agent fallback)
-pub fn resolve_session_fallback() -> Option<AgentChannelCredentials> {
-    let settings = load_app_settings();
-    let channel_id = settings.default_session_channel.as_deref()?;
-    resolve_channel_credentials(channel_id, &settings, None)
 }
 
 fn resolve_channel_credentials(channel_id: &str, settings: &AppSettings, model_override: Option<String>) -> Option<AgentChannelCredentials> {
@@ -370,19 +353,6 @@ pub(crate) fn read_channel_credentials(id: &str) -> Option<(String, String)> {
     None
 }
 
-// ---- 错误分类(agent.rs 消费) ----
-
-pub fn is_retryable_error(e: &str) -> bool {
-    e.contains("connect") || e.contains("timeout") || e.contains("timed out")
-        || e.contains("API 5") || e.contains(" 500") || e.contains(" 502") || e.contains(" 503")
-        || e.contains("429") || e.contains("Too Many Requests")
-        || e.contains("connection") || e.contains("Connection")
-}
-
-pub fn is_auth_error(e: &str) -> bool {
-    e.contains("401") || e.contains("403")
-        || e.contains("Unauthorized") || e.contains("Forbidden")
-}
 
 // ---- 前端命令 ----
 
@@ -403,6 +373,10 @@ pub struct ChannelView {
     pub available_models: Vec<String>,
     /// CC Space 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传)
     pub model_env: BTreeMap<String, String>,
+    /// 渠道默认模型(official 读 meta;第三方读文件 env.ANTHROPIC_MODEL)
+    pub default_model: Option<String>,
+    /// 渠道默认思考强度:五档 | "ultracode"(official 读 meta;第三方读文件顶层 ultracode/effortLevel)
+    pub default_effort: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -430,6 +404,8 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             agent_model: None,
             available_models: vec![],
             model_env: BTreeMap::new(),
+            default_model: meta.default_model.clone().filter(|s| !s.is_empty()),
+            default_effort: meta.default_effort.clone().filter(|s| !s.is_empty()),
         };
     }
     if id == APPLE_FM_ID {
@@ -447,6 +423,8 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
             agent_model: meta.agent_model.clone(),
             available_models: vec![],
             model_env: BTreeMap::new(),
+            default_model: None,
+            default_effort: None,
         };
     }
     let path = channel_file_path(id);
@@ -502,6 +480,24 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
                 .collect()
         })
         .unwrap_or_default();
+    // 渠道默认模型/思考强度:全部读自渠道文件本身(原生 settings 语义,终端 --settings 同样生效)。
+    // 默认模型 = env.ANTHROPIC_MODEL;默认思考强度 = 顶层 ultracode(true 优先) / effortLevel
+    let default_model = env
+        .and_then(|e| e.get("ANTHROPIC_MODEL"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let default_effort = parsed.as_ref().and_then(|root| {
+        if root.get("ultracode").and_then(|v| v.as_bool()) == Some(true) {
+            return Some("ultracode".to_string());
+        }
+        root.get("effortLevel")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    });
     ChannelView {
         name: meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| id.to_string()),
         note: meta.note.clone().filter(|s| !s.is_empty()),
@@ -516,6 +512,8 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         agent_model: cc_ext.agent_model,
         available_models: cc_ext.available_models,
         model_env,
+        default_model,
+        default_effort,
     }
 }
 
@@ -549,6 +547,17 @@ pub fn list_channels() -> ChannelListResult {
     }
 }
 
+/// 渠道默认思考强度的合法值(五档 + ultracode 超档)
+const VALID_EFFORT_VALUES: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultracode"];
+
+fn validate_effort_value(effort: &str) -> Result<(), String> {
+    if VALID_EFFORT_VALUES.contains(&effort) {
+        Ok(())
+    } else {
+        Err(format!("无效的思考强度值: {}(允许 low/medium/high/xhigh/max/ultracode)", effort))
+    }
+}
+
 #[tauri::command]
 pub fn save_channel(
     id: String,
@@ -561,6 +570,7 @@ pub fn save_channel(
     agent_model: Option<String>,
     available_models: Option<Vec<String>>,
     model_env: Option<std::collections::HashMap<String, String>>,
+    default_effort: Option<String>,
 ) -> Result<(), String> {
     validate_id(&id)?;
     let is_virtual = id == APPLE_FM_ID;
@@ -621,6 +631,23 @@ pub fn save_channel(
             }
         }
 
+        // 渠道默认思考强度:替换语义(Some=按值重写,None=不动,向后兼容)。
+        // 原生 settings 字段承载:五档写顶层 effortLevel;"ultracode" 写顶层 ultracode=true——
+        // 终端 `claude --settings <渠道文件>` 吃到同一默认
+        if let Some(effort) = default_effort.as_deref() {
+            let effort = effort.trim();
+            obj.remove("effortLevel");
+            obj.remove("ultracode");
+            if !effort.is_empty() {
+                validate_effort_value(effort)?;
+                if effort == "ultracode" {
+                    obj.insert("ultracode".to_string(), json!(true));
+                } else {
+                    obj.insert("effortLevel".to_string(), json!(effort));
+                }
+            }
+        }
+
         let am = agent_model.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let av = available_models.as_deref().unwrap_or(&[]);
         if am.is_some() || !av.is_empty() {
@@ -641,6 +668,22 @@ pub fn save_channel(
     meta.scope = scope;
     meta.agent_model = agent_model.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
+    save_app_settings(&settings)
+}
+
+/// official 渠道的默认模型/思考强度(无渠道文件,存 settings.json 的渠道元数据)。
+/// 全量替换语义:两参数均传当前表单值,空/None = 清除该字段
+#[tauri::command]
+pub fn set_official_defaults(model: Option<String>, effort: Option<String>) -> Result<(), String> {
+    let model = model.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let effort = effort.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(e) = effort.as_deref() {
+        validate_effort_value(e)?;
+    }
+    let mut settings = load_app_settings();
+    let meta = settings.channels.entry(OFFICIAL_ID.to_string()).or_default();
+    meta.default_model = model;
+    meta.default_effort = effort;
     save_app_settings(&settings)
 }
 
@@ -822,6 +865,10 @@ pub fn prepare_injection(
     }
     if ultracode {
         obj.insert("ultracode".to_string(), json!(true));
+    } else {
+        // ultracode 开关以调用方解析结果为准:会话覆盖了五档时,
+        // 渠道文件自带的 ultracode=true 不放行(否则超档压过会话选择)
+        obj.remove("ultracode");
     }
     obj.remove("_ccSpace");
 

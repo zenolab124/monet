@@ -17,6 +17,10 @@ export interface ChannelInfo {
   availableModels: string[]
   /** CC Space 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传) */
   modelEnv: Record<string, string>
+  /** 渠道默认模型(official 存元数据;第三方即文件 env.ANTHROPIC_MODEL) */
+  defaultModel: string | null
+  /** 渠道默认思考强度:五档 | 'ultracode'(official 存元数据;第三方即文件顶层 effortLevel/ultracode) */
+  defaultEffort: string | null
 }
 
 export const APPLE_FM_CHANNEL_ID = 'apple-fm'
@@ -55,7 +59,11 @@ export function channelDisplayName(id: string | null): string {
 export function resolveChannel(selected: string | null): string | null {
   if (selected === OFFICIAL_CHANNEL_ID) return null
   if (selected) return selected
-  return defaultSessionChannel.value ?? null
+  // 跟随默认:默认渠道被禁用时回落官方,不带着禁用渠道发送
+  const id = defaultSessionChannel.value
+  if (!id) return null
+  const ch = channels.value.find(c => c.id === id)
+  return ch && ch.enabled ? id : null
 }
 
 export interface SaveChannelPayload {
@@ -70,6 +78,8 @@ export interface SaveChannelPayload {
   availableModels?: string[]
   /** 整命名空间替换语义:传对象=先移除全部 21 托管键再写非空值;不传/undefined=不动这些键 */
   modelEnv?: Record<string, string>
+  /** 渠道默认思考强度:传字符串=按值重写(空串=清除),不传=不动(默认模型走 modelEnv.ANTHROPIC_MODEL) */
+  defaultEffort?: string
 }
 
 async function saveChannel(payload: SaveChannelPayload): Promise<void> {
@@ -84,8 +94,39 @@ async function saveChannel(payload: SaveChannelPayload): Promise<void> {
     agentModel: payload.agentModel ?? null,
     availableModels: payload.availableModels ?? null,
     modelEnv: payload.modelEnv ?? null,
+    defaultEffort: payload.defaultEffort ?? null,
   })
   await refreshChannels()
+}
+
+/** official 渠道的默认模型/思考强度(全量替换语义,空/null = 清除) */
+async function setOfficialDefaults(model: string | null, effort: string | null): Promise<void> {
+  await invoke('set_official_defaults', { model, effort })
+  await refreshChannels()
+}
+
+const LEGACY_APP_DEFAULTS_KEY = 'cc-space:app-defaults'
+
+/**
+ * 一次性迁移:旧「应用默认思考强度」(localStorage, useAppDefaults) → official 渠道默认。
+ * official 已有显式配置时旧值直接丢弃;迁移后移除旧 key,幂等。
+ */
+export async function migrateLegacyAppDefaults(): Promise<void> {
+  try {
+    const raw = localStorage.getItem(LEGACY_APP_DEFAULTS_KEY)
+    if (!raw) return
+    const effort: unknown = JSON.parse(raw)?.effort
+    if (typeof effort === 'string' && effort) {
+      await refreshChannels()
+      const official = channels.value.find(c => c.id === OFFICIAL_CHANNEL_ID)
+      if (official && !official.defaultEffort) {
+        await setOfficialDefaults(official.defaultModel, effort)
+      }
+    }
+    localStorage.removeItem(LEGACY_APP_DEFAULTS_KEY)
+  } catch {
+    // 迁移失败不阻塞启动;旧 key 保留,下次启动重试
+  }
 }
 
 export interface AgentFeaturePrefs {
@@ -212,6 +253,7 @@ export function useChannels() {
     agentPreferences,
     refreshChannels,
     saveChannel,
+    setOfficialDefaults,
     deleteChannel,
     setChannelEnabled,
     setDefaultSessionChannel,

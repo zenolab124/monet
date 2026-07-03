@@ -21,6 +21,7 @@ import { initStreamListeners } from '@/composables/useStreaming'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
 import { useRoutines } from '@/composables/useRoutines'
 import { initShortcuts } from '@/composables/useShortcuts'
+import { migrateLegacyAppDefaults } from '@/composables/useChannels'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
 import { applyZoom, useZoom } from '@/composables/useZoom'
 import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
@@ -164,6 +165,8 @@ onMounted(async () => {
   await initShortcuts()
   await useRoutines().initRoutineListener()
   applyZoom()
+  // 旧「应用默认思考强度」一次性迁移进 official 渠道默认(不阻塞启动)
+  migrateLegacyAppDefaults()
   // 档案馆预加载:v-show 保活但数据要提前拉，首次切换零等待
   loadProjects()
   // 工作台持久化损坏回退提示(NFR-002)

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   useChannels,
   refreshChannels,
+  resolveChannel,
   channelDisplayName,
   OFFICIAL_CHANNEL_ID,
 } from '@/composables/useChannels'
@@ -21,10 +22,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { channels, defaultSessionChannel } = useChannels()
 const { switchSection } = useUiState()
-
-/** 「跟随默认」在选项列表中的占位值(null 不能做 v-for key)。
- * 含冒号——validate_id 只允许 [a-zA-Z0-9_-],真实渠道 id 永不会等于它,杜绝冲突 */
-const FOLLOW = ':follow:'
 
 interface ChannelOption {
   value: string
@@ -51,10 +48,12 @@ const options = computed<ChannelOption[]>(() => {
   return result
 })
 
-const resolvedChannel = computed(() => props.current ?? defaultSessionChannel.value ?? OFFICIAL_CHANNEL_ID)
+// 与发送链同一解析函数(含默认渠道禁用回落官方),按钮显示 = 实际注入
+const resolvedChannel = computed(() => resolveChannel(props.current) ?? OFFICIAL_CHANNEL_ID)
 
+/** 会话覆盖项在具体清单中的索引(打勾判定):跟随默认(null)时勾落在「默认」项 */
 const currentIndex = computed(() =>
-  options.value.findIndex(o => o.value === resolvedChannel.value),
+  props.current === null ? -1 : options.value.findIndex(o => o.value === props.current),
 )
 
 const currentLabel = computed(() => {
@@ -63,6 +62,12 @@ const currentLabel = computed(() => {
   const ch = channels.value.find(c => c.id === id)
   return ch?.name ?? channelDisplayName(id)
 })
+
+/** 跟随默认态:按钮弱化显示(值仍是解析后的实际渠道名) */
+const inherited = computed(() => props.current === null)
+
+/** 键盘导航总项数 = 「默认」项 + 具体渠道项 */
+const totalCount = computed(() => options.value.length + 1)
 
 const open = ref(false)
 const containerRef = ref<HTMLElement>()
@@ -74,7 +79,7 @@ function toggle() {
   if (open.value) {
     // channels/*.json 是用户可手编的活文件:每次打开下拉重读,清单不显示过期值
     refreshChannels()
-    focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value : 0
+    focusedIndex.value = currentIndex.value >= 0 ? currentIndex.value + 1 : 0
     nextTick(() => focusListItem(focusedIndex.value))
   }
 }
@@ -84,8 +89,14 @@ function close() {
   buttonRef.value?.focus()
 }
 
+/** index 0 = 「默认」项(跟随应用默认渠道);1.. = 具体渠道项 */
 function selectAt(index: number) {
-  const o = options.value[index]
+  if (index === 0) {
+    emit('select', null)
+    close()
+    return
+  }
+  const o = options.value[index - 1]
   if (!o) return
   emit('select', o.value)
   close()
@@ -98,7 +109,7 @@ function openSettings() {
 
 function onKeydown(e: KeyboardEvent) {
   if (!open.value) return
-  const len = options.value.length
+  const len = totalCount.value
   switch (e.key) {
     case 'ArrowDown':
       e.preventDefault()
@@ -159,7 +170,7 @@ onUnmounted(() => {
       :aria-expanded="open"
       @click="toggle"
     >
-      <span class="truncate max-w-24">{{ currentLabel }}</span>
+      <span class="truncate max-w-24" :class="{ 'opacity-70': inherited }">{{ currentLabel }}</span>
       <span class="i-carbon-chevron-down w-3 h-3 text-muted-foreground" />
     </button>
 
@@ -169,6 +180,26 @@ onUnmounted(() => {
       class="absolute top-full left-0 mt-1 z-50 min-w-36 py-1 rounded-md border border-border
              shadow-paper-lifted bg-popover"
     >
+      <!-- 「默认」项:跟随应用默认渠道(设置页切默认时随之变化) -->
+      <li
+        data-item
+        role="option"
+        tabindex="-1"
+        :aria-selected="currentIndex < 0"
+        :title="$t('topbar.inheritFromApp')"
+        class="px-2 py-1 text-xs flex items-center gap-2 cursor-pointer
+               text-muted-foreground hover:bg-muted hover:text-foreground focus:bg-muted focus:text-foreground focus:outline-none"
+        @click="selectAt(0)"
+        @mouseenter="focusedIndex = 0"
+      >
+        <span
+          class="w-3 h-3 shrink-0"
+          :class="currentIndex < 0 ? 'i-carbon-checkmark text-primary' : ''"
+        />
+        <span class="flex-1">{{ $t('topbar.channelDefault') }}</span>
+        <span class="text-[10px] opacity-60 truncate max-w-20">{{ chainFirstName() }}</span>
+      </li>
+
       <li
         v-for="(o, i) in options"
         :key="o.value"
@@ -178,8 +209,9 @@ onUnmounted(() => {
         :aria-selected="i === currentIndex"
         class="px-2 py-1 text-xs flex items-center gap-2 cursor-pointer
                text-muted-foreground hover:bg-muted hover:text-foreground focus:bg-muted focus:text-foreground focus:outline-none"
-        @click="selectAt(i)"
-        @mouseenter="focusedIndex = i"
+        :class="{ 'mt-1 pt-1.5 border-t border-border': i === 0 }"
+        @click="selectAt(i + 1)"
+        @mouseenter="focusedIndex = i + 1"
       >
         <span
           class="w-3 h-3 shrink-0"

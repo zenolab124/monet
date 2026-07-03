@@ -27,6 +27,9 @@ const protocol = ref(props.channel?.protocol ?? 'anthropic')
 const scope = ref(props.channel?.scope ?? 'full')
 const agentModel = ref(props.channel?.agentModel ?? '')
 const tokenVisible = ref(false)
+/** 渠道默认模型(env.ANTHROPIC_MODEL,保存时合并进 modelEnv)与默认思考强度(顶层 effortLevel/ultracode) */
+const defaultModel = ref(props.channel?.defaultModel ?? '')
+const defaultEffort = ref(props.channel?.defaultEffort ?? '')
 
 /** 模型映射 env(编辑回显源 = 渠道当前 modelEnv;子组件变更时更新) */
 const sourceModelEnv = computed<Record<string, string>>(() => props.channel?.modelEnv ?? {})
@@ -87,6 +90,11 @@ async function onSave() {
   }
   saving.value = true
   try {
+    // 默认模型归主表单持有,保存时合并进映射 env(子组件产出恒不含 ANTHROPIC_MODEL)
+    const mergedEnv: Record<string, string> = { ...modelEnv.value }
+    delete mergedEnv['ANTHROPIC_MODEL']
+    const dm = defaultModel.value.trim()
+    if (dm) mergedEnv['ANTHROPIC_MODEL'] = dm
     await saveChannel({
       id: trimmedId,
       name: name.value.trim(),
@@ -98,7 +106,9 @@ async function onSave() {
       agentModel: agentModel.value.trim() || undefined,
       availableModels: modelOptions.value.length > 0 ? modelOptions.value : undefined,
       // 整命名空间替换语义:虚拟渠道不传(保持 undefined→null 不动 env);其余传构建后的 env(空对象=清除映射)
-      modelEnv: isVirtual.value ? undefined : modelEnv.value,
+      modelEnv: isVirtual.value ? undefined : mergedEnv,
+      // 替换语义:空串=清除默认(移除顶层 effortLevel/ultracode);虚拟渠道不传
+      defaultEffort: isVirtual.value ? undefined : defaultEffort.value,
     })
     emit('saved')
   } catch (e) {
@@ -176,6 +186,37 @@ async function onSave() {
         <option value="agent-only">{{ $t('settings.channelForm.scopeAgentOnlyHint') }}</option>
       </select>
     </label>
+
+    <!-- 渠道运行预设:默认模型 + 默认思考强度(会话解析链的渠道层;agent-only 渠道不进会话链,隐藏) -->
+    <div v-if="scope === 'full' && !isVirtual" class="grid grid-cols-2 gap-2">
+      <div class="form-field">
+        <span class="form-label">{{ $t('settings.channelForm.defaultModelLabel') }} <span class="text-muted-foreground/60 font-normal italic">{{ $t('common.optional') }}</span></span>
+        <input
+          v-model="defaultModel"
+          type="text"
+          :list="`default-model-opts-${id}`"
+          :placeholder="$t('settings.channelForm.defaultModelPlaceholder')"
+          class="form-input font-mono"
+          spellcheck="false"
+        />
+        <datalist :id="`default-model-opts-${id}`">
+          <option v-for="m in modelOptions" :key="m" :value="m" />
+        </datalist>
+      </div>
+      <div class="form-field">
+        <span class="form-label">{{ $t('settings.channelForm.defaultEffortLabel') }} <span class="text-muted-foreground/60 font-normal italic">{{ $t('common.optional') }}</span></span>
+        <select v-model="defaultEffort" class="form-input">
+          <option value="">{{ $t('settings.channelForm.defaultEffortNone') }}</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="xhigh">xHigh</option>
+          <option value="max">Max</option>
+          <option value="ultracode">Ultracode</option>
+        </select>
+      </div>
+      <p class="text-[10px] text-muted-foreground/60 leading-snug col-span-2 -mt-1">{{ $t('settings.channelForm.defaultsHint') }}</p>
+    </div>
 
     <div class="form-field">
       <span class="form-label">Agent Model <span class="text-muted-foreground/60 font-normal italic">{{ $t('common.optional') }}</span></span>

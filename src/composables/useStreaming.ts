@@ -27,6 +27,8 @@ export interface SendOptions {
 export interface StreamingTurn {
   messageId: string
   content: ContentBlock[]
+  /** 本轮实际运行的模型真值(流式期实时标注,与落账后的 message.model 同源) */
+  model?: string
 }
 
 /** 监控卡尾部行：普通文本 / 等宽工具行 / 错误行 */
@@ -87,6 +89,8 @@ interface StreamEventPayload {
   session_id: string
   message_id?: string
   content?: ContentBlock[]
+  /** 本轮实际运行的模型真值(message_start / assistant 快照的 message.model) */
+  model?: string
   // block_start / block_delta / block_stop
   index?: number
   content_block?: ContentBlock
@@ -537,12 +541,14 @@ export async function initStreamListeners(): Promise<void> {
         if (payload.message_id && payload.index !== undefined && payload.content_block) {
           let entry = turnIndex.get(payload.message_id)
           if (!entry) {
-            const turn: StreamingTurn = { messageId: payload.message_id, content: [] }
+            const turn: StreamingTurn = { messageId: payload.message_id, content: [], model: payload.model }
             state.streamingTurns.push(turn)
             // reactive 数组里取回代理对象,保证后续 mutate 走响应式
             const reactiveTurn = state.streamingTurns[state.streamingTurns.length - 1]
             entry = { turn: reactiveTurn, sessionId: sid }
             turnIndex.set(payload.message_id, entry)
+          } else if (!entry.turn.model && payload.model) {
+            entry.turn.model = payload.model
           }
           ;(entry.turn.content as ContentBlock[])[payload.index] = payload.content_block
           // thinking 块计时起点
@@ -645,6 +651,7 @@ export async function initStreamListeners(): Promise<void> {
           const entry = turnIndex.get(mid)
           if (entry) {
             const existing = entry.turn
+            if (!existing.model && payload.model) existing.model = payload.model
             let cursor = 0
             for (const incoming of payload.content) {
               let matched = -1
@@ -683,6 +690,7 @@ export async function initStreamListeners(): Promise<void> {
             state.streamingTurns.push({
               messageId: mid,
               content: strippedContent,
+              model: payload.model,
             })
             const reactiveTurn = state.streamingTurns[state.streamingTurns.length - 1]
             turnIndex.set(mid, { turn: reactiveTurn, sessionId: sid })

@@ -11,8 +11,10 @@ import {
 
 /**
  * 渠道「模型角色映射」高级区(参照 CC Switch)。
- * 四角色行(Fable/Opus/Sonnet/Haiku)+ 自定义行 + 兜底模型。
+ * 四角色行(Fable/Opus/Sonnet/Haiku)+ 自定义行。
  * 表单 ↔ env 翻译走 utils/modelEnv 纯函数;每次变更 emit 构建后的 env 给父组件。
+ * 默认模型(ANTHROPIC_MODEL)已升格为主表单字段,由 ChannelForm 持有,
+ * 本组件 emit 的 env 恒不含该键(父组件保存时合并)。
  *
  * 折叠默认收起,有任一映射时默认展开。
  */
@@ -42,7 +44,14 @@ const ROLE_LABELS: Record<ModelRole, string> = {
   HAIKU: 'Haiku',
 }
 
-const form = ref<ModelMapForm>(parseModelEnv(props.modelEnv))
+/** 解析回显并剥离 fallback(默认模型归主表单,本组件不产出 ANTHROPIC_MODEL) */
+function parseWithoutFallback(env: Record<string, string>): ModelMapForm {
+  const f = parseModelEnv(env)
+  f.fallback = ''
+  return f
+}
+
+const form = ref<ModelMapForm>(parseWithoutFallback(props.modelEnv))
 // 有映射则默认展开
 const expanded = ref(hasAnyMapping(props.modelEnv))
 
@@ -50,7 +59,7 @@ const expanded = ref(hasAnyMapping(props.modelEnv))
 watch(
   () => props.modelEnv,
   (v) => {
-    form.value = parseModelEnv(v)
+    form.value = parseWithoutFallback(v)
     expanded.value = hasAnyMapping(v)
   },
 )
@@ -158,20 +167,6 @@ const datalistId = computed(() => `channel-model-map-opts-${props.domKey}`)
         />
       </div>
       <p class="text-[10px] text-muted-foreground/60 leading-snug -mt-1">{{ $t('settings.channelForm.modelMap.customHint') }}</p>
-
-      <!-- 兜底模型 -->
-      <div class="flex flex-col gap-1 pt-1.5 border-t border-border/50">
-        <span class="text-[11px] text-muted-foreground">{{ $t('settings.channelForm.modelMap.fallbackLabel') }}</span>
-        <input
-          v-model="form.fallback"
-          type="text"
-          :list="datalistId"
-          :placeholder="$t('common.optional')"
-          class="form-input font-mono text-[11px] py-1"
-          spellcheck="false"
-        />
-        <span class="text-[10px] text-muted-foreground/60">{{ $t('settings.channelForm.modelMap.fallbackHint') }}</span>
-      </div>
 
       <datalist :id="datalistId">
         <option v-for="m in modelOptions" :key="m" :value="m" />

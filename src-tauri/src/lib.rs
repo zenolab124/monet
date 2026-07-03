@@ -156,6 +156,7 @@ pub fn run() {
             automation::open_hooks_config,
             channels::list_channels,
             channels::save_channel,
+            channels::set_official_defaults,
             channels::delete_channel,
             channels::set_channel_enabled,
             channels::set_default_session_channel,

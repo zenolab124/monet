@@ -215,9 +215,13 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
 
   function setChannel(channelId: string | null, afterUuid: string | null) {
     if (channelId === internal.value.channelId) return
+    // 切渠道 = 换整套运行预设:清空本会话的模型/effort 覆盖,回落新渠道默认——
+    // 否则旧渠道语境下选的模型 ID 在新渠道可能不存在(官方 alias vs 第三方映射)
     internal.value = {
       ...internal.value,
       channelId,
+      modelId: null,
+      effort: null,
       channelMarks: [
         ...internal.value.channelMarks,
         { afterUuid, channelId, at: Date.now() },
