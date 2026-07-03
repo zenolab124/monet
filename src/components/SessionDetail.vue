@@ -88,6 +88,11 @@ const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const featureBannerShown = ref(false)
 const bannerResumed = ref(false)
 const bannerCwd = ref('')
+
+// 横幅自动消失:悬浮通知语义——出现后固定停留 BANNER_MS 淡出,与回合进度无关
+const BANNER_MS = 5000
+let bannerHideTimer = 0
+onUnmounted(() => clearTimeout(bannerHideTimer))
 interface HookEvent {
   subtype: 'hook_started' | 'hook_response'
   hook_name: string
@@ -122,8 +127,8 @@ listen<SessionConnectedPayload>('session-connected', (e) => {
     bannerCwd.value = p.cwd
     bannerHookEvents.value = []
     featureBannerShown.value = true
-    // 横幅出现/增高的贴底由 contentRO 兜(跟随态);脱离跟随时不强拽,
-    // 免得阅读历史的用户被新会话握手打断
+    clearTimeout(bannerHideTimer)
+    bannerHideTimer = window.setTimeout(() => { featureBannerShown.value = false }, BANNER_MS)
   }
 }).then(fn => { unlistenConnected = fn })
 
@@ -1000,8 +1005,14 @@ let scrollRafId = 0
 let programmaticScroll = false
 let programmaticTimer = 0
 
+/** 最近一次滚轮上滚意图时刻:窗口期内 contentRO 暂停贴底。
+ *  没有它,用户上滚与打字机/图片增高同帧竞争时,RO 在 layout 后把位置贴回、
+ *  onScroll 事后读到的已是贴底值——脱离手势被吞,表现为"滚不上去被拽回" */
+let wheelUpIntentAt = 0
+
 function onScrollWheel(e: WheelEvent) {
   if (e.deltaY < -3) {
+    wheelUpIntentAt = performance.now()
     const el = scrollContainer.value
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 5) return
     followStreaming.value = false
@@ -1026,8 +1037,10 @@ function onScroll() {
     if (delta < 0 && distFromBottom > 5) {
       followStreaming.value = false
     } else if (delta > 0 && !followStreaming.value) {
-      const threshold = Math.max(el.clientHeight * 0.5, 400)
-      if (distFromBottom < threshold) {
+      // 恢复阈值必须窄:曾是 max(半屏,400),触控板惯性衰减的微小下滑就会在
+      // 距底几百 px 处误恢复跟随,contentRO 随即贴底=「还差几行被强制吸走」。
+      // 收紧为"几乎滚到底才算想回去",滚到底本身另有 dist<2 兜底
+      if (distFromBottom < 48) {
         followStreaming.value = true
         resumedAt = performance.now()
       }
@@ -1043,6 +1056,7 @@ function onScroll() {
 function resumeFollow() {
   followStreaming.value = true
   resumedAt = performance.now()
+  wheelUpIntentAt = 0
   scrollToBottom(true)
 }
 
@@ -1088,6 +1102,8 @@ watch(scrollContentEl, (el) => {
   if (!contentRO) {
     contentRO = new ResizeObserver(() => {
       if (!followStreaming.value) return
+      // 用户刚有上滚意图:让手势先走,onScroll/onScrollWheel 正常完成脱离判定
+      if (performance.now() - wheelUpIntentAt < 150) return
       const sc = scrollContainer.value
       if (!sc) return
       const target = sc.scrollHeight - sc.clientHeight
@@ -1380,6 +1396,27 @@ async function onReload() {
       :anchors="anchorItems"
       :scroll-container="scrollContainer"
     />
+    <!-- 会话横幅:悬浮通知层,不占文档流——出现/增高不推挤消息、不触发滚动跟随,
+         根除"hook 事件陆续到达时横幅增高顶块/与用户上滚手势竞态拽回"。
+         最短停留 5s,首轮回合结束后到点淡出(scheduleBannerHide) -->
+    <Transition name="banner-float">
+      <div
+        v-if="interactive && featureBannerShown && effectiveSessionId"
+        class="absolute top-2 left-4 right-4 z-20 pointer-events-none"
+      >
+        <div class="pointer-events-auto shadow-paper-lifted rounded-md bg-popover/40 backdrop-blur-md border border-border">
+          <SessionBanner
+            :session-id="effectiveSessionId"
+            :resumed="bannerResumed"
+            :cwd="bannerCwd"
+            :model="settings.modelId"
+            :effort="(settings.effort as string | null)"
+            :features="htmlVisualEnabled ? [$t('settings.htmlVisual')] : []"
+            :hook-events="bannerHookEvents"
+          />
+        </div>
+      </div>
+    </Transition>
     <div
       ref="scrollContainer"
       class="h-full overflow-y-auto min-h-0 px-4 py-3 overscroll-contain relative"
@@ -1497,18 +1534,8 @@ async function onReload() {
         </div>
       </template>
 
-      <!-- 流式区:横幅 + pendingUserMessage + streamingTurns；turns 不主动清(下次 sendMessage 清),横幅位置才稳定 -->
-      <div v-if="(interactive && featureBannerShown) || stream.pendingUserMessage || stream.pendingImages?.length || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
-        <SessionBanner
-          v-if="interactive && featureBannerShown && effectiveSessionId"
-          :session-id="effectiveSessionId"
-          :resumed="bannerResumed"
-          :cwd="bannerCwd"
-          :model="settings.modelId"
-          :effort="(settings.effort as string | null)"
-          :features="htmlVisualEnabled ? [$t('settings.htmlVisual')] : []"
-          :hook-events="bannerHookEvents"
-        />
+      <!-- 流式区:pendingUserMessage + streamingTurns(横幅已移出文档流,悬浮层见上方) -->
+      <div v-if="stream.pendingUserMessage || stream.pendingImages?.length || stream.streamingTurns.length || (stream.streaming && stream.streamingTurns.length === 0)" class="space-y-4">
         <!-- 落账接管即让位:pendingLandedUuid 非 null 时历史条与气泡同帧原子切换,无双显无空窗 -->
         <div v-if="(stream.pendingUserMessage || stream.pendingImages?.length) && !pendingLandedUuid" class="user-msg-sticky">
           <div class="flex gap-3">
@@ -1734,6 +1761,16 @@ async function onReload() {
 </template>
 
 <style scoped>
+/* 会话横幅悬浮层:淡入下滑进场,淡出上滑退场 */
+.banner-float-enter-active,
+.banner-float-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.banner-float-enter-from,
+.banner-float-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
 .subagent-slide-enter-active,
 .subagent-slide-leave-active {
   transition: width 220ms cubic-bezier(0.32, 0.72, 0, 1), opacity 220ms ease;
