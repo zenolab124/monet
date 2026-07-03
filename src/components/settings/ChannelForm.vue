@@ -41,12 +41,22 @@ function onModelEnvUpdate(env: Record<string, string>) {
 
 const isVirtual = computed(() => props.channel?.id === APPLE_FM_CHANNEL_ID)
 
-/** 「获取模型列表」:探活当前渠道(已保存渠道用其 id),转圈态复用 probing ref */
+/** 「获取模型列表」:已保存渠道按 id 走文件;新建未保存渠道用表单值直探(无需先保存) */
 const probeTargetId = computed(() => props.channel?.id ?? id.value)
 const modelMapProbing = computed(() => !!probing.value[probeTargetId.value])
 async function onProbe() {
   const target = probeTargetId.value.trim()
   if (!target) return
+  if (isNew.value) {
+    const url = baseUrl.value.trim().replace(/\/+$/, '')
+    if (!url) {
+      formError.value = t('settings.channelForm.baseUrlError')
+      return
+    }
+    formError.value = null
+    await probeChannel(target, { baseUrl: url, token: authToken.value.trim(), protocol: protocol.value })
+    return
+  }
   await probeChannel(target)
 }
 

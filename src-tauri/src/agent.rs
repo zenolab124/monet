@@ -161,7 +161,7 @@ struct AgentCallResult {
 
 /// Agent 服务的公开入口——经 fallback 链调度
 pub(crate) fn request_blocking_pub(prompt: &str) -> Result<String, String> {
-    request_with_fallback(prompt, "claude-haiku-4-5-20251001", 2048)
+    request_with_fallback(prompt, HTTP_FALLBACK_AGENT_MODEL, 2048)
         .map(|r| r.text)
 }
 
@@ -172,7 +172,7 @@ fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, m
         Ok(AgentCallResult {
             text: r.text,
             channel_id,
-            model: "claude-haiku-4-5-20251001".to_string(),
+            model: OFFICIAL_AGENT_MODEL.to_string(),
             usage: r.usage,
         })
     } else {
@@ -194,6 +194,12 @@ fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, m
     }
 }
 
+/// official CLI 路径的记账模型名:与 spawn_agent 的 --model 一致(alias,CLI 解析到当代版本)。
+/// 写死带日期 ID 会失真——日志记的应是"我们指定了什么",实际解析由 CLI 决定
+const OFFICIAL_AGENT_MODEL: &str = "haiku";
+/// HTTP 直调兜底模型(渠道未声明 agent_model 时):第三方 API 不一定支持 alias,用完整 ID
+const HTTP_FALLBACK_AGENT_MODEL: &str = "claude-haiku-4-5-20251001";
+
 fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, String> {
     if let Some(cred) = crate::channels::resolve_agent_credentials() {
         let effective_model = cred.agent_model.as_deref().unwrap_or(model);
@@ -203,7 +209,7 @@ fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<A
     Ok(AgentCallResult {
         text: r.text,
         channel_id: "official".to_string(),
-        model: "claude-haiku-4-5-20251001".to_string(),
+        model: OFFICIAL_AGENT_MODEL.to_string(),
         usage: r.usage,
     })
 }
@@ -227,7 +233,7 @@ fn request_for_agent(prompt: &str, agent_key: &str) -> Result<String, String> {
 fn request_for_agent_inner(prompt: &str, agent_key: &str) -> Result<AgentCallResult, String> {
     if let Some(cred) = crate::channels::resolve_agent_for_feature(agent_key) {
         let channel_id = cred.id.clone();
-        let effective_model = cred.agent_model.as_deref().unwrap_or("claude-haiku-4-5-20251001").to_string();
+        let effective_model = cred.agent_model.as_deref().unwrap_or(HTTP_FALLBACK_AGENT_MODEL).to_string();
         match call_channel(&cred, prompt, &effective_model, 2048) {
             Ok(result) => return Ok(result),
             Err(e) => {
@@ -240,7 +246,7 @@ fn request_for_agent_inner(prompt: &str, agent_key: &str) -> Result<AgentCallRes
     Ok(AgentCallResult {
         text: r.text,
         channel_id: "official(fallback)".to_string(),
-        model: "claude-haiku-4-5-20251001".to_string(),
+        model: OFFICIAL_AGENT_MODEL.to_string(),
         usage: r.usage,
     })
 }
@@ -647,7 +653,7 @@ pub struct AgentTestResult {
 pub async fn test_agent_channel() -> AgentTestResult {
     let start = std::time::Instant::now();
     let result = tauri::async_runtime::spawn_blocking(|| {
-        request_with_fallback("Reply with exactly: OK", "claude-haiku-4-5-20251001", 32)
+        request_with_fallback("Reply with exactly: OK", HTTP_FALLBACK_AGENT_MODEL, 32)
     })
     .await
     .map_err(|e| e.to_string())

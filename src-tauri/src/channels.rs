@@ -67,6 +67,23 @@ pub const MODEL_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_MODEL",
 ];
 
+/// UI 实际管理的模型映射键子集(角色 _MODEL/_NAME + 自定义槽 + 默认模型)。
+/// save_channel 的替换语义只作用于这些键——_DESCRIPTION/_CAPABILITIES 等
+/// v1 无 UI 的手编键在重新保存映射时原样保留,不被整命名空间替换吞掉
+pub const UI_MANAGED_MODEL_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_MODEL",
+];
+
 fn cc_space_dir() -> PathBuf {
     config::data_dir().to_path_buf()
 }
@@ -615,13 +632,14 @@ pub fn save_channel(
             }
         }
 
-        // 模型角色映射:整命名空间替换语义。
-        // Some(map)=先移除全部 21 个托管键,再写入 map 中的非空值;None=完全不动这些键(向后兼容)。
+        // 模型角色映射:替换语义只作用于 UI 管理键。
+        // Some(map)=先移除 UI 管理键再写入 map 中的非空值;None=完全不动(向后兼容)。
+        // _DESCRIPTION/_CAPABILITIES 等无 UI 键不在替换范围,手编值保留
         if let Some(map) = model_env.as_ref() {
-            for k in MODEL_ENV_KEYS {
+            for k in UI_MANAGED_MODEL_ENV_KEYS {
                 env_obj.remove(*k);
             }
-            for k in MODEL_ENV_KEYS {
+            for k in UI_MANAGED_MODEL_ENV_KEYS {
                 if let Some(v) = map.get(*k) {
                     let v = v.trim();
                     if !v.is_empty() {
@@ -927,7 +945,25 @@ pub struct ProbeResult {
 }
 
 #[tauri::command]
-pub async fn probe_channel(id: String) -> Result<ProbeResult, String> {
+pub async fn probe_channel(
+    id: String,
+    // 表单值直探(新建未保存渠道的「获取模型列表」):三者齐传时绕过渠道文件
+    base_url: Option<String>,
+    token: Option<String>,
+    protocol: Option<String>,
+) -> Result<ProbeResult, String> {
+    // 表单值直探路径:不读文件、不校验 id 存在性
+    if let Some(url) = base_url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        let token = token.unwrap_or_default();
+        let protocol = protocol.unwrap_or_else(|| "anthropic".to_string());
+        return tauri::async_runtime::spawn_blocking(move || {
+            probe_channel_blocking(&url, &token, &protocol)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+    }
+
     if id == OFFICIAL_ID {
         return Ok(ProbeResult {
             online: true,

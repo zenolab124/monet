@@ -203,10 +203,22 @@ interface ProbeResult {
 const probeResults = ref<Record<string, ProbeResult>>({})
 const probing = ref<Record<string, boolean>>({})
 
-async function probeChannel(id: string): Promise<ProbeResult | null> {
+/** 表单值直探参数(新建未保存渠道的「获取模型列表」):齐传时 Rust 侧绕过渠道文件 */
+export interface ProbeDraft {
+  baseUrl: string
+  token: string
+  protocol: string
+}
+
+async function probeChannel(id: string, draft?: ProbeDraft): Promise<ProbeResult | null> {
   probing.value = { ...probing.value, [id]: true }
   try {
-    const result = await invoke<ProbeResult>('probe_channel', { id })
+    const result = await invoke<ProbeResult>('probe_channel', {
+      id,
+      baseUrl: draft?.baseUrl ?? null,
+      token: draft?.token ?? null,
+      protocol: draft?.protocol ?? null,
+    })
     probeResults.value = { ...probeResults.value, [id]: result }
     return result
   } catch {
