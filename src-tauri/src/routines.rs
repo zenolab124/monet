@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -12,22 +12,10 @@ use crate::config;
 use crate::scheduler;
 
 // ---------------------------------------------------------------------------
-// Data structures
+// Data structures（RoutineDefinition/RoutineSource 见 routine_types.rs 单一事实源）
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoutineDefinition {
-    pub id: String,
-    pub name: String,
-    pub cron_expression: String,
-    pub original_text: String,
-    pub prompt: String,
-    pub enabled: bool,
-    pub created_at: String,
-    pub last_run: Option<String>,
-    pub next_run: Option<String>,
-}
+pub use crate::routine_types::{RoutineDefinition, RoutineSource};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +35,8 @@ pub struct RoutineRow {
     pub definition: RoutineDefinition,
     pub last_execution: Option<RoutineExecutionLog>,
     pub is_running: bool,
+    /// 正在运行时的开始时刻（RFC3339），供前端显示已耗时
+    pub running_started_at: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +44,8 @@ pub struct RoutineRow {
 // ---------------------------------------------------------------------------
 
 static ROUTINES: Mutex<Option<Vec<RoutineDefinition>>> = Mutex::new(None);
-static RUNNING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// 运行中任务：id → 开始时刻（RFC3339）
+static RUNNING: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 // ---------------------------------------------------------------------------
 // File paths
@@ -129,12 +120,8 @@ fn load_routines() -> Vec<RoutineDefinition> {
 }
 
 fn save_routines(data: &[RoutineDefinition]) {
-    let path = routines_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
     if let Ok(json) = serde_json::to_string_pretty(data) {
-        let _ = fs::write(&path, json);
+        let _ = crate::config::atomic_write(&routines_path(), &json);
     }
 }
 
@@ -165,16 +152,27 @@ fn is_running(id: &str) -> bool {
         .lock()
         .unwrap()
         .as_ref()
-        .map_or(false, |s| s.contains(id))
+        .map_or(false, |s| s.contains_key(id))
 }
 
-fn set_running(id: &str, running: bool) {
+fn running_started_at(id: &str) -> Option<String> {
+    RUNNING
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|s| s.get(id).cloned())
+}
+
+fn set_running(id: &str, started_at: Option<&str>) {
     let mut guard = RUNNING.lock().unwrap();
-    let set = guard.get_or_insert_with(HashSet::new);
-    if running {
-        set.insert(id.to_string());
-    } else {
-        set.remove(id);
+    let map = guard.get_or_insert_with(HashMap::new);
+    match started_at {
+        Some(at) => {
+            map.insert(id.to_string(), at.to_string());
+        }
+        None => {
+            map.remove(id);
+        }
     }
 }
 
@@ -276,13 +274,22 @@ fn agent_cwd() -> PathBuf {
 
 fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
     let id = routine.id.clone();
+    let name = routine.name.clone();
     let prompt = routine.prompt.clone();
     let app = app.clone();
 
-    set_running(&id, true);
+    let started_at = Utc::now().to_rfc3339();
+    let t0 = std::time::Instant::now();
+    set_running(&id, Some(&started_at));
+
+    // 开始事件：前端据此立即刷新出「运行中」状态
+    let _ = app.emit("routine-started", serde_json::json!({
+        "routineId": &id,
+        "name": &name,
+        "startedAt": &started_at,
+    }));
 
     tauri::async_runtime::spawn_blocking(move || {
-        let started_at = Utc::now().to_rfc3339();
 
         // .app 环境 PATH 极简，裸命令名找不到 claude，必须走 locator 显式定位
         let output = match crate::claude_locator::locate() {
@@ -329,10 +336,14 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
             save_routines(routines);
         });
 
-        set_running(&id, false);
+        set_running(&id, None);
 
+        // 完成事件带结果概要：前端据此弹完成/失败 toast，无需再查日志
         let _ = app.emit("routine-executed", serde_json::json!({
             "routineId": id,
+            "name": name,
+            "exitCode": log.exit_code,
+            "durationMs": t0.elapsed().as_millis() as u64,
         }));
     });
 }
@@ -397,6 +408,7 @@ pub fn get_routines() -> Result<Vec<RoutineRow>, String> {
                 definition: r.clone(),
                 last_execution: read_latest_log(&r.id),
                 is_running: is_running(&r.id),
+                running_started_at: running_started_at(&r.id),
             })
             .collect()
     }))
@@ -428,6 +440,7 @@ pub fn create_routine(
         created_at: Utc::now().to_rfc3339(),
         last_run: None,
         next_run,
+        source: Some(RoutineSource::ui()),
     };
 
     with_routines(|routines| {

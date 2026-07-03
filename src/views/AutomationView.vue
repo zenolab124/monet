@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
@@ -111,6 +111,35 @@ async function onRunNow(r: RoutineRow) {
   } catch {
     // 已在运行中，忽略
   }
+}
+
+// --- 运行中已耗时：存在运行行时每秒 tick ---
+const nowTick = ref(Date.now())
+let tickTimer: number | null = null
+watch(() => routineRows.value.some(r => r.isRunning), (hasRunning) => {
+  if (hasRunning && tickTimer === null) {
+    nowTick.value = Date.now()
+    tickTimer = window.setInterval(() => { nowTick.value = Date.now() }, 1000)
+  } else if (!hasRunning && tickTimer !== null) {
+    window.clearInterval(tickTimer)
+    tickTimer = null
+  }
+}, { immediate: true })
+onBeforeUnmount(() => {
+  if (tickTimer !== null) window.clearInterval(tickTimer)
+})
+
+function runningElapsed(r: RoutineRow): string {
+  if (!r.runningStartedAt) return ''
+  const s = Math.max(0, Math.floor((nowTick.value - new Date(r.runningStartedAt).getTime()) / 1000))
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+/** 来源项目显示名：完整路径取末段 */
+function sourceProjectName(r: RoutineRow): string {
+  const p = r.source?.project
+  if (!p) return ''
+  return p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? ''
 }
 
 // --- 日志弹窗 ---
@@ -340,7 +369,19 @@ function renderLogContent(log: RoutineExecutionLog): string {
             </thead>
             <tbody>
               <tr v-for="r in routineRows" :key="r.id">
-                <td class="text-xs font-medium">{{ r.name }}</td>
+                <td class="text-xs font-medium">
+                  {{ r.name }}
+                  <div
+                    v-if="r.source"
+                    v-tooltip="r.source.kind === 'mcp' ? [r.source.project, r.source.client].filter(Boolean).join(' · ') : undefined"
+                    class="text-[10px] text-muted-foreground font-normal mt-0.5"
+                  >
+                    <template v-if="r.source.kind === 'mcp'">
+                      MCP<span v-if="sourceProjectName(r)"> · {{ sourceProjectName(r) }}</span>
+                    </template>
+                    <template v-else>{{ $t('automation.sourceUi') }}</template>
+                  </div>
+                </td>
                 <td>
                   <code class="text-[11px]">{{ r.cronExpression }}</code>
                   <div v-if="r.originalText" v-tooltip="r.originalText" class="text-[10px] text-muted-foreground mt-0.5 truncate">{{ r.originalText }}</div>
@@ -349,7 +390,11 @@ function renderLogContent(log: RoutineExecutionLog): string {
                   <span class="truncate-cmd cursor-pointer" @click="detailPopup = { title: r.name, content: r.prompt }">{{ r.prompt }}</span>
                 </td>
                 <td class="text-xs whitespace-nowrap">
-                  <span v-if="r.isRunning" class="text-accent">{{ $t('common.running') }}</span>
+                  <span v-if="r.isRunning" class="inline-flex items-center gap-1 text-accent">
+                    <span class="i-carbon-circle-dash w-3 h-3 animate-spin" />
+                    {{ $t('common.running') }}
+                    <span v-if="runningElapsed(r)" class="text-[10px] text-muted-foreground tabular-nums">{{ runningElapsed(r) }}</span>
+                  </span>
                   <span v-else-if="r.enabled" class="text-success">{{ $t('common.enabled') }}</span>
                   <span v-else class="text-muted-foreground">{{ $t('common.paused') }}</span>
                 </td>

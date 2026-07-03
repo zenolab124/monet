@@ -36,22 +36,16 @@ fn data_dir() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Routine data structures (mirrors routines.rs)
+// Routine data structures（与主 App / runner 共享单一事实源）
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RoutineDefinition {
-    id: String,
-    name: String,
-    cron_expression: String,
-    original_text: String,
-    prompt: String,
-    enabled: bool,
-    created_at: String,
-    last_run: Option<String>,
-    next_run: Option<String>,
-}
+#[path = "../routine_types.rs"]
+#[allow(dead_code)]
+mod routine_types;
+use routine_types::{RoutineDefinition, RoutineSource};
+
+/// initialize 握手记录的 MCP 客户端标识（如 claude-code 2.1.187）
+static CLIENT_INFO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 // ---------------------------------------------------------------------------
 // Routine file operations
@@ -77,8 +71,12 @@ fn save_routines(data: &[RoutineDefinition]) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    // 原子写：主 App / runner 可能并发读同一文件
     if let Ok(json_str) = serde_json::to_string_pretty(data) {
-        let _ = std::fs::write(&path, json_str);
+        let tmp = path.with_extension(format!("json.tmp{}", std::process::id()));
+        if std::fs::write(&tmp, json_str).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
     }
 }
 
@@ -129,7 +127,7 @@ fn main() {
         let method = req.get("method").and_then(Value::as_str).unwrap_or("");
 
         let response = match method {
-            "initialize" => handle_initialize(id.clone().unwrap_or(Value::Null)),
+            "initialize" => handle_initialize(id.clone().unwrap_or(Value::Null), &req),
             "tools/list" => handle_tools_list(id.clone().unwrap_or(Value::Null)),
             "tools/call" => handle_tools_call(id.clone().unwrap_or(Value::Null), &req),
             m if m.starts_with("notifications/") => continue,
@@ -159,7 +157,14 @@ fn write_response<W: Write>(out: &mut W, value: &Value) {
 // MCP protocol handlers
 // ---------------------------------------------------------------------------
 
-fn handle_initialize(id: Value) -> Value {
+fn handle_initialize(id: Value, req: &Value) -> Value {
+    // 记录客户端标识（如 claude-code 2.1.187），routine_create 写入来源用
+    if let Some(info) = req.pointer("/params/clientInfo") {
+        let name = info.get("name").and_then(Value::as_str).unwrap_or("unknown");
+        let version = info.get("version").and_then(Value::as_str).unwrap_or("");
+        let label = if version.is_empty() { name.to_string() } else { format!("{} {}", name, version) };
+        *CLIENT_INFO.lock().unwrap_or_else(|e| e.into_inner()) = Some(label);
+    }
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -417,6 +422,12 @@ fn handle_routine_create(arguments: &Value) -> Result<String, String> {
 
     validate_cron(&cron_expression)?;
 
+    // 来源：MCP server 继承 claude CLI 的 cwd，即发起会话的项目路径
+    let project = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
+    let client = CLIENT_INFO.lock().unwrap_or_else(|e| e.into_inner()).clone();
+
     let routine = RoutineDefinition {
         id: uuid::Uuid::new_v4().to_string(),
         name,
@@ -427,6 +438,7 @@ fn handle_routine_create(arguments: &Value) -> Result<String, String> {
         created_at: Utc::now().to_rfc3339(),
         last_run: None,
         next_run: compute_next_run(&cron_expression),
+        source: Some(RoutineSource::mcp(project, client)),
     };
 
     let mut routines = load_routines();

@@ -323,7 +323,11 @@
       "exitCode": "退出码 {code}",
       "stderr": "错误输出",
       "running": "运行中…"
-    }
+    },
+    "runDone": "「{name}」执行完成",
+    "runFailed": "「{name}」执行失败",
+    "runFailedHint": "点击任务行的日志图标查看错误详情",
+    "sourceUi": "手动创建"
   },
   "home": {
     "diagnosis": {

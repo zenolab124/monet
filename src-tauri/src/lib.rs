@@ -23,6 +23,8 @@ mod agent;
 mod automation;
 mod metadata;
 mod routines;
+/// pub：结构定义同时被 cc-space-mcp / cc-space-routine-runner 以 #[path] 方式复用
+pub mod routine_types;
 mod scheduler;
 #[cfg(target_os = "macos")]
 mod signing;

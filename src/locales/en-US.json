@@ -323,7 +323,11 @@
       "exitCode": "Exit code {code}",
       "stderr": "Stderr",
       "running": "Running…"
-    }
+    },
+    "runDone": "“{name}” completed",
+    "runFailed": "“{name}” failed",
+    "runFailedHint": "Open the log icon on the task row for details",
+    "sourceUi": "Created manually"
   },
   "home": {
     "diagnosis": {

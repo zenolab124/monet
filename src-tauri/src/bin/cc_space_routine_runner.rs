@@ -18,19 +18,12 @@ mod claude_locator;
 #[allow(dead_code)]
 mod tcc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RoutineDefinition {
-    id: String,
-    name: String,
-    cron_expression: String,
-    original_text: String,
-    prompt: String,
-    enabled: bool,
-    created_at: String,
-    last_run: Option<String>,
-    next_run: Option<String>,
-}
+// Routine 结构单一事实源：runner 的 update_routine_state 会整文件重写
+// routines.json，本地副本缺字段会抹掉其他写者（UI/MCP）的数据
+#[path = "../routine_types.rs"]
+#[allow(dead_code)]
+mod routine_types;
+use routine_types::RoutineDefinition;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -327,8 +320,12 @@ fn update_routine_state(routine_id: &str, last_run: &str) {
         r.next_run = compute_next_run(&r.cron_expression);
     }
 
+    // 原子写：锁只保证写者互斥，主 App/MCP 的读者不持锁，裸写仍有撕裂窗口
     if let Ok(json) = serde_json::to_string_pretty(&routines) {
-        let _ = fs::write(&path, json);
+        let tmp = path.with_extension(format!("json.tmp{}", std::process::id()));
+        if fs::write(&tmp, json).is_ok() {
+            let _ = fs::rename(&tmp, &path);
+        }
     }
 
     let _ = file.unlock();

@@ -1,6 +1,17 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import i18n from '../locales'
+import { useNotifications } from './useNotifications'
+
+export interface RoutineSource {
+  /** 创建入口：ui | mcp */
+  kind: string
+  /** 发起会话的项目路径（MCP 场景） */
+  project?: string
+  /** MCP 客户端标识（如 claude-code 2.1.187） */
+  client?: string
+}
 
 export interface RoutineDefinition {
   id: string
@@ -12,6 +23,8 @@ export interface RoutineDefinition {
   createdAt: string
   lastRun: string | null
   nextRun: string | null
+  /** 任务来源；旧数据无此字段 */
+  source?: RoutineSource
 }
 
 export interface RoutineExecutionLog {
@@ -26,6 +39,8 @@ export interface RoutineExecutionLog {
 export interface RoutineRow extends RoutineDefinition {
   lastExecution: RoutineExecutionLog | null
   isRunning: boolean
+  /** 正在运行时的开始时刻（RFC3339），供显示已耗时 */
+  runningStartedAt: string | null
 }
 
 const routines = ref<RoutineRow[]>([])
@@ -55,12 +70,41 @@ function refresh() {
   ensureLoaded(true)
 }
 
+interface RoutineExecutedPayload {
+  routineId: string
+  name: string
+  exitCode: number | null
+  durationMs: number
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
 let listenerReady = false
 async function initRoutineListener() {
   if (listenerReady) return
   listenerReady = true
-  await listen('routine-executed', () => {
+  const { notifyTransient } = useNotifications()
+  await listen('routine-started', () => {
     loadRoutines()
+  })
+  await listen<RoutineExecutedPayload>('routine-executed', (e) => {
+    loadRoutines()
+    const { name, exitCode, durationMs } = e.payload
+    if (exitCode === 0) {
+      notifyTransient(
+        i18n.global.t('automation.runDone', { name }),
+        formatDuration(durationMs),
+      )
+    } else {
+      notifyTransient(
+        i18n.global.t('automation.runFailed', { name }),
+        i18n.global.t('automation.runFailedHint'),
+      )
+    }
   })
   await listen('routines-changed', () => {
     loadRoutines()
@@ -95,6 +139,8 @@ async function deleteRoutine(id: string): Promise<void> {
 
 async function runNow(id: string): Promise<void> {
   await invoke('run_routine_now', { id })
+  // 立即刷新出「运行中」状态，不等 routine-started 事件（双保险）
+  await loadRoutines()
 }
 
 async function getRoutineLogs(id: string, limit?: number): Promise<RoutineExecutionLog[]> {
