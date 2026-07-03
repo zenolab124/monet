@@ -360,8 +360,9 @@ function openSettings() {
             @click="pickEffort(o.value)"
           >
             <span>{{ o.label }}</span>
+            <!-- 「默认」与「不支持」可同时成立(渠道默认档在当前模型上会被 CLI 静默降级),并列显示 -->
             <span v-if="o.value === defaultEffort" class="rc-hint">{{ $t('topbar.hintDefault') }}</span>
-            <span v-else-if="effortUnsupported(o.value)" class="rc-hint rc-warn">{{ $t('topbar.hintUnsupported') }}</span>
+            <span v-if="effortUnsupported(o.value)" class="rc-hint rc-warn">{{ $t('topbar.hintUnsupported') }}</span>
           </button>
         </div>
       </div>
@@ -408,6 +409,8 @@ function openSettings() {
 .rc-opt:hover { background: var(--muted); color: var(--foreground); }
 .rc-opt.sel { background: var(--primary); color: var(--primary-foreground); }
 .rc-hint { opacity: .6; font-size: 10px; margin-left: auto; flex-shrink: 0; }
+/* 双标注并列(默认+不支持):第二个不再 auto 推移,紧随首个 */
+.rc-hint + .rc-hint { margin-left: 0; }
 .rc-opt.sel .rc-hint { opacity: .8; }
 .rc-warn { color: var(--destructive); opacity: .75; }
 .rc-opt.sel .rc-warn { color: var(--primary-foreground); }
