@@ -6,6 +6,13 @@ use std::process::Command;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+// 与主 App 共享同一份定位逻辑源文件（单一事实源）；
+// runner 不引 app_lib 整个 crate，避免把 tauri 链进这个轻量二进制。
+// allow(dead_code)：runner 只消费 locate_lightweight，其余入口是主 App 用的
+#[path = "../claude_locator.rs"]
+#[allow(dead_code)]
+mod claude_locator;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RoutineDefinition {
@@ -69,18 +76,21 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Execute
+    // Execute：launchd 环境贫瘠，只走轻量探测（手动配置/缓存/候选扫描），
+    // login shell 重探测由主 App 负责并通过缓存共享结果
     let started_at = Utc::now().to_rfc3339();
-    let claude_path = find_claude();
 
-    let output = Command::new(&claude_path)
-        .arg("-p")
-        .arg(&routine.prompt)
-        .arg("--output-format")
-        .arg("text")
-        .arg("--no-session-persistence")
-        .current_dir(agent_cwd())
-        .output();
+    let output = match claude_locator::locate_lightweight() {
+        Ok(located) => Command::new(&located.path)
+            .arg("-p")
+            .arg(&routine.prompt)
+            .arg("--output-format")
+            .arg("text")
+            .arg("--no-session-persistence")
+            .current_dir(agent_cwd())
+            .output(),
+        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e)),
+    };
 
     let finished_at = Utc::now().to_rfc3339();
 
@@ -204,51 +214,6 @@ fn should_skip(routine: &RoutineDefinition) -> bool {
         Some(prev_scheduled) => last_run_dt >= prev_scheduled,
         None => false,
     }
-}
-
-fn find_claude() -> String {
-    let home = dirs::home_dir().unwrap_or_default();
-
-    let bin_name = if cfg!(target_os = "windows") {
-        "claude.exe"
-    } else {
-        "claude"
-    };
-
-    let mut candidates: Vec<PathBuf> = vec![
-        home.join(".local").join("bin").join(bin_name),
-        home.join(".cargo").join("bin").join(bin_name),
-    ];
-
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push(PathBuf::from("/usr/local/bin/claude"));
-        candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = env::var("APPDATA") {
-            candidates.push(PathBuf::from(appdata).join("npm").join(bin_name));
-        }
-        if let Ok(localappdata) = env::var("LOCALAPPDATA") {
-            candidates.push(PathBuf::from(localappdata).join("Programs").join("claude").join(bin_name));
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        candidates.push(PathBuf::from("/usr/local/bin/claude"));
-        candidates.push(home.join(".npm-global").join("bin").join("claude"));
-    }
-
-    for c in &candidates {
-        if c.exists() {
-            return c.to_string_lossy().to_string();
-        }
-    }
-
-    bin_name.to_string()
 }
 
 fn truncate(s: &str, max: usize) -> String {

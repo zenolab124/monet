@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useCliSettings, type SettingsField, type SchemaProperty } from '@/composables/useCliSettings'
 import { useUiState } from '@/composables/useUiState'
 import PermissionsEditor from './PermissionsEditor.vue'
+import ClaudeBinaryCard from './ClaudeBinaryCard.vue'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
@@ -285,6 +286,9 @@ async function onRemove(key: string) {
           </p>
         </div>
       </div>
+      <!-- Claude CLI 二进制路径 -->
+      <ClaudeBinaryCard />
+
       <!-- MCP Server 注册 -->
       <div class="mcp-card">
         <div class="flex items-center gap-2">

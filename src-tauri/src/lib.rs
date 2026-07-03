@@ -2,6 +2,8 @@ use tauri::Manager;
 
 mod cache;
 mod channels;
+/// pub：定位逻辑同时被 cc-space-routine-runner 以 #[path] 方式复用
+pub mod claude_locator;
 pub mod config;
 mod commands;
 mod discovery;
@@ -22,6 +24,8 @@ mod automation;
 mod metadata;
 mod routines;
 mod scheduler;
+#[cfg(target_os = "macos")]
+mod signing;
 mod workshop;
 mod cli_settings;
 mod translate;
@@ -86,6 +90,8 @@ pub fn run() {
             routines::startup_sync();
             // 后台刷新 CLI settings schema
             cli_settings::refresh_settings_schema();
+            // MCP 二进制启动自愈（存量 adhoc 安装收敛到稳定签名）
+            cli_settings::startup_sync_mcp();
             // Widget LaunchAgent 自动安装
             widget::ensure_launch_agent();
 
@@ -185,6 +191,9 @@ pub fn run() {
             cli_settings::get_mcp_status,
             cli_settings::register_mcp,
             cli_settings::unregister_mcp,
+            cli_settings::get_claude_binary_info,
+            cli_settings::set_claude_binary_path,
+            cli_settings::redetect_claude_binary,
             translate::translate_locale,
             translate::parse_language_intent,
             translate::list_external_locales,

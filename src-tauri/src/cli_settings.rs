@@ -142,7 +142,7 @@ pub fn refresh_settings_schema() {
 #[cfg(target_os = "macos")]
 fn is_codesigned(path: &std::path::Path) -> bool {
     std::process::Command::new("codesign")
-        .args(["--verify", "--quiet", path.to_string_lossy().as_ref()])
+        .args(["--verify", path.to_string_lossy().as_ref()])
         .output()
         .map_or(false, |o| o.status.success())
 }
@@ -204,14 +204,29 @@ fn install_mcp_binary() -> Result<PathBuf, String> {
             let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o755));
         }
         #[cfg(target_os = "macos")]
-        {
-            let _ = std::process::Command::new("codesign")
-                .args(["--sign", "-", "--force", target.to_string_lossy().as_ref()])
-                .output();
-        }
+        crate::signing::sign(&target, "com.ccspace.desktop.cc-space-mcp");
     }
 
     Ok(target)
+}
+
+/// 启动自愈：MCP 已注册则同步安装的二进制到最新版并收敛签名形态。
+/// register_mcp 是唯一安装入口，存量用户的旧 adhoc 安装靠这里迁移到稳定 DR
+pub fn startup_sync_mcp() {
+    std::thread::spawn(|| {
+        let registered = fs::read_to_string(claude_settings_path())
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .as_ref()
+            .and_then(|v| v.get("mcpServers"))
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|servers| servers.contains_key("cc-space"));
+        if registered {
+            if let Err(e) = install_mcp_binary() {
+                log::warn!("MCP binary startup sync failed: {}", e);
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -295,8 +310,13 @@ pub fn unregister_mcp() -> Result<(), String> {
     fs::write(&settings_path, json_str).map_err(|e| format!("写入失败: {}", e))
 }
 
-/// 定位 claude CLI 的真实二进制路径（解析 symlink）
+/// 定位 claude CLI 的真实二进制路径（解析 symlink）。
+/// locator 拿到的是入口路径（可能是软链），这里 canonicalize 到真实文件；
+/// versions 目录扫描保底——claude 装过但不在任何已知位置/PATH 时仍可读到二进制
 pub fn find_claude_binary() -> Option<PathBuf> {
+    if let Ok(located) = crate::claude_locator::locate() {
+        return Some(fs::canonicalize(&located.path).unwrap_or(located.path));
+    }
     let home = dirs::home_dir()?;
     let versions_dir = home.join(".local/share/claude/versions");
     if versions_dir.is_dir() {
@@ -310,15 +330,40 @@ pub fn find_claude_binary() -> Option<PathBuf> {
             return Some(latest.path());
         }
     }
-    let output = Command::new("sh")
-        .args(["-c", "readlink -f $(which claude) 2>/dev/null"])
-        .output()
-        .ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if !path.is_empty() && PathBuf::from(&path).is_file() {
-        return Some(PathBuf::from(path));
-    }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Claude CLI 路径设置（设置页消费）
+// ---------------------------------------------------------------------------
+
+// 三个 command 一律 async + spawn_blocking：探测失败路径要跑 login shell
+// （5s 超时），同步 command 会在主线程执行、冻结整个 UI
+
+#[tauri::command]
+pub async fn get_claude_binary_info() -> Result<crate::claude_locator::LocateInfo, String> {
+    tauri::async_runtime::spawn_blocking(crate::claude_locator::current_info)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_claude_binary_path(
+    path: Option<String>,
+) -> Result<crate::claude_locator::LocateInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::claude_locator::set_manual_path(path.as_deref())?;
+        Ok(crate::claude_locator::current_info())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn redetect_claude_binary() -> Result<crate::claude_locator::LocateInfo, String> {
+    tauri::async_runtime::spawn_blocking(crate::claude_locator::redetect_info)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 从 CLI 二进制中提取字段默认值（Python 读二进制 + 正则模式匹配，不经 Agent）

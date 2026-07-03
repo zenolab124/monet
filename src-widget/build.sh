@@ -6,8 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # --- 参数 ---
-TEAM_ID="${TEAM_ID:-BKJ3T6HL57}"
-SIGN_ID="${SIGN_ID:-Apple Development: 1255996058@qq.com (5P3LX4CJR7)}"
+# 签名身份默认本机自签长效证书（scripts/setup-signing.sh 创建）：
+# TCC 授权钉在 identifier+证书 的 designated requirement 上，重新构建不丢权限
+SIGN_ID="${SIGN_ID:-CC Space Signing}"
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/cc-space-signing.keychain-db"
+SIGNING_PASS_FILE="$HOME/.cc-space/signing/keychain-password"
 CONFIG="${1:-Release}"
 APP_BUNDLE="${2:-../src-tauri/target/release/bundle/macos/CC Space.app}"
 XCODE="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
@@ -25,9 +28,7 @@ DEVELOPER_DIR="$XCODE" xcodebuild build \
     -project CCSpaceWidget.xcodeproj \
     -target CCSpaceWidgetExtension \
     -configuration "$CONFIG" \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic \
-    -allowProvisioningUpdates \
+    CODE_SIGNING_ALLOWED=NO \
     CONFIGURATION_BUILD_DIR=build/"$CONFIG" \
     -quiet
 
@@ -45,10 +46,22 @@ cp ../src-tauri/target/release/widget-updater "$APP_BUNDLE/Contents/MacOS/widget
 
 # --- 签名 ---
 echo "=> Signing..."
+# 自签证书钥匙串可能处于锁定状态，签名前解锁
+if [ -f "$SIGNING_PASS_FILE" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
+    security unlock-keychain -p "$(cat "$SIGNING_PASS_FILE")" "$SIGNING_KEYCHAIN"
+fi
 codesign --force --options runtime --sign "$SIGN_ID" \
     --entitlements CCSpaceWidgetExtension.entitlements \
     "$PLUGINS_DIR/CCSpaceWidgetExtension.appex"
-codesign --force --options runtime --sign "$SIGN_ID" "$APP_BUNDLE"
+# 辅助二进制单独签固定 identifier：被安装到 ~/.cc-space/bin 后 DR 依旧稳定
+for BIN in "$APP_BUNDLE/Contents/MacOS/"*; do
+    NAME=$(basename "$BIN")
+    [ "$NAME" = "app" ] && continue
+    codesign --force --options runtime --sign "$SIGN_ID" \
+        --identifier "com.ccspace.desktop.$NAME" "$BIN"
+done
+codesign --force --options runtime --sign "$SIGN_ID" \
+    --entitlements ../src-tauri/CCSpace.entitlements "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
 # --- 打 DMG ---

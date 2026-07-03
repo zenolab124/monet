@@ -234,9 +234,8 @@ fn scan_channel_ids() -> Vec<String> {
 }
 
 fn save_app_settings(settings: &AppSettings) -> Result<(), String> {
-    fs::create_dir_all(cc_space_dir()).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(), text).map_err(|e| e.to_string())
+    crate::config::atomic_write(&settings_path(), &text).map_err(|e| e.to_string())
 }
 
 fn write_json_0600(path: &Path, value: &Value) -> Result<(), String> {

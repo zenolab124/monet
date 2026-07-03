@@ -68,11 +68,7 @@ pub fn install_runner_binary() -> Result<(), String> {
             let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
         }
         #[cfg(target_os = "macos")]
-        {
-            let _ = std::process::Command::new("codesign")
-                .args(["--sign", "-", "--force", target.to_string_lossy().as_ref()])
-                .output();
-        }
+        crate::signing::sign(&target, "com.ccspace.desktop.cc-space-routine-runner");
     }
 
     Ok(())
@@ -81,7 +77,7 @@ pub fn install_runner_binary() -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn is_codesigned(path: &Path) -> bool {
     std::process::Command::new("codesign")
-        .args(["--verify", "--quiet", path.to_string_lossy().as_ref()])
+        .args(["--verify", path.to_string_lossy().as_ref()])
         .output()
         .map_or(false, |o| o.status.success())
 }

@@ -81,17 +81,22 @@ fn read_app_setting(key: &str) -> Option<serde_json::Value> {
 
 fn write_app_setting(key: &str, value: serde_json::Value) {
     let path = app_settings_path();
-    let mut settings: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    // 文件存在但解析失败时拒绝覆写，避免带着空 map 清掉其他设置键
+    let mut settings: serde_json::Map<String, serde_json::Value> =
+        match fs::read_to_string(&path) {
+            Ok(s) => match serde_json::from_str(&s) {
+                Ok(m) => m,
+                Err(_) => return,
+            },
+            Err(_) => Default::default(),
+        };
     if value.is_null() {
         settings.remove(key);
     } else {
         settings.insert(key.to_string(), value);
     }
     if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(settings)) {
-        let _ = fs::write(&path, json);
+        let _ = crate::config::atomic_write(&path, &json);
     }
 }
 
@@ -279,14 +284,19 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let started_at = Utc::now().to_rfc3339();
 
-        let output = Command::new("claude")
-            .arg("-p")
-            .arg(&prompt)
-            .arg("--output-format")
-            .arg("text")
-            .arg("--no-session-persistence")
-            .current_dir(agent_cwd())
-            .output();
+        // .app 环境 PATH 极简，裸命令名找不到 claude，必须走 locator 显式定位
+        let output = match crate::claude_locator::locate() {
+            Ok(located) => Command::new(&located.path)
+                .arg("-p")
+                .arg(&prompt)
+                .arg("--output-format")
+                .arg("text")
+                .arg("--no-session-persistence")
+                .env("PATH", crate::streaming::enhanced_path())
+                .current_dir(agent_cwd())
+                .output(),
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e)),
+        };
 
         let finished_at = Utc::now().to_rfc3339();
 

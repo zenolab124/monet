@@ -5,6 +5,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>CC Space needs local network access for network diagnostics and connecting to local development servers.</string>
 
+	<key>NSAppleEventsUsageDescription</key>
+	<string>CC Space uses AppleScript to open Terminal for resuming sessions and to manage scheduled-task wake and sleep.</string>
+
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ccspace._tcp</string>

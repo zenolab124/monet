@@ -11,7 +11,8 @@
     "mcp:build": "cargo build --bin cc-space-mcp --manifest-path src-tauri/Cargo.toml",
     "mcp:build:release": "cargo build --release --bin cc-space-mcp --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "pnpm tauri build && src-widget/build.sh"
   },
   "author": "",
   "license": "MIT",

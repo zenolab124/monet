@@ -103,27 +103,17 @@ pub enum StreamEvent {
     },
 }
 
-/// 查找 claude 可执行文件路径
+/// 查找 claude 可执行文件路径（薄 wrapper，事实源在 claude_locator）。
+/// 探测全败时保留 env fallback 兜底，行为不比旧版倒退；
+/// 需要结构化错误的消费方（定时任务、设置页）直接用 claude_locator。
 pub fn find_claude() -> (String, Vec<String>) {
-    let candidates = [
-        "/opt/homebrew/bin/claude",
-        "/usr/local/bin/claude",
-    ];
-
-    let home = dirs::home_dir().unwrap_or_default();
-    let home_candidates = [
-        home.join(".claude/local/bin/claude"),
-        home.join(".npm-global/bin/claude"),
-    ];
-
-    for path in candidates.iter().map(|s| std::path::PathBuf::from(s)).chain(home_candidates) {
-        if path.is_file() {
-            return (path.to_string_lossy().into_owned(), vec![]);
+    match crate::claude_locator::locate() {
+        Ok(l) => (l.path.to_string_lossy().into_owned(), vec![]),
+        Err(e) => {
+            eprintln!("[claude-locator] {}", e);
+            ("/usr/bin/env".to_string(), vec!["claude".to_string()])
         }
     }
-
-    // fallback: 用 env 解析
-    ("/usr/bin/env".to_string(), vec!["claude".to_string()])
 }
 
 /// 构建增强 PATH 环境变量
@@ -136,22 +126,31 @@ pub fn enhanced_path() -> String {
         format!("{}/.local/bin", home.display()),
     ];
 
-    // 检测 nvm node 路径
+    // 检测 nvm node 路径（语义化取最新——字典序会让 v9.x 压过 v18.x）
     let nvm_dir = home.join(".nvm/versions/node");
     if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
-        let mut versions: Vec<_> = entries
+        let latest = entries
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .map(|e| e.path())
-            .collect();
-        versions.sort();
-        if let Some(latest) = versions.last() {
-            extra_paths.push(format!("{}/bin", latest.display()));
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let ver: Vec<u32> = name
+                    .trim_start_matches('v')
+                    .split('.')
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                (ver.len() == 3).then(|| (ver, e.path()))
+            })
+            .max_by(|a, b| a.0.cmp(&b.0));
+        if let Some((_, path)) = latest {
+            extra_paths.push(format!("{}/bin", path.display()));
         }
     }
 
+    // Windows 下 PATH 分隔符是 ';'，硬编码 ':' 会损坏子进程 PATH
+    let sep = if cfg!(windows) { ";" } else { ":" };
     let existing = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{}", extra_paths.join(":"), existing)
+    format!("{}{}{}", extra_paths.join(sep), sep, existing)
 }
 
 /// 向长活进程 stdin 写入一行 JSON
