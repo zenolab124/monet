@@ -288,7 +288,11 @@ async function openInTerminal() {
       channel: props.resolvedChannelId,
     })
   } catch (e) {
-    notifyTransient(t('topbar.terminalFailed'), String(e))
+    if (String(e).includes('AUTOMATION_DENIED')) {
+      notifyTransient(t('topbar.automationDenied'), t('topbar.automationDeniedHint'))
+    } else {
+      notifyTransient(t('topbar.terminalFailed'), String(e))
+    }
   }
 }
 

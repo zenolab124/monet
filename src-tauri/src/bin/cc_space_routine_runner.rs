@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 #[allow(dead_code)]
 mod claude_locator;
 
+// TCC 权限检测（--health-check 模式），与主 App 共享同一份源文件
+#[path = "../tcc.rs"]
+#[allow(dead_code)]
+mod tcc;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RoutineDefinition {
@@ -39,6 +44,20 @@ struct ExecutionLog {
 }
 
 fn main() {
+    // 权限体检模式：由主 App 经 launchd 触发（与真实定时任务相同的 TCC
+    // 归因语境），自检后写结果文件退出。--prompt <kind> 时对指定权限发起
+    // 请求式调用（弹系统授权窗，用户在权限页面点击驱动）
+    if env::args().any(|a| a == "--health-check") {
+        let args: Vec<String> = env::args().collect();
+        let prompt = args
+            .iter()
+            .position(|a| a == "--prompt")
+            .and_then(|i| args.get(i + 1))
+            .cloned();
+        run_health_check(prompt.as_deref());
+        return;
+    }
+
     let routine_id = parse_args();
 
     let routines = load_routines();
@@ -116,6 +135,49 @@ fn main() {
     write_log(&log);
     update_routine_state(&routine_id, &started_at);
     maybe_sleep_after_run();
+}
+
+fn run_health_check(prompt: Option<&str>) {
+    // 预热 System Events：open 走 LaunchServices 不需要自动化权限，
+    // 避免 AE 查询因目标未运行返回 procNotFound
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open")
+            .args(["-g", "-a", "System Events"])
+            .output();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        // 请求式调用：弹系统授权窗并阻塞至用户响应，随后照常快照
+        match prompt {
+            Some("automationSystemEvents") => {
+                let _ = tcc::check_automation("com.apple.systemevents", true);
+            }
+            Some("accessibility") => {
+                let _ = tcc::prompt_accessibility();
+            }
+            Some("screenCapture") => {
+                let _ = tcc::request_screen_capture();
+            }
+            _ => {}
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = prompt;
+    let result = serde_json::json!({
+        "checkedAt": Utc::now().to_rfc3339(),
+        "permissions": {
+            "automationSystemEvents": tcc::check_automation("com.apple.systemevents", false),
+            "accessibility": tcc::check_accessibility(),
+            "screenCapture": tcc::check_screen_capture(),
+            "fullDiskAccess": tcc::check_full_disk_access(),
+        },
+    });
+    // 结果路径与主 App 读取侧硬编码一致（launchd 语境无 CC_SPACE_DATA_DIR）
+    let dir = dirs::home_dir().unwrap_or_default().join(".cc-space");
+    let _ = fs::create_dir_all(&dir);
+    let _ = fs::write(
+        dir.join("permissions-runner.json"),
+        serde_json::to_string_pretty(&result).unwrap_or_default(),
+    );
 }
 
 fn parse_args() -> String {

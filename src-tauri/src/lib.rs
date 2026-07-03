@@ -26,6 +26,7 @@ mod routines;
 mod scheduler;
 #[cfg(target_os = "macos")]
 mod signing;
+mod tcc;
 mod workshop;
 mod cli_settings;
 mod translate;
@@ -124,6 +125,11 @@ pub fn run() {
             commands::get_perf_stats,
             commands::delete_session,
             commands::resume_in_terminal,
+            commands::check_system_permissions,
+            commands::request_system_permission,
+            commands::open_privacy_settings,
+            commands::run_runner_health_check,
+            commands::get_runner_health_snapshot,
             commands::resume_in_vscode,
             commands::open_in_finder,
             commands::start_streaming,

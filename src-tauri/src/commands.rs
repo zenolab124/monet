@@ -69,7 +69,7 @@ pub fn delete_session(project_id: String, session_id: String) -> Result<(), Stri
 /// 终端用渠道原文件(非 runtime 合成):与「终端可直接复用渠道文件」的设计一致,
 /// 终端环境的变量残留属用户自己的 shell 管辖,不做防御注入
 #[tauri::command]
-pub fn resume_in_terminal(
+pub async fn resume_in_terminal(
     cwd: String,
     session_id: String,
     channel: Option<String>,
@@ -96,12 +96,222 @@ pub fn resume_in_terminal(
         end tell"#,
         escaped_cwd, settings_part, session_id
     );
-    std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
+    // osascript 会阻塞在系统自动化授权弹窗上：放 blocking 线程等待结果，
+    // 授权被拒（-1743）时返回前端可识别的错误标记
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("-1743") || stderr.contains("Not authorized") {
+            return Err(format!("AUTOMATION_DENIED: {}", stderr.trim()));
+        }
+        let msg = stderr.trim().to_string();
+        return Err(if msg.is_empty() {
+            format!("osascript exited with {}", output.status)
+        } else {
+            msg
+        });
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 权限体检（设置页）：主 app 与 runner 两本 TCC 账，见 tcc.rs
+// ---------------------------------------------------------------------------
+
+/// 静默检测主 app 账本的各项系统权限（零弹窗）
+#[tauri::command]
+pub fn check_system_permissions() -> serde_json::Value {
+    serde_json::json!({
+        "automationTerminal": crate::tcc::check_automation("com.apple.Terminal", false),
+        "accessibility": crate::tcc::check_accessibility(),
+        "screenCapture": crate::tcc::check_screen_capture(),
+        "fullDiskAccess": crate::tcc::check_full_disk_access(),
+    })
+}
+
+/// 主动触发系统授权弹窗（仅用户点击驱动），返回请求后的最新状态。
+/// denied 记录系统不会再弹：先 tccutil reset 清掉本 app 的旧记录（等价
+/// 在系统设置里删除条目——频繁构建时代的旧 DR 记录靠这个自愈），再触发
+#[tauri::command]
+pub async fn request_system_permission(kind: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let reset_if_denied = |service: &str, currently: &str| {
+            if currently == "denied" {
+                let _ = std::process::Command::new("tccutil")
+                    .args(["reset", service, "com.ccspace.desktop"])
+                    .output();
+            }
+        };
+        match kind.as_str() {
+            "automationTerminal" => {
+                reset_if_denied(
+                    "AppleEvents",
+                    crate::tcc::check_automation("com.apple.Terminal", false),
+                );
+                // 发一个无害真实事件：目标未运行会先拉起，未决则弹授权窗
+                let _ = std::process::Command::new("osascript")
+                    .args(["-e", r#"tell application "Terminal" to count windows"#])
+                    .output();
+                Ok(crate::tcc::check_automation("com.apple.Terminal", false).to_string())
+            }
+            "screenCapture" => {
+                reset_if_denied("ScreenCapture", crate::tcc::check_screen_capture());
+                Ok(crate::tcc::request_screen_capture().to_string())
+            }
+            "accessibility" => {
+                reset_if_denied("Accessibility", crate::tcc::check_accessibility());
+                Ok(crate::tcc::prompt_accessibility().to_string())
+            }
+            _ => Err(format!("unsupported permission kind: {}", kind)),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 打开系统设置对应隐私面板（白名单锚点）
+#[tauri::command]
+pub fn open_privacy_settings(panel: String) -> Result<(), String> {
+    let anchor = match panel.as_str() {
+        "automation" => "Privacy_Automation",
+        "accessibility" => "Privacy_Accessibility",
+        "screenRecording" => "Privacy_ScreenCapture",
+        "allFiles" => "Privacy_AllFiles",
+        "localNetwork" => "Privacy_LocalNetwork",
+        _ => return Err(format!("unknown panel: {}", panel)),
+    };
+    std::process::Command::new("open")
+        .arg(format!(
+            "x-apple.systempreferences:com.apple.preference.security?{}",
+            anchor
+        ))
         .spawn()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// runner 账本与主 app 分离（TCC 按 responsible process 记账），必须经
+/// launchd 启动才是真实语境——主 app 直接 spawn 的话归因会挂到主 app 头上
+#[tauri::command]
+pub async fn run_runner_health_check(
+    prompt_kind: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if cfg!(not(target_os = "macos")) {
+        return Err("macOS only".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::scheduler::install_runner_binary()?;
+        let runner = crate::scheduler::runner_binary_path();
+        let result_path = runner_health_result_path();
+        let _ = std::fs::remove_file(&result_path);
+
+        // 与真实 routine 完全一致的启动机制（plist + bootstrap 到 gui 域）。
+        // 不用 launchctl submit：submit 的 job 挂在提交者会话下，会继承
+        // 主 app 的 TCC 语境，检测结果失真
+        let label = "com.cc-space.health-check";
+        let uid = std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|_| "501".to_string());
+        let domain = format!("gui/{}", uid);
+        let service_target = format!("{}/{}", domain, label);
+
+        // prompt 模式：runner 对指定权限发起请求式调用（弹系统授权窗）。
+        // kind 走白名单防 plist 注入
+        let prompt_args = match prompt_kind.as_deref() {
+            Some(k @ ("automationSystemEvents" | "accessibility" | "screenCapture")) => {
+                format!("\t\t<string>--prompt</string>\n\t\t<string>{}</string>\n", k)
+            }
+            Some(other) => return Err(format!("unsupported prompt kind: {}", other)),
+            None => String::new(),
+        };
+        let plist_path = std::env::temp_dir().join("com.cc-space.health-check.plist");
+        let plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>{}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{}</string>
+		<string>--health-check</string>
+{}	</array>
+	<key>RunAtLoad</key><true/>
+</dict>
+</plist>
+"#,
+            label,
+            runner.display(),
+            prompt_args
+        );
+        std::fs::write(&plist_path, &plist).map_err(|e| e.to_string())?;
+
+        let _ = std::process::Command::new("launchctl")
+            .args(["bootout", &service_target])
+            .output();
+        let bootstrap = std::process::Command::new("launchctl")
+            .args(["bootstrap", &domain, &plist_path.to_string_lossy()])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !bootstrap.status.success() {
+            let _ = std::fs::remove_file(&plist_path);
+            return Err(format!(
+                "launchctl bootstrap failed: {}",
+                String::from_utf8_lossy(&bootstrap.stderr).trim()
+            ));
+        }
+
+        // prompt 模式会阻塞在系统授权窗上，等待时长给足用户反应时间
+        let max_polls = if prompt_kind.is_some() { 600 } else { 50 };
+        let mut content = None;
+        for _ in 0..max_polls {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if result_path.exists() {
+                // 结果文件出现后稍等写完
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                content = std::fs::read_to_string(&result_path).ok();
+                break;
+            }
+        }
+        let _ = std::process::Command::new("launchctl")
+            .args(["bootout", &service_target])
+            .output();
+        let _ = std::fs::remove_file(&plist_path);
+
+        let Some(text) = content else {
+            return Err("health check timed out".to_string());
+        };
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 读取上次 runner 健康检查结果（不触发新检测）
+#[tauri::command]
+pub fn get_runner_health_snapshot() -> Option<serde_json::Value> {
+    std::fs::read_to_string(runner_health_result_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// 与 runner 侧硬编码一致：launchd 语境没有 CC_SPACE_DATA_DIR，
+/// 双侧统一走默认家目录，避免 dev 环境变量导致读写错位
+fn runner_health_result_path() -> std::path::PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".cc-space")
+        .join("permissions-runner.json")
 }
 
 /// 在 VSCode 中打开项目目录

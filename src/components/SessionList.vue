@@ -141,6 +141,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { Menu } from '@tauri-apps/api/menu'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useConfirm } from '@/composables/useConfirm'
+import { useNotifications } from '@/composables/useNotifications'
 import { readStoredChannelId } from '@/composables/useSessionSettings'
 import { resolveChannel, refreshChannels } from '@/composables/useChannels'
 
@@ -155,7 +156,16 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       action: async () => {
         await refreshChannels()
         const channel = resolveChannel(readStoredChannelId(session.id))
-        await invoke('resume_in_terminal', { cwd: session.cwd!, sessionId: session.id, channel })
+        try {
+          await invoke('resume_in_terminal', { cwd: session.cwd!, sessionId: session.id, channel })
+        } catch (err) {
+          const { notifyTransient } = useNotifications()
+          const denied = String(err).includes('AUTOMATION_DENIED')
+          notifyTransient(
+            denied ? t('topbar.automationDenied') : t('topbar.terminalFailed'),
+            denied ? t('topbar.automationDeniedHint') : String(err),
+          )
+        }
       },
     })
   }

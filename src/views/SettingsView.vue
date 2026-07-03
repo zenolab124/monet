@@ -19,6 +19,7 @@ import PaperSelect from '@/components/settings/PaperSelect.vue'
 import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
+import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 import { useAppDefaults } from '@/composables/useAppDefaults'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
@@ -165,7 +166,7 @@ const agentLogsStats = computed(() => {
   return { total: logs.length, totalInput, totalOutput, successCount }
 })
 
-type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'lab' | 'diag'
+type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'permissions' | 'lab' | 'diag'
 const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
@@ -383,6 +384,9 @@ function onSaved() {
       </button>
       <button :class="['side-item', { active: activeTab === 'claude-code' }]" @click="activeTab = 'claude-code'">
         <span class="i-carbon-json w-3.5 h-3.5" />Claude Code
+      </button>
+      <button :class="['side-item', { active: activeTab === 'permissions' }]" @click="activeTab = 'permissions'">
+        <span class="i-carbon-security w-3.5 h-3.5" />{{ $t('settings.permissionsNav') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
         <span class="i-carbon-chemistry w-3.5 h-3.5" />{{ $t('settings.lab') }}
@@ -889,6 +893,12 @@ function onSaved() {
         <!-- ====== Claude Code 配置 ====== -->
         <section v-show="activeTab === 'claude-code'" class="cli-section">
           <ClaudeCodeSettings />
+        </section>
+
+        <!-- ====== 权限体检 ====== -->
+        <section v-show="activeTab === 'permissions'">
+          <h2 class="section-title">{{ $t('settings.permCheck.title') }}</h2>
+          <PermissionsPanel />
         </section>
 
         <!-- ====== 实验室 ====== -->
