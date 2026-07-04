@@ -6,6 +6,7 @@ import { useCliSettings, type SettingsField, type SchemaProperty } from '@/compo
 import { useUiState } from '@/composables/useUiState'
 import PermissionsEditor from './PermissionsEditor.vue'
 import ClaudeBinaryCard from './ClaudeBinaryCard.vue'
+import ClaudeEnvCard from './ClaudeEnvCard.vue'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
@@ -286,6 +287,9 @@ async function onRemove(key: string) {
           </p>
         </div>
       </div>
+      <!-- 本地环境:版本检查 / 升级 / 冲突诊断 -->
+      <ClaudeEnvCard />
+
       <!-- Claude CLI 二进制路径 -->
       <ClaudeBinaryCard />
 

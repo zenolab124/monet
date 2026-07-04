@@ -30,6 +30,7 @@ mod scheduler;
 mod signing;
 mod tcc;
 mod workshop;
+mod cli_env;
 mod cli_settings;
 mod translate;
 mod turn_signal;
@@ -160,6 +161,9 @@ pub fn run() {
             turn_signal::turn_signal_status,
             turn_signal::turn_signal_install,
             turn_signal::turn_signal_uninstall,
+            cli_env::claude_env_check,
+            cli_env::claude_env_upgrade,
+            cli_env::claude_env_diagnose,
             channels::list_channels,
             channels::save_channel,
             channels::set_official_defaults,
