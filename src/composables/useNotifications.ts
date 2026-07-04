@@ -209,8 +209,9 @@ let notifPermissionAsked = false
 /**
  * 应用窗口非前台或最小化时发系统通知;前台抑制。
  * 首次需要发送时才请求授权;权限被拒/发送失败静默降级,不影响应用内 toast。
+ * export：会话状态跟踪扩展(useTurnSignals)复用同一抑制与授权逻辑。
  */
-async function maybeNotifySystem(title: string, body: string, extra?: { actionTypeId?: string; extra?: Record<string, unknown> }) {
+export async function maybeNotifySystem(title: string, body: string, extra?: { actionTypeId?: string; extra?: Record<string, unknown> }) {
   try {
     const win = getCurrentWindow()
     const [focused, minimized] = await Promise.all([

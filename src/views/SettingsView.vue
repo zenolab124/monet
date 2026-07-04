@@ -21,6 +21,7 @@ import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
+import TurnSignalCard from '@/components/settings/TurnSignalCard.vue'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
@@ -166,7 +167,7 @@ const agentLogsStats = computed(() => {
   return { total: logs.length, totalInput, totalOutput, successCount }
 })
 
-type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'permissions' | 'lab' | 'diag'
+type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'permissions' | 'extensions' | 'lab' | 'diag'
 const activeTab = ref<Tab>('general')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
@@ -388,6 +389,9 @@ function onSaved() {
       </button>
       <button :class="['side-item', { active: activeTab === 'permissions' }]" @click="activeTab = 'permissions'">
         <span class="i-carbon-security w-3.5 h-3.5" />{{ $t('settings.permissionsNav') }}
+      </button>
+      <button :class="['side-item', { active: activeTab === 'extensions' }]" @click="activeTab = 'extensions'">
+        <span class="i-carbon-plug w-3.5 h-3.5" />{{ $t('settings.extensions') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
         <span class="i-carbon-chemistry w-3.5 h-3.5" />{{ $t('settings.lab') }}
@@ -893,6 +897,15 @@ function onSaved() {
         <section v-show="activeTab === 'permissions'">
           <h2 class="section-title">{{ $t('settings.permCheck.title') }}</h2>
           <PermissionsPanel />
+        </section>
+
+        <!-- ====== 扩展 ====== -->
+        <section v-show="activeTab === 'extensions'">
+          <h2 class="section-title">{{ $t('settings.extensions') }}</h2>
+          <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
+            {{ $t('settings.extensionsDesc') }}
+          </p>
+          <TurnSignalCard />
         </section>
 
         <!-- ====== 实验室 ====== -->

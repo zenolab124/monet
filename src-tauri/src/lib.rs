@@ -32,6 +32,7 @@ mod tcc;
 mod workshop;
 mod cli_settings;
 mod translate;
+mod turn_signal;
 mod widget;
 
 
@@ -83,6 +84,8 @@ pub fn run() {
             }
             // 启动文件监控
             watcher::start(app.handle());
+            // 会话状态跟踪扩展：已安装则恢复信号监听
+            turn_signal::start_listener_if_installed(app.handle().clone());
             // 渠道 runtime 残留清理(上次异常退出可能留下含 token 的合成文件)
             channels::cleanup_runtime_dir();
             // AgentService 常驻进程
@@ -154,6 +157,9 @@ pub fn run() {
             automation::get_hooks_config,
             automation::get_hooks_stats,
             automation::open_hooks_config,
+            turn_signal::turn_signal_status,
+            turn_signal::turn_signal_install,
+            turn_signal::turn_signal_uninstall,
             channels::list_channels,
             channels::save_channel,
             channels::set_official_defaults,

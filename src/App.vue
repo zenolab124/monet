@@ -18,6 +18,7 @@ import { useSessions } from '@/composables/useSessions'
 import { useUiState } from '@/composables/useUiState'
 import { initPermissionListener } from '@/composables/usePermissionRequests'
 import { initStreamListeners } from '@/composables/useStreaming'
+import { initTurnSignalListener } from '@/composables/useTurnSignals'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
 import { useRoutines } from '@/composables/useRoutines'
 import { initShortcuts } from '@/composables/useShortcuts'
@@ -160,6 +161,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   // 全局事件监听:整个 app 生命周期各注册一次
   await initStreamListeners()
+  await initTurnSignalListener()
   await initPermissionListener()
   await initNotificationLayer()
   await initShortcuts()

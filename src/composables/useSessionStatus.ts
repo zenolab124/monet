@@ -3,6 +3,7 @@ import i18n from '../locales'
 import { useSessionStream } from './useStreaming'
 import { queueForSession } from './usePermissionRequests'
 import { useNotifications } from './useNotifications'
+import { signalFor } from './useTurnSignals'
 
 /**
  * 会话运行状态派生(FR-003 状态枚举):监控卡状态行与右区列头共用。
@@ -15,6 +16,7 @@ export type SessionStatusKey =
   | 'workflow'
   | 'waiting_tool'
   | 'waiting_permission'
+  | 'external_running'
   | 'error'
   | 'idle'
 
@@ -34,6 +36,8 @@ const STATUS_META_STATIC: Record<SessionStatusKey, { dotClass: string; pulse: bo
   workflow: { dotClass: 'bg-primary', pulse: true, edge: null, labelKey: '' },
   waiting_tool: { dotClass: 'bg-primary', pulse: true, edge: null, labelKey: 'session.waitingTool' },
   waiting_permission: { dotClass: 'bg-accent', pulse: false, edge: 'accent', labelKey: 'session.waitingPermission' },
+  // labelKey 用 externalActive：externalRunning 已被会话详情的后台运行横幅占用
+  external_running: { dotClass: 'bg-primary', pulse: true, edge: null, labelKey: 'session.externalActive' },
   error: { dotClass: 'bg-destructive', pulse: false, edge: 'destructive', labelKey: 'session.error' },
   idle: { dotClass: 'bg-border', pulse: false, edge: null, labelKey: 'session.idle' },
 }
@@ -66,6 +70,12 @@ export function useSessionStatus(
       if (tool?.startsWith('Workflow')) key = 'workflow'
       else if (tool) key = 'waiting_tool'
       else key = 'streaming'
+    } else {
+      // 无应用内流状态时，用状态跟踪扩展的外部信号兜底（未安装则恒为 null）
+      const sig = signalFor(sid)
+      if (sig?.state === 'started') key = 'external_running'
+      else if (sig?.state === 'blocked') key = 'waiting_permission'
+      else if (sig?.state === 'failed') key = 'error'
     }
     return { key, ...getStatusMeta(key) }
   })

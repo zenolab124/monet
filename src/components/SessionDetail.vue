@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useConfirm } from '@/composables/useConfirm'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useProjects } from '@/composables/useProjects'
@@ -69,6 +70,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { confirm: confirmDialog } = useConfirm()
 
 /** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
 const interactive = computed(() => props.mode === 'workbench')
@@ -293,8 +295,25 @@ async function onPermissionDecide(
 async function onStop() {
   const sid = effectiveSessionId.value
   if (!sid) return
-  if (externalRunning.value) {
-    await invoke('kill_external_session', { sessionId: sid })
+  // 与按钮文案同判据:自家流式优先走温和停止,仅纯外部运行才走终止链路
+  if (externalRunning.value && !stream.value.streaming) {
+    if (stopping.value) return
+    // 外部进程不是我们 spawn 的:终止前确认,并说明归属方(可能正在生成,杀了会丢那一轮)
+    const owner = externalOwner.value
+    const msg = owner
+      ? t('session.killExternalConfirmBy', { owner })
+      : t('session.killExternalConfirm')
+    if (!(await confirmDialog(msg, t('session.killExternalOk')))) return
+    stopping.value = true
+    stoppingTimeout = window.setTimeout(() => {
+      stopping.value = false
+      stoppingTimeout = null
+    }, 8000)
+    try {
+      await invoke('kill_external_session', { sessionId: sid })
+    } catch {
+      stopping.value = false
+    }
     return
   }
   await denyAllForSession(sid)
@@ -1312,10 +1331,32 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
 // 注意:声明须在下方 immediate watch 之前(其回调在 setup 同步阶段就会执行)。
 
 const externalRunning = ref(false)
+/** 外部进程归属应用（父进程链解析,如 Terminal / SomeApp),横幅与停止确认共用 */
+const externalOwner = ref<string | null>(null)
+/** 终止外部进程进行中:锁按钮防重复 kill,SIGTERM 后到 probe 撤横幅有数秒窗口 */
+const stopping = ref(false)
+let stoppingTimeout: number | null = null
+
+/** 终止完成的感知时点 = 横幅消失(externalRunning→false);超时兜底防进程无视 SIGTERM 导致永锁 */
+watch(externalRunning, (running) => {
+  if (!running && stopping.value) {
+    stopping.value = false
+    if (stoppingTimeout != null) {
+      window.clearTimeout(stoppingTimeout)
+      stoppingTimeout = null
+    }
+  }
+})
 let followSessionId: string | null = null
 let externalTimer: number | null = null
 let probing = false
 let externalIdleTicks = 0
+
+interface ExternalSessionInfo {
+  running: boolean
+  pid: number | null
+  owner: string | null
+}
 
 /** 静默重载:不动 loading 态/滚动状态,记录数有增长才替换(jsonl 仅追加) */
 async function silentReloadRecords() {
@@ -1348,7 +1389,9 @@ async function probeExternal() {
     }
     let running = false
     try {
-      running = await invoke<boolean>('check_session_running', { sessionId: cs.summary.id })
+      const info = await invoke<ExternalSessionInfo>('check_session_running', { sessionId: cs.summary.id })
+      running = info.running
+      externalOwner.value = info.owner
     } catch {
       // 探测失败视为未运行
     }
@@ -1389,6 +1432,8 @@ async function probeExternal() {
 function startExternalFollow() {
   stopExternalFollow()
   externalRunning.value = false
+  externalOwner.value = null
+  stopping.value = false
   externalIdleTicks = 0
   // 先起定时器再立即探一次:未运行的会话首轮探测即自停,运行中的持续跟随
   externalTimer = window.setInterval(probeExternal, 1500)
@@ -1774,10 +1819,10 @@ async function onReload() {
         {{ slashError }}
       </div>
 
-      <!-- 外部运行跟随提示 -->
+      <!-- 外部运行跟随提示（能解析出归属方时点名是谁在跑） -->
       <div v-if="externalRunning" class="mb-1 text-xs text-muted-foreground flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-claude animate-pulse shrink-0" />
-        {{ $t('session.externalRunning') }}
+        {{ externalOwner ? $t('session.externalRunningBy', { owner: externalOwner }) : $t('session.externalRunning') }}
       </div>
 
       <SlashCommandPanel
@@ -1841,12 +1886,21 @@ async function onReload() {
           @click="syncCursor"
           @select="syncCursor"
         />
+        <!-- 停止/终止按钮:应用内是温和中断自家生成(停止);外部运行是 SIGTERM 别家进程(终止,destructive 色 + 进行中锁定) -->
         <button
           v-if="(stream.streaming || externalRunning) && !inputText.trim() && !imageInput.images.value.length"
-          class="px-3 py-2 text-xs rounded-md bg-accent text-accent-foreground hover:shadow-paper transition-shadow shrink-0"
+          :disabled="stopping"
+          :class="['px-3 py-2 text-xs rounded-md hover:shadow-paper transition-shadow shrink-0 flex items-center gap-1.5',
+                   externalRunning && !stream.streaming
+                     ? 'bg-destructive/10 text-destructive border border-destructive/30 disabled:opacity-60 disabled:cursor-default'
+                     : 'bg-accent text-accent-foreground']"
           @click="onStop"
         >
-          {{ $t('common.stop') }}
+          <span v-if="stopping" class="i-carbon-circle-dash w-3 h-3 animate-spin shrink-0" />
+          <template v-if="externalRunning && !stream.streaming">
+            {{ stopping ? $t('session.terminating') : $t('session.terminateExternal') }}
+          </template>
+          <template v-else>{{ $t('common.stop') }}</template>
         </button>
         <button
           v-else

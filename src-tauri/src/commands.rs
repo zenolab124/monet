@@ -491,68 +491,188 @@ pub fn get_cli_settings(cwd: Option<String>) -> CliSettings {
     }
 }
 
-/// 检测某会话是否有**外部** claude CLI 进程在运行。
-/// 排除 CC Space 自身持有的长活进程 PID，只报告终端 `claude --resume` / VS Code 等外部进程。
-/// 交互式 REPL(命令行不带 session-id)检测不到,属已知边界。
-/// Windows 无 ps,Command 失败时返回 false 优雅降级。
-#[tauri::command]
-pub fn check_session_running(session_id: String) -> bool {
-    let own_pid = crate::streaming::get_own_pid(&session_id);
+/// 外部会话进程信息：是否在跑 + 归属应用（父进程链解析），横幅与停止确认共用
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSessionInfo {
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub owner: Option<String>,
+}
 
+/// 判断一条 ps 命令行是否是「跑着指定会话的 claude 进程」本体。双精确条件防误伤：
+/// 1. 存在 basename 恰为 "claude" 的 token（可执行本体，而非 `~/.claude/...` 路径巧合）
+/// 2. session_id 以独立 token 出现（而非 `<sid>.jsonl` 之类的子串）
+/// 因此 `tail -f ~/.claude/projects/x/<sid>.jsonl`、`vim <sid>.jsonl`、`grep <sid> ~/.claude/…` 均不命中。
+fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
+    let mut has_claude_bin = false;
+    let mut has_sid_token = false;
+    for tok in cmd.split_whitespace() {
+        if !has_claude_bin && tok.rsplit('/').next().unwrap_or(tok) == "claude" {
+            has_claude_bin = true;
+        }
+        if !has_sid_token && tok == session_id {
+            has_sid_token = true;
+        }
+        if has_claude_bin && has_sid_token {
+            return true;
+        }
+    }
+    false
+}
+
+/// 扫描外部 claude 进程：命中匹配且非 CC Space 自持进程的 pid 列表。
+/// 交互式 REPL（命令行不带 session-id）检测不到，属已知边界。
+/// Windows 无 ps，Command 失败时返回空表优雅降级。
+fn scan_external_claude(session_id: &str) -> Vec<u32> {
+    let own_pid = crate::streaming::get_own_pid(session_id);
     let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "pid,command"])
+        .args(["-axo", "pid=,command="])
         .output()
     else {
-        return false;
+        return Vec::new();
     };
     String::from_utf8_lossy(&output.stdout)
         .lines()
-        .any(|l| {
-            if !l.contains(&session_id) || !l.contains("claude") {
-                return false;
+        .filter_map(|l| {
+            let trimmed = l.trim_start();
+            let (pid_str, cmd) = trimmed.split_once(char::is_whitespace)?;
+            let pid: u32 = pid_str.parse().ok()?;
+            if own_pid == Some(pid) || !command_matches_claude_session(cmd, session_id) {
+                return None;
             }
-            if let Some(own) = own_pid {
-                let pid = l.trim().split_whitespace().next().and_then(|s| s.parse::<u32>().ok());
-                if pid == Some(own) {
-                    return false;
-                }
-            }
-            true
+            Some(pid)
         })
+        .collect()
 }
 
-/// 终止指定会话的外部 CLI 进程（用户在 CC Space 点"停止"时调用）。
-/// 排除 CC Space 自身持有的长活进程,只 kill 终端 / VS Code 等外部进程。
-#[tauri::command]
-pub fn kill_external_session(session_id: String) -> bool {
-    let own_pid = crate::streaming::get_own_pid(&session_id);
-
+/// 进程族谱表：pid → (ppid, 进程名)。进程名取 comm 首 token 的 basename
+/// （macOS 的 comm 是完整可执行路径，含空格的应用名会被截到首段，够识别用）
+fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
     let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "pid,command"])
+        .args(["-axo", "pid=,ppid=,comm="])
         .output()
     else {
-        return false;
+        return Default::default();
     };
-    let mut killed = false;
-    for l in String::from_utf8_lossy(&output.stdout).lines() {
-        if !l.contains(&session_id) || !l.contains("claude") {
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let pid: u32 = it.next()?.parse().ok()?;
+            let ppid: u32 = it.next()?.parse().ok()?;
+            let comm = it.next().unwrap_or("");
+            let name = comm.rsplit('/').next().unwrap_or(comm).to_string();
+            Some((pid, (ppid, name)))
+        })
+        .collect()
+}
+
+/// 沿父进程链解析归属应用名：跳过 shell/login 中转层，取第一个真实应用。
+/// 例：claude ← zsh ← login ← Terminal 解析为 "Terminal"；
+///     claude ← SomeApp 解析为 "SomeApp"。
+fn resolve_owner(pid: u32, table: &std::collections::HashMap<u32, (u32, String)>) -> Option<String> {
+    const SHELLS: [&str; 6] = ["sh", "zsh", "bash", "fish", "dash", "login"];
+    let mut cur = pid;
+    for _ in 0..6 {
+        let (ppid, _) = table.get(&cur)?;
+        if *ppid <= 1 {
+            return None;
+        }
+        let (_, parent_name) = table.get(ppid)?;
+        let clean = parent_name.trim_start_matches('-');
+        if SHELLS.contains(&clean) {
+            cur = *ppid;
             continue;
         }
-        let Some(pid) = l.trim().split_whitespace().next().and_then(|s| s.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if let Some(own) = own_pid {
-            if pid == own {
-                continue;
-            }
+        if clean.is_empty() {
+            return None;
         }
-        let _ = std::process::Command::new("kill")
-            .arg(pid.to_string())
-            .output();
-        killed = true;
+        return Some(clean.to_string());
     }
-    killed
+    None
+}
+
+/// 检测某会话是否有**外部** claude CLI 进程在运行，并解析归属方。
+/// 排除 CC Space 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
+#[tauri::command]
+pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
+    match scan_external_claude(&session_id).first() {
+        Some(&pid) => {
+            let owner = resolve_owner(pid, &process_table());
+            ExternalSessionInfo { running: true, pid: Some(pid), owner }
+        }
+        None => ExternalSessionInfo { running: false, pid: None, owner: None },
+    }
+}
+
+/// 终止指定会话的外部 CLI 进程（用户在 CC Space 点"停止"并确认后调用）。
+/// SIGTERM 温和终止；排除 CC Space 自身持有的长活进程。
+#[tauri::command]
+pub fn kill_external_session(session_id: String) -> bool {
+    let pids = scan_external_claude(&session_id);
+    for pid in &pids {
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+    }
+    !pids.is_empty()
+}
+
+#[cfg(test)]
+mod external_session_tests {
+    use super::*;
+
+    const SID: &str = "0ebe7955-ab04-4f5b-b5b9-8362886222aa";
+
+    #[test]
+    fn matches_real_claude_invocations() {
+        assert!(command_matches_claude_session(&format!("claude --resume {SID}"), SID));
+        assert!(command_matches_claude_session(
+            &format!("/Users/x/.local/bin/claude --print --resume {SID}"),
+            SID
+        ));
+        // node 包装：第二个 token 是 claude 本体
+        assert!(command_matches_claude_session(
+            &format!("node /usr/local/bin/claude --session-id {SID}"),
+            SID
+        ));
+    }
+
+    #[test]
+    fn rejects_path_coincidences() {
+        // 查看/编辑 JSONL 的无辜进程：路径含 .claude 与 sid 子串，但无 claude 二进制 token、sid 非独立 token
+        assert!(!command_matches_claude_session(
+            &format!("tail -f /Users/x/.claude/projects/p/{SID}.jsonl"),
+            SID
+        ));
+        assert!(!command_matches_claude_session(&format!("vim {SID}.jsonl"), SID));
+        assert!(!command_matches_claude_session(
+            &format!("grep {SID} /Users/x/.claude/projects"),
+            SID
+        ));
+        // sid 独立 token 但没有 claude 二进制
+        assert!(!command_matches_claude_session(&format!("echo {SID}"), SID));
+    }
+
+    #[test]
+    fn owner_resolution_skips_shells() {
+        let mut t = std::collections::HashMap::new();
+        // 终端链:claude(100) ← zsh(90) ← login(80) ← Terminal(70) ← launchd(1)
+        t.insert(100u32, (90u32, "claude".to_string()));
+        t.insert(90, (80, "zsh".to_string()));
+        t.insert(80, (70, "login".to_string()));
+        t.insert(70, (1, "Terminal".to_string()));
+        assert_eq!(resolve_owner(100, &t).as_deref(), Some("Terminal"));
+
+        // GUI 直挂:claude(200) ← SomeApp(150) ← launchd(1)
+        t.insert(200, (150, "claude".to_string()));
+        t.insert(150, (1, "SomeApp".to_string()));
+        assert_eq!(resolve_owner(200, &t).as_deref(), Some("SomeApp"));
+
+        // 父链到顶仍是 shell → None
+        let mut o = std::collections::HashMap::new();
+        o.insert(300u32, (1u32, "claude".to_string()));
+        assert_eq!(resolve_owner(300, &o), None);
+    }
 }
 
 /// 全项目 token 用量聚合（v2.2.0 FR-001）：首页 Token 卡 / 活跃热力图数据源。

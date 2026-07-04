@@ -154,6 +154,11 @@ export function useSessionStream(
   })
 }
 
+/** 无副作用查询某会话是否在流式（getStream 会顺手建条目，只读判断用这个） */
+export function isSessionStreaming(sessionId: string): boolean {
+  return streams.get(sessionId)?.streaming ?? false
+}
+
 /** 是否有任一会话正在流式（全局视图用） */
 export function anyStreaming(): boolean {
   for (const s of streams.values()) {
