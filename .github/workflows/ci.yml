@@ -1,0 +1,94 @@
+# CI 门禁：push main / PR 必绿。仓库 public，macOS runner 免费不限量。
+# clippy 目前信息性运行（存量 lint 债约 25 条：map_or 简化、too_many_arguments 等），
+# 清零后把 clippy 步骤升级为 `-- -D warnings` 变成硬门禁。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (vue-tsc + vite build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # 类型检查 + 构建产物完整性（package.json build = vue-tsc --noEmit && vite build）
+      - name: Typecheck & build
+        run: pnpm build
+
+      # locale 合法性 + 重复键检测（JSON.parse 后者静默覆盖前者，重复键曾真实咬过：
+      # session.externalRunning 撞名会把横幅文案覆盖成状态点短标签）
+      - name: Validate locales (syntax + duplicate keys)
+        run: |
+          python3 - <<'EOF'
+          import json, sys, glob
+
+          def reject_dup(pairs):
+              d = {}
+              for k, v in pairs:
+                  if k in d:
+                      sys.exit(f"duplicate key '{k}'")
+                  d[k] = v
+              return d
+
+          files = glob.glob('src/locales/*.json')
+          assert files, 'no locale files found'
+          for f in files:
+              try:
+                  json.load(open(f), object_pairs_hook=reject_dup)
+              except SystemExit as e:
+                  sys.exit(f"{f}: {e}")
+              except Exception as e:
+                  sys.exit(f"{f}: {e}")
+          print(f"{len(files)} locale files OK")
+          EOF
+
+  rust:
+    name: Rust (test + clippy)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # tauri-build 校验 frontendDist（../dist）存在；测试不需要真产物，占位即可
+      - name: Stub frontend dist
+        run: mkdir -p ../dist && touch ../dist/index.html
+
+      - name: Test
+        run: cargo test --locked
+
+      # 信息性运行（不 fail）：存量 lint 债清零前先保持可见、防继续恶化靠 review
+      - name: Clippy (informational)
+        run: cargo clippy --all-targets --locked || true

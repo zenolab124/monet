@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 // 与主 App 共享同一份定位逻辑源文件（单一事实源）；
 // runner 不引 app_lib 整个 crate，避免把 tauri 链进这个轻量二进制。

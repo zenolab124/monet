@@ -16,7 +16,6 @@ use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const SERVER_NAME: &str = "cc-space";

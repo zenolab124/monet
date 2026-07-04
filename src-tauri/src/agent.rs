@@ -256,7 +256,6 @@ fn request_via_cli(prompt: &str) -> Result<String, String> {
 }
 
 fn request_blocking(prompt: &str) -> Result<CliCallResult, String> {
-    let start = std::time::Instant::now();
     let preview: String = prompt.chars().take(40).collect();
     eprintln!("[agent-service] request: prompt={}...", preview);
     let mut guard = AGENT.lock().unwrap_or_else(|e| e.into_inner());
