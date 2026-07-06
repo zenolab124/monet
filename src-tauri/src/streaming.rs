@@ -568,7 +568,8 @@ pub fn toggle_remote_control(
     let mut sp = process.lock().unwrap();
     eprintln!("[long-lived] Remote Control enabled={} PID={} 会话={}", enabled, sp.child.id(), &session_id[..session_id.len().min(8)]);
     sp.request_counter += 1;
-    let req_id = format!("rc-{}", sp.request_counter);
+    // 语义编进 request_id：CLI 的 response 不含 enabled 值，read_stream 只能靠它还原请求意图
+    let req_id = format!("rc-{}-{}", if enabled { "on" } else { "off" }, sp.request_counter);
     let msg = json!({
         "type": "control_request",
         "request_id": req_id,
@@ -762,6 +763,35 @@ fn read_stream(
                     let mut payload = value.clone();
                     payload.as_object_mut().map(|o| o.insert("session_id".to_string(), json!(session_id)));
                     let _ = app.emit("session-hook", &payload);
+                }
+            }
+        }
+
+        // Remote Control 判决回报：success/error 都上报，前端 rcActive 完全由本事件驱动
+        // （不能乐观置位——判决与 invoke 返回并发，先到的判决会被晚写的乐观值覆盖）。
+        // 请求意图编码在 request_id：rc-init（连接自动开）/rc-on-N/rc-off-N（手动）。
+        // 第三方渠道实测 CLI 回 error "Remote Control initialization failed"
+        if raw_type == "control_response" {
+            if let Some(resp) = value.get("response") {
+                let req_id = resp.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
+                if req_id.starts_with("rc-") {
+                    let is_err = resp.get("subtype").and_then(|v| v.as_str()) == Some("error");
+                    let wanted_on = !req_id.starts_with("rc-off");
+                    // 成功 = 达成所愿；失败 = 维持原状（开失败→仍关，关失败→仍开）
+                    let active = if is_err { !wanted_on } else { wanted_on };
+                    let err = resp.get("error").and_then(|v| v.as_str());
+                    eprintln!(
+                        "[long-lived] Remote Control 判决 req={} active={} 会话={}{}",
+                        req_id, active, &session_id[..session_id.len().min(8)],
+                        err.map(|e| format!(" err={}", e)).unwrap_or_default()
+                    );
+                    let _ = app.emit("rc-status", json!({
+                        "session_id": session_id,
+                        "active": active,
+                        // 手动开关的判决才触发 toast；连接时自动开启的失败静默（防第三方渠道每次连接被骚扰）
+                        "manual": req_id != "rc-init",
+                        "error": if is_err { json!(err.unwrap_or("Remote Control unavailable")) } else { Value::Null },
+                    }));
                 }
             }
         }

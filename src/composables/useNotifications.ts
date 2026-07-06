@@ -338,6 +338,20 @@ export async function initNotificationLayer(): Promise<void> {
       void maybeNotifySystem(i18n.global.t('notification.errorStopped'), `${sessionTitle(sessionId)} · ${(content || '').slice(0, 60)}`)
     },
   )
+
+  // 4. Remote Control 判决 toast:仅手动开关回报成败(连接时自动开启的失败静默,
+  //    避免第三方渠道用户每次起进程都被骚扰);按钮状态由 useStreaming 监听同一事件负责
+  await listen<{ session_id: string; active: boolean; manual: boolean; error?: string | null }>(
+    'rc-status',
+    (e) => {
+      if (!e.payload.manual) return
+      if (e.payload.error) {
+        notifyTransient(i18n.global.t('workbench.column.rcFailed'), e.payload.error)
+      } else {
+        notifyTransient(i18n.global.t(e.payload.active ? 'workbench.column.rcOpened' : 'workbench.column.rcClosed'))
+      }
+    },
+  )
 }
 
 // ---- 操作:toast 上的按钮 ----

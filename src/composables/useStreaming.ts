@@ -725,6 +725,14 @@ export async function initStreamListeners(): Promise<void> {
     const sid = event.payload?.session_id
     if (sid) finishStream(sid)
   })
+
+  // Remote Control 判决:rcActive 的唯一写入源(CLI 对 rc-* 请求的 success/error 真值),
+  // 发送侧不乐观置位——判决与 invoke 返回并发,乐观值会覆盖先到的判决。
+  // getStream 而非 streams.get:判决可能先于首条消息到达(展开列即连接),需建态承接。
+  // toast 由 useNotifications 监听同一事件负责(它反向依赖本模块,不能在此 import)
+  await listen<{ session_id: string; active: boolean }>('rc-status', (event) => {
+    getStream(event.payload.session_id).rcActive = event.payload.active
+  })
 }
 
 /**
@@ -831,7 +839,6 @@ async function sendMessage(
       permissionMode: opts.permissionMode ?? null,
       appendSystemPrompt: htmlVisualEnabled.value ? HTML_VISUAL_PROMPT : null,
     })
-    state.rcActive = true
   } catch (e) {
     state.streamError = String(e)
     finishStream(sessionId)

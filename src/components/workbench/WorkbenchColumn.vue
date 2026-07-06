@@ -6,6 +6,9 @@ import { useProjects } from '@/composables/useProjects'
 import { useWorkbench, type WorkbenchColumn } from '@/composables/useWorkbench'
 import { useSessionStream } from '@/composables/useStreaming'
 import { useSessionStatus } from '@/composables/useSessionStatus'
+import { useSessionSettings } from '@/composables/useSessionSettings'
+import { useRunConfig } from '@/composables/useRunConfig'
+import { refreshChannels } from '@/composables/useChannels'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import { displayTitle } from '@/types'
@@ -42,19 +45,23 @@ async function onToggleRC() {
   rcLoading.value = true
   try {
     const session = projects.value.flatMap(p => p.sessions).find(s => s.id === props.column.sessionId)
+    // 与发消息同源解析渠道/模型/effort:进程未启动时本调用会用这套配置起进程,
+    // 硬编码 null(=官方)会让 RC 判决对着错误的渠道,发消息时又因渠道不一致重启进程
+    await refreshChannels()
+    const rc = runConfig.value
     await invoke('toggle_remote_control', {
       sessionId: props.column.sessionId,
-      cwd: session?.cwd ?? '',
-      model: null,
-      effort: null,
-      channel: null,
-      advisor: false,
+      cwd: session?.cwd ?? draftCwd(props.column.sessionId) ?? '',
+      model: rc.model ?? null,
+      effort: rc.effort ?? null,
+      channel: rc.channelId,
+      advisor: settings.value.advisor,
       enabled: enabling,
-      permissionMode: null,
+      permissionMode: settings.value.permissionMode ?? null,
     })
-    stream.value.rcActive = enabling
-    notifyTransient(enabling ? t('workbench.column.rcOpened') : t('workbench.column.rcClosed'))
+    // 按钮状态与成败 toast 均由 CLI 判决(rc-status 事件)驱动,此处只负责把请求发出去
   } catch (e) {
+    // invoke 失败 = 进程级故障(判决不会再来),就地报错
     notifyTransient(t('workbench.column.rcFailed'), String(e))
   } finally {
     rcLoading.value = false
@@ -64,6 +71,9 @@ async function onToggleRC() {
 const sid = computed(() => props.column.sessionId)
 const stream = useSessionStream(sid)
 const status = useSessionStatus(sid)
+// RC 开关与发消息同源的运行配置(渠道/模型/effort/advisor)
+const { settings } = useSessionSettings(sid)
+const { runConfig } = useRunConfig(settings)
 
 const projectName = computed(() => {
   for (const p of projects.value) {
