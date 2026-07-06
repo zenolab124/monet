@@ -26,6 +26,8 @@ mod routines;
 /// pub：结构定义同时被 cc-space-mcp / cc-space-routine-runner 以 #[path] 方式复用
 pub mod routine_types;
 mod scheduler;
+/// pub：唤醒计划逻辑同时被 cc-space-routine-runner 以 #[path] 方式复用
+pub mod wake;
 #[cfg(target_os = "macos")]
 mod signing;
 mod tcc;
@@ -203,6 +205,9 @@ pub fn run() {
             routines::run_routine_now,
             routines::get_routine_wake_policy,
             routines::set_routine_wake_policy,
+            routines::get_wake_authorization_status,
+            routines::enable_wake_active,
+            routines::remove_wake_authorization,
             cli_settings::get_settings_schema,
             cli_settings::get_full_cli_settings,
             cli_settings::update_cli_settings,

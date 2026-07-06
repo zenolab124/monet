@@ -25,6 +25,12 @@ mod tcc;
 mod routine_types;
 use routine_types::RoutineDefinition;
 
+// 唤醒计划单一事实源：active 模式下 runner 每次执行完续设下一批唤醒点，
+// 形成「唤醒 → 跑任务 → 续设 → 回睡」闭环（主 App 不在场时链条不断）
+#[path = "../wake.rs"]
+#[allow(dead_code)]
+mod wake;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecutionLog {
@@ -127,7 +133,22 @@ fn main() {
 
     write_log(&log);
     update_routine_state(&routine_id, &started_at);
+    refresh_wake_schedule();
     maybe_sleep_after_run();
+}
+
+/// 续设唤醒计划（必须在回睡之前）。授权不在位时 wake::sync 静默返回，
+/// 降级决策留给主 App——runner 无 UI，不弹任何系统框
+fn refresh_wake_schedule() {
+    if read_wake_policy() != "active" {
+        return;
+    }
+    let cron_exprs: Vec<String> = load_routines()
+        .iter()
+        .filter(|r| r.enabled)
+        .map(|r| r.cron_expression.clone())
+        .collect();
+    let _ = wake::sync(&data_dir(), &cron_exprs, "active");
 }
 
 fn run_health_check(prompt: Option<&str>) {

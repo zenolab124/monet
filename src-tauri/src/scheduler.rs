@@ -111,10 +111,16 @@ fn runner_bin_name() -> &'static str {
 // Wake schedule management
 // ---------------------------------------------------------------------------
 
-pub fn sync_wake_schedule(routines: &[RoutineDefinition], policy: &str) {
-    platform::sync_wake(routines, policy);
+pub fn sync_wake_schedule(
+    routines: &[RoutineDefinition],
+    policy: &str,
+) -> crate::wake::SyncOutcome {
+    platform::sync_wake(routines, policy)
 }
 
+// Windows 专用：schtasks 的 WakeToRun 属性在 register 时需要读取策略；
+// macOS 的唤醒策略读取在 routines.rs（wake_policy）
+#[cfg(target_os = "windows")]
 fn read_wake_policy_file() -> String {
     let path = config::data_dir().join("settings.json");
     std::fs::read_to_string(&path)
@@ -420,116 +426,20 @@ mod platform {
     }
 
     // -----------------------------------------------------------------------
-    // Wake schedule (pmset)
+    // Wake schedule：实现在 crate::wake（pmset schedule 多点 + sudoers 静默）
     // -----------------------------------------------------------------------
 
-    fn wake_cache_path() -> PathBuf {
-        config::data_dir().join("wake_cache.json")
-    }
-
-    fn read_wake_cache() -> Option<Vec<(u32, u32)>> {
-        let data = std::fs::read_to_string(wake_cache_path()).ok()?;
-        serde_json::from_str(&data).ok()
-    }
-
-    fn write_wake_cache(times: &[(u32, u32)]) {
-        let _ = std::fs::write(wake_cache_path(), serde_json::to_string(times).unwrap_or_default());
-    }
-
-    pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) {
-        if policy != "active" {
-            cancel_wake();
-            return;
-        }
-
-        let wake_times = compute_wake_times(routines);
-        if wake_times.is_empty() {
-            cancel_wake();
-            return;
-        }
-
-        if read_wake_cache().as_deref() == Some(wake_times.as_slice()) {
-            return;
-        }
-
-        let mut parts = Vec::new();
-        for (h, m) in &wake_times {
-            parts.push(format!("wakeorpoweron MTWRFSU {:02}:{:02}:00", h, m));
-        }
-        let pmset_cmd = format!("pmset repeat {}", parts.join(" "));
-
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(format!(
-                "do shell script \"{}\" with administrator privileges",
-                pmset_cmd
-            ))
-            .output();
-
-        match output {
-            Ok(o) if o.status.success() => {
-                log::info!("wake schedule set: {:?}", wake_times);
-                write_wake_cache(&wake_times);
-            }
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                log::warn!("pmset repeat failed: {}", stderr);
-            }
-            Err(e) => {
-                log::warn!("osascript failed: {}", e);
-            }
-        }
-    }
-
-    fn cancel_wake() {
-        if read_wake_cache().map_or(true, |c| c.is_empty()) {
-            return;
-        }
-
-        let _ = Command::new("osascript")
-            .arg("-e")
-            .arg("do shell script \"pmset repeat cancel\" with administrator privileges")
-            .output();
-        write_wake_cache(&[]);
-    }
-
-    fn compute_wake_times(routines: &[RoutineDefinition]) -> Vec<(u32, u32)> {
-        let mut all_times = std::collections::HashSet::new();
-
-        for routine in routines.iter().filter(|r| r.enabled) {
-            let full = format!("0 {}", routine.cron_expression);
-            if let Ok(schedule) = cron::Schedule::from_str(&full) {
-                for dt in schedule.upcoming(chrono::Local).take(48) {
-                    all_times.insert((dt.hour(), dt.minute()));
-                    if all_times.len() >= 24 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        let mut wake: Vec<(u32, u32)> = all_times
-            .into_iter()
-            .map(|(h, m)| {
-                if m >= 3 {
-                    (h, m - 3)
-                } else if h > 0 {
-                    (h - 1, m + 57)
-                } else {
-                    (23, m + 57)
-                }
-            })
+    pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) -> crate::wake::SyncOutcome {
+        let cron_exprs: Vec<String> = routines
+            .iter()
+            .filter(|r| r.enabled)
+            .map(|r| r.cron_expression.clone())
             .collect();
-
-        wake.sort();
-        wake.dedup();
-        wake
+        crate::wake::sync(&config::data_dir(), &cron_exprs, policy)
     }
-
 
     use chrono::Timelike;
     use chrono::Datelike;
-    use std::str::FromStr;
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +476,7 @@ mod platform {
 
     pub fn cleanup_orphans(_known_ids: &std::collections::HashSet<&str>) {}
 
-    pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) {
+    pub fn sync_wake(routines: &[RoutineDefinition], policy: &str) -> crate::wake::SyncOutcome {
         let wake = policy == "active";
         let runner_path = super::runner_binary_path();
         for routine in routines.iter().filter(|r| r.enabled) {
@@ -584,6 +494,7 @@ mod platform {
                     .output();
             }
         }
+        crate::wake::SyncOutcome::Synced
     }
 
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
@@ -712,7 +623,9 @@ mod platform {
 
     pub fn cleanup_orphans(_known_ids: &std::collections::HashSet<&str>) {}
 
-    pub fn sync_wake(_routines: &[RoutineDefinition], _policy: &str) {}
+    pub fn sync_wake(_routines: &[RoutineDefinition], _policy: &str) -> crate::wake::SyncOutcome {
+        crate::wake::SyncOutcome::Synced
+    }
 
     pub fn register(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
         let dir = unit_dir();

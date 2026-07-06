@@ -384,14 +384,29 @@ pub fn startup_sync() {
     }
 
     // Sync wake schedule
-    scheduler::sync_wake_schedule(&routines_snapshot, &wake_policy());
+    handle_wake_outcome(scheduler::sync_wake_schedule(
+        &routines_snapshot,
+        &wake_policy(),
+    ));
 }
 
 fn sync_wake_if_active() {
     let policy = wake_policy();
     if policy == "active" {
         let snapshot: Vec<RoutineDefinition> = with_routines(|r| r.clone());
-        scheduler::sync_wake_schedule(&snapshot, &policy);
+        handle_wake_outcome(scheduler::sync_wake_schedule(&snapshot, &policy));
+    }
+}
+
+/// 授权丢失（用户手动删了 sudoers 规则等）时自动降级 passive——
+/// 绝不在非交互路径弹系统授权框，设置页下次打开如实展示回落状态
+fn handle_wake_outcome(outcome: crate::wake::SyncOutcome) {
+    if outcome == crate::wake::SyncOutcome::NoAuthorization {
+        log::warn!("wake authorization missing; downgrading policy to passive");
+        write_app_setting(
+            "routineWakePolicy",
+            serde_json::Value::String("passive".to_string()),
+        );
     }
 }
 
@@ -566,9 +581,14 @@ pub fn get_routine_wake_policy() -> String {
 }
 
 #[tauri::command]
-pub fn set_routine_wake_policy(policy: String) -> Result<(), String> {
+pub async fn set_routine_wake_policy(policy: String) -> Result<(), String> {
     if policy != "passive" && policy != "active" {
         return Err("无效策略，支持: passive | active".to_string());
+    }
+    // 正常开启路径是 enable_wake_active（含授权引导）；此处兜住 MCP 等
+    // 旁路直接 set active 且授权不在位的情况
+    if policy == "active" && !crate::wake::authorization_present() {
+        return Err("NEEDS_AUTHORIZATION".to_string());
     }
     write_app_setting(
         "routineWakePolicy",
@@ -576,7 +596,42 @@ pub fn set_routine_wake_policy(policy: String) -> Result<(), String> {
     );
 
     let snapshot: Vec<RoutineDefinition> = with_routines(|r| r.clone());
-    scheduler::sync_wake_schedule(&snapshot, &policy);
+    handle_wake_outcome(scheduler::sync_wake_schedule(&snapshot, &policy));
 
     Ok(())
+}
+
+/// sudoers 白名单授权是否在位（sudo -n pmset 探测）
+#[tauri::command]
+pub fn get_wake_authorization_status() -> bool {
+    crate::wake::authorization_present()
+}
+
+/// 开启主动唤醒：授权不在位时先提权安装 sudoers 白名单（系统弹一次密码
+/// 框，用户取消返回 Err("cancelled")），随后写入 policy 并静默同步计划
+#[tauri::command]
+pub async fn enable_wake_active() -> Result<(), String> {
+    if !crate::wake::authorization_present() {
+        crate::wake::install_authorization()?;
+    }
+    write_app_setting(
+        "routineWakePolicy",
+        serde_json::Value::String("active".to_string()),
+    );
+    let snapshot: Vec<RoutineDefinition> = with_routines(|r| r.clone());
+    handle_wake_outcome(scheduler::sync_wake_schedule(&snapshot, "active"));
+    Ok(())
+}
+
+/// 移除系统授权：先趁规则还在静默清空唤醒计划并降级 passive，
+/// 再提权删除 sudoers 文件（用户主动点击，弹窗在预期内）
+#[tauri::command]
+pub async fn remove_wake_authorization() -> Result<(), String> {
+    write_app_setting(
+        "routineWakePolicy",
+        serde_json::Value::String("passive".to_string()),
+    );
+    let snapshot: Vec<RoutineDefinition> = with_routines(|r| r.clone());
+    let _ = scheduler::sync_wake_schedule(&snapshot, "passive");
+    crate::wake::remove_authorization()
 }

@@ -226,18 +226,57 @@ async function setWidgetDayStart(hour: number) {
   await invoke('set_widget_config', { dayStartHour: hour }).catch(() => {})
 }
 
+// 系统授权状态：/etc/sudoers.d 白名单是否在位（与 policy 独立——
+// 切回被动后规则可保留，下次开启不再弹密码框）
+const wakeAuthorized = ref(false)
+
 async function loadWakePolicy() {
   try {
     wakePolicy.value = await invoke<string>('get_routine_wake_policy')
+    wakeAuthorized.value = await invoke<boolean>('get_wake_authorization_status')
   } catch {}
 }
 async function setWakePolicy(policy: string) {
-  wakePolicy.value = policy
-  try {
-    await invoke('set_routine_wake_policy', { policy })
-  } catch (e) {
-    wakePolicy.value = policy === 'active' ? 'passive' : 'active'
+  if (policy === 'active') {
+    // 乐观跟随 radio，取消/失败回弹（值变化驱动 DOM 复位）
+    wakePolicy.value = 'active'
+    const ok = await confirm(
+      t('settings.routineWakeAuthBody'),
+      t('settings.routineWakeAuthConfirm'),
+    )
+    if (ok) {
+      try {
+        await invoke('enable_wake_active')
+        wakeAuthorized.value = true
+        return
+      } catch (e) {
+        const msg = String(e)
+        notifyTransient(
+          t('settings.routineWake'),
+          msg.includes('cancelled') ? t('settings.routineWakeAuthDenied') : msg,
+        )
+      }
+    }
+    wakePolicy.value = 'passive'
+    return
   }
+  wakePolicy.value = 'passive'
+  try {
+    await invoke('set_routine_wake_policy', { policy: 'passive' })
+  } catch {}
+}
+
+async function removeWakeAuthorization() {
+  try {
+    await invoke('remove_wake_authorization')
+    notifyTransient(t('settings.routineWake'), t('settings.routineWakeAuthRemoved'))
+  } catch (e) {
+    if (!String(e).includes('cancelled')) {
+      notifyTransient(t('settings.routineWake'), String(e))
+    }
+  }
+  // 提权删除可能被取消（规则仍在、策略已降级），以后端真实状态为准
+  await loadWakePolicy()
 }
 
 // 模型 — 暂用本地状态
@@ -548,6 +587,15 @@ function onSaved() {
                   {{ $t('settings.routineWakeActive') }}
                 </label>
                 <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground ml-5">{{ $t('settings.routineWakeActiveSub') }}</span>
+                <div v-if="wakeAuthorized" class="flex items-center gap-2 ml-5 text-[11px] text-muted-foreground">
+                  <span>{{ $t('settings.routineWakeAuthorized') }}</span>
+                  <button
+                    class="underline underline-offset-2 hover:text-foreground transition-colors"
+                    @click="removeWakeAuthorization"
+                  >
+                    {{ $t('settings.routineWakeRemoveAuth') }}
+                  </button>
+                </div>
               </div>
               <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
