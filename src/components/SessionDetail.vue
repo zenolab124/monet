@@ -69,7 +69,7 @@ const props = defineProps<{
   hideInput?: boolean
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { confirm: confirmDialog } = useConfirm()
 
 /** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
@@ -660,6 +660,8 @@ function mergeResponses(responses: VisibleRecord[]): VisibleRecord[] {
       const curMsg = (r as any).message
       prevMsg.content = [...prevMsg.content, ...curMsg.content]
       if (curMsg.usage) prevMsg.usage = curMsg.usage
+      // 合并块的 timestamp 是首行落盘时间(≈回复开始);末行时间(≈回复完成)另存,组末尾标注用
+      ;(prev as any)._lastTs = (r as any).timestamp ?? (prev as any)._lastTs
     } else {
       merged.push({ ...r, message: r.type === 'assistant' && r.message ? { ...r.message, content: [...r.message.content] } : r.message } as any)
     }
@@ -942,7 +944,7 @@ function groupIsLong(group: { responses: unknown[] }): boolean {
 function groupFooterText(group: { responses: unknown[] }): string | null {
   if (!groupIsLong(group)) return null
   for (let i = group.responses.length - 1; i >= 0; i--) {
-    const rec = group.responses[i] as { type?: string; message?: { model?: string; usage?: Record<string, number> } }
+    const rec = group.responses[i] as { type?: string; timestamp?: string | null; _lastTs?: string | null; message?: { model?: string; usage?: Record<string, number> } }
     if (rec.type === 'assistant' && rec.message?.model && rec.message.model !== '<synthetic>') {
       const parts = [shortModel(rec.message.model)]
       const u = rec.message.usage
@@ -954,11 +956,76 @@ function groupFooterText(group: { responses: unknown[] }): string | null {
           `${formatTokens(u.output_tokens ?? 0)} out`,
         )
       }
+      // 回复完成时间,与用户消息头的发送时间呼应(合并块 timestamp 是首行≈开始,_lastTs 是末行≈完成)
+      const doneAt = timeOfDay(rec._lastTs ?? rec.timestamp)
+      if (doneAt) parts.push(doneAt)
       return parts.join(' · ')
     }
   }
   return null
 }
+
+/** 组末尾标注预计算,与 messageGroups 同下标(含 Intl 格式化,不能留在模板里每次 re-render 逐组重跑) */
+const groupFooters = computed<(string | null)[]>(() => messageGroups.value.map(groupFooterText))
+
+// ---- 发送时间标注 ----
+
+/** HH:mm(时制跟随 UI 语言惯例);无效/缺失时间戳返回空串,调用侧 v-if 吞掉 */
+function timeOfDay(ts: string | null | undefined): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
+}
+
+/** hover 用完整日期时间串 */
+function fullTime(ts: string | null | undefined): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(locale.value)
+}
+
+/** 组代表时间戳:用户消息优先,兜底首条带时间的回复(首组可能无 user) */
+function groupTs(g: MsgGroup): string | null {
+  const ut = (g.user as { timestamp?: string | null } | null)?.timestamp
+  if (ut) return ut
+  for (const r of g.responses) {
+    const rt = (r as { timestamp?: string | null }).timestamp
+    if (rt) return rt
+  }
+  return null
+}
+
+/**
+ * 用户消息发送时间文案,与 messageGroups 同下标。
+ * 预计算而非模板内调用:本组件任何状态变化(如输入框打字)都整模板 re-render,
+ * 几百组逐个跑 Intl 格式化会吃掉帧预算;computed 后 re-render 只剩数组下标访问。
+ */
+const groupTimeLabels = computed<{ hm: string; full: string }[]>(() =>
+  messageGroups.value.map(g => {
+    const ts = (g.user as { timestamp?: string | null } | null)?.timestamp
+    return { hm: timeOfDay(ts), full: fullTime(ts) }
+  }),
+)
+
+/** 跨天日期分隔文案,与 messageGroups 同下标;同天/无时间戳为 null。首组也标(会话起始日) */
+const dayDividers = computed<(string | null)[]>(() => {
+  const out: (string | null)[] = []
+  let prevDay: string | null = null
+  const thisYear = new Date().getFullYear()
+  for (const g of messageGroups.value) {
+    const ts = groupTs(g)
+    const d = ts ? new Date(ts) : null
+    if (!d || Number.isNaN(d.getTime())) { out.push(null); continue }
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    if (key === prevDay) { out.push(null); continue }
+    prevDay = key
+    const opts: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric', weekday: 'short' }
+    if (d.getFullYear() !== thisYear) opts.year = 'numeric'
+    out.push(d.toLocaleDateString(locale.value, opts))
+  }
+  return out
+})
 
 const USER_CONTENT_TYPES = new Set(['text', 'image', 'document'])
 
@@ -1620,6 +1687,13 @@ async function onReload() {
           :data-anchor-index="gi"
           class="space-y-4 msg-group-cv"
         >
+          <!-- 跨天分隔:这轮起进入新的一天(首组标会话起始日) -->
+          <div v-if="dayDividers[gi]" class="channel-mark">
+            <div class="flex-1 h-px bg-border" />
+            <span class="i-carbon-calendar w-3 h-3" />
+            <span>{{ dayDividers[gi] }}</span>
+            <div class="flex-1 h-px bg-border" />
+          </div>
           <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
           <!-- /model 切换成功(stdout 事实源):渲染成与渠道切换同款的配置分界横线 -->
           <div
@@ -1647,7 +1721,14 @@ async function onReload() {
             <div class="flex gap-3">
               <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
               <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
-                <div class="text-xs font-medium mb-1 text-primary">{{ $t('session.you') }}</div>
+                <div class="text-xs font-medium mb-1 text-primary flex items-baseline gap-2">
+                  <span>{{ $t('session.you') }}</span>
+                  <span
+                    v-if="groupTimeLabels[gi]?.hm"
+                    class="text-muted-foreground/60 font-normal tabular-nums"
+                    :title="groupTimeLabels[gi].full"
+                  >{{ groupTimeLabels[gi].hm }}</span>
+                </div>
                 <MsgClamp>
                   <UserMsgContent :blocks="contentBlocks(group.user as any)" :record-uuid="group.user.uuid" />
                 </MsgClamp>
@@ -1707,12 +1788,16 @@ async function onReload() {
               <div class="flex-1 h-px bg-border" />
             </div>
           </template>
-          <!-- 长轮次组末尾补一行模型/token 标注:滚到底不用回头找归属(数据取该轮最后一条 assistant,与顶部标注同源) -->
+          <!-- 长轮次组末尾补一行模型/token/完成时间标注:滚到底不用回头找归属(数据取该轮最后一条 assistant,与顶部标注同源)。
+               与消息块同构的 flex+竖线段布局:视觉上归属回复块,而非悬空 -->
           <div
-            v-if="groupFooterText(group)"
-            class="pl-3.5 text-[11px] text-muted-foreground/70 tabular-nums"
+            v-if="groupFooters[gi]"
+            class="flex gap-3"
           >
-            {{ groupFooterText(group) }}
+            <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
+            <div class="min-w-0 flex-1 text-[11px] text-muted-foreground/70 tabular-nums">
+              {{ groupFooters[gi] }}
+            </div>
           </div>
         </div>
         <!-- 锚点失效的切换横线兜底:末尾按序渲染,不静默消失 -->
