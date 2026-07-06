@@ -941,32 +941,63 @@ function groupIsLong(group: { responses: unknown[] }): boolean {
  * 组末尾标注整行文案(长轮次才有):数据取该轮最后一条有效 assistant 记录,
  * 模型/token 与顶部标注同源。返回 null = 不渲染。
  */
-function groupFooterText(group: { responses: unknown[] }): string | null {
+function groupFooterOf(group: { responses: unknown[] }): { text: string; doneFull: string } | null {
   if (!groupIsLong(group)) return null
-  for (let i = group.responses.length - 1; i >= 0; i--) {
-    const rec = group.responses[i] as { type?: string; timestamp?: string | null; _lastTs?: string | null; message?: { model?: string; usage?: Record<string, number> } }
-    if (rec.type === 'assistant' && rec.message?.model && rec.message.model !== '<synthetic>') {
-      const parts = [shortModel(rec.message.model)]
-      const u = rec.message.usage
-      if (u) {
-        parts.push(
-          `${formatTokens(u.input_tokens ?? 0)} in`,
-          `${formatTokens(u.cache_read_input_tokens ?? 0)} cache`,
-          `${formatTokens(u.cache_creation_input_tokens ?? 0)} new`,
-          `${formatTokens(u.output_tokens ?? 0)} out`,
-        )
-      }
-      // 回复完成时间,与用户消息头的发送时间呼应(合并块 timestamp 是首行≈开始,_lastTs 是末行≈完成)
-      const doneAt = timeOfDay(rec._lastTs ?? rec.timestamp)
-      if (doneAt) parts.push(doneAt)
-      return parts.join(' · ')
+  // usage 全轮求和:单块 usage 只是单次 API 调用(每次工具往返一次),求和才是"这一轮总消耗",
+  // 与计费口径一致(块级明细仍在各块头部)。模型/完成时间取最后一条有效 assistant。
+  let model: string | null = null
+  let doneTs: string | null = null
+  let hasUsage = false
+  const sum = { in: 0, cache: 0, new: 0, out: 0 }
+  for (const r of group.responses) {
+    const rec = r as { type?: string; timestamp?: string | null; _lastTs?: string | null; message?: { model?: string; usage?: Record<string, number> } }
+    if (rec.type !== 'assistant') continue
+    const u = rec.message?.usage
+    if (u) {
+      hasUsage = true
+      sum.in += u.input_tokens ?? 0
+      sum.cache += u.cache_read_input_tokens ?? 0
+      sum.new += u.cache_creation_input_tokens ?? 0
+      sum.out += u.output_tokens ?? 0
+    }
+    if (rec.message?.model && rec.message.model !== '<synthetic>') {
+      model = rec.message.model
+      // 完成时间:合并块 timestamp 是首行≈开始,_lastTs 是末行≈完成
+      doneTs = rec._lastTs ?? rec.timestamp ?? doneTs
     }
   }
-  return null
+  if (!model) return null
+  // 顺序:完成时间 → 模型 → token 汇总
+  const parts: string[] = []
+  const doneAt = timeOfDay(doneTs)
+  if (doneAt) parts.push(doneAt)
+  parts.push(shortModel(model))
+  if (hasUsage) {
+    parts.push(
+      `${formatTokens(sum.in)} in`,
+      `${formatTokens(sum.cache)} cache`,
+      `${formatTokens(sum.new)} new`,
+      `${formatTokens(sum.out)} out`,
+    )
+  }
+  return { text: parts.join(' · '), doneFull: fullTime(doneTs) }
 }
 
 /** 组末尾标注预计算,与 messageGroups 同下标(含 Intl 格式化,不能留在模板里每次 re-render 逐组重跑) */
-const groupFooters = computed<(string | null)[]>(() => messageGroups.value.map(groupFooterText))
+const groupFooters = computed<({ text: string; doneFull: string } | null)[]>(() => messageGroups.value.map(groupFooterOf))
+
+/** 组末尾标注挂载的 resp 下标(最后一条有效 assistant,与 groupFooterOf 同规则):
+ *  挂进该块内容列而非组级独立行,统计行与回复共用同一根竖线(线连续、缩进天然对齐) */
+const groupFooterAt = computed<(number | null)[]>(() =>
+  messageGroups.value.map(g => {
+    let at: number | null = null
+    g.responses.forEach((r, i) => {
+      const rec = r as { type?: string; message?: { model?: string } }
+      if (rec.type === 'assistant' && rec.message?.model && rec.message.model !== '<synthetic>') at = i
+    })
+    return at
+  }),
+)
 
 // ---- 发送时间标注 ----
 
@@ -978,11 +1009,19 @@ function timeOfDay(ts: string | null | undefined): string {
   return d.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' })
 }
 
-/** hover 用完整日期时间串 */
+/** hover 用完整日期时间串(带秒) */
 function fullTime(ts: string | null | undefined): string {
   if (!ts) return ''
   const d = new Date(ts)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(locale.value)
+}
+
+/** 常驻显示用完整时间:年月日时分,不带秒(如 2026/7/6 14:32) */
+function fullStamp(ts: string | null | undefined): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString(locale.value, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 /** 组代表时间戳:用户消息优先,兜底首条带时间的回复(首组可能无 user) */
@@ -997,15 +1036,14 @@ function groupTs(g: MsgGroup): string | null {
 }
 
 /**
- * 用户消息发送时间文案,与 messageGroups 同下标。
+ * 用户消息发送时间文案(完整年月日时分,常驻显示),与 messageGroups 同下标。
  * 预计算而非模板内调用:本组件任何状态变化(如输入框打字)都整模板 re-render,
  * 几百组逐个跑 Intl 格式化会吃掉帧预算;computed 后 re-render 只剩数组下标访问。
  */
-const groupTimeLabels = computed<{ hm: string; full: string }[]>(() =>
-  messageGroups.value.map(g => {
-    const ts = (g.user as { timestamp?: string | null } | null)?.timestamp
-    return { hm: timeOfDay(ts), full: fullTime(ts) }
-  }),
+const groupTimeLabels = computed<string[]>(() =>
+  messageGroups.value.map(g =>
+    fullStamp((g.user as { timestamp?: string | null } | null)?.timestamp),
+  ),
 )
 
 /** 跨天日期分隔文案,与 messageGroups 同下标;同天/无时间戳为 null。首组也标(会话起始日) */
@@ -1724,10 +1762,9 @@ async function onReload() {
                 <div class="text-xs font-medium mb-1 text-primary flex items-baseline gap-2">
                   <span>{{ $t('session.you') }}</span>
                   <span
-                    v-if="groupTimeLabels[gi]?.hm"
+                    v-if="groupTimeLabels[gi]"
                     class="text-muted-foreground/60 font-normal tabular-nums"
-                    :title="groupTimeLabels[gi].full"
-                  >{{ groupTimeLabels[gi].hm }}</span>
+                  >{{ groupTimeLabels[gi] }}</span>
                 </div>
                 <MsgClamp>
                   <UserMsgContent :blocks="contentBlocks(group.user as any)" :record-uuid="group.user.uuid" />
@@ -1747,7 +1784,7 @@ async function onReload() {
             <div class="flex-1 h-px bg-border" />
           </div>
           <!-- 回复(AI + system) -->
-          <template v-for="resp in group.responses" :key="resp.uuid || resp">
+          <template v-for="(resp, ri) in group.responses" :key="resp.uuid || resp">
             <SystemEventRow v-if="resp.type === 'system'" :record="resp" />
             <div v-else class="flex gap-3 msg-block">
               <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
@@ -1774,6 +1811,14 @@ async function onReload() {
                     :record-uuid="(resp as any).uuid"
                   />
                 </div>
+                <!-- 长轮次组末统计(全轮 usage 总和+完成时间):挂在最后一条有效 assistant 块内,与回复共用竖线 -->
+                <div
+                  v-if="ri === groupFooterAt[gi] && groupFooters[gi]"
+                  class="mt-2 text-[11px] text-muted-foreground/70 tabular-nums w-fit"
+                  v-tooltip="groupFooters[gi]?.doneFull"
+                >
+                  {{ groupFooters[gi]?.text }}
+                </div>
               </div>
             </div>
             <!-- 渠道切换横线:回复消息锚点 -->
@@ -1788,17 +1833,6 @@ async function onReload() {
               <div class="flex-1 h-px bg-border" />
             </div>
           </template>
-          <!-- 长轮次组末尾补一行模型/token/完成时间标注:滚到底不用回头找归属(数据取该轮最后一条 assistant,与顶部标注同源)。
-               与消息块同构的 flex+竖线段布局:视觉上归属回复块,而非悬空 -->
-          <div
-            v-if="groupFooters[gi]"
-            class="flex gap-3"
-          >
-            <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
-            <div class="min-w-0 flex-1 text-[11px] text-muted-foreground/70 tabular-nums">
-              {{ groupFooters[gi] }}
-            </div>
-          </div>
         </div>
         <!-- 锚点失效的切换横线兜底:末尾按序渲染,不静默消失 -->
         <div

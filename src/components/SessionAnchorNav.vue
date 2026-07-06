@@ -18,9 +18,9 @@ const railRef = ref<HTMLElement>()
 const railHeight = ref(0)
 let resizeObs: ResizeObserver | null = null
 
-const MAX_GAP = 6
+const MAX_GAP = 3
 const MIN_GAP = 2
-const MAX_WRAP = 14
+const MAX_WRAP = 12
 const MIN_WRAP = 8
 
 const layout = computed(() => {
