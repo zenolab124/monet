@@ -36,7 +36,7 @@ watch(activeSection, (s) => {
 }, { immediate: true })
 
 type AutoTab = 'hooks' | 'routines'
-const autoTab = ref<AutoTab>('hooks')
+const autoTab = ref<AutoTab>('routines')
 
 /** 表格行：配置为主体，统计异步填充 */
 const rows = computed(() => {
@@ -198,13 +198,13 @@ function renderLogContent(log: RoutineExecutionLog): string {
     <!-- 侧栏导航 -->
     <nav class="auto-nav">
       <div class="auto-nav-title">{{ $t('automation.title') }}</div>
-      <button :class="['auto-nav-item', { active: autoTab === 'hooks' }]" @click="autoTab = 'hooks'">
-        <span class="i-carbon-flow w-3.5 h-3.5" />Hooks
-        <span class="auto-nav-count">{{ rows.length || '—' }}</span>
-      </button>
       <button :class="['auto-nav-item', { active: autoTab === 'routines' }]" @click="autoTab = 'routines'">
         <span class="i-carbon-time w-3.5 h-3.5" />{{ $t('automation.scheduledTasks') }}
         <span class="auto-nav-count">{{ routineRows.length || '—' }}</span>
+      </button>
+      <button :class="['auto-nav-item', { active: autoTab === 'hooks' }]" @click="autoTab = 'hooks'">
+        <span class="i-carbon-flow w-3.5 h-3.5" />Hooks
+        <span class="auto-nav-count">{{ rows.length || '—' }}</span>
       </button>
     </nav>
 
