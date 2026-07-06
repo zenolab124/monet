@@ -430,7 +430,7 @@ pub fn get_routines() -> Result<Vec<RoutineRow>, String> {
 }
 
 #[tauri::command]
-pub fn create_routine(
+pub async fn create_routine(
     name: String,
     cron_expression: String,
     original_text: String,
@@ -475,7 +475,7 @@ pub fn create_routine(
 }
 
 #[tauri::command]
-pub fn update_routine(
+pub async fn update_routine(
     id: String,
     name: Option<String>,
     cron_expression: Option<String>,
@@ -487,7 +487,12 @@ pub fn update_routine(
         validate_cron(expr)?;
     }
 
-    with_routines(|routines| {
+    let cron_changed = cron_expression.is_some();
+    let enabled_changed = enabled.is_some();
+
+    // 锁内只做数据变更与落盘；scheduler 同步必须在锁外——
+    // sync_wake_if_active 会再取 ROUTINES 锁，锁内调用即重入死锁
+    let result = with_routines(|routines| {
         let r = routines
             .iter_mut()
             .find(|r| r.id == id)
@@ -496,7 +501,6 @@ pub fn update_routine(
         if let Some(v) = name {
             r.name = v;
         }
-        let cron_changed = cron_expression.is_some();
         if let Some(v) = cron_expression {
             r.cron_expression = v;
         }
@@ -506,7 +510,6 @@ pub fn update_routine(
         if let Some(v) = prompt {
             r.prompt = v;
         }
-        let enabled_changed = enabled.is_some();
         if let Some(v) = enabled {
             r.enabled = v;
         }
@@ -522,27 +525,26 @@ pub fn update_routine(
 
         let result = r.clone();
         save_routines(routines);
+        Ok::<RoutineDefinition, String>(result)
+    })?;
 
-        // Sync system scheduler
-        if cron_changed || enabled_changed {
+    // Sync system scheduler
+    if cron_changed || enabled_changed {
+        let _ = scheduler::unregister_routine(&result.id);
+        if result.enabled {
             let runner_path = scheduler::runner_binary_path();
-            if result.enabled {
-                let _ = scheduler::unregister_routine(&result.id);
-                if let Err(e) = scheduler::register_routine(&result, &runner_path) {
-                    log::warn!("scheduler re-register failed: {}", e);
-                }
-            } else {
-                let _ = scheduler::unregister_routine(&result.id);
+            if let Err(e) = scheduler::register_routine(&result, &runner_path) {
+                log::warn!("scheduler re-register failed: {}", e);
             }
-            sync_wake_if_active();
         }
+        sync_wake_if_active();
+    }
 
-        Ok(result)
-    })
+    Ok(result)
 }
 
 #[tauri::command]
-pub fn delete_routine(id: String) -> Result<(), String> {
+pub async fn delete_routine(id: String) -> Result<(), String> {
     if let Err(e) = scheduler::unregister_routine(&id) {
         log::warn!("scheduler unregister failed: {}", e);
     }

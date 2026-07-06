@@ -95,8 +95,8 @@ pub fn run() {
             agent::init();
             // Apple FM 自动检测
             channels::register_apple_fm_if_available();
-            // 系统级定时任务调度器同步
-            routines::startup_sync();
+            // 系统级定时任务调度器同步（launchctl/pmset 耗时且可能弹授权框，不得阻塞主线程）
+            tauri::async_runtime::spawn_blocking(routines::startup_sync);
             // 后台刷新 CLI settings schema
             cli_settings::refresh_settings_schema();
             // MCP 二进制启动自愈（存量 adhoc 安装收敛到稳定签名）
