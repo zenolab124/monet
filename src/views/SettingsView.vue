@@ -211,7 +211,6 @@ function toggleCcSwitchAll() {
   }
 }
 
-const rcEnabled = ref(true)
 const wakePolicy = ref('passive')
 const widgetDayStart = ref(0)
 
@@ -545,20 +544,6 @@ function onSaved() {
                   <p v-if="translateError" class="text-[11px] text-destructive mt-1">{{ translateError }}</p>
                 </div>
               </div>
-            </div>
-
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.remoteControl') }}</div>
-              <div class="flex items-center gap-2.5">
-                <button
-                  :class="['form-toggle', { on: rcEnabled }]"
-                  @click="rcEnabled = !rcEnabled"
-                >
-                  <span class="form-toggle-knob" />
-                </button>
-                <span class="text-[11px] text-muted-foreground">{{ $t('settings.remoteControlSub') }}</span>
-              </div>
-              <div class="setting-hint">{{ $t('settings.remoteControlHint') }}</div>
             </div>
 
             <div class="setting-cell">
