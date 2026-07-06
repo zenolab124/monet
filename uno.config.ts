@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, transformerDirectives, transformerVariantGroup } from 'unocss'
 import presetWind4 from '@unocss/preset-wind4'
 import presetIcons from '@unocss/preset-icons'
 import { icons as carbonIcons } from '@iconify-json/carbon'
+
+// 自定义图标（i-app-*）：SVG 源放 src/assets/icons/，须 fill="currentColor" 才能跟随文字色
+const appIconDir = fileURLToPath(new URL('./src/assets/icons', import.meta.url))
+const appIcon = (name: string) => () => readFileSync(`${appIconDir}/${name}.svg`, 'utf-8')
 
 export default defineConfig({
   presets: [
@@ -14,6 +20,9 @@ export default defineConfig({
       },
       collections: {
         carbon: () => carbonIcons,
+        app: {
+          horse: appIcon('horse'),
+        },
       },
     }),
   ],

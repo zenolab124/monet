@@ -180,7 +180,7 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
           @pointerdown.stop
           @click.stop="emit('startRace')"
         >
-          <span class="i-carbon-compare w-3 h-3" />
+          <span class="i-app-horse w-3 h-3" />
         </button>
         <button
           class="icon-btn icon-btn-sm"

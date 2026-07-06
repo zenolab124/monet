@@ -109,7 +109,7 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
             @pointerdown.stop
           />
           <template v-else>
-            <span v-if="tab.race" class="i-carbon-compare w-3 h-3 shrink-0 text-muted-foreground" />
+            <span v-if="tab.race" class="i-app-horse w-3 h-3 shrink-0 text-muted-foreground" />
             <span class="truncate max-w-36">{{ tab.name }}</span>
             <span v-if="tab.sessionIds.length > 0" class="text-[10px] text-muted-foreground">{{ tab.sessionIds.length }}</span>
           </template>
