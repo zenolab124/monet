@@ -110,9 +110,6 @@ const scrollContainer = ref<HTMLElement>()
 const scrollContentEl = ref<HTMLElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
 
-const imageInput = useImageInput({ pasteTarget: textareaRef })
-onMounted(() => imageInput.attach())
-
 interface SessionConnectedPayload {
   session_id: string
   resumed: boolean
@@ -443,6 +440,16 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
   if (cwd) return { summary: draftSummary(sid, cwd), projectId: cwd.replace(/\//g, '-') }
   return null
 })
+
+// 图片输入:粘贴绑 textarea;拖拽收图区放大到整个详情面板(多列并排时拖到哪列进哪列),仅可输入时生效
+const detailRootRef = ref<HTMLElement>()
+const imageDropArea = computed<HTMLElement | null | undefined>(() =>
+  interactive.value && !props.hideInput && currentSession.value?.summary.cwd
+    ? detailRootRef.value
+    : null,
+)
+const imageInput = useImageInput({ pasteTarget: textareaRef, dropTarget: imageDropArea })
+onMounted(() => imageInput.attach())
 
 // 会话级图片定位上下文(主会话,无 agentId);历史区图片按此拼 ccimg 协议 URL
 const imageLocator = computed<ImageLocator | null>(() => {
@@ -1510,7 +1517,7 @@ async function onReload() {
     <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? $t('session.notExist') : $t('archive.selectSession') }}</p>
   </div>
 
-  <div v-else class="h-full flex min-h-0">
+  <div v-else ref="detailRootRef" class="h-full flex min-h-0">
     <!-- 主内容区 -->
     <div class="flex-1 min-w-0 flex flex-col">
     <!-- 会话顶栏(单行极简:标题由列头/列表承担,不重复显示) -->
@@ -1814,7 +1821,11 @@ async function onReload() {
     </div>
 
     <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染;赛马模式由共享输入替代) -->
-    <div v-if="interactive && !hideInput && currentSession.summary.cwd" class="px-4 py-3 border-t border-border shrink-0 relative">
+    <div
+      v-if="interactive && !hideInput && currentSession.summary.cwd"
+      class="px-4 py-3 border-t border-border shrink-0 relative transition-colors"
+      :class="imageInput.isDragging.value && 'ring-1 ring-primary/40 ring-inset bg-primary/5'"
+    >
       <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
       </div>
@@ -1848,6 +1859,15 @@ async function onReload() {
             @click="removePendingQueueItem(effectiveSessionId!, i)"
           />
         </div>
+      </div>
+
+      <!-- 拖拽指引(pointer-events-none:避免提示自身触发 dragleave 抖动) -->
+      <div
+        v-if="imageInput.isDragging.value"
+        class="mb-1 text-xs text-primary flex items-center gap-1.5 pointer-events-none"
+      >
+        <span class="i-carbon-image w-3.5 h-3.5" />
+        {{ $t('image.dropHint') }}
       </div>
 
       <div v-if="imageInput.images.value.length" class="mb-2 flex gap-2 flex-wrap">

@@ -961,7 +961,8 @@
     "noHeic": "HEIC format not supported",
     "unsupportedFormat": "{format} format not supported",
     "tooLarge": "Image too large, please resize manually",
-    "compressFailed": "Image compression failed: {error}"
+    "compressFailed": "Image compression failed: {error}",
+    "dropHint": "Drop to add images"
   },
   "danger": {
     "bashRule": "Bash command matched dangerous rule: {rule}",

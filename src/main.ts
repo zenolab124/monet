@@ -27,4 +27,14 @@ document.addEventListener('click', (e) => {
   })
 })
 
+// dragDropEnabled 已关闭（HTML5 拖放需要），webview 对拖入文件的默认行为是导航打开它；
+// 全局吃掉默认行为，实际收图由各输入区自己的 drop 监听承接（preventDefault 不阻断冒泡）
+window.addEventListener('dragover', (e) => e.preventDefault())
+window.addEventListener('drop', (e) => {
+  // 纯文本拖进 textarea/input 放行浏览器原生插入，只拦文件（防导航）
+  const isTextTarget = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement
+  if (isTextTarget && !e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+})
+
 createApp(App).use(i18n).directive('tooltip', vTooltip).mount('#app')

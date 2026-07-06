@@ -961,7 +961,8 @@
     "noHeic": "不支持 heic 格式",
     "unsupportedFormat": "不支持 {format} 格式",
     "tooLarge": "图片过大，请手动缩小",
-    "compressFailed": "图片压缩失败: {error}"
+    "compressFailed": "图片压缩失败: {error}",
+    "dropHint": "松开鼠标添加图片"
   },
   "danger": {
     "bashRule": "Bash 命令命中危险规则: {rule}",

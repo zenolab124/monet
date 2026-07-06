@@ -25,6 +25,7 @@ const race = computed(() => activeTab.value.race!)
 const {
   inputText,
   textareaRef,
+  dropAreaRef,
   imageInput,
   slashError,
   anyStreaming,
@@ -93,7 +94,7 @@ function onInputKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex-1 min-w-0 h-full flex flex-col">
+  <div ref="dropAreaRef" class="flex-1 min-w-0 h-full flex flex-col">
     <div class="flex-1 min-h-0 flex flex-row">
       <!-- 赛道区(横向滚动) -->
       <div ref="containerRef" class="flex-1 min-w-0 overflow-x-auto flex flex-row p-2.5 gap-2.5">
@@ -191,9 +192,21 @@ function onInputKeydown(e: KeyboardEvent) {
     </div>
 
     <!-- 输入区 -->
-    <div class="px-4 py-3 border-t border-border shrink-0">
+    <div
+      class="px-4 py-3 border-t border-border shrink-0 transition-colors"
+      :class="imageInput.isDragging.value && 'ring-1 ring-primary/40 ring-inset bg-primary/5'"
+    >
       <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
+      </div>
+
+      <!-- 拖拽指引(pointer-events-none:避免提示自身触发 dragleave 抖动) -->
+      <div
+        v-if="imageInput.isDragging.value"
+        class="mb-1 text-xs text-primary flex items-center gap-1.5 pointer-events-none"
+      >
+        <span class="i-carbon-image w-3.5 h-3.5" />
+        {{ t('image.dropHint') }}
       </div>
 
       <div v-if="imageInput.images.value.length" class="mb-2 flex gap-2 flex-wrap">

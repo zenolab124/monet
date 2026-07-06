@@ -12,7 +12,9 @@ import { parseCommand } from './useSlashCommands'
 export function useRaceInput(tab: Ref<WorkbenchTab>) {
   const inputText = ref('')
   const textareaRef = ref<HTMLTextAreaElement>()
-  const imageInput = useImageInput({ pasteTarget: textareaRef })
+  // 拖拽收图区由组件侧绑定(整个赛马区,拖到任意位置都进共享输入)
+  const dropAreaRef = ref<HTMLElement>()
+  const imageInput = useImageInput({ pasteTarget: textareaRef, dropTarget: dropAreaRef })
   const slashError = ref<string | null>(null)
 
   const { sendMessage, stopStreaming } = useStreaming()
@@ -99,5 +101,5 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
     }
   }
 
-  return { inputText, textareaRef, imageInput, slashError, anyStreaming, streamingCount, broadcastSend, stopAll, forkNewLane }
+  return { inputText, textareaRef, dropAreaRef, imageInput, slashError, anyStreaming, streamingCount, broadcastSend, stopAll, forkNewLane }
 }
