@@ -40,10 +40,7 @@ struct AgentProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<std::process::ChildStdout>,
-    request_count: u64,
 }
-
-static AGENT: Mutex<Option<AgentProcess>> = Mutex::new(None);
 
 fn spawn_agent() -> Result<AgentProcess, String> {
     let (executable, prefix_args) = find_claude();
@@ -139,7 +136,6 @@ fn spawn_agent() -> Result<AgentProcess, String> {
         child,
         stdin,
         stdout: reader,
-        request_count: 0,
     })
 }
 
@@ -257,36 +253,11 @@ fn request_via_cli(prompt: &str) -> Result<String, String> {
 
 fn request_blocking(prompt: &str) -> Result<CliCallResult, String> {
     let preview: String = prompt.chars().take(40).collect();
-    eprintln!("[agent-service] request: prompt={}...", preview);
-    let mut guard = AGENT.lock().unwrap_or_else(|e| e.into_inner());
-
-    let need_spawn = match &mut *guard {
-        Some(agent) => {
-            let dead = agent.child.try_wait().ok().flatten().is_some();
-            if dead { eprintln!("[agent-service] 进程已死，需重新 spawn"); }
-            dead
-        }
-        None => {
-            eprintln!("[agent-service] 进程不存在，需 spawn");
-            true
-        }
-    };
-    if need_spawn {
-        *guard = Some(spawn_agent()?);
-    }
-
-    let agent = guard.as_mut().unwrap();
-    agent.request_count += 1;
-
-    if agent.request_count > 100 {
-        eprintln!("[agent-service] 达到 100 次请求，重启清上下文");
-        let _ = agent.child.kill();
-        *guard = Some(spawn_agent()?);
-        let agent = guard.as_mut().unwrap();
-        return send_and_collect(agent, prompt);
-    }
-
-    send_and_collect(agent, prompt)
+    eprintln!("[agent-service] request(oneshot): prompt={}...", preview);
+    let mut agent = spawn_agent()?;
+    let result = send_and_collect(&mut agent, prompt);
+    let _ = agent.child.kill();
+    result
 }
 
 struct CliCallResult {
@@ -401,32 +372,16 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<CliCallRes
     Ok(CliCallResult { text: result, usage })
 }
 
-/// 初始化 AgentService（app 启动时调用）
+/// 初始化 AgentService（验证 claude 可用）
 pub fn init() {
     std::thread::spawn(|| {
-        let start = std::time::Instant::now();
-        eprintln!("[agent-service] 初始化开始...");
-        let mut guard = AGENT.lock().unwrap_or_else(|e| e.into_inner());
-        match spawn_agent() {
-            Ok(agent) => {
-                eprintln!("[agent-service] 初始化完成 elapsed={:?}", start.elapsed());
-                *guard = Some(agent);
-            }
-            Err(e) => {
-                eprintln!("[agent-service] 启动失败: {} elapsed={:?}", e, start.elapsed());
-            }
-        }
+        let (executable, _) = find_claude();
+        eprintln!("[agent-service] oneshot mode, executable={}", executable);
     });
 }
 
-/// 关闭 AgentService（app 退出时调用）
-pub fn shutdown() {
-    let mut guard = AGENT.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(mut agent) = guard.take() {
-        let _ = agent.child.kill();
-        eprintln!("[agent-service] 已关闭");
-    }
-}
+/// 关闭 AgentService（oneshot 模式无需清理）
+pub fn shutdown() {}
 
 // --- 公开的 agent 能力 ---
 
