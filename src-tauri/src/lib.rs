@@ -25,6 +25,8 @@ mod metadata;
 mod routines;
 /// pub：结构定义同时被 cc-space-mcp / cc-space-routine-runner 以 #[path] 方式复用
 pub mod routine_types;
+/// pub：搜索引擎同时被 cc-space-mcp 以 #[path] 方式复用（search_sessions 工具）
+pub mod search;
 mod scheduler;
 /// pub：唤醒计划逻辑同时被 cc-space-routine-runner 以 #[path] 方式复用
 pub mod wake;
@@ -103,6 +105,11 @@ pub fn run() {
             cli_settings::startup_sync_mcp();
             // Widget LaunchAgent 自动安装
             widget::ensure_launch_agent();
+            // 搜索缓存预热：延迟避开启动高峰，后台建/对账文本缓存
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                search::warm();
+            });
 
             // 窗口事件拦截：红色关闭按钮→隐藏到托盘；Destroyed→清理
             let handle = app.handle().clone();
@@ -154,6 +161,8 @@ pub fn run() {
             commands::fork_session,
             commands::get_usage_stats,
             commands::get_schema_diagnosis,
+            commands::search_query,
+            commands::search_status,
             workshop::get_workshop_assets,
             workshop::probe_mcp_server,
             workshop::open_workshop_dir,

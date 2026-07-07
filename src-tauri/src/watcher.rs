@@ -95,6 +95,8 @@ pub fn start(app: &AppHandle) {
                                 // 与 discovery 的会话定义保持一致：排除 agent- 前缀，
                                 // 否则增量路径会把全量扫描不认的文件 push 成幽灵会话
                                 if !sid.starts_with("agent-") {
+                                    // 搜索缓存懒失效：只标 dirty，查询时才重提取
+                                    crate::search::invalidate_file(path);
                                     pending_changes.insert((pid, sid));
                                 }
                             } else if path.parent() == Some(root.as_path()) {

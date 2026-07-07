@@ -79,6 +79,19 @@
     "settings": "Settings",
     "comingSoon": "{label} (Coming soon)"
   },
+  "search": {
+    "placeholder": "Search all sessions…",
+    "indexed": "{n} sessions indexed",
+    "building": "Building index…",
+    "allProjects": "All Projects",
+    "days30": "Last 30 days",
+    "titleOnly": "Title only",
+    "resultStats": "{n} sessions · {ms}ms",
+    "emptyHint": "Type keywords to search all sessions, separate words with spaces",
+    "noResults": "No matching sessions",
+    "untitled": "Untitled session",
+    "matchCount": "{n} matches"
+  },
   "titlebar": {
     "archive": "Archive",
     "workshop": "Workshop",

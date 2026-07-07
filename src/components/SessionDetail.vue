@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
+import { useSearch } from '@/composables/useSearch'
 import { createSessionDetail } from '@/composables/useSessionDetail'
 import {
   useStreaming,
@@ -77,6 +78,7 @@ const interactive = computed(() => props.mode === 'workbench')
 
 const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
+const { pendingScrollTarget } = useSearch()
 const { findSession, removeSession, draftCwd } = useWorkbench()
 const { goToSession } = useNotifications()
 
@@ -1571,6 +1573,37 @@ listen('projects-changed', () => {
 }).then(fn => { unlistenProjectsChanged = fn })
 onUnmounted(() => unlistenProjectsChanged?.())
 
+/**
+ * 搜索命中定位(档案馆实例专属;工作台列不消费,防止同会话开列时抢走目标):
+ * 按 uuid 反查所在消息组,滚到组锚点并闪烁。消费判据用 detail.currentSessionId
+ * 保证原子性——records 未加载完时不消费不置空,留给加载完成路径。
+ */
+function consumeScrollTarget(): boolean {
+  if (interactive.value) return false
+  const target = pendingScrollTarget.value
+  if (!target || target.sessionId !== detail.currentSessionId.value || loading.value) return false
+  pendingScrollTarget.value = null
+  const gi = messageGroups.value.findIndex(g =>
+    (g.user as { uuid?: string } | null)?.uuid === target.uuid
+    || g.responses.some(r => (r as { uuid?: string }).uuid === target.uuid))
+  if (gi < 0) return false
+  // 定位后禁跟随:外部跟随 reload 的 scrollToBottom 不得抢走落点
+  followStreaming.value = false
+  nextTick(() => {
+    const el = scrollContainer.value?.querySelector<HTMLElement>(`[data-anchor-index="${gi}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'start' })
+    el.classList.add('search-hit-flash')
+    setTimeout(() => el.classList.remove('search-hit-flash'), 1600)
+  })
+  return true
+}
+
+// 目标会话已是当前加载会话时(currentSession watch 不会重跑),置值即定位
+watch(pendingScrollTarget, (t) => {
+  if (t) consumeScrollTarget()
+})
+
 let loadedSessionId: string | null = null
 
 watch(
@@ -1589,7 +1622,8 @@ watch(
         if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
           clearStreamingTurns(cs.summary.id)
         }
-        scrollToBottom(true)
+        // 搜索命中定位优先于默认滚底
+        if (!consumeScrollTarget()) scrollToBottom(true)
       }
       if (cs.summary.id !== followSessionId) {
         followSessionId = cs.summary.id
@@ -2157,5 +2191,14 @@ async function onReload() {
 @keyframes typing-blink {
   0%, 80%, 100% { opacity: 0.15; }
   40% { opacity: 0.6; }
+}
+/* 搜索命中定位落点反馈:accent 底色淡出(亮暗双套走 token) */
+.search-hit-flash {
+  border-radius: 6px;
+  animation: search-hit-fade 1.6s ease-out;
+}
+@keyframes search-hit-fade {
+  0%, 25% { background-color: color-mix(in srgb, var(--accent) 12%, transparent); }
+  100% { background-color: transparent; }
 }
 </style>

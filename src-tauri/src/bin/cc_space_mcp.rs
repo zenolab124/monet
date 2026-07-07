@@ -23,16 +23,16 @@ const SERVER_VERSION: &str = "0.2.0";
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
 // ---------------------------------------------------------------------------
-// Data directory (mirrors config.rs)
+// 共享模块（与主 App 单一事实源）
 // ---------------------------------------------------------------------------
 
-fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
-        PathBuf::from(dir)
-    } else {
-        dirs::home_dir().unwrap_or_default().join(".cc-space")
-    }
-}
+#[path = "../config.rs"]
+mod config;
+/// 搜索引擎：独立进程直读落盘缓存 + mtime 对账自补增量，不依赖主 App 存活
+#[path = "../search.rs"]
+mod search;
+
+use config::data_dir;
 
 // ---------------------------------------------------------------------------
 // Routine data structures（与主 App / runner 共享单一事实源）
@@ -171,7 +171,7 @@ fn handle_initialize(id: Value, req: &Value) -> Value {
             "protocolVersion": PROTOCOL_VERSION,
             "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
             "capabilities": { "tools": {} },
-            "instructions": "CC Space provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them."
+            "instructions": "CC Space provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them. CC Space also provides search_sessions: full-text search over the user's Claude Code session history (~/.claude/projects). When the user asks to recall a past conversation/decision/discussion, prefer search_sessions over grepping JSONL files directly — it returns clean text with session locators in milliseconds."
         }
     })
 }
@@ -245,6 +245,37 @@ fn handle_tools_list(id: Value) -> Value {
         }
     }));
 
+    tools.push(json!({
+        "name": "search_sessions",
+        "description": "Full-text search over the user's Claude Code session history (all projects). Space-separated terms are ANDed at session level, case-insensitive substring match (works for CJK). Returns matching sessions with title, project, KWIC snippets, message uuids and the JSONL path — read the JSONL directly for full context around a hit.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search terms, space-separated (AND semantics across the session)"
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Restrict to one project (encoded dir name under ~/.claude/projects)"
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Only sessions modified within the last N days"
+                },
+                "title_only": {
+                    "type": "boolean",
+                    "description": "Match only titles/tags/summary, skip message bodies"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max sessions to return (default 20, max 50)"
+                }
+            },
+            "required": ["query"]
+        }
+    }));
+
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -262,6 +293,7 @@ fn handle_tools_call(id: Value, req: &Value) -> Value {
         "routine_list" => handle_routine_list(),
         "routine_create" => handle_routine_create(&arguments),
         "routine_delete" => handle_routine_delete(&arguments),
+        "search_sessions" => handle_search_sessions(&arguments),
         _ => Err(format!("Unknown tool: {}", name)),
     };
 
@@ -282,6 +314,80 @@ fn handle_tools_call(id: Value, req: &Value) -> Value {
             }
         }),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tool: search_sessions
+// ---------------------------------------------------------------------------
+
+fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
+    let query = arguments
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "query is required".to_string())?;
+
+    let filter = search::SearchFilter {
+        project_id: arguments
+            .get("project_id")
+            .and_then(Value::as_str)
+            .map(String::from),
+        days: arguments.get("days").and_then(Value::as_u64).map(|d| d as u32),
+        title_only: arguments
+            .get("title_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    };
+    let limit = arguments
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(20)
+        .min(50) as usize;
+
+    // 每次调用都对账：stdio server 长驻期间会话文件在持续变化；
+    // 冷建 <1s、热对账 <10ms，可承受且保证结果新鲜
+    search::warm();
+    let result = search::query(query, &filter);
+
+    let projects_root = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("projects");
+    let sessions: Vec<Value> = result
+        .hits
+        .iter()
+        .take(limit)
+        .map(|h| {
+            let iso = chrono::DateTime::from_timestamp(h.last_modified as i64, 0)
+                .map(|t| t.to_rfc3339())
+                .unwrap_or_default();
+            json!({
+                "sessionId": h.session_id,
+                "projectId": h.project_id,
+                "title": h.title,
+                "lastModified": iso,
+                "matchedIn": h.matched_in,
+                "totalMatches": h.total_matches,
+                "jsonlPath": projects_root
+                    .join(&h.project_id)
+                    .join(format!("{}.jsonl", h.session_id))
+                    .to_string_lossy(),
+                "snippets": h.snippets.iter().map(|s| json!({
+                    "uuid": s.uuid,
+                    "role": if s.role == 0 { "user" } else { "assistant" },
+                    "timestamp": s.timestamp,
+                    "text": s.text,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    serde_json::to_string(&json!({
+        "totalHits": result.total_hits,
+        "returned": sessions.len(),
+        "elapsedMs": result.elapsed_ms,
+        "sessions": sessions,
+    }))
+    .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

@@ -79,6 +79,19 @@
     "settings": "设置",
     "comingSoon": "{label}（即将推出）"
   },
+  "search": {
+    "placeholder": "搜索所有会话…",
+    "indexed": "已索引 {n} 个会话",
+    "building": "索引构建中…",
+    "allProjects": "全部项目",
+    "days30": "近 30 天",
+    "titleOnly": "仅标题",
+    "resultStats": "{n} 个会话命中 · {ms}ms",
+    "emptyHint": "输入关键词搜索全部会话，多个词以空格分隔",
+    "noResults": "没有找到匹配的会话",
+    "untitled": "无标题会话",
+    "matchCount": "{n} 处命中"
+  },
   "titlebar": {
     "archive": "档案",
     "workshop": "工坊",

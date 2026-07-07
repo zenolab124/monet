@@ -21,7 +21,7 @@ interface DomainItem {
 const topDomains = computed<DomainItem[]>(() => [
   { key: 'workbench', icon: 'i-carbon-workspace', label: t('activity.workbench'), section: 'workbench' },
   { key: 'sessions', icon: 'i-carbon-chat', label: t('activity.archive'), section: 'sessions' },
-  { key: 'search', icon: 'i-carbon-search', label: t('activity.search') },
+  { key: 'search', icon: 'i-carbon-search', label: t('activity.search'), section: 'search' },
   { key: 'workshop', icon: 'i-carbon-tools', label: t('activity.workshop'), section: 'workshop' },
   { key: 'automation', icon: 'i-carbon-bot', label: t('activity.automation'), section: 'automation' },
   { key: 'home', icon: 'i-carbon-home', label: t('activity.home'), section: 'home' },

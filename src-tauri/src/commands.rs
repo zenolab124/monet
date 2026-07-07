@@ -6,6 +6,7 @@ use crate::models::*;
 use crate::parser;
 use crate::permission::PermissionService;
 use crate::probe;
+use crate::search;
 use crate::streaming;
 use crate::usage_stats;
 
@@ -682,6 +683,24 @@ pub async fn get_usage_stats() -> Result<usage_stats::UsageStats, String> {
     tauri::async_runtime::spawn_blocking(usage_stats::collect_usage_stats)
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// 全局搜索：多词 AND 匹配缓存文本。首查触发建缓存 + dirty 懒重提取，
+/// 属重活，丢 blocking 线程池
+#[tauri::command]
+pub async fn search_query(
+    query: String,
+    filter: search::SearchFilter,
+) -> Result<search::SearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || search::query(&query, &filter))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 搜索索引状态（就绪与否 / 已索引会话数）
+#[tauri::command]
+pub fn search_status() -> search::SearchStatus {
+    search::status()
 }
 
 /// schema-probe 全量扫描（v2.2.0 FR-004）：首页兼容性诊断卡数据源。

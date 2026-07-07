@@ -4,8 +4,8 @@ import { ref, watch } from 'vue'
 
 const STORAGE_KEY = 'cc-space-ui'
 
-/** ActivityBar 区域（v2.1.0 点亮工作台；sessions 语义为档案馆；settings 自多渠道起点亮；workshop 自 v2.3.0 点亮；automation 自 v2.4.0 点亮） */
-export type AppSection = 'workbench' | 'sessions' | 'home' | 'settings' | 'workshop' | 'automation'
+/** ActivityBar 区域（v2.1.0 点亮工作台；sessions 语义为档案馆；settings 自多渠道起点亮；workshop 自 v2.3.0 点亮；automation 自 v2.4.0 点亮；search 自全局搜索起点亮） */
+export type AppSection = 'workbench' | 'sessions' | 'search' | 'home' | 'settings' | 'workshop' | 'automation'
 
 interface UiState {
   sidebarsCollapsed: boolean
@@ -20,7 +20,7 @@ function loadState(): UiState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      const validSections: AppSection[] = ['workbench', 'sessions', 'home', 'settings', 'workshop', 'automation']
+      const validSections: AppSection[] = ['workbench', 'sessions', 'search', 'home', 'settings', 'workshop', 'automation']
       return {
         sidebarsCollapsed: !!parsed.sidebarsCollapsed,
         activeSection: validSections.includes(parsed.activeSection)
