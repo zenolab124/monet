@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -179,6 +179,21 @@ fn sigterm_pid(pid: u32) {
         .output();
 }
 
+/// 断链探测：同 id 的 jsonl 是否存在于其他 cwd 编码目录（如 EnterWorktree 迁走的）。
+/// 命中说明"这不是新会话，是历史不在预期位置"——静默 --session-id 会以空历史
+/// 重生同名会话，复刻「会话被覆盖」事故。
+fn find_session_elsewhere(session_id: &str, expected: &Path) -> Option<PathBuf> {
+    let root = crate::commands::projects_dir();
+    let name = format!("{}.jsonl", session_id);
+    for entry in std::fs::read_dir(&root).ok()?.filter_map(|e| e.ok()) {
+        let candidate = entry.path().join(&name);
+        if candidate != expected && candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// 打开会话进程：spawn 长活 CLI + 初始化握手 + 启动 stdout 读取线程
 fn open_session(
     app: &AppHandle,
@@ -190,6 +205,7 @@ fn open_session(
     advisor: bool,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
+    force_new: bool,
 ) -> Result<(), String> {
     if !std::path::Path::new(cwd).is_dir() {
         return Err(format!("工作目录不存在: {}", cwd));
@@ -232,6 +248,15 @@ fn open_session(
         .join(format!("{}.jsonl", session_id));
     let session_flag = if session_file.is_file() {
         "--resume"
+    } else if !force_new {
+        // jsonl 不在预期位置——全局探测：是迁走了还是真的新会话？
+        if let Some(actual) = find_session_elsewhere(session_id, &session_file) {
+            return Err(format!(
+                "SESSION_ELSEWHERE:{}",
+                actual.to_string_lossy()
+            ));
+        }
+        "--session-id"
     } else {
         "--session-id"
     };
@@ -452,6 +477,7 @@ pub fn send_message(
     images: Option<&[serde_json::Value]>,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
+    force_new: bool,
 ) -> Result<(), String> {
     let mut exists = ACTIVE_PROCESSES
         .lock()
@@ -483,7 +509,7 @@ pub fn send_message(
     }
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, append_system_prompt)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, append_system_prompt, force_new)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -555,7 +581,7 @@ pub fn toggle_remote_control(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, None)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, None, false)?;
     }
 
     let process = ACTIVE_PROCESSES

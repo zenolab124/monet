@@ -6,6 +6,7 @@ import { triggerMetaGeneration } from './useSessionMeta'
 import { useHtmlVisual, HTML_VISUAL_PROMPT } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
+import { useConfirm } from './useConfirm'
 import i18n from '../locales'
 
 export interface SendOptions {
@@ -22,6 +23,8 @@ export interface SendOptions {
   /** Anthropic image content blocks(base64 编码) */
   images?: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>
   permissionMode?: string
+  /** 跳过断链校验，强制以新会话语义打开（用户确认"仍新建"后重发时置 true） */
+  forceNew?: boolean
 }
 
 export interface StreamingTurn {
@@ -838,9 +841,24 @@ async function sendMessage(
       images: opts.images?.length ? opts.images : null,
       permissionMode: opts.permissionMode ?? null,
       appendSystemPrompt: htmlVisualEnabled.value ? HTML_VISUAL_PROMPT : null,
+      forceNew: opts.forceNew ?? false,
     })
   } catch (e) {
-    state.streamError = String(e)
+    const err = String(e)
+    // 断链校验：会话历史在别处（worktree 迁走等），给用户知情选择
+    if (err.includes('SESSION_ELSEWHERE:')) {
+      finishStream(sessionId)
+      const { confirm } = useConfirm()
+      const ok = await confirm(
+        i18n.global.t('session.elsewhereConfirm'),
+        i18n.global.t('session.elsewhereOk'),
+      )
+      if (ok) {
+        await sendMessage(sessionId, cwd, message, { ...opts, forceNew: true })
+      }
+      return
+    }
+    state.streamError = err
     finishStream(sessionId)
   }
 }

@@ -167,6 +167,8 @@
     "killExternalConfirm": "将终止正在运行此会话的外部进程。若对方正在生成回复，该轮内容会丢失。确定终止？",
     "killExternalConfirmBy": "将终止「{owner}」正在运行此会话的进程。若其正在生成回复，该轮内容会丢失。确定终止？",
     "killExternalOk": "终止进程",
+    "elsewhereConfirm": "此会话的历史记录不在当前项目目录下（可能已被 worktree 迁走）。继续将以空历史新建会话，原始对话不会受影响。",
+    "elsewhereOk": "仍然新建",
     "terminateExternal": "终止",
     "terminating": "终止中…",
     "inputPlaceholder": "输入消息…",

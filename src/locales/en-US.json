@@ -167,6 +167,8 @@
     "killExternalConfirm": "This will terminate the external process running this session. If it is generating a reply, that turn will be lost. Terminate?",
     "killExternalConfirmBy": "This will terminate the process run by \"{owner}\" for this session. If it is generating a reply, that turn will be lost. Terminate?",
     "killExternalOk": "Terminate",
+    "elsewhereConfirm": "This session's history is not in the current project directory (it may have been moved by a worktree). Continuing will start with an empty history; the original conversation will not be affected.",
+    "elsewhereOk": "Create New Anyway",
     "terminateExternal": "Terminate",
     "terminating": "Terminating…",
     "inputPlaceholder": "Type a message…",
