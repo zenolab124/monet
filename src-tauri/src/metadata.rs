@@ -101,6 +101,11 @@ pub fn update_meta(session_id: String, patch: SessionMeta) -> Result<SessionMeta
     })
 }
 
+/// 查询某会话是否已被软删除（discovery 过滤用）
+pub fn is_deleted(session_id: &str) -> bool {
+    with_store(|s| s.get(session_id).and_then(|m| m.deleted).unwrap_or(false))
+}
+
 pub fn agent_cwd() -> PathBuf {
     let p = config::data_dir().join("agent");
     let _ = fs::create_dir_all(&p);

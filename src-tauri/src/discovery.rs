@@ -80,6 +80,7 @@ fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
     let mut sessions: Vec<SessionSummary> = session_paths
         .par_iter()
         .filter_map(|path| cache::get_summary(path))
+        .filter(|s| !crate::metadata::is_deleted(&s.id))
         .collect();
 
     // 按 last_modified 降序排序

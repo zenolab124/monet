@@ -51,18 +51,18 @@ pub async fn get_session_summary(
     crate::cache::get_summary(&path)
 }
 
-/// 删除会话（.jsonl 文件 + 子会话目录）
+/// 软删除会话：写 metadata 删除标记，不动 jsonl（只读铁律）。
+/// 前端列表/扫描侧过滤 deleted=true 的条目。
 #[tauri::command]
-pub fn delete_session(project_id: String, session_id: String) -> Result<(), String> {
-    let jsonl = session_path(&project_id, &session_id);
-    if jsonl.exists() {
-        fs::remove_file(&jsonl).map_err(|e| e.to_string())?;
-    }
-    // 删除可能存在的子会话目录
-    let subdir = projects_dir().join(&project_id).join(&session_id);
-    if subdir.is_dir() {
-        fs::remove_dir_all(&subdir).map_err(|e| e.to_string())?;
-    }
+pub fn delete_session(_project_id: String, session_id: String) -> Result<(), String> {
+    crate::metadata::update_meta(
+        session_id,
+        crate::metadata::SessionMeta {
+            deleted: Some(true),
+            deleted_at: Some(chrono::Utc::now().to_rfc3339()),
+            ..Default::default()
+        },
+    )?;
     Ok(())
 }
 
