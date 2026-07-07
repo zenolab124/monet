@@ -163,6 +163,7 @@ pub fn run() {
             commands::get_schema_diagnosis,
             commands::search_query,
             commands::search_status,
+            commands::smart_search,
             workshop::get_workshop_assets,
             workshop::probe_mcp_server,
             workshop::open_workshop_dir,
@@ -237,8 +238,22 @@ pub fn run() {
             menu::hide_main_window,
             menu::quit_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            match &event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    api.prevent_exit();
+                }
+                tauri::RunEvent::Reopen { .. } => {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+                _ => {}
+            }
+        });
 }
 
 /// 开发时把窗口移到扩展显示器居中

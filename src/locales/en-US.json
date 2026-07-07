@@ -90,7 +90,14 @@
     "emptyHint": "Type keywords to search all sessions, separate words with spaces",
     "noResults": "No matching sessions",
     "untitled": "Untitled session",
-    "matchCount": "{n} matches"
+    "matchCount": "{n} matches",
+    "modeKeyword": "Keyword",
+    "modeAgent": "Smart Search",
+    "agentPlaceholder": "Describe what you want to recall in natural language…",
+    "agentHint": "Type a question and press Enter — Agent will search your session history and synthesize an answer",
+    "agentLabel": "Agent",
+    "agentSearching": "Searching…",
+    "agentTermsLabel": "Search terms"
   },
   "titlebar": {
     "archive": "Archive",
@@ -885,8 +892,7 @@
   },
   "theme": {
     "paper": "Paper",
-    "ink": "Ink",
-    "glass": "Glass"
+    "ink": "Ink"
   },
   "block": {
     "thinking": "Thinking process ({length} chars)",

@@ -90,7 +90,14 @@
     "emptyHint": "输入关键词搜索全部会话，多个词以空格分隔",
     "noResults": "没有找到匹配的会话",
     "untitled": "无标题会话",
-    "matchCount": "{n} 处命中"
+    "matchCount": "{n} 处命中",
+    "modeKeyword": "关键词",
+    "modeAgent": "智能搜索",
+    "agentPlaceholder": "用自然语言描述你想回忆的内容…",
+    "agentHint": "输入问题后按回车，Agent 将搜索会话历史并综合回答",
+    "agentLabel": "Agent",
+    "agentSearching": "搜索中…",
+    "agentTermsLabel": "搜索关键词"
   },
   "titlebar": {
     "archive": "档案",
@@ -885,8 +892,7 @@
   },
   "theme": {
     "paper": "Paper · 纸",
-    "ink": "Ink · 墨",
-    "glass": "Glass · 玻璃"
+    "ink": "Ink · 墨"
   },
   "block": {
     "thinking": "思考过程（{length} 字）",

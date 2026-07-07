@@ -42,9 +42,9 @@ struct AgentProcess {
     stdout: BufReader<std::process::ChildStdout>,
 }
 
-fn spawn_agent() -> Result<AgentProcess, String> {
+fn spawn_agent_with(model: &str, effort: &str) -> Result<AgentProcess, String> {
     let (executable, prefix_args) = find_claude();
-    eprintln!("[agent-service] spawn: executable={} prefix_args={:?}", executable, prefix_args);
+    eprintln!("[agent-service] spawn: executable={} prefix_args={:?} model={} effort={}", executable, prefix_args, model, effort);
     let mut args = prefix_args;
     let session_id = uuid::Uuid::new_v4().to_string();
     args.extend([
@@ -55,10 +55,9 @@ fn spawn_agent() -> Result<AgentProcess, String> {
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--model".to_string(),
-        // alias 抗版本漂移(不写死带日期的完整 ID),且可被渠道 ANTHROPIC_DEFAULT_HAIKU_MODEL 模型映射重定向
-        "haiku".to_string(),
+        model.to_string(),
         "--effort".to_string(),
-        "low".to_string(),
+        effort.to_string(),
         "--tools".to_string(),
         "".to_string(),
         "--append-system-prompt".to_string(),
@@ -251,10 +250,18 @@ fn request_via_cli(prompt: &str) -> Result<String, String> {
     request_blocking(prompt).map(|r| r.text)
 }
 
+fn spawn_agent() -> Result<AgentProcess, String> {
+    spawn_agent_with("haiku", "low")
+}
+
 fn request_blocking(prompt: &str) -> Result<CliCallResult, String> {
+    request_blocking_with(prompt, "haiku", "low")
+}
+
+fn request_blocking_with(prompt: &str, model: &str, effort: &str) -> Result<CliCallResult, String> {
     let preview: String = prompt.chars().take(40).collect();
-    eprintln!("[agent-service] request(oneshot): prompt={}...", preview);
-    let mut agent = spawn_agent()?;
+    eprintln!("[agent-service] request(oneshot): prompt={}... model={}", preview, model);
+    let mut agent = spawn_agent_with(model, effort)?;
     let result = send_and_collect(&mut agent, prompt);
     let _ = agent.child.kill();
     result
@@ -498,6 +505,54 @@ pub fn generate_summary(snippet: &str, current_summary: Option<&str>) -> Result<
         ),
     };
     request_for_agent(&prompt, "summary")
+}
+
+/// 自然语言 → 搜索关键词组（语义搜索的翻译层）
+pub fn extract_search_terms(question: &str, model: &str, effort: &str) -> Result<Vec<String>, String> {
+    let lang = locale_instruction();
+    let prompt = format!(
+        "【角色：搜索关键词提取器】将用户的自然语言回忆需求翻译为 2-4 组搜索关键词。\n\
+        {lang}\n\n\
+        规则：\n\
+        - 每行一组关键词，空格分隔的多词会被 AND 匹配\n\
+        - 覆盖不同表述角度（中/英、同义词、技术术语 vs 口语）\n\
+        - 只输出关键词，每行一组，不要编号、引号或解释\n\
+        - 关键词从问题本身提取，不要编造不相关的词\n\n\
+        示例输入：我们之前怎么处理流式卡顿的\n\
+        示例输出：\n\
+        流式 卡顿\n\
+        streaming 性能\n\
+        流式 闪烁 掉帧\n\n\
+        <data>\n{question}\n</data>"
+    );
+    let result = request_blocking_with(&prompt, model, effort)?.text;
+    let terms: Vec<String> = result
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if terms.is_empty() {
+        return Err("未能提取关键词".to_string());
+    }
+    Ok(terms)
+}
+
+/// 根据搜索结果综合回答用户的回忆问题
+pub fn summarize_search_hits(question: &str, hits_context: &str, model: &str, effort: &str) -> Result<String, String> {
+    let lang = locale_instruction();
+    let prompt = format!(
+        "【角色：会话回忆助手】用户想回忆过去的对话内容。下方是从会话历史中搜索到的匹配片段。\n\
+        {lang}\n\n\
+        用户问题：{question}\n\n\
+        规则：\n\
+        - 根据搜索结果，用 2-5 句话回答用户的问题\n\
+        - 引用具体的会话标题作为出处\n\
+        - 如果搜索结果无法回答问题，诚实说明\n\
+        - 不要编造搜索结果中没有的信息\n\
+        - 简洁直接，不要开场白\n\n\
+        <data>\n{hits_context}\n</data>"
+    );
+    request_blocking_with(&prompt, model, effort).map(|r| r.text)
 }
 
 /// 自然语言转 cron 表达式

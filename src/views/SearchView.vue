@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSearch, type SearchHit } from '@/composables/useSearch'
+import { useAgentSearch } from '@/composables/useAgentSearch'
 import { useProjects } from '@/composables/useProjects'
 import { useUiState } from '@/composables/useUiState'
 
@@ -11,11 +12,19 @@ const {
   result, searching, searchError, indexStatus,
   runSearch, refreshStatus, goToHit,
 } = useSearch()
+const {
+  agentResult, agentSearching, agentError,
+  agentTermGroups, agentAllTerms, agentSummary,
+  agentModel, MODELS,
+  startAgentSearch,
+} = useAgentSearch()
 const { projects } = useProjects()
 const { activeSection } = useUiState()
 
 const inputEl = ref<HTMLInputElement | null>(null)
 const projectMenuOpen = ref(false)
+/** 搜索模式：keyword=关键词(默认) / agent=智能搜索 */
+const mode = ref<'keyword' | 'agent'>('keyword')
 
 // 进域时聚焦搜索框 + 刷新索引状态
 watch(activeSection, async (s) => {
@@ -46,10 +55,16 @@ function pickProject(id: string | null) {
   projectMenuOpen.value = false
 }
 
-/** 查询词列表（高亮用）*/
-const terms = computed(() =>
-  query.value.trim().split(/\s+/).filter(Boolean),
-)
+/** 当前活跃的结果（两模式同构） */
+const activeResult = computed(() => mode.value === 'keyword' ? result.value : agentResult.value)
+const activeSearching = computed(() => mode.value === 'keyword' ? searching.value : agentSearching.value)
+const activeError = computed(() => mode.value === 'keyword' ? searchError.value : agentError.value)
+
+/** 高亮词列表：关键词模式用用户输入，Agent 模式用 Agent 提取的全部关键词 */
+const terms = computed(() => {
+  if (mode.value === 'agent') return agentAllTerms.value
+  return query.value.trim().split(/\s+/).filter(Boolean)
+})
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -59,7 +74,6 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** KWIC 高亮：全部词合成单个 alternation 正则一次替换，避免嵌套污染 */
 function highlight(text: string): string {
   const html = escapeHtml(text)
   if (!terms.value.length) return html
@@ -71,7 +85,6 @@ function highlight(text: string): string {
   }
 }
 
-/** 相对时间（秒级 epoch）*/
 function relativeTime(epochSecs: number): string {
   const diff = Date.now() / 1000 - epochSecs
   if (diff < 60) return t('time.justNow')
@@ -83,18 +96,22 @@ function relativeTime(epochSecs: number): string {
 }
 
 function onHitClick(hit: SearchHit) {
-  // 默认定位到首个命中片段
   goToHit(hit, hit.snippets[0]?.uuid ?? null)
+}
+
+function onSubmit() {
+  if (mode.value === 'keyword') runSearch()
+  else startAgentSearch(query.value.trim())
 }
 </script>
 
 <template>
   <main class="flex-1 min-w-0 overflow-y-auto bg-background" @click="projectMenuOpen = false">
     <div class="max-w-180 mx-auto px-6 py-6">
-      <!-- 页头：标题 + 索引状态 -->
+      <!-- 页头 -->
       <div class="flex items-baseline gap-3 mb-4">
         <h1 class="text-lg font-semibold text-foreground">{{ t('activity.search') }}</h1>
-        <span v-if="indexStatus" class="text-xs text-muted-foreground">
+        <span v-if="indexStatus && mode === 'keyword'" class="text-xs text-muted-foreground">
           {{ indexStatus.state === 'ready'
             ? t('search.indexed', { n: indexStatus.indexedSessions })
             : t('search.building') }}
@@ -103,86 +120,132 @@ function onHitClick(hit: SearchHit) {
 
       <!-- 搜索框 -->
       <div class="flex items-center gap-2 px-3 py-2 mb-2.5 bg-card border border-input rounded focus-within:border-ring focus-within:shadow-paper transition-colors">
-        <span class="i-carbon-search w-4 h-4 text-muted-foreground shrink-0" />
+        <span class="w-4 h-4 text-muted-foreground shrink-0" :class="mode === 'keyword' ? 'i-carbon-search' : 'i-carbon-bot'" />
         <input
           ref="inputEl"
           v-model="query"
           type="text"
-          :placeholder="t('search.placeholder')"
+          :placeholder="mode === 'keyword' ? t('search.placeholder') : t('search.agentPlaceholder')"
           class="flex-1 min-w-0 bg-transparent outline-none border-none text-sm text-foreground placeholder:text-muted-foreground"
-          @keydown.enter="runSearch"
+          @keydown.enter="onSubmit"
         />
-        <span v-if="searching" class="i-carbon-renew w-3.5 h-3.5 text-muted-foreground animate-spin shrink-0" />
+        <span v-if="activeSearching" class="i-carbon-renew w-3.5 h-3.5 text-muted-foreground animate-spin shrink-0" />
       </div>
 
-      <!-- 过滤 chips -->
+      <!-- 模式切换 + 过滤 chips -->
       <div class="flex items-center gap-1.5 mb-4">
-        <div class="relative">
-          <button
-            class="px-2 py-0.5 text-xs rounded transition-colors flex items-center gap-1"
-            :class="projectFilter ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
-            @click.stop="projectMenuOpen = !projectMenuOpen"
-          >
-            {{ currentProjectLabel }}
-            <span class="i-carbon-chevron-down w-3 h-3" />
-          </button>
-          <div
-            v-if="projectMenuOpen"
-            class="absolute left-0 top-full mt-1 z-20 max-h-72 w-56 overflow-y-auto bg-card border border-border rounded-md shadow-paper-lifted py-1"
-            @click.stop
-          >
+        <button
+          class="px-2 py-0.5 text-xs rounded transition-colors"
+          :class="mode === 'keyword' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          @click="mode = 'keyword'"
+        >{{ t('search.modeKeyword') }}</button>
+        <button
+          class="px-2 py-0.5 text-xs rounded transition-colors"
+          :class="mode === 'agent' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          @click="mode = 'agent'"
+        >{{ t('search.modeAgent') }}</button>
+
+        <span class="w-px h-3.5 bg-border mx-1" />
+
+        <template v-if="mode === 'keyword'">
+          <div class="relative">
             <button
-              class="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors"
-              :class="projectFilter === null ? 'text-accent' : 'text-foreground'"
-              @click="pickProject(null)"
-            >{{ t('search.allProjects') }}</button>
-            <button
-              v-for="p in projects"
-              :key="p.id"
-              class="w-full text-left px-3 py-1.5 text-xs truncate hover:bg-muted transition-colors"
-              :class="projectFilter === p.id ? 'text-accent' : 'text-foreground'"
-              :title="p.display_path"
-              @click="pickProject(p.id)"
-            >{{ projectNames[p.id] }}</button>
+              class="px-2 py-0.5 text-xs rounded transition-colors flex items-center gap-1"
+              :class="projectFilter ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              @click.stop="projectMenuOpen = !projectMenuOpen"
+            >
+              {{ currentProjectLabel }}
+              <span class="i-carbon-chevron-down w-3 h-3" />
+            </button>
+            <div
+              v-if="projectMenuOpen"
+              class="absolute left-0 top-full mt-1 z-20 max-h-72 w-56 overflow-y-auto bg-card border border-border rounded-md shadow-paper-lifted py-1"
+              @click.stop
+            >
+              <button
+                class="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors"
+                :class="projectFilter === null ? 'text-accent' : 'text-foreground'"
+                @click="pickProject(null)"
+              >{{ t('search.allProjects') }}</button>
+              <button
+                v-for="p in projects"
+                :key="p.id"
+                class="w-full text-left px-3 py-1.5 text-xs truncate hover:bg-muted transition-colors"
+                :class="projectFilter === p.id ? 'text-accent' : 'text-foreground'"
+                :title="p.display_path"
+                @click="pickProject(p.id)"
+              >{{ projectNames[p.id] }}</button>
+            </div>
           </div>
-        </div>
-        <button
-          class="px-2 py-0.5 text-xs rounded transition-colors"
-          :class="days30 ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
-          @click="days30 = !days30"
-        >{{ t('search.days30') }}</button>
-        <button
-          class="px-2 py-0.5 text-xs rounded transition-colors"
-          :class="titleOnly ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
-          @click="titleOnly = !titleOnly"
-        >{{ t('search.titleOnly') }}</button>
-        <span v-if="result && !searching" class="ml-auto text-xs text-muted-foreground">
-          {{ t('search.resultStats', { n: result.totalHits, ms: result.elapsedMs }) }}
+          <button
+            class="px-2 py-0.5 text-xs rounded transition-colors"
+            :class="days30 ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            @click="days30 = !days30"
+          >{{ t('search.days30') }}</button>
+          <button
+            class="px-2 py-0.5 text-xs rounded transition-colors"
+            :class="titleOnly ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            @click="titleOnly = !titleOnly"
+          >{{ t('search.titleOnly') }}</button>
+        </template>
+
+        <!-- Agent 模式模型选择 -->
+        <template v-if="mode === 'agent'">
+          <button
+            v-for="m in MODELS"
+            :key="m"
+            class="px-2 py-0.5 text-xs rounded transition-colors capitalize"
+            :class="agentModel === m ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            @click="agentModel = m"
+          >{{ m }}</button>
+        </template>
+
+        <span v-if="activeResult && !activeSearching" class="ml-auto text-xs text-muted-foreground">
+          {{ t('search.resultStats', { n: activeResult.totalHits, ms: activeResult.elapsedMs }) }}
         </span>
       </div>
 
       <!-- 错误态 -->
-      <div v-if="searchError" class="text-sm text-destructive py-8 text-center">
-        {{ searchError }}
-        <button class="block mx-auto mt-2 text-xs text-accent hover:underline" @click="runSearch">
+      <div v-if="activeError" class="text-sm text-destructive py-8 text-center">
+        {{ activeError }}
+        <button class="block mx-auto mt-2 text-xs text-accent hover:underline" @click="onSubmit">
           {{ t('common.retry') }}
         </button>
       </div>
 
-      <!-- 空态：未输入 -->
-      <div v-else-if="!query.trim()" class="text-sm text-muted-foreground text-center py-16">
-        {{ t('search.emptyHint') }}
+      <!-- 空态 -->
+      <div v-else-if="!query.trim() && !activeSearching" class="text-sm text-muted-foreground text-center py-16">
+        {{ mode === 'keyword' ? t('search.emptyHint') : t('search.agentHint') }}
+      </div>
+
+      <!-- Agent 搜索中（关键词提取阶段） -->
+      <div v-else-if="agentSearching && mode === 'agent'" class="text-sm text-muted-foreground text-center py-16">
+        <span class="i-carbon-renew w-4 h-4 animate-spin inline-block mr-2 align-middle" />
+        {{ t('search.agentSearching') }}
       </div>
 
       <!-- 无结果 -->
-      <div v-else-if="result && result.hits.length === 0 && !searching" class="text-sm text-muted-foreground text-center py-16">
+      <div v-else-if="activeResult && activeResult.hits.length === 0 && !activeSearching" class="text-sm text-muted-foreground text-center py-16">
         {{ t('search.noResults') }}
       </div>
 
       <!-- 结果列表 -->
-      <div v-else-if="result" class="flex flex-col gap-2">
+      <div v-else-if="activeResult" class="flex flex-col gap-2">
+        <!-- Agent 归纳摘要 -->
+        <div v-if="mode === 'agent' && agentSummary" class="bg-card border border-border rounded shadow-paper px-3.5 py-2.5 mb-2.5 text-sm text-foreground leading-relaxed">
+          {{ agentSummary }}
+        </div>
+        <!-- Agent 关键词组展示 -->
+        <div v-if="mode === 'agent' && agentTermGroups.length" class="flex items-center gap-1.5 mb-2.5 flex-wrap">
+          <span class="text-xs text-muted-foreground">{{ t('search.agentTermsLabel') }}</span>
+          <span
+            v-for="(g, i) in agentTermGroups"
+            :key="i"
+            class="px-1.5 py-0.5 text-xs bg-secondary rounded text-foreground"
+          >{{ g }}</span>
+        </div>
         <div
-          v-for="hit in result.hits"
+          v-for="hit in activeResult.hits"
           :key="hit.sessionId"
           class="bg-card border border-border rounded shadow-paper hover:shadow-paper-lifted px-3.5 py-2.5 cursor-pointer transition-shadow"
           @click="onHitClick(hit)"

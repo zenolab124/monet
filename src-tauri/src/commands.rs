@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use serde::Serialize;
 use crate::discovery;
 use crate::models::*;
 use crate::parser;
@@ -705,6 +706,92 @@ pub fn search_status() -> search::SearchStatus {
     search::status()
 }
 
+/// 语义搜索结果（在 SearchResult 基础上附带 Agent 关键词组 + 归纳摘要）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartSearchResult {
+    #[serde(flatten)]
+    pub search: search::SearchResult,
+    pub term_groups: Vec<String>,
+    pub summary: Option<String>,
+}
+
+/// 语义搜索：Agent 翻译自然语言 → 多组关键词 → 逐组搜索 → 合并去重
+#[tauri::command]
+pub async fn smart_search(
+    question: String,
+    filter: search::SearchFilter,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<SmartSearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let m = model.as_deref().unwrap_or("sonnet");
+        let e = effort.as_deref().unwrap_or("low");
+        let term_groups = crate::agent::extract_search_terms(&question, m, e)?;
+        eprintln!("[smart-search] 关键词组: {:?}", term_groups);
+        let t0 = std::time::Instant::now();
+        let mut seen = std::collections::HashSet::new();
+        let mut merged = Vec::new();
+        for terms in &term_groups {
+            let r = search::query(terms, &filter);
+            for hit in r.hits {
+                if seen.insert(hit.session_id.clone()) {
+                    merged.push(hit);
+                }
+            }
+        }
+        merged.sort_unstable_by(|a, b| {
+            b.last_modified.partial_cmp(&a.last_modified).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let total = merged.len();
+        merged.truncate(50);
+
+        // 把前几条命中的完整上下文（±3 消息窗口，与 recall 等价）喂给 Agent 归纳
+        let all_terms = search::compile_terms(&term_groups.join(" "));
+        let summary = if merged.is_empty() {
+            None
+        } else {
+            let mut ctx = String::new();
+            for (i, hit) in merged.iter().take(6).enumerate() {
+                ctx.push_str(&format!("━━ 会话 {} ━━\n标题: {}\n\n",
+                    i + 1,
+                    hit.title.as_deref().unwrap_or("(无标题)")
+                ));
+                let messages = search::get_hit_context(
+                    &hit.session_id, &all_terms, 3, 3000,
+                );
+                for (label, text) in &messages {
+                    if label == "---" {
+                        ctx.push_str("  ┄\n");
+                    } else {
+                        ctx.push_str(&format!("{} {}\n", label, text));
+                    }
+                }
+                ctx.push('\n');
+            }
+            match crate::agent::summarize_search_hits(&question, &ctx, m, e) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("[smart-search] 归纳失败: {}", e);
+                    None
+                }
+            }
+        };
+
+        Ok(SmartSearchResult {
+            search: search::SearchResult {
+                hits: merged,
+                total_hits: total,
+                elapsed_ms: t0.elapsed().as_millis() as u64,
+            },
+            term_groups,
+            summary,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// schema-probe 全量扫描（v2.2.0 FR-004）：首页兼容性诊断卡数据源。
 /// 返回结构与 CLI `--json` 输出同构（既有契约）
 #[tauri::command]
@@ -817,6 +904,7 @@ pub struct SubAgentMeta {
     pub tool_use_id: String,
     pub agent_type: Option<String>,
     pub description: Option<String>,
+    pub workflow_id: Option<String>,
 }
 
 #[tauri::command]
@@ -825,36 +913,56 @@ pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMet
         .join(&project_id)
         .join(&session_id)
         .join("subagents");
-    let entries = match fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return vec![],
-    };
     let mut result = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !name.ends_with(".meta.json") {
-            continue;
+
+    // Helper: parse agent-*.meta.json entries from a directory, tagging with workflow_id
+    let scan_dir = |dir: &std::path::Path, workflow_id: Option<String>, out: &mut Vec<SubAgentMeta>| {
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.ends_with(".meta.json") {
+                continue;
+            }
+            let agent_id = name
+                .strip_prefix("agent-")
+                .and_then(|s| s.strip_suffix(".meta.json"))
+                .unwrap_or("")
+                .to_string();
+            if agent_id.is_empty() {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(entry.path()) {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    out.push(SubAgentMeta {
+                        agent_id,
+                        tool_use_id: v["toolUseId"].as_str().unwrap_or("").to_string(),
+                        agent_type: v["agentType"].as_str().map(String::from),
+                        description: v["description"].as_str().map(String::from),
+                        workflow_id: workflow_id.clone(),
+                    });
+                }
+            }
         }
-        let agent_id = name
-            .strip_prefix("agent-")
-            .and_then(|s| s.strip_suffix(".meta.json"))
-            .unwrap_or("")
-            .to_string();
-        if agent_id.is_empty() {
-            continue;
-        }
-        if let Ok(bytes) = fs::read(entry.path()) {
-            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                result.push(SubAgentMeta {
-                    agent_id,
-                    tool_use_id: v["toolUseId"].as_str().unwrap_or("").to_string(),
-                    agent_type: v["agentType"].as_str().map(String::from),
-                    description: v["description"].as_str().map(String::from),
-                });
+    };
+
+    // 1) Direct subagents: subagents/agent-*.meta.json
+    scan_dir(&dir, None, &mut result);
+
+    // 2) Workflow subagents: subagents/workflows/*/agent-*.meta.json
+    let workflows_dir = dir.join("workflows");
+    if let Ok(wf_entries) = fs::read_dir(&workflows_dir) {
+        for wf_entry in wf_entries.flatten() {
+            if wf_entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                let wf_id = wf_entry.file_name().to_string_lossy().to_string();
+                scan_dir(&wf_entry.path(), Some(wf_id), &mut result);
             }
         }
     }
+
     result
 }
 
@@ -864,12 +972,30 @@ pub fn get_subagent_records(
     session_id: String,
     agent_id: String,
 ) -> Vec<SessionRecord> {
-    let path = projects_dir()
+    let subagents_dir = projects_dir()
         .join(&project_id)
         .join(&session_id)
-        .join("subagents")
-        .join(format!("agent-{}.jsonl", agent_id));
-    parser::parse_messages(&path)
+        .join("subagents");
+    let filename = format!("agent-{}.jsonl", agent_id);
+
+    // 1) Try direct path: subagents/agent-{id}.jsonl
+    let direct = subagents_dir.join(&filename);
+    if direct.exists() {
+        return parser::parse_messages(&direct);
+    }
+
+    // 2) Fallback: search subagents/workflows/*/agent-{id}.jsonl
+    let workflows_dir = subagents_dir.join("workflows");
+    if let Ok(wf_entries) = fs::read_dir(&workflows_dir) {
+        for wf_entry in wf_entries.flatten() {
+            let candidate = wf_entry.path().join(&filename);
+            if candidate.exists() {
+                return parser::parse_messages(&candidate);
+            }
+        }
+    }
+
+    vec![]
 }
 
 #[tauri::command]
