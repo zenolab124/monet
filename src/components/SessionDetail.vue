@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide, inject, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfirm } from '@/composables/useConfirm'
 import { invoke } from '@tauri-apps/api/core'
@@ -207,6 +207,26 @@ const {
 provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
 provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
 provide('isSubAgentOpen', (agentId: string) => isAgentOpen(agentId))
+
+// --- 异步面板列宽联动：打开侧边栏时列宽翻倍，关闭时恢复 ---
+const columnIndex = inject<ComputedRef<number>>('columnIndex', undefined as any)
+const columnTabId = inject<ComputedRef<string>>('tabId', undefined as any)
+const { activeTab: wbActiveTab } = useWorkbench()
+let savedColumnWidth: number | null = null
+
+watch(asyncPanelVisible, (open) => {
+  if (!columnIndex?.value == null || !columnTabId?.value || !wbActiveTab.value) return
+  const tab = wbActiveTab.value
+  const idx = columnIndex.value
+  if (idx < 0 || idx >= tab.columnSizes.length) return
+  if (open) {
+    savedColumnWidth = tab.columnSizes[idx]
+    tab.columnSizes[idx] = savedColumnWidth * 2
+  } else if (savedColumnWidth !== null) {
+    tab.columnSizes[idx] = savedColumnWidth
+    savedColumnWidth = null
+  }
+})
 
 const ASYNC_TOOL_NAMES = new Set(['Agent', 'Task', 'Workflow'])
 

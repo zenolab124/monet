@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
@@ -31,6 +31,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { projects } = useProjects()
 const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state, openSession } = useWorkbench()
+
+provide('columnIndex', computed(() => props.index))
+provide('tabId', computed(() => props.tabId))
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
 
