@@ -1681,7 +1681,7 @@ async function onReload() {
     <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? $t('session.notExist') : $t('archive.selectSession') }}</p>
   </div>
 
-  <div v-else ref="detailRootRef" class="h-full flex min-h-0 relative">
+  <div v-else ref="detailRootRef" class="h-full flex min-h-0">
     <!-- 主内容区 -->
     <div class="flex-1 min-w-0 flex flex-col">
     <!-- 会话顶栏(单行极简:标题由列头/列表承担,不重复显示) -->
@@ -2150,12 +2150,11 @@ async function onReload() {
       </button>
     </div>
     </div>
-    <!-- 异步任务面板：从右边缘向外弹出,跟主栏等宽,不压缩主内容区 -->
+    <!-- 异步任务面板：跟主栏等宽,flex 等分 -->
     <Transition name="subagent-slide">
       <div
         v-if="asyncPanelVisible"
-        class="absolute top-0 bottom-0 border-l border-border overflow-hidden bg-card z-10"
-        :style="{ left: '100%', width: '100%' }"
+        class="flex-1 min-w-0 border-l border-border overflow-hidden"
       >
         <AsyncTaskPanel
           :tasks="asyncTasks"
