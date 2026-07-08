@@ -12,6 +12,12 @@ struct TodaySummaryView: View {
         }
     }
 
+    private var todayDateString: String {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        return f.string(from: Date())
+    }
+
     private func smallView(_ data: WidgetData) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 5) {
@@ -22,7 +28,7 @@ struct TodaySummaryView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.8))
                 Spacer()
-                Text("widget.today")
+                Text(todayDateString)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -48,7 +54,7 @@ struct TodaySummaryView: View {
             Spacer(minLength: 6)
 
             if let model = data.models.first {
-                Text(model)
+                Text(WidgetData.formatModelName(model))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }

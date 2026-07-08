@@ -7,7 +7,6 @@ struct CCSpaceWidgetBundle: WidgetBundle {
         TodaySummaryWidget()
         TokenWidget()
         StreakWidget()
-        ProjectWidget()
         ActivityWidget()
     }
 }
@@ -40,7 +39,7 @@ struct TodaySummaryMultiView: View {
     }
 }
 
-// MARK: - Token: Small=脉搏, Medium=趋势, Large=月度总览
+// MARK: - Token: Small=脉搏, Medium=趋势
 
 struct TokenWidget: Widget {
     let kind = "Token"
@@ -51,7 +50,7 @@ struct TokenWidget: Widget {
         }
         .configurationDisplayName(Text("pulse.displayName"))
         .description(Text("trend.description"))
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
@@ -62,8 +61,6 @@ struct TokenMultiView: View {
         switch family {
         case .systemMedium:
             TokenTrendView(entry: entry)
-        case .systemLarge:
-            MonthlyDashboardView(entry: entry)
         default:
             TokenPulseView(entry: entry)
         }
@@ -94,34 +91,6 @@ struct StreakMultiView: View {
             ModelMixView(entry: entry)
         default:
             StreakView(entry: entry)
-        }
-    }
-}
-
-// MARK: - Project: Small=活跃项目, Medium=项目排行
-
-struct ProjectWidget: Widget {
-    let kind = "Project"
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: TodaySummaryProvider()) { entry in
-            ProjectMultiView(entry: entry)
-                .containerBackground(.ultraThinMaterial, for: .widget)
-        }
-        .configurationDisplayName(Text("projects.displayName"))
-        .description(Text("board.description"))
-        .supportedFamilies([.systemSmall, .systemMedium])
-    }
-}
-
-struct ProjectMultiView: View {
-    let entry: TodaySummaryEntry
-    @Environment(\.widgetFamily) var family
-    var body: some View {
-        switch family {
-        case .systemMedium:
-            ProjectBoardView(entry: entry)
-        default:
-            ActiveProjectsView(entry: entry)
         }
     }
 }

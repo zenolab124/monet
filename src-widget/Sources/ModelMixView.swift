@@ -15,23 +15,43 @@ struct ModelMixView: View {
     }
 
     private func content(_ data: WidgetData) -> some View {
-        let models = Array((data.monthlyModels ?? []).prefix(5))
+        let models = Array((data.monthlyModels ?? []).prefix(4))
         let totalTokens = models.reduce(0) { $0 + $1.tokens }
 
         return VStack(alignment: .leading, spacing: 0) {
+            // Header
             HStack(spacing: 5) {
                 Image(systemName: "cpu.fill")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.purple.opacity(0.7))
+                    .foregroundStyle(Color.purple.opacity(0.7))
                 Text("models.title")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.8))
                 Spacer()
-                Text("models.badge")
+                Text("近 30 天")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 8)
+
+            Spacer().frame(height: 6)
+
+            // Hero dominant model
+            if let dom = data.dominantModel {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(dom.name)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text("\(dom.percent)%")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.purple.opacity(0.7))
+                    Text("主力模型")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer().frame(height: 8)
+
             // Stacked bar
             if totalTokens > 0 {
                 GeometryReader { geo in
@@ -45,17 +65,19 @@ struct ModelMixView: View {
                     }
                 }
                 .frame(height: 10)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
             }
-            Spacer(minLength: 8)
-            // Legend
-            VStack(alignment: .leading, spacing: 3) {
+
+            Spacer().frame(height: 10)
+
+            // Legend list
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(models.enumerated()), id: \.offset) { idx, m in
                     HStack(spacing: 6) {
                         Circle()
                             .fill(barColors[idx % barColors.count].opacity(0.7))
                             .frame(width: 6, height: 6)
-                        Text(m.model)
+                        Text(WidgetData.formatModelName(m.model))
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -63,6 +85,11 @@ struct ModelMixView: View {
                         Text(WidgetData.formatTokens(m.tokens))
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)
+                            .frame(width: 38, alignment: .trailing)
+                        Text("\(data.modelPercent(m))%")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 28, alignment: .trailing)
                     }
                 }
             }

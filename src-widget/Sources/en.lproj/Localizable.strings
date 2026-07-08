@@ -1,6 +1,5 @@
 // Common
-"widget.title" = "CC Space";
-"widget.today" = "Today";
+"widget.title" = "Today";
 "widget.sessions" = "sessions";
 "widget.tokens" = "tokens";
 "widget.empty" = "Open CC Space";
@@ -24,20 +23,20 @@
 "cost.displayName" = "Cost Estimate";
 "cost.description" = "Monthly API cost estimate";
 
+// Token (Small)
+"token.title" = "Token";
+"token.today" = "Today";
+
 // Token Pulse (Small)
-"pulse.title" = "Token Pulse";
+"pulse.title" = "Token";
+"pulse.avg" = "daily avg";
 "pulse.ofMonthly" = "of monthly total";
 "pulse.displayName" = "Token Pulse";
 "pulse.description" = "Today's tokens vs monthly progress";
 
-// Active Projects (Small)
-"projects.title" = "Projects";
-"projects.activeToday" = "active today";
-"projects.displayName" = "Active Projects";
-"projects.description" = "Projects with activity today";
-
 // Token Trend (Medium)
 "trend.title" = "Token Trend";
+"trend.badge" = "This month";
 "trend.thisMonth" = "this month";
 "trend.displayName" = "Token Trend";
 "trend.description" = "Weekly token usage with monthly total";
@@ -48,12 +47,6 @@
 "models.displayName" = "Model Mix";
 "models.description" = "Token distribution across models";
 
-// Project Board (Medium)
-"board.title" = "Projects";
-"board.total" = "total";
-"board.displayName" = "Project Board";
-"board.description" = "Top projects by session count";
-
 // Work Rhythm (Medium)
 "rhythm.title" = "Work Rhythm";
 "rhythm.peak" = "Peak";
@@ -61,7 +54,7 @@
 "rhythm.description" = "24-hour coding activity pattern";
 
 // Weekly Summary (Medium)
-"weekly.title" = "This Week";
+"weekly.title" = "Last 7 Days";
 "weekly.badge" = "7 days";
 "weekly.tokens" = "Tokens";
 "weekly.sessions" = "Sessions";
@@ -69,20 +62,12 @@
 "weekly.displayName" = "Weekly Summary";
 "weekly.description" = "This week's coding stats at a glance";
 
-// Monthly Dashboard (Large)
-"dashboard.title" = "Monthly Dashboard";
-"dashboard.tokens" = "Tokens";
-"dashboard.cost" = "Cost";
-"dashboard.streak" = "Streak";
-"dashboard.sessions" = "Sessions";
-"dashboard.displayName" = "Monthly Dashboard";
-"dashboard.description" = "Complete monthly overview with trends";
-
 // Heatmap (Large)
 "heatmap.title" = "Activity Map";
 "heatmap.badge" = "This month";
 "heatmap.monthTokens" = "Month tokens";
 "heatmap.activeDays" = "Active days";
+"heatmap.dailyAvg" = "Daily avg";
 "heatmap.streak" = "Streak";
 "heatmap.less" = "Less";
 "heatmap.more" = "More";

@@ -1,6 +1,5 @@
 // Common
-"widget.title" = "CC Space";
-"widget.today" = "今天";
+"widget.title" = "今日";
 "widget.sessions" = "会话";
 "widget.tokens" = "tokens";
 "widget.empty" = "打开 CC Space";
@@ -24,20 +23,20 @@
 "cost.displayName" = "费用估算";
 "cost.description" = "本月 API 费用估算";
 
+// Token (Small)
+"token.title" = "Token";
+"token.today" = "今日";
+
 // Token Pulse (Small)
-"pulse.title" = "Token 脉搏";
+"pulse.title" = "Token";
+"pulse.avg" = "日均";
 "pulse.ofMonthly" = "占月用量";
 "pulse.displayName" = "Token 脉搏";
 "pulse.description" = "今日 Token 占月度进度";
 
-// Active Projects (Small)
-"projects.title" = "项目";
-"projects.activeToday" = "今日活跃";
-"projects.displayName" = "活跃项目";
-"projects.description" = "今日有活动的项目";
-
 // Token Trend (Medium)
 "trend.title" = "Token 趋势";
+"trend.badge" = "本月";
 "trend.thisMonth" = "本月";
 "trend.displayName" = "Token 趋势";
 "trend.description" = "每周 Token 用量与月度总量";
@@ -48,12 +47,6 @@
 "models.displayName" = "模型分布";
 "models.description" = "各模型 Token 用量分布";
 
-// Project Board (Medium)
-"board.title" = "项目排行";
-"board.total" = "总计";
-"board.displayName" = "项目排行";
-"board.description" = "按会话数排列的项目";
-
 // Work Rhythm (Medium)
 "rhythm.title" = "作息节奏";
 "rhythm.peak" = "高峰";
@@ -61,7 +54,7 @@
 "rhythm.description" = "24 小时编码活跃分布";
 
 // Weekly Summary (Medium)
-"weekly.title" = "本周";
+"weekly.title" = "近 7 天";
 "weekly.badge" = "7 天";
 "weekly.tokens" = "Token";
 "weekly.sessions" = "会话";
@@ -69,20 +62,12 @@
 "weekly.displayName" = "本周总结";
 "weekly.description" = "本周编码统计一览";
 
-// Monthly Dashboard (Large)
-"dashboard.title" = "月度总览";
-"dashboard.tokens" = "Token";
-"dashboard.cost" = "费用";
-"dashboard.streak" = "连续";
-"dashboard.sessions" = "会话";
-"dashboard.displayName" = "月度总览";
-"dashboard.description" = "完整月度数据与趋势";
-
 // Heatmap (Large)
 "heatmap.title" = "活跃图谱";
 "heatmap.badge" = "本月";
 "heatmap.monthTokens" = "月 Token";
 "heatmap.activeDays" = "活跃天数";
+"heatmap.dailyAvg" = "日均";
 "heatmap.streak" = "连续";
 "heatmap.less" = "少";
 "heatmap.more" = "多";

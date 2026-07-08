@@ -19,50 +19,58 @@ struct HeatmapView: View {
         let p50 = quantile(nonzero, 0.50)
         let p75 = quantile(nonzero, 0.75)
 
+        let activeDays = nonzero.count
+
         let today = Calendar.current.startOfDay(for: Date())
         let grid = buildCalendarGrid(heatmap: heatmap, today: today)
         let weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"]
 
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 5) {
-                Image(systemName: "square.grid.3x3.fill")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.primary.opacity(0.6))
-                Text("heatmap.title")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.8))
+            HStack {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.grid.3x3.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.primary.opacity(0.6))
+                    Text("heatmap.title")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.8))
+                }
                 Spacer()
-                Text(monthLabel(heatmap))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
+                Text(monthYearLabel)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.8))
             }
-            Spacer(minLength: 4)
+            Spacer().frame(height: 10)
 
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(data.formattedMonthlyTokens)
+            HStack(spacing: 0) {
+                VStack(spacing: 1) {
+                    Text(WidgetData.formatTokens(data.monthlyTokens ?? 0))
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                     Text("heatmap.monthTokens")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(data.activeDays ?? 0)")
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 1) {
+                    Text("\(activeDays)")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                     Text("heatmap.activeDays")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(data.currentStreak ?? 0)")
+                .frame(maxWidth: .infinity)
+
+                VStack(spacing: 1) {
+                    Text(WidgetData.formatTokens(data.dailyAverage))
                         .font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text("heatmap.streak")
+                    Text("heatmap.dailyAvg")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity)
             }
-            Spacer(minLength: 4)
+            Spacer().frame(height: 10)
 
             // Weekday header
             HStack(spacing: 2) {
@@ -150,12 +158,11 @@ struct HeatmapView: View {
         return formatter.string(from: date)
     }
 
-    private func monthLabel(_ heatmap: [DayTokens]) -> String {
-        guard let first = heatmap.first, first.date.count >= 7 else { return "" }
-        let idx = first.date.index(first.date.startIndex, offsetBy: 5)
-        let endIdx = first.date.index(idx, offsetBy: 2)
-        let month = String(first.date[idx..<endIdx])
-        return "\(month)月"
+    private var monthYearLabel: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy 年 M 月"
+        return f.string(from: Date())
     }
 
     private func cellLevel(_ tokens: UInt64, p25: UInt64, p50: UInt64, p75: UInt64, nonzeroCount: Int) -> Int {

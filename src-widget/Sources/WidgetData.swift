@@ -91,8 +91,59 @@ struct WidgetData: Codable {
         return Int(((Double(current) - Double(last)) / Double(last)) * 100)
     }
 
+    // Daily average: monthlyTokens / day-of-month (1-indexed)
+    var dailyAverage: UInt64 {
+        let day = max(Calendar.current.component(.day, from: Date()), 1)
+        return (monthlyTokens ?? 0) / UInt64(day)
+    }
+
+    // Multiplier: today vs daily average
+    var todayMultiplier: Double {
+        let avg = dailyAverage
+        guard avg > 0 else { return 0 }
+        return Double(todayTokens) / Double(avg)
+    }
+
+    // Dominant model from monthlyModels (highest tokens)
+    var dominantModel: (name: String, percent: Int)? {
+        guard let models = monthlyModels, !models.isEmpty else { return nil }
+        let total = models.reduce(0 as UInt64) { $0 + $1.tokens }
+        guard total > 0, let top = models.max(by: { $0.tokens < $1.tokens }) else { return nil }
+        let pct = Int(Double(top.tokens) / Double(total) * 100)
+        return (Self.formatModelName(top.model), pct)
+    }
+
+    // Model percentages for the legend list
+    func modelPercent(_ model: ModelStat) -> Int {
+        guard let models = monthlyModels else { return 0 }
+        let total = models.reduce(0 as UInt64) { $0 + $1.tokens }
+        guard total > 0 else { return 0 }
+        return Int(Double(model.tokens) / Double(total) * 100)
+    }
+
+    // Week date range string like "7/2 – 7/8"
+    var weekDateRange: String {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        let today = Date()
+        let sixAgo = Calendar.current.date(byAdding: .day, value: -6, to: today)!
+        return "\(f.string(from: sixAgo)) – \(f.string(from: today))"
+    }
+
+    // Total weekly tokens
+    var weekTotalTokens: UInt64 {
+        weeklyTokens?.reduce(0) { $0 + $1.tokens } ?? 0
+    }
+
+    // Weekly active days count
+    var weekActiveDays: Int {
+        weeklyTokens?.filter { $0.tokens > 0 }.count ?? 0
+    }
+
     static func formatTokens(_ value: UInt64) -> String {
-        if value >= 1_000_000 {
+        if value >= 1_000_000_000 {
+            return String(format: "%.1fB", Double(value) / 1_000_000_000)
+        } else if value >= 1_000_000 {
             return String(format: "%.1fM", Double(value) / 1_000_000)
         } else if value >= 1_000 {
             return String(format: "%.1fK", Double(value) / 1_000)
@@ -106,6 +157,25 @@ struct WidgetData: Codable {
         formatter.currencyCode = "USD"
         formatter.maximumFractionDigits = value >= 100 ? 0 : 2
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "$%.0f", value)
+    }
+
+    static func formatModelName(_ raw: String) -> String {
+        var s = raw
+        // Strip "claude-" prefix
+        if s.hasPrefix("claude-") { s = String(s.dropFirst(7)) }
+        // Strip date suffix like "-20250514"
+        if let range = s.range(of: #"-\d{8}$"#, options: .regularExpression) {
+            s = String(s[..<range.lowerBound])
+        }
+        // Capitalize first letter of each segment: "sonnet-4" → "Sonnet 4"
+        let parts = s.split(separator: "-")
+        return parts.enumerated().map { i, part in
+            let str = String(part)
+            if str.first?.isLetter == true {
+                return str.prefix(1).uppercased() + str.dropFirst()
+            }
+            return str
+        }.joined(separator: " ")
     }
 
     static func shortDate(_ dateStr: String) -> String {

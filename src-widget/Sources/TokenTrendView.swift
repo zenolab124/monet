@@ -12,54 +12,108 @@ struct TokenTrendView: View {
         }
     }
 
+    /// Convert "2026-07-02" → "7/2"
+    private func shortDateMD(_ dateStr: String) -> String {
+        let parts = dateStr.split(separator: "-")
+        guard parts.count >= 3,
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else { return dateStr }
+        return "\(month)/\(day)"
+    }
+
+    private func tickPositions(count: Int) -> [Int] {
+        guard count > 1 else { return [0] }
+        let last = count - 1
+        return [0, last / 4, last / 2, last * 3 / 4, last]
+    }
+
     private func content(_ data: WidgetData) -> some View {
-        let weekly = data.weeklyTokens ?? []
-        let maxT = weekly.map(\.tokens).max() ?? 1
+        let days: [DayTokens]
+        if let heatmap = data.dailyHeatmap, !heatmap.isEmpty {
+            days = heatmap
+        } else {
+            days = data.weeklyTokens ?? []
+        }
+        let maxTokens = max(days.map(\.tokens).max() ?? 0, 1)
+        let ticks = tickPositions(count: days.count)
 
         return VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chart.bar.fill")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.primary.opacity(0.6))
-                        Text("trend.title")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.primary.opacity(0.8))
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(data.formattedMonthlyTokens)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                        Text("trend.thisMonth")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        if let pct = data.monthlyTrendPercent {
-                            Text("\(pct >= 0 ? "↑" : "↓")\(abs(pct))%")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(pct >= 0 ? .orange : .blue)
-                        }
-                    }
-                }
+            // Header
+            HStack(spacing: 5) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.6))
+                Text("trend.title")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.8))
                 Spacer()
+                Text("本月")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 8)
-            // Bar chart
-            HStack(alignment: .bottom, spacing: 4) {
-                ForEach(Array(weekly.enumerated()), id: \.offset) { idx, day in
-                    VStack(spacing: 2) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(idx == weekly.count - 1 ? Color.blue.opacity(0.7) : Color.primary.opacity(0.2))
-                            .frame(height: max(CGFloat(day.tokens) / CGFloat(maxT) * 40, 2))
-                        Text(WidgetData.shortDate(day.date))
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity)
+
+            Spacer().frame(height: 4)
+
+            // Hero
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(data.formattedMonthlyTokens)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                Text("tokens")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                if let pct = data.monthlyTrendPercent {
+                    Text("\(pct >= 0 ? "↑" : "↓") \(abs(pct))%")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(pct >= 0 ? .orange : .blue)
                 }
             }
-            .frame(height: 56)
+
+            Spacer(minLength: 6)
+
+            // 30-day bar chart
+            if !days.isEmpty {
+                HStack(alignment: .bottom, spacing: 1.5) {
+                    ForEach(Array(days.enumerated()), id: \.offset) { idx, day in
+                        let isPeak = day.tokens == maxTokens && day.tokens > 0
+                        let isLast = idx == days.count - 1
+                        let isZero = day.tokens == 0
+
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(
+                                isLast ? Color.blue.opacity(0.7) :
+                                isPeak ? Color.blue.opacity(0.5) :
+                                isZero ? Color.primary.opacity(0.08) :
+                                Color.primary.opacity(0.15)
+                            )
+                            .frame(maxWidth: .infinity)
+                            .frame(height: isZero ? 1 : max(CGFloat(Double(day.tokens) / Double(maxTokens) * 54), 1))
+                    }
+                }
+                .frame(height: 64)
+
+                // Date ticks
+                if days.count > 1 {
+                    dateTicks(days: days, ticks: ticks)
+                }
+            }
         }
         .widgetURL(URL(string: "ccspace://home"))
+    }
+
+    private func dateTicks(days: [DayTokens], ticks: [Int]) -> some View {
+        HStack {
+            ForEach(Array(ticks.enumerated()), id: \.offset) { i, tickIdx in
+                if i > 0 {
+                    Spacer()
+                }
+                Text(shortDateMD(days[tickIdx].date))
+                    .font(.system(size: 7, weight: tickIdx == days.count - 1 ? .semibold : .medium, design: .monospaced))
+                    .foregroundStyle(tickIdx == days.count - 1 ? AnyShapeStyle(Color.blue.opacity(0.7)) : AnyShapeStyle(.tertiary))
+            }
+        }
     }
 
     private var emptyView: some View {

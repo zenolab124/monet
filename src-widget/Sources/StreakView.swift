@@ -13,42 +13,78 @@ struct StreakView: View {
     }
 
     private func content(_ data: WidgetData) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let current = data.currentStreak ?? 0
+        let longest = data.longestStreak ?? 0
+        let ratio = min(Double(current) / Double(max(longest, 1)), 1.0)
+        let remaining = longest - current
+
+        return VStack(alignment: .leading, spacing: 0) {
+            // Header
             HStack(spacing: 5) {
                 Image(systemName: "flame.fill")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.orange.opacity(0.8))
+                    .foregroundStyle(Color.orange.opacity(0.8))
                 Text("streak.title")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.8))
                 Spacer()
             }
-            Spacer(minLength: 6)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text("\(data.currentStreak ?? 0)")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
+
+            Spacer(minLength: 2)
+
+            // Hero streak number
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(current)")
+                    .font(.system(size: 42, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.orange)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                 Text("streak.days")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.orange.opacity(0.8))
             }
-            Spacer(minLength: 6)
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("streak.longest")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                    Text("\(data.longestStreak ?? 0)")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+
+            Spacer().frame(height: 6)
+
+            // Progress bar toward record
+            HStack(spacing: 6) {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(.tertiary.opacity(0.3))
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.orange.opacity(0.7))
+                                .frame(width: max(geo.size.width * ratio, 4))
+                        }
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("streak.active")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                    Text("\(data.activeDays ?? 0)")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                .frame(height: 5)
+
+                Text("\(current)/\(longest)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer().frame(height: 2)
+
+            // Motivational text
+            if remaining > 0 {
+                Text("距最长记录还差 \(remaining) 天")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("新纪录进行中！")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.orange.opacity(0.7))
+            }
+
+            Spacer(minLength: 4)
+
+            // Streak trail dots
+            HStack(spacing: 4) {
+                ForEach(0..<7, id: \.self) { i in
+                    Circle()
+                        .fill(Color.orange.opacity(0.8 - Double(i) * 0.08))
+                        .frame(width: 12, height: 12)
                 }
             }
         }
