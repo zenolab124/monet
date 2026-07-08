@@ -31,7 +31,7 @@ export default defineConfig({
     transformerDirectives(),
     transformerVariantGroup(),
   ],
-  safelist: ['i-carbon-document', 'i-carbon-ink-pen', 'i-carbon-fog', 'i-carbon-renew'],
+  safelist: ['i-carbon-sun', 'i-carbon-moon', 'i-carbon-renew'],
   shortcuts: [
     ['center', 'flex justify-center items-center'],
     ['flex-center', 'flex items-center justify-center'],

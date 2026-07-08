@@ -13,7 +13,7 @@ export const THEMES: ThemeMeta[] = [
     className: 'theme-paper',
     isDark: false,
     atmosphere: 'paper-atmosphere',
-    icon: 'i-carbon-document',
+    icon: 'i-carbon-sun',
     labelKey: 'theme.paper',
   },
   {
@@ -21,16 +21,8 @@ export const THEMES: ThemeMeta[] = [
     className: 'theme-ink',
     isDark: true,
     atmosphere: false,
-    icon: 'i-carbon-ink-pen',
+    icon: 'i-carbon-moon',
     labelKey: 'theme.ink',
-  },
-  {
-    id: 'glass',
-    className: 'theme-glass',
-    isDark: true,
-    atmosphere: false,
-    icon: 'i-carbon-fog',
-    labelKey: 'theme.glass',
   },
 ]
 

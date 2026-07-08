@@ -21,7 +21,11 @@ function loadConfig(): ThemeConfig {
 
   try {
     const parsed = JSON.parse(raw)
-    if (parsed.version === 2) return parsed
+    if (parsed.version === 2) {
+      if (parsed.lightTheme === 'glass') parsed.lightTheme = 'paper'
+      if (parsed.darkTheme === 'glass') parsed.darkTheme = 'ink'
+      return parsed
+    }
   } catch {}
   return { version: 2, lightTheme: 'paper', darkTheme: 'ink' }
 }
@@ -38,27 +42,42 @@ const activeTheme = computed<ThemeMeta>(() => {
   return getTheme(id)
 })
 
-function applyTheme() {
+let transitionTimer: ReturnType<typeof setTimeout> | null = null
+
+function applyTheme(animate = true) {
   const theme = activeTheme.value
   const html = document.documentElement
   const body = document.body
 
-  THEMES.forEach(t => html.classList.remove(t.className))
-  html.classList.add(theme.className)
+  const commit = () => {
+    THEMES.forEach(t => html.classList.remove(t.className))
+    html.classList.add(theme.className)
+    html.classList.toggle('dark', theme.isDark)
 
-  html.classList.toggle('dark', theme.isDark)
+    const atmosphereClasses = THEMES.map(t => t.atmosphere).filter(Boolean) as string[]
+    atmosphereClasses.forEach(cls => body.classList.remove(cls))
+    if (theme.atmosphere) body.classList.add(theme.atmosphere)
 
-  const atmosphereClasses = THEMES.map(t => t.atmosphere).filter(Boolean) as string[]
-  atmosphereClasses.forEach(cls => body.classList.remove(cls))
-  if (theme.atmosphere) body.classList.add(theme.atmosphere)
+    const win = getCurrentWindow()
+    win.setTheme(theme.isDark ? 'dark' : 'light').catch(() => {})
+  }
 
-  const win = getCurrentWindow()
-  win.setTheme(theme.isDark ? 'dark' : 'light').catch(() => {})
+  if (animate) {
+    html.classList.add('theme-transitioning')
+    void html.offsetHeight
+    commit()
+    if (transitionTimer) clearTimeout(transitionTimer)
+    transitionTimer = setTimeout(() => html.classList.remove('theme-transitioning'), 400)
+  } else {
+    commit()
+  }
 }
 
+let initialized = false
 watch([config, prefersDark], () => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config.value))
-  applyTheme()
+  applyTheme(initialized)
+  initialized = true
 }, { immediate: true, deep: true })
 
 function setLightTheme(themeId: string) {
