@@ -54,7 +54,7 @@ import {
 } from '@/composables/usePermissionRequests'
 import { createSubAgentContext } from '@/composables/useSubAgents'
 import type { SubAgentMeta } from '@/types'
-import SubAgentPanel from './SubAgentPanel.vue'
+import AsyncTaskPanel from './AsyncTaskPanel.vue'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
 
 /**
@@ -185,16 +185,19 @@ const toolResultMap = computed(() => {
 })
 provide('toolResultMap', toolResultMap)
 
-// --- 子 Agent 侧面板 ---
+// --- 异步任务面板（子 Agent / Workflow）---
 const {
   subAgentMap,
   openAgents: subAgentTabs,
-  panelVisible: subAgentPanelVisible,
-  activeTab: subAgentActiveTab,
+  panelVisible: asyncPanelVisible,
   activeTabId: subAgentActiveTabId,
+  asyncTasks,
+  sidebarOpen: asyncSidebarOpen,
+  openSidebar: openAsyncPanel,
   loadSubAgentList,
   findByToolUseId,
   toggleSubAgent,
+  closeSidebar: closeAsyncPanel,
   closeTab: closeSubAgentTab,
   closeAllTabs: closeAllSubAgents,
   isAgentOpen,
@@ -205,10 +208,12 @@ provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
 provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
 provide('isSubAgentOpen', (agentId: string) => isAgentOpen(agentId))
 
+const ASYNC_TOOL_NAMES = new Set(['Agent', 'Task', 'Workflow'])
+
 function hasUnmatchedAgentToolUse(): boolean {
   for (const turn of stream.value.streamingTurns) {
     for (const b of turn.content) {
-      if (b.type === 'tool_use' && ((b as any).name === 'Agent' || (b as any).name === 'Task')) {
+      if (b.type === 'tool_use' && ASYNC_TOOL_NAMES.has((b as any).name)) {
         if (!subAgentMap.value.has((b as any).id)) return true
       }
     }
@@ -255,6 +260,9 @@ function onInputChange() {
   autoResize()
   syncCursor()
   if (slashError.value) slashError.value = null
+  // textarea 增高缩小了 scrollContainer 的 clientHeight,但 contentRO 不触发(内容高度没变),
+  // 原来的 scrollTop 不够贴底——看起来内容被输入框顶上去了。跟随模式下补偿一次贴底
+  if (followStreaming.value) scrollToBottom()
 }
 
 // 会话切换时复位 /clear 与 /help 的视图标志,滚动恢复跟随
@@ -1224,6 +1232,20 @@ async function handleSend() {
   followStreaming.value = true
   featureBannerShown.value = false
   scrollToBottom(true)
+  // 发送前即时落账:上一轮流式 turns 还在(子 Agent 晚到 / 300ms 窗口未到)时,
+  // sendMessage 会清 streamingTurns 但 records 尚未 reload——内容从两源同时消失。
+  // 先 reload 把旧内容收进历史区,再清 turns 再发送,消除消失窗口
+  if (stream.value.streamingTurns.length > 0) {
+    try {
+      const fresh = await invoke<SessionRecord[]>('get_session_records', {
+        projectId: cs.projectId,
+        sessionId: cs.summary.id,
+      })
+      if (effectiveSessionId.value === cs.summary.id && fresh.length >= records.value.length) {
+        records.value = fresh
+      }
+    } catch { /* next reload will pick it up */ }
+  }
   const advisor = settings.value.advisor
   const images = imageInput.images.value.length ? await imageInput.toImageBlocks() : undefined
   imageInput.clearImages()
@@ -1424,6 +1446,9 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (effectiveSessionId.value !== sid) return
     console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     if (newRecords) records.value = newRecords
+    // 新流式已启动(用户在 300ms 窗口内再次发送):只落账 records,不动新 turns——
+    // 否则会清掉新一轮刚到的 streamingTurns,造成新回复消失
+    if (getStream(sid).streaming) return
     // keepPending:气泡退场由落账匹配驱动(pendingLandedUuid watch),重试尽头仍未
     // 落账时保留气泡等下一轮 reload——宁可气泡多活一会,不可消息凭空消失
     clearStreamingTurns(sid, { keepPending: true })
@@ -1656,7 +1681,7 @@ async function onReload() {
     <p class="text-muted-foreground text-sm">{{ mode === 'workbench' ? $t('session.notExist') : $t('archive.selectSession') }}</p>
   </div>
 
-  <div v-else ref="detailRootRef" class="h-full flex min-h-0">
+  <div v-else ref="detailRootRef" class="h-full flex min-h-0 relative">
     <!-- 主内容区 -->
     <div class="flex-1 min-w-0 flex flex-col">
     <!-- 会话顶栏(单行极简:标题由列头/列表承担,不重复显示) -->
@@ -1685,7 +1710,20 @@ async function onReload() {
       @permission-mode-change="onPermissionModeChange"
       @reload="onReload"
       @deleted="onDeleted"
-    />
+    >
+      <button
+        v-if="asyncTasks.length > 0"
+        class="p-1 rounded transition-colors flex items-center gap-1"
+        :class="asyncSidebarOpen
+          ? 'text-claude bg-claude/10'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+        :title="$t('asyncTask.title')"
+        @click="asyncSidebarOpen ? closeAsyncPanel() : openAsyncPanel()"
+      >
+        <span class="i-carbon-lightning w-3.5 h-3.5" :class="stream.streaming && 'animate-pulse'" />
+        <span class="text-[10px] font-semibold tabular-nums leading-none">{{ asyncTasks.length }}</span>
+      </button>
+    </SessionTopBar>
 
     <!-- 加载态 -->
     <div v-if="loading" class="flex-1 flex items-center justify-center">
@@ -2112,21 +2150,22 @@ async function onReload() {
       </button>
     </div>
     </div>
-    <!-- 子 Agent 侧面板 -->
+    <!-- 异步任务面板：从右边缘向外弹出,跟主栏等宽,不压缩主内容区 -->
     <Transition name="subagent-slide">
       <div
-        v-if="subAgentPanelVisible"
-        class="shrink-0 border-l border-border overflow-hidden"
-        :style="{ width: '45%', maxWidth: '520px' }"
+        v-if="asyncPanelVisible"
+        class="absolute top-0 bottom-0 border-l border-border overflow-hidden bg-card z-10"
+        :style="{ left: '100%', width: '100%' }"
       >
-        <SubAgentPanel
-          :tabs="subAgentTabs"
+        <AsyncTaskPanel
+          :tasks="asyncTasks"
+          :open-tabs="subAgentTabs"
           :active-tab-id="subAgentActiveTabId"
           :project-id="currentSession?.projectId ?? null"
           :session-id="currentSession?.summary.id ?? null"
-          @select="subAgentActiveTabId = $event"
+          @select-agent="toggleSubAgent($event)"
           @close-tab="closeSubAgentTab($event)"
-          @close-all="closeAllSubAgents()"
+          @close="closeAsyncPanel"
         />
       </div>
     </Transition>

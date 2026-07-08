@@ -274,6 +274,9 @@ function onPermissionModeChange(mode: PermissionMode) {
       compact
     />
 
+    <!-- 外部注入控件(异步任务按钮等) -->
+    <slot />
+
     <!-- ⋯ 统一菜单 -->
     <div ref="menuRef" class="relative inline-flex shrink-0">
       <button

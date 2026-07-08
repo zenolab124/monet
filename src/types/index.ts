@@ -136,6 +136,7 @@ export interface SubAgentMeta {
   tool_use_id: string
   agent_type: string | null
   description: string | null
+  workflow_id?: string | null
 }
 
 /** 常见三值（PRD 口径）；Rust 端对配置显式 type 原样透传，运行时可能出现其他字符串 */

@@ -8,18 +8,66 @@ export interface SubAgentState {
   loading: boolean
 }
 
+export interface AsyncTask {
+  id: string
+  type: 'agent' | 'workflow'
+  label: string
+  description: string
+  toolUseId: string
+  children: SubAgentMeta[]
+}
+
 export function createSubAgentContext() {
   const subAgentMap = ref(new Map<string, SubAgentMeta>())
+  const allAgents = ref<SubAgentMeta[]>([])
   const openAgents = ref<SubAgentState[]>([])
   const activeTabId = ref<string | null>(null)
+  const sidebarOpen = ref(false)
   let currentProjectId = ''
   let currentSessionId = ''
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  const panelVisible = computed(() => openAgents.value.length > 0)
+  const panelVisible = computed(() => sidebarOpen.value && allAgents.value.length > 0)
   const activeTab = computed(() =>
     openAgents.value.find(a => a.meta.agent_id === activeTabId.value) ?? null,
   )
+
+  const asyncTasks = computed<AsyncTask[]>(() => {
+    const agents = allAgents.value
+    const workflowGroups = new Map<string, SubAgentMeta[]>()
+    const directAgents: SubAgentMeta[] = []
+    for (const a of agents) {
+      if (a.workflow_id) {
+        const list = workflowGroups.get(a.workflow_id) ?? []
+        list.push(a)
+        workflowGroups.set(a.workflow_id, list)
+      } else {
+        directAgents.push(a)
+      }
+    }
+    const tasks: AsyncTask[] = []
+    for (const a of directAgents) {
+      tasks.push({
+        id: a.agent_id,
+        type: 'agent',
+        label: a.agent_type ?? 'Agent',
+        description: a.description ?? '',
+        toolUseId: a.tool_use_id,
+        children: [],
+      })
+    }
+    for (const [wfId, children] of workflowGroups) {
+      tasks.push({
+        id: wfId,
+        type: 'workflow',
+        label: 'Workflow',
+        description: `${children.length} agents`,
+        toolUseId: '',
+        children,
+      })
+    }
+    return tasks
+  })
 
   async function loadSubAgentList(projectId: string, sessionId: string) {
     currentProjectId = projectId
@@ -29,12 +77,14 @@ export function createSubAgentContext() {
         projectId,
         sessionId,
       })
+      allAgents.value = list
       const map = new Map<string, SubAgentMeta>()
       for (const item of list) {
         if (item.tool_use_id) map.set(item.tool_use_id, item)
       }
       subAgentMap.value = map
     } catch {
+      allAgents.value = []
       subAgentMap.value = new Map()
     }
   }
@@ -44,16 +94,21 @@ export function createSubAgentContext() {
   }
 
   function toggleSubAgent(meta: SubAgentMeta) {
+    sidebarOpen.value = true
     const idx = openAgents.value.findIndex(a => a.meta.agent_id === meta.agent_id)
     if (idx >= 0) {
-      if (activeTabId.value === meta.agent_id) {
-        closeTab(meta.agent_id)
-      } else {
-        activeTabId.value = meta.agent_id
-      }
+      activeTabId.value = meta.agent_id
       return
     }
     openTab(meta)
+  }
+
+  function openSidebar() {
+    sidebarOpen.value = true
+  }
+
+  function closeSidebar() {
+    sidebarOpen.value = false
   }
 
   async function openTab(meta: SubAgentMeta) {
@@ -103,6 +158,9 @@ export function createSubAgentContext() {
             return
           }
           await loadSubAgentList(currentProjectId, currentSessionId)
+          if (allAgents.value.length > 0 && !sidebarOpen.value) {
+            sidebarOpen.value = true
+          }
         }, 2000)
       }
     })
@@ -122,13 +180,18 @@ export function createSubAgentContext() {
 
   return {
     subAgentMap,
+    allAgents,
     openAgents,
     activeTabId,
     panelVisible,
     activeTab,
+    asyncTasks,
+    sidebarOpen,
     loadSubAgentList,
     findByToolUseId,
     toggleSubAgent,
+    openSidebar,
+    closeSidebar,
     closeTab,
     closeAllTabs,
     isAgentOpen,

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, inject } from 'vue'
+import { computed, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { SubAgentMeta } from '@/types'
-
-const PROMPT_PREVIEW_LEN = 120
 
 const props = defineProps<{
   input: Record<string, unknown>
@@ -10,32 +9,23 @@ const props = defineProps<{
   name: string
 }>()
 
+const { t } = useI18n()
+
 const findSubAgent = inject<(toolUseId: string) => SubAgentMeta | undefined>('findSubAgent')
 const toggleSubAgent = inject<(meta: SubAgentMeta) => void>('toggleSubAgent')
 const isSubAgentOpen = inject<(agentId: string) => boolean>('isSubAgentOpen')
 
-const subagentType = computed(() => {
+const isWorkflow = computed(() => props.name === 'Workflow')
+
+const typeLabel = computed(() => {
+  if (isWorkflow.value) return 'Workflow'
   const v = props.input.subagent_type
-  return typeof v === 'string' ? v : ''
+  return typeof v === 'string' && v ? v : props.name
 })
 
 const description = computed(() => {
   const v = props.input.description
   return typeof v === 'string' ? v : ''
-})
-
-const prompt = computed(() => {
-  const v = props.input.prompt
-  return typeof v === 'string' ? v : ''
-})
-
-const expanded = ref(false)
-
-const isLong = computed(() => prompt.value.length > PROMPT_PREVIEW_LEN)
-
-const promptPreview = computed(() => {
-  if (!isLong.value || expanded.value) return prompt.value
-  return prompt.value.slice(0, PROMPT_PREVIEW_LEN) + '…'
 })
 
 const matchedAgent = computed(() => findSubAgent?.(props.toolUseId))
@@ -50,30 +40,24 @@ function onToggle() {
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
-    <div class="flex items-center gap-1.5 flex-wrap">
-      <span class="i-carbon-bot w-3.5 h-3.5 shrink-0" />
-      <span class="text-foreground font-medium">{{ name }}</span>
-      <span v-if="subagentType" class="px-1.5 py-0.5 rounded border border-border text-muted-foreground font-mono">{{ subagentType }}</span>
-      <span v-if="description" class="text-foreground">{{ description }}</span>
-      <button
-        v-if="matchedAgent"
-        class="ml-auto px-1.5 py-0.5 rounded border transition-colors"
-        :class="isOpen
-          ? 'border-primary bg-primary/15 text-primary'
-          : 'border-primary/30 text-primary hover:bg-primary/10'"
-        @click="onToggle"
-      >
-        {{ isOpen ? $t('block.toolTask.collapse') : $t('block.toolTask.viewAgent') }}
-      </button>
-    </div>
-    <div v-if="prompt" class="mt-1 text-muted-foreground whitespace-pre-wrap break-words">{{ promptPreview }}</div>
-    <button
-      v-if="isLong"
-      class="mt-1 text-muted-foreground hover:text-foreground"
-      @click="expanded = !expanded"
-    >
-      {{ expanded ? $t('block.toolTask.collapse') : $t('block.toolTask.expand') }}
-    </button>
+  <div
+    class="mt-2 flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px]
+           bg-background border border-border cursor-pointer
+           transition-colors hover:bg-card hover:border-primary/40"
+    :class="isOpen && 'border-primary bg-primary/5'"
+    @click="onToggle"
+  >
+    <span
+      class="w-4 h-4 shrink-0 rounded flex items-center justify-center text-[9px] font-semibold"
+      :class="isWorkflow
+        ? 'bg-claude/15 text-claude'
+        : 'bg-tag text-tag-foreground'"
+    >{{ isWorkflow ? 'W' : 'A' }}</span>
+    <span class="font-medium text-foreground shrink-0">{{ typeLabel }}</span>
+    <span v-if="description" class="text-muted-foreground truncate flex-1">{{ description }}</span>
+    <span
+      v-if="matchedAgent"
+      class="shrink-0 text-[10px] text-primary tabular-nums"
+    >{{ t('block.toolTask.viewDetail') }}</span>
   </div>
 </template>

@@ -25,7 +25,7 @@ export const TOOL_MAP: Record<string, Component> = {
   WebFetch: ToolWebFetch, WebSearch: ToolWebSearch,
   TodoWrite: ToolTodoWrite,
   // Agent 是 Task 的新名（claude CLI 改名），共用同一组件，标题显示实际 name
-  Task: ToolTask, Agent: ToolTask,
+  Task: ToolTask, Agent: ToolTask, Workflow: ToolTask,
   ExitPlanMode: ToolExitPlanMode, EnterPlanMode: ToolEnterPlanMode,
   AskUserQuestion: ToolAskUserQuestion, Skill: ToolSkill,
   SendUserFile: ToolSendUserFile,

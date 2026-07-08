@@ -148,6 +148,10 @@
   "subAgent": {
     "panel": "Sub Agent"
   },
+  "asyncTask": {
+    "title": "Async Tasks",
+    "empty": "No async tasks"
+  },
   "session": {
     "notExist": "Session does not exist or has been deleted",
     "loadingChat": "Loading conversation...",
@@ -939,7 +943,10 @@
     "toolTask": {
       "collapse": "Collapse",
       "expand": "Expand",
-      "viewAgent": "View"
+      "viewAgent": "View",
+      "running": "Running",
+      "completed": "Completed",
+      "viewDetail": "View Detail"
     },
     "toolTodo": {
       "empty": "(No todo items)"

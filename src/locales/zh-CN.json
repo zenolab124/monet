@@ -148,6 +148,10 @@
   "subAgent": {
     "panel": "子 Agent"
   },
+  "asyncTask": {
+    "title": "异步任务",
+    "empty": "暂无异步任务"
+  },
   "session": {
     "notExist": "会话不存在或已删除",
     "loadingChat": "加载对话中...",
@@ -939,7 +943,10 @@
     "toolTask": {
       "collapse": "收起",
       "expand": "展开",
-      "viewAgent": "查看执行"
+      "viewAgent": "查看执行",
+      "running": "运行中",
+      "completed": "已完成",
+      "viewDetail": "查看详情"
     },
     "toolTodo": {
       "empty": "（无待办项）"
