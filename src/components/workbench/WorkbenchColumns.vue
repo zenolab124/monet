@@ -168,6 +168,7 @@ watch(focusColumnRequest, async (req) => {
         :tab-id="activeTab.id"
         :index="i"
         :flex="activeTab.columnSizes[i]"
+        :resizing="dragging"
       >
         <template #default="{ isDragging: colDragging, handleRef }">
           <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" @start-race="onStartRace(col.sessionId)" />

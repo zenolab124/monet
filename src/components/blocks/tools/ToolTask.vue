@@ -45,6 +45,7 @@ function onToggle() {
            bg-background border border-border cursor-pointer
            transition-colors hover:bg-card hover:border-primary/40"
     :class="isOpen && 'border-primary bg-primary/5'"
+    :data-tool-use-id="toolUseId"
     @click="onToggle"
   >
     <span

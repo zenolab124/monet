@@ -150,7 +150,8 @@
   },
   "asyncTask": {
     "title": "异步任务",
-    "empty": "暂无异步任务"
+    "empty": "暂无异步任务",
+    "locate": "定位到对话中"
   },
   "session": {
     "notExist": "会话不存在或已删除",
@@ -536,6 +537,10 @@
     "widgetMidnight": "零点（0:00 - 0:00）",
     "widgetFiveAm": "凌晨五点（5:00 - 5:00）",
     "widgetRolling24h": "滚动 24 小时",
+    "widgetMonthBoundary": "小组件「本月」范围",
+    "widgetNaturalMonth": "自然月（1 号 – 月末）",
+    "widgetRolling30": "滚动 30 天",
+    "widgetMonthBoundaryHint": "影响月度 Token、费用、模型分布等统计口径",
     "channelDesc1": "每个渠道是一份标准 Claude Code settings 格式的 JSON 文件，发送消息时经",
     "channelDesc2": "注入。高级 env 可直接手编文件，本页改动不会抹掉手编字段。",
     "defaultSessionChannel": "默认会话渠道",

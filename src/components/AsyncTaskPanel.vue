@@ -22,6 +22,7 @@ const emit = defineEmits<{
   selectAgent: [meta: SubAgentMeta]
   closeTab: [agentId: string]
   close: []
+  locate: [toolUseId: string]
 }>()
 
 const { t } = useI18n()
@@ -99,7 +100,7 @@ const messageGroups = computed<MessageGroup[]>(() =>
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-card">
+  <div class="async-panel-root h-full flex flex-col bg-card">
     <!-- Header -->
     <div class="shrink-0 h-10 flex items-center px-3 border-b border-border gap-2">
       <button
@@ -134,33 +135,42 @@ const messageGroups = computed<MessageGroup[]>(() =>
         :key="task.id"
         class="overflow-hidden"
       >
-        <!-- 锚点卡片：跟主流 ToolTask 同款样式 -->
         <div
-          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px]
+          class="px-2.5 py-2 rounded text-[11px]
                  bg-background border border-border cursor-pointer
                  transition-colors hover:bg-card hover:border-primary/40"
           @click="onSelectTask(task)"
         >
-          <span
-            class="w-4 h-4 shrink-0 rounded flex items-center justify-center text-[9px] font-semibold"
-            :class="task.type === 'workflow'
-              ? 'bg-claude/15 text-claude'
-              : 'bg-tag text-tag-foreground'"
-          >{{ task.type === 'workflow' ? 'W' : 'A' }}</span>
-          <span class="font-medium text-foreground shrink-0">{{ task.label }}</span>
-          <span class="text-muted-foreground truncate flex-1">{{ task.description }}</span>
+          <div class="flex items-center gap-1.5 mb-1">
+            <span
+              class="px-1 py-0.5 rounded text-[9px] font-semibold shrink-0"
+              :class="task.type === 'workflow'
+                ? 'bg-claude/15 text-claude'
+                : 'bg-tag text-tag-foreground'"
+            >{{ task.type === 'workflow' ? 'Workflow' : task.label === 'general-purpose' ? 'Agent' : task.label }}</span>
+            <span class="flex-1" />
+            <button
+              v-if="task.toolUseId"
+              class="w-4 h-4 flex items-center justify-center rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+              :title="t('asyncTask.locate')"
+              @click.stop="emit('locate', task.toolUseId)"
+            >
+              <span class="i-carbon-location w-3 h-3" />
+            </button>
+          </div>
+          <div class="text-foreground leading-relaxed">{{ task.description }}</div>
         </div>
         <!-- Workflow 子 Agent 折叠列表 -->
         <div v-if="task.type === 'workflow' && task.children.length" class="ml-6 mt-0.5 space-y-0.5">
           <div
             v-for="child in task.children"
             :key="child.agent_id"
-            class="flex items-center gap-1.5 px-2 py-1 rounded bg-background text-[10px]
+            class="flex gap-1.5 px-2 py-1.5 rounded bg-background text-[10px]
                    text-muted-foreground cursor-pointer hover:text-foreground hover:bg-card transition-colors"
             @click.stop="onSelectAgent(child)"
           >
-            <span class="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-            <span class="truncate flex-1">{{ child.description || child.agent_type || child.agent_id }}</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-1" />
+            <span class="flex-1 leading-relaxed">{{ child.description || child.agent_type || child.agent_id }}</span>
           </div>
         </div>
       </div>

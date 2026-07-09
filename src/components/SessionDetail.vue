@@ -208,23 +208,39 @@ provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
 provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
 provide('isSubAgentOpen', (agentId: string) => isAgentOpen(agentId))
 
-// --- 异步面板列宽联动：打开侧边栏时列宽翻倍，关闭时恢复 ---
+// --- 异步面板手风琴展开：列宽 + 侧边栏 width 同步 transition ---
 const columnIndex = inject<ComputedRef<number>>('columnIndex', undefined as any)
 const columnTabId = inject<ComputedRef<string>>('tabId', undefined as any)
 const { activeTab: wbActiveTab } = useWorkbench()
-let savedColumnWidth: number | null = null
+const asyncPanelDom = ref(false)
+const asyncPanelExpanded = ref(false)
+const sidebarTargetWidth = ref(0)
 
-watch(asyncPanelVisible, (open) => {
-  if (!columnIndex?.value == null || !columnTabId?.value || !wbActiveTab.value) return
+watch(asyncPanelVisible, async (open) => {
   const tab = wbActiveTab.value
-  const idx = columnIndex.value
-  if (idx < 0 || idx >= tab.columnSizes.length) return
+  const idx = columnIndex?.value
+  const hasCol = tab && idx != null && idx >= 0 && idx < tab.columnSizes.length
   if (open) {
-    savedColumnWidth = tab.columnSizes[idx]
-    tab.columnSizes[idx] = savedColumnWidth * 2
-  } else if (savedColumnWidth !== null) {
-    tab.columnSizes[idx] = savedColumnWidth
-    savedColumnWidth = null
+    const colW = hasCol ? tab!.columnSizes[idx!] : 400
+    sidebarTargetWidth.value = colW
+    asyncPanelDom.value = true
+    await nextTick()
+    requestAnimationFrame(() => {
+      asyncPanelExpanded.value = true
+      if (hasCol) tab!.columnSizes[idx!] = colW * 2
+      setTimeout(() => {
+        const root = detailRootRef.value
+        if (!root) return
+        root.querySelector('.async-panel-root')
+          ?.scrollIntoView({ inline: 'nearest', behavior: 'smooth' })
+      }, 260)
+    })
+  } else {
+    asyncPanelExpanded.value = false
+    if (hasCol) tab!.columnSizes[idx!] = sidebarTargetWidth.value
+    setTimeout(() => {
+      asyncPanelDom.value = false
+    }, 260)
   }
 })
 
@@ -1350,6 +1366,15 @@ function onScroll() {
   })
 }
 
+function locateToolUse(toolUseId: string) {
+  const el = scrollContainer.value?.querySelector<HTMLElement>(`[data-tool-use-id="${CSS.escape(toolUseId)}"]`)
+  if (!el) return
+  followStreaming.value = false
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('ring-2', 'ring-primary/60')
+  setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 1500)
+}
+
 function resumeFollow() {
   followStreaming.value = true
   resumedAt = performance.now()
@@ -2170,24 +2195,24 @@ async function onReload() {
       </button>
     </div>
     </div>
-    <!-- 异步任务面板：跟主栏等宽,flex 等分 -->
-    <Transition name="subagent-slide">
-      <div
-        v-if="asyncPanelVisible"
-        class="flex-1 min-w-0 border-l border-border overflow-hidden"
-      >
-        <AsyncTaskPanel
-          :tasks="asyncTasks"
-          :open-tabs="subAgentTabs"
-          :active-tab-id="subAgentActiveTabId"
-          :project-id="currentSession?.projectId ?? null"
-          :session-id="currentSession?.summary.id ?? null"
-          @select-agent="toggleSubAgent($event)"
-          @close-tab="closeSubAgentTab($event)"
-          @close="closeAsyncPanel"
-        />
-      </div>
-    </Transition>
+    <!-- 异步任务面板：width transition 手风琴展开,列宽同步翻倍,主栏宽度恒定 -->
+    <div
+      v-if="asyncPanelDom"
+      class="shrink-0 border-l border-border overflow-hidden"
+      :style="{ width: asyncPanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
+    >
+      <AsyncTaskPanel
+        :tasks="asyncTasks"
+        :open-tabs="subAgentTabs"
+        :active-tab-id="subAgentActiveTabId"
+        :project-id="currentSession?.projectId ?? null"
+        :session-id="currentSession?.summary.id ?? null"
+        @select-agent="toggleSubAgent($event)"
+        @close-tab="closeSubAgentTab($event)"
+        @close="closeAsyncPanel"
+        @locate="locateToolUse"
+      />
+    </div>
   </div>
 </template>
 
@@ -2201,16 +2226,6 @@ async function onReload() {
 .banner-float-leave-to {
   opacity: 0;
   transform: translateY(-6px);
-}
-.subagent-slide-enter-active,
-.subagent-slide-leave-active {
-  transition: width 220ms cubic-bezier(0.32, 0.72, 0, 1), opacity 220ms ease;
-  overflow: hidden;
-}
-.subagent-slide-enter-from,
-.subagent-slide-leave-to {
-  width: 0 !important;
-  opacity: 0;
 }
 .msg-block {
   contain: layout style;

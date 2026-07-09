@@ -150,7 +150,8 @@
   },
   "asyncTask": {
     "title": "Async Tasks",
-    "empty": "No async tasks"
+    "empty": "No async tasks",
+    "locate": "Locate in chat"
   },
   "session": {
     "notExist": "Session does not exist or has been deleted",
@@ -536,6 +537,10 @@
     "widgetMidnight": "Midnight (0:00 - 0:00)",
     "widgetFiveAm": "5 AM (5:00 - 5:00)",
     "widgetRolling24h": "Rolling 24 hours",
+    "widgetMonthBoundary": "Widget \"month\" range",
+    "widgetNaturalMonth": "Natural month (1st – end)",
+    "widgetRolling30": "Rolling 30 days",
+    "widgetMonthBoundaryHint": "Affects monthly tokens, cost, model mix and other stats",
     "channelDesc1": "Each channel is a standard Claude Code settings JSON file, injected when sending messages via ",
     "channelDesc2": ". Advanced env can be edited directly — changes here won't overwrite manual edits.",
     "defaultSessionChannel": "Default Session Channel",
