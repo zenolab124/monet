@@ -36,6 +36,7 @@ mod tcc;
 mod workshop;
 mod cli_env;
 mod cli_settings;
+mod quota;
 mod translate;
 mod turn_signal;
 mod widget;
@@ -235,6 +236,9 @@ pub fn run() {
             widget::update_widget,
             widget::get_widget_config,
             widget::set_widget_config,
+            quota::get_quota,
+            quota::refresh_quota,
+            quota::quota_available,
             menu::hide_main_window,
             menu::quit_app,
         ])

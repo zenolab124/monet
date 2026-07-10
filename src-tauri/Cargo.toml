@@ -58,6 +58,23 @@ lru = "0.16"
 uuid = { version = "1", features = ["v4"] }
 fs2 = "0.4"
 tauri-plugin-dialog = "2.7.1"
+urlencoding = "2"
+
+# macOS: attributed-title tab alignment in tray menu (right-aligned reset times)
+# These are already transitive deps via muda/tray-icon; we add them directly to
+# enable extra features (NSFont, NSParagraphStyle, NSText) without pulling new crates.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", default-features = false }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "NSString", "NSDictionary", "NSArray", "NSObject",
+    "NSAttributedString", "NSEnumerator", "NSRange",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "NSFont", "NSParagraphStyle", "NSText", "NSAttributedString",
+    "NSMenu", "NSMenuItem", "NSStatusItem", "NSColor",
+    "objc2-core-foundation",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes"] }
 
 [[bin]]
 name = "cc-space-routine-runner"
