@@ -253,16 +253,6 @@ fn load_routines() -> Vec<RoutineDefinition> {
 }
 
 fn should_skip(routine: &RoutineDefinition) -> bool {
-    let last_run = match &routine.last_run {
-        Some(lr) => lr,
-        None => return false,
-    };
-
-    let last_run_dt = match chrono::DateTime::parse_from_rfc3339(last_run) {
-        Ok(dt) => dt.with_timezone(&chrono::Local),
-        Err(_) => return false,
-    };
-
     // Find the previous scheduled time before now
     use cron::Schedule;
     use std::str::FromStr;
@@ -286,10 +276,25 @@ fn should_skip(routine: &RoutineDefinition) -> bool {
         prev = Some(dt);
     }
 
-    match prev {
-        Some(prev_scheduled) => last_run_dt >= prev_scheduled,
-        None => false,
-    }
+    // 近 2 天内没有到期的调度点（未来任务 / 停摆已久）：不该跑。
+    // RunAtLoad 与 plist 重载会在非调度时刻拉起 runner，此分支是它们的闸门
+    let prev_scheduled = match prev {
+        Some(p) => p,
+        None => return true,
+    };
+
+    // 到期且从未跑过 → 补跑
+    let last_run = match &routine.last_run {
+        Some(lr) => lr,
+        None => return false,
+    };
+
+    let last_run_dt = match chrono::DateTime::parse_from_rfc3339(last_run) {
+        Ok(dt) => dt.with_timezone(&chrono::Local),
+        Err(_) => return false,
+    };
+
+    last_run_dt >= prev_scheduled
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -362,18 +367,27 @@ fn compute_next_run(cron_expr: &str) -> Option<String> {
     Some(next.to_rfc3339())
 }
 
+/// 回睡判据：近期无键鼠活动即视为无人使用。不以合盖为条件——
+/// 开盖唤醒跑完同样要回睡，而 clamshell 外接屏使用中合盖为真却不能睡
+const USER_IDLE_THRESHOLD_SECS: u64 = 600;
+
 fn maybe_sleep_after_run() {
     if read_wake_policy() != "active" {
         return;
     }
-    if !is_lid_closed() {
+    // HID 空闲读取失败按「用户在用」处理：宁可不睡，不可误睡
+    let idle = hid_idle_secs();
+    if idle.map_or(true, |s| s < USER_IDLE_THRESHOLD_SECS) {
         return;
     }
     // 有即将执行的 routine 则不休眠（5 分钟内）
     if has_imminent_routine() {
         return;
     }
-    eprintln!("active wake: lid closed, sleeping");
+    eprintln!(
+        "active wake: user idle {}s, sleeping",
+        idle.unwrap_or_default()
+    );
     let _ = Command::new("osascript")
         .arg("-e")
         .arg("tell application \"System Events\" to sleep")
@@ -389,13 +403,18 @@ fn read_wake_policy() -> String {
         .unwrap_or_else(|| "passive".to_string())
 }
 
-fn is_lid_closed() -> bool {
-    Command::new("ioreg")
-        .args(["-r", "-k", "AppleClamshellState"])
+/// 距上次键鼠输入的秒数（IOHIDSystem HIDIdleTime，纳秒），含蓝牙/USB 外接设备
+fn hid_idle_secs() -> Option<u64> {
+    let out = Command::new("ioreg")
+        .args(["-c", "IOHIDSystem", "-d", "4", "-k", "HIDIdleTime"])
         .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("\"AppleClamshellState\" = Yes"))
-        .unwrap_or(false)
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find(|l| l.contains("\"HIDIdleTime\""))
+        .and_then(|l| l.rsplit('=').next())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|ns| ns / 1_000_000_000)
 }
 
 fn has_imminent_routine() -> bool {
