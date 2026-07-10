@@ -4,7 +4,7 @@ import WidgetKit
 struct ModelMixView: View {
     let entry: TodaySummaryEntry
 
-    private let barColors: [Color] = [.blue, .purple, .orange, .green, .pink]
+    private let barColors: [Color] = [.blue, .orange, .green, .purple, .pink]
 
     var body: some View {
         if let data = entry.data {
@@ -28,7 +28,7 @@ struct ModelMixView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.8))
                 Spacer()
-                Text("近 30 天")
+                Text("models.badge")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
@@ -52,7 +52,7 @@ struct ModelMixView: View {
 
             Spacer().frame(height: 8)
 
-            // Stacked bar
+            // Stacked bar with gaps
             if totalTokens > 0 {
                 GeometryReader { geo in
                     HStack(spacing: 1) {
@@ -81,11 +81,11 @@ struct ModelMixView: View {
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        Spacer()
-                        Text(WidgetData.formatTokens(m.tokens))
+                        Spacer(minLength: 4)
+                        Text(WidgetData.formatTokensCompact(m.tokens))
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)
-                            .frame(width: 38, alignment: .trailing)
+                            .frame(width: 56, alignment: .trailing)
                         Text("\(data.modelPercent(m))%")
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(.tertiary)

@@ -64,6 +64,8 @@ struct ProjectStat {
 struct WidgetConfig {
     #[serde(default)]
     day_start_hour: i8,
+    #[serde(default)]
+    month_mode: String,
 }
 
 fn data_dir() -> PathBuf {
@@ -307,14 +309,24 @@ fn main() {
                 .map(|d| d.total)
                 .sum();
 
-            // Monthly models with count
+            let is_rolling = cfg.month_mode == "rolling";
+
+            // Monthly tokens: natural month or rolling 30 days
+            let monthly_t = if is_rolling {
+                let cutoff = (today_date - Duration::days(30)).format("%Y-%m-%d").to_string();
+                stats.daily.iter().filter(|d| d.date > cutoff).map(|d| d.total).sum()
+            } else {
+                stats.month.total
+            };
+
+            // Model distribution & cost: always from natural month (daily has no model granularity)
             let mm: Vec<ModelStat> = stats.month.by_model.iter().map(|m| ModelStat {
                 model: m.model.clone(),
                 count: 0,
                 tokens: m.total,
             }).collect();
-
             let cost = estimate_cost(&stats.month.by_model);
+            let models_list: Vec<String> = stats.month.by_model.iter().map(|m| m.model.clone()).collect();
 
             // Weekly (last 7 days)
             let weekly: Vec<DayTokens> = (0..7).rev().map(|i| {
@@ -324,27 +336,34 @@ fn main() {
                 DayTokens { date: ds, tokens: t }
             }).collect();
 
-            // Heatmap: 当前自然月（1 号到月末）
-            let month_start = NaiveDate::from_ymd_opt(today_date.year(), today_date.month(), 1).unwrap();
-            let next_month = if today_date.month() == 12 {
-                NaiveDate::from_ymd_opt(today_date.year() + 1, 1, 1).unwrap()
+            // Heatmap
+            let heatmap: Vec<DayTokens> = if is_rolling {
+                (0..30).rev().map(|i| {
+                    let d = today_date - Duration::days(i);
+                    let ds = d.format("%Y-%m-%d").to_string();
+                    let t = stats.daily.iter().find(|x| x.date == ds).map(|x| x.total).unwrap_or(0);
+                    DayTokens { date: ds, tokens: t }
+                }).collect()
             } else {
-                NaiveDate::from_ymd_opt(today_date.year(), today_date.month() + 1, 1).unwrap()
+                let month_start = NaiveDate::from_ymd_opt(today_date.year(), today_date.month(), 1).unwrap();
+                let next_month = if today_date.month() == 12 {
+                    NaiveDate::from_ymd_opt(today_date.year() + 1, 1, 1).unwrap()
+                } else {
+                    NaiveDate::from_ymd_opt(today_date.year(), today_date.month() + 1, 1).unwrap()
+                };
+                let days_in_month = (next_month - month_start).num_days();
+                (0..days_in_month).map(|i| {
+                    let d = month_start + Duration::days(i);
+                    let ds = d.format("%Y-%m-%d").to_string();
+                    let t = stats.daily.iter().find(|x| x.date == ds).map(|x| x.total).unwrap_or(0);
+                    DayTokens { date: ds, tokens: t }
+                }).collect()
             };
-            let days_in_month = (next_month - month_start).num_days();
-            let heatmap: Vec<DayTokens> = (0..days_in_month).map(|i| {
-                let d = month_start + Duration::days(i);
-                let ds = d.format("%Y-%m-%d").to_string();
-                let t = stats.daily.iter().find(|x| x.date == ds).map(|x| x.total).unwrap_or(0);
-                DayTokens { date: ds, tokens: t }
-            }).collect();
 
             let (cs, ls, ad) = compute_streak(&stats.daily);
             let total_t: u64 = stats.daily.iter().map(|d| d.total).sum();
 
-            let models_list: Vec<String> = stats.month.by_model.iter().map(|m| m.model.clone()).collect();
-
-            (tt, models_list, stats.month.total, lmt, mm, cost, weekly, heatmap, cs, ls, ad, total_t)
+            (tt, models_list, monthly_t, lmt, mm, cost, weekly, heatmap, cs, ls, ad, total_t)
         } else {
             (0, Vec::new(), 0, 0, Vec::new(), 0.0, Vec::new(), Vec::new(), 0, 0, 0, 0)
         };

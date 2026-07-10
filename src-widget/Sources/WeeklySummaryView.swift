@@ -104,7 +104,6 @@ struct WeeklySummaryView: View {
                         RoundedRectangle(cornerRadius: 2.5)
                             .fill(
                                 isLast ? Color.blue.opacity(0.7) :
-                                isPeak ? Color.blue.opacity(0.5) :
                                 isZero ? Color.primary.opacity(0.08) :
                                 Color.primary.opacity(0.15)
                             )

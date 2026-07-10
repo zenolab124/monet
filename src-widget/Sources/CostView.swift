@@ -31,16 +31,11 @@ struct CostView: View {
             Spacer(minLength: 4)
 
             // Hero approximate cost
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("≈")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                Text("$\(Int((data.estimatedCostUsd ?? 0).rounded()))")
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-            }
+            Text("$\(Int((data.estimatedCostUsd ?? 0).rounded()))")
+                .font(.system(size: 38, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
 
             Spacer().frame(height: 4)
 

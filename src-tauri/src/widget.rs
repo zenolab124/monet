@@ -11,11 +11,13 @@ use crate::config;
 pub struct WidgetConfig {
     #[serde(default)]
     pub day_start_hour: i8,
+    #[serde(default)]
+    pub month_mode: String,
 }
 
 impl Default for WidgetConfig {
     fn default() -> Self {
-        Self { day_start_hour: 0 }
+        Self { day_start_hour: 0, month_mode: "natural".into() }
     }
 }
 
@@ -42,8 +44,8 @@ pub fn get_widget_config() -> WidgetConfig {
 }
 
 #[tauri::command]
-pub fn set_widget_config(day_start_hour: i8) -> Result<(), String> {
-    let cfg = WidgetConfig { day_start_hour };
+pub fn set_widget_config(day_start_hour: i8, month_mode: String) -> Result<(), String> {
+    let cfg = WidgetConfig { day_start_hour, month_mode };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     std::fs::write(widget_config_path(), json).map_err(|e| e.to_string())
 }

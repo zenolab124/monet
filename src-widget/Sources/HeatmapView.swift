@@ -23,7 +23,7 @@ struct HeatmapView: View {
 
         let today = Calendar.current.startOfDay(for: Date())
         let grid = buildCalendarGrid(heatmap: heatmap, today: today)
-        let weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"]
+        let weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"]
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -40,37 +40,41 @@ struct HeatmapView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.8))
             }
-            Spacer().frame(height: 10)
+            Spacer().frame(height: 6)
 
             HStack(spacing: 0) {
                 VStack(spacing: 1) {
                     Text(WidgetData.formatTokens(data.monthlyTokens ?? 0))
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
                     Text("heatmap.monthTokens")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
 
                 VStack(spacing: 1) {
                     Text("\(activeDays)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
                     Text("heatmap.activeDays")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
 
                 VStack(spacing: 1) {
                     Text(WidgetData.formatTokens(data.dailyAverage))
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
                     Text("heatmap.dailyAvg")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
             }
-            Spacer().frame(height: 10)
+            Spacer().frame(height: 6)
 
             // Weekday header
             HStack(spacing: 2) {
@@ -129,9 +133,9 @@ struct HeatmapView: View {
         let cal = Calendar.current
 
         guard let date1 = dateFromString(firstDate.date) else { return [] }
-        // 周一=1 ... 周日=7; 我们要周一在第 0 列
-        var weekday = cal.component(.weekday, from: date1) // Sun=1, Mon=2, ...
-        let offset = (weekday + 5) % 7 // Mon=0, Tue=1, ..., Sun=6
+        // Sun=1, Mon=2, ..., Sat=7; 周日在第 0 列
+        let weekday = cal.component(.weekday, from: date1)
+        let offset = weekday - 1 // Sun=0, Mon=1, ..., Sat=6
 
         let totalSlots = offset + heatmap.count
         let rows = (totalSlots + 6) / 7

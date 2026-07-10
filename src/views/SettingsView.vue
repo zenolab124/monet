@@ -213,16 +213,22 @@ function toggleCcSwitchAll() {
 
 const wakePolicy = ref('passive')
 const widgetDayStart = ref(0)
+const widgetMonthMode = ref('natural')
 
 async function loadWidgetConfig() {
   try {
-    const cfg = await invoke<{ dayStartHour: number }>('get_widget_config')
+    const cfg = await invoke<{ dayStartHour: number, monthMode: string }>('get_widget_config')
     widgetDayStart.value = cfg.dayStartHour
+    widgetMonthMode.value = cfg.monthMode || 'natural'
   } catch {}
 }
 async function setWidgetDayStart(hour: number) {
   widgetDayStart.value = hour
-  await invoke('set_widget_config', { dayStartHour: hour }).catch(() => {})
+  await invoke('set_widget_config', { dayStartHour: hour, monthMode: widgetMonthMode.value }).catch(() => {})
+}
+async function setWidgetMonthMode(mode: string) {
+  widgetMonthMode.value = mode
+  await invoke('set_widget_config', { dayStartHour: widgetDayStart.value, monthMode: mode }).catch(() => {})
 }
 
 // 系统授权状态：/etc/sudoers.d 白名单是否在位（与 policy 独立——
@@ -629,6 +635,19 @@ function onSaved() {
                 <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
               </select>
               <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
+            </div>
+
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.widgetMonthBoundary') }}</div>
+              <select
+                :value="widgetMonthMode"
+                class="form-select w-full"
+                @change="setWidgetMonthMode(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="natural">{{ $t('settings.widgetNaturalMonth') }}</option>
+                <option value="rolling">{{ $t('settings.widgetRolling30') }}</option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.widgetMonthBoundaryHint') }}</div>
             </div>
           </div>
         </section>

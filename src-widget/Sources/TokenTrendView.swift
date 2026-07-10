@@ -36,6 +36,11 @@ struct TokenTrendView: View {
         }
         let maxTokens = max(days.map(\.tokens).max() ?? 0, 1)
         let ticks = tickPositions(count: days.count)
+        let todayStr: String = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            return f.string(from: Date())
+        }()
 
         return VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -77,14 +82,12 @@ struct TokenTrendView: View {
             if !days.isEmpty {
                 HStack(alignment: .bottom, spacing: 1.5) {
                     ForEach(Array(days.enumerated()), id: \.offset) { idx, day in
-                        let isPeak = day.tokens == maxTokens && day.tokens > 0
-                        let isLast = idx == days.count - 1
+                        let isToday = day.date == todayStr
                         let isZero = day.tokens == 0
 
                         RoundedRectangle(cornerRadius: 1.5)
                             .fill(
-                                isLast ? Color.blue.opacity(0.7) :
-                                isPeak ? Color.blue.opacity(0.5) :
+                                isToday ? Color.blue.opacity(0.7) :
                                 isZero ? Color.primary.opacity(0.08) :
                                 Color.primary.opacity(0.15)
                             )
@@ -96,22 +99,23 @@ struct TokenTrendView: View {
 
                 // Date ticks
                 if days.count > 1 {
-                    dateTicks(days: days, ticks: ticks)
+                    dateTicks(days: days, ticks: ticks, todayStr: todayStr)
                 }
             }
         }
         .widgetURL(URL(string: "ccspace://home"))
     }
 
-    private func dateTicks(days: [DayTokens], ticks: [Int]) -> some View {
+    private func dateTicks(days: [DayTokens], ticks: [Int], todayStr: String) -> some View {
         HStack {
             ForEach(Array(ticks.enumerated()), id: \.offset) { i, tickIdx in
                 if i > 0 {
                     Spacer()
                 }
+                let isToday = days[tickIdx].date == todayStr
                 Text(shortDateMD(days[tickIdx].date))
-                    .font(.system(size: 7, weight: tickIdx == days.count - 1 ? .semibold : .medium, design: .monospaced))
-                    .foregroundStyle(tickIdx == days.count - 1 ? AnyShapeStyle(Color.blue.opacity(0.7)) : AnyShapeStyle(.tertiary))
+                    .font(.system(size: 7, weight: isToday ? .semibold : .medium, design: .monospaced))
+                    .foregroundStyle(isToday ? AnyShapeStyle(Color.blue.opacity(0.7)) : AnyShapeStyle(.tertiary))
             }
         }
     }

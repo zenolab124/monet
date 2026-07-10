@@ -140,10 +140,17 @@ struct WidgetData: Codable {
         weeklyTokens?.filter { $0.tokens > 0 }.count ?? 0
     }
 
+    static func formatTokensCompact(_ value: UInt64) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        } else if value >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000)
+        }
+        return "\(value)"
+    }
+
     static func formatTokens(_ value: UInt64) -> String {
-        if value >= 1_000_000_000 {
-            return String(format: "%.1fB", Double(value) / 1_000_000_000)
-        } else if value >= 1_000_000 {
+        if value >= 1_000_000 {
             return String(format: "%.1fM", Double(value) / 1_000_000)
         } else if value >= 1_000 {
             return String(format: "%.1fK", Double(value) / 1_000)

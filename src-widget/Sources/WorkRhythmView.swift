@@ -33,13 +33,14 @@ struct WorkRhythmView: View {
                 }
             }
             Spacer(minLength: 8)
-            // 24h histogram
+            // 24h histogram — time-of-day gradient
             HStack(alignment: .bottom, spacing: 1) {
                 ForEach(0..<24, id: \.self) { h in
                     let pct = maxH > 0 ? CGFloat(hours[h]) / CGFloat(maxH) : 0
+                    let barColor = hours[h] > 0 ? Self.hourColor(h, intensity: pct, isPeak: h == peakHour) : Color.primary.opacity(0.08)
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(h == peakHour ? Color.blue.opacity(0.7) : Color.primary.opacity(0.15))
-                        .frame(height: max(pct * 44, 1))
+                        .fill(barColor)
+                        .frame(height: hours[h] > 0 ? max(pct * 44, 2) : 1)
                 }
             }
             .frame(height: 44)
@@ -67,6 +68,23 @@ struct WorkRhythmView: View {
             }
         }
         .widgetURL(URL(string: "ccspace://home"))
+    }
+
+    private static func hourColor(_ hour: Int, intensity: CGFloat, isPeak: Bool) -> Color {
+        // 深夜靛蓝 → 晨间青 → 午间蓝 → 傍晚紫 → 夜间靛蓝
+        let hue: Double
+        switch hour {
+        case 0...4:   hue = 0.68   // indigo
+        case 5...7:   hue = 0.52   // teal
+        case 8...11:  hue = 0.55   // cyan-blue
+        case 12...14: hue = 0.60   // blue
+        case 15...17: hue = 0.62   // blue
+        case 18...20: hue = 0.75   // purple
+        default:      hue = 0.70   // indigo-purple
+        }
+        let sat = isPeak ? 0.8 : 0.6
+        let brightness = isPeak ? 0.85 : 0.4 + Double(intensity) * 0.4
+        return Color(hue: hue, saturation: sat, brightness: brightness)
     }
 
     private var emptyView: some View {
