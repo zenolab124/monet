@@ -246,8 +246,13 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             match &event {
-                tauri::RunEvent::ExitRequested { api, .. } => {
-                    api.prevent_exit();
+                // code=None 是最后一个窗口关闭触发的自动退出请求，拦下保持托盘常驻；
+                // code=Some 来自显式 app.exit()（Cmd+Q 确认退出），必须放行，
+                // 否则 quit_app 已 SIGTERM 子进程而应用不退，探测会把自家濒死进程误报为外部运行
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    if code.is_none() {
+                        api.prevent_exit();
+                    }
                 }
                 tauri::RunEvent::Reopen { .. } => {
                     if let Some(window) = app_handle.get_webview_window("main") {
