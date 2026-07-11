@@ -144,6 +144,8 @@ fn collect_main_sessions() -> Vec<(PathBuf, String, String)> {
     let mut out = Vec::new();
     let Some(root) = projects_root() else { return out };
     let Ok(projects) = fs::read_dir(&root) else { return out };
+    // 内置 Agent 工作目录不入索引（防旧版残留污染搜索）
+    let agent_dirs = crate::config::agent_project_dirs();
     for project in projects.filter_map(|e| e.ok()) {
         let dir = project.path();
         if !dir.is_dir() {
@@ -152,6 +154,9 @@ fn collect_main_sessions() -> Vec<(PathBuf, String, String)> {
         let Some(pid) = dir.file_name().and_then(|n| n.to_str()).map(String::from) else {
             continue;
         };
+        if agent_dirs.contains(&pid) {
+            continue;
+        }
         let Ok(files) = fs::read_dir(&dir) else { continue };
         for file in files.filter_map(|e| e.ok()) {
             let path = file.path();

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::metadata::agent_cwd;
+use crate::config::agent_cwd;
 use crate::streaming::{enhanced_path, find_claude};
 use crate::translate::ApiUsage;
 
@@ -40,16 +40,26 @@ struct AgentProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<std::process::ChildStdout>,
+    /// 落盘会话 ID（agent_cwd 目录下的 <id>.jsonl）。落盘设置关闭时为 None
+    session_id: Option<String>,
 }
 
 fn spawn_agent_with(model: &str, effort: &str) -> Result<AgentProcess, String> {
     let (executable, prefix_args) = find_claude();
     eprintln!("[agent-service] spawn: executable={} prefix_args={:?} model={} effort={}", executable, prefix_args, model, effort);
     let mut args = prefix_args;
-    let session_id = uuid::Uuid::new_v4().to_string();
+    // print 模式（oneshot 语义，无握手）；落盘与否由设置决定，
+    // 落盘目录（agent_cwd 对应编码名）已被全部扫描面软屏蔽（见 config::agent_project_dirs）。
+    // 落盘时指定 session id 并记入调用日志，供「查看会话」定位 JSONL
+    let session_id = crate::channels::agent_session_persist()
+        .then(|| uuid::Uuid::new_v4().to_string());
+    args.push("-p".to_string());
+    match &session_id {
+        Some(sid) => args.extend(["--session-id".to_string(), sid.clone()]),
+        // --no-session-persistence 仅 print 模式生效
+        None => args.push("--no-session-persistence".to_string()),
+    }
     args.extend([
-        "--session-id".to_string(),
-        session_id,
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--input-format".to_string(),
@@ -82,10 +92,10 @@ fn spawn_agent_with(model: &str, effort: &str) -> Result<AgentProcess, String> {
         .spawn()
         .map_err(|e| format!("AgentService spawn 失败: {}", e))?;
 
-    let mut stdin = child.stdin.take().ok_or("无法获取 agent stdin")?;
+    let stdin = child.stdin.take().ok_or("无法获取 agent stdin")?;
     let stdout = child.stdout.take().ok_or("无法获取 agent stdout")?;
     let stderr = child.stderr.take();
-    let mut reader = BufReader::new(stdout);
+    let reader = BufReader::new(stdout);
 
     // 后台读 stderr 打日志
     if let Some(se) = stderr {
@@ -97,44 +107,14 @@ fn spawn_agent_with(model: &str, effort: &str) -> Result<AgentProcess, String> {
         });
     }
 
-    // 初始化握手
-    let init = json!({
-        "type": "control_request",
-        "request_id": "agent-init",
-        "request": {"subtype": "initialize"}
-    });
-    write_line(&mut stdin, &init)?;
-
-    // 等 control_response（10 秒超时）
-    let mut buf = String::new();
-    eprintln!("[agent-service] 等待握手响应...");
-    let handshake_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        if std::time::Instant::now() > handshake_deadline {
-            let _ = child.kill();
-            return Err("agent 握手超时(10s)".to_string());
-        }
-        buf.clear();
-        let n = reader.read_line(&mut buf).map_err(|e| format!("agent 握手读取失败: {}", e))?;
-        if n == 0 {
-            return Err("agent 进程在握手阶段退出".to_string());
-        }
-        let trimmed = buf.trim_end();
-        let preview: String = trimmed.chars().take(120).collect();
-        eprintln!("[agent-service] 握手行: {}", preview);
-        if let Ok(v) = serde_json::from_str::<Value>(&buf) {
-            if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
-                break;
-            }
-        }
-    }
-
+    // print 模式无 control protocol，不做 initialize 握手，直接发消息
     eprintln!("[agent-service] 进程已启动 PID={}", child.id());
 
     Ok(AgentProcess {
         child,
         stdin,
         stdout: reader,
+        session_id,
     })
 }
 
@@ -152,15 +132,32 @@ struct AgentCallResult {
     channel_id: String,
     model: String,
     usage: Option<ApiUsage>,
+    /// 官方 CLI 路径的落盘会话 ID；HTTP 渠道 / 落盘关闭时为 None
+    session_id: Option<String>,
+}
+
+/// CLI 链路错误：spawn 之后的失败会话可能已落盘（错误上下文正是最需要追溯的），
+/// 携带 session_id 让失败日志也能挂「查看会话」入口
+struct CliCallError {
+    message: String,
+    /// 进程已启动后的失败为 Some；spawn 失败 / HTTP 渠道错误为 None（无落盘）
+    session_id: Option<String>,
+}
+
+impl From<String> for CliCallError {
+    fn from(message: String) -> Self {
+        CliCallError { message, session_id: None }
+    }
 }
 
 /// Agent 服务的公开入口——经 fallback 链调度
 pub(crate) fn request_blocking_pub(prompt: &str) -> Result<String, String> {
     request_with_fallback(prompt, HTTP_FALLBACK_AGENT_MODEL, 2048)
         .map(|r| r.text)
+        .map_err(|e| e.message)
 }
 
-fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, String> {
+fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, CliCallError> {
     let channel_id = cred.id.clone();
     if cred.is_official {
         let r = request_blocking(prompt)?;
@@ -169,6 +166,7 @@ fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, m
             channel_id,
             model: OFFICIAL_AGENT_MODEL.to_string(),
             usage: r.usage,
+            session_id: r.session_id,
         })
     } else {
         if cred.id == crate::channels::APPLE_FM_ID {
@@ -185,6 +183,7 @@ fn call_channel(cred: &crate::channels::AgentChannelCredentials, prompt: &str, m
             channel_id,
             model: model.to_string(),
             usage,
+            session_id: None,
         })
     }
 }
@@ -195,7 +194,7 @@ const OFFICIAL_AGENT_MODEL: &str = "haiku";
 /// HTTP 直调兜底模型(渠道未声明 agent_model 时):第三方 API 不一定支持 alias,用完整 ID
 const HTTP_FALLBACK_AGENT_MODEL: &str = "claude-haiku-4-5-20251001";
 
-fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, String> {
+fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<AgentCallResult, CliCallError> {
     if let Some(cred) = crate::channels::resolve_agent_credentials() {
         let effective_model = cred.agent_model.as_deref().unwrap_or(model);
         return call_channel(&cred, prompt, effective_model, max_tokens);
@@ -206,6 +205,7 @@ fn request_with_fallback(prompt: &str, model: &str, max_tokens: u32) -> Result<A
         channel_id: "official".to_string(),
         model: OFFICIAL_AGENT_MODEL.to_string(),
         usage: r.usage,
+        session_id: r.session_id,
     })
 }
 
@@ -215,25 +215,26 @@ fn request_for_agent(prompt: &str, agent_key: &str) -> Result<String, String> {
     let duration_ms = start.elapsed().as_millis() as u64;
     match &result {
         Ok(r) => {
-            record_log(agent_key, &r.channel_id, &r.model, duration_ms, r.usage.as_ref(), true, None);
+            record_log(agent_key, &r.channel_id, &r.model, duration_ms, r.usage.as_ref(), true, None, r.session_id.as_deref());
             Ok(r.text.clone())
         }
         Err(e) => {
-            record_log(agent_key, "", "", duration_ms, None, false, Some(e));
-            Err(e.clone())
+            // 失败也带 session_id：CLI 已落盘的错误会话正是最需要「查看会话」的
+            record_log(agent_key, "", "", duration_ms, None, false, Some(&e.message), e.session_id.as_deref());
+            Err(e.message.clone())
         }
     }
 }
 
-fn request_for_agent_inner(prompt: &str, agent_key: &str) -> Result<AgentCallResult, String> {
+fn request_for_agent_inner(prompt: &str, agent_key: &str) -> Result<AgentCallResult, CliCallError> {
     if let Some(cred) = crate::channels::resolve_agent_for_feature(agent_key) {
         let channel_id = cred.id.clone();
         let effective_model = cred.agent_model.as_deref().unwrap_or(HTTP_FALLBACK_AGENT_MODEL).to_string();
         match call_channel(&cred, prompt, &effective_model, 2048) {
             Ok(result) => return Ok(result),
             Err(e) => {
-                eprintln!("[agent] channel {} failed for {}, fallback: {}", channel_id, agent_key, e);
-                record_log(agent_key, &channel_id, &effective_model, 0, None, false, Some(&e));
+                eprintln!("[agent] channel {} failed for {}, fallback: {}", channel_id, agent_key, e.message);
+                record_log(agent_key, &channel_id, &effective_model, 0, None, false, Some(&e.message), e.session_id.as_deref());
             }
         }
     }
@@ -243,33 +244,33 @@ fn request_for_agent_inner(prompt: &str, agent_key: &str) -> Result<AgentCallRes
         channel_id: "official(fallback)".to_string(),
         model: OFFICIAL_AGENT_MODEL.to_string(),
         usage: r.usage,
+        session_id: r.session_id,
     })
 }
 
-fn request_via_cli(prompt: &str) -> Result<String, String> {
-    request_blocking(prompt).map(|r| r.text)
-}
-
-fn spawn_agent() -> Result<AgentProcess, String> {
-    spawn_agent_with("haiku", "low")
-}
-
-fn request_blocking(prompt: &str) -> Result<CliCallResult, String> {
+fn request_blocking(prompt: &str) -> Result<CliCallResult, CliCallError> {
     request_blocking_with(prompt, "haiku", "low")
 }
 
-fn request_blocking_with(prompt: &str, model: &str, effort: &str) -> Result<CliCallResult, String> {
+fn request_blocking_with(prompt: &str, model: &str, effort: &str) -> Result<CliCallResult, CliCallError> {
     let preview: String = prompt.chars().take(40).collect();
     eprintln!("[agent-service] request(oneshot): prompt={}... model={}", preview, model);
+    // spawn 失败：进程未启动，无落盘，From<String> 置 session_id None
     let mut agent = spawn_agent_with(model, effort)?;
+    let session_id = agent.session_id.clone();
     let result = send_and_collect(&mut agent, prompt);
     let _ = agent.child.kill();
+    // 进程启动后的失败：会话可能已落盘，错误携带 id
     result
+        .map(|r| CliCallResult { session_id: session_id.clone(), ..r })
+        .map_err(|message| CliCallError { message, session_id })
 }
 
 struct CliCallResult {
     text: String,
     usage: Option<ApiUsage>,
+    /// 落盘会话 ID（spawn 层决定；不落盘时 None）
+    session_id: Option<String>,
 }
 
 fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<CliCallResult, String> {
@@ -351,11 +352,11 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<CliCallRes
                 let preview: String = result_text.chars().take(80).collect();
                 eprintln!("[agent-service] result: is_error={} text={}... elapsed={:?}",
                     is_error, preview, start.elapsed());
-                // 提取 token 用量
-                if let Some(cw) = v.get("context_window") {
+                // 提取 token 用量：CLI 2.1.x 在 result 事件用 usage 字段，老版本 context_window 兜底
+                if let Some(u) = v.get("usage").or_else(|| v.get("context_window")) {
                     usage = Some(ApiUsage {
-                        input_tokens: cw.get("input_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
-                        output_tokens: cw.get("output_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+                        input_tokens: u.get("input_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+                        output_tokens: u.get("output_tokens").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
                     });
                 }
                 if is_error {
@@ -376,7 +377,7 @@ fn send_and_collect(agent: &mut AgentProcess, prompt: &str) -> Result<CliCallRes
     if result.is_empty() {
         return Err("agent 返回为空".to_string());
     }
-    Ok(CliCallResult { text: result, usage })
+    Ok(CliCallResult { text: result, usage, session_id: None })
 }
 
 /// 初始化 AgentService（验证 claude 可用）
@@ -525,7 +526,7 @@ pub fn extract_search_terms(question: &str, model: &str, effort: &str) -> Result
         流式 闪烁 掉帧\n\n\
         <data>\n{question}\n</data>"
     );
-    let result = request_blocking_with(&prompt, model, effort)?.text;
+    let result = request_logged("search_terms", &prompt, model, effort)?.text;
     let terms: Vec<String> = result
         .lines()
         .map(|l| l.trim().to_string())
@@ -535,6 +536,18 @@ pub fn extract_search_terms(question: &str, model: &str, effort: &str) -> Result
         return Err("未能提取关键词".to_string());
     }
     Ok(terms)
+}
+
+/// 智能搜索专用：官方 CLI 直调 + 记账（与 request_for_agent 的渠道链路口径对齐）
+fn request_logged(feature: &str, prompt: &str, model: &str, effort: &str) -> Result<CliCallResult, String> {
+    let start = std::time::Instant::now();
+    let result = request_blocking_with(prompt, model, effort);
+    let duration_ms = start.elapsed().as_millis() as u64;
+    match &result {
+        Ok(r) => record_log(feature, "official", model, duration_ms, r.usage.as_ref(), true, None, r.session_id.as_deref()),
+        Err(e) => record_log(feature, "official", model, duration_ms, None, false, Some(&e.message), e.session_id.as_deref()),
+    }
+    result.map_err(|e| e.message)
 }
 
 /// 根据搜索结果综合回答用户的回忆问题
@@ -552,7 +565,7 @@ pub fn summarize_search_hits(question: &str, hits_context: &str, model: &str, ef
         - 简洁直接，不要开场白\n\n\
         <data>\n{hits_context}\n</data>"
     );
-    request_blocking_with(&prompt, model, effort).map(|r| r.text)
+    request_logged("search_summarize", &prompt, model, effort).map(|r| r.text)
 }
 
 /// 自然语言转 cron 表达式
@@ -593,6 +606,9 @@ pub struct AgentLog {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// 官方 CLI 路径的落盘会话 ID，「查看会话」据此定位 JSONL
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 static LOGS: Mutex<Option<Vec<AgentLog>>> = Mutex::new(None);
@@ -615,6 +631,7 @@ fn save_logs(logs: &[AgentLog]) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_log(
     feature: &str,
     channel_id: &str,
@@ -623,6 +640,7 @@ fn record_log(
     usage: Option<&ApiUsage>,
     success: bool,
     error: Option<&String>,
+    session_id: Option<&str>,
 ) {
     let log = AgentLog {
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -634,6 +652,7 @@ fn record_log(
         output_tokens: usage.map(|u| u.output_tokens).unwrap_or(0),
         success,
         error: error.cloned(),
+        session_id: session_id.map(String::from),
     };
     with_logs(|logs| {
         logs.push(log);
@@ -665,12 +684,12 @@ pub async fn test_agent_channel() -> AgentTestResult {
         request_with_fallback("Reply with exactly: OK", HTTP_FALLBACK_AGENT_MODEL, 32)
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| CliCallError { message: e.to_string(), session_id: None })
     .and_then(|r| r);
     let duration_ms = start.elapsed().as_millis() as u64;
     match result {
         Ok(r) => {
-            record_log("test", &r.channel_id, &r.model, duration_ms, r.usage.as_ref(), true, None);
+            record_log("test", &r.channel_id, &r.model, duration_ms, r.usage.as_ref(), true, None, r.session_id.as_deref());
             AgentTestResult {
                 success: true,
                 channel_id: r.channel_id,
@@ -683,7 +702,7 @@ pub async fn test_agent_channel() -> AgentTestResult {
             }
         }
         Err(e) => {
-            record_log("test", "", "", duration_ms, None, false, Some(&e));
+            record_log("test", "", "", duration_ms, None, false, Some(&e.message), e.session_id.as_deref());
             AgentTestResult {
                 success: false,
                 channel_id: String::new(),
@@ -692,7 +711,7 @@ pub async fn test_agent_channel() -> AgentTestResult {
                 input_tokens: 0,
                 output_tokens: 0,
                 reply: String::new(),
-                error: Some(e),
+                error: Some(e.message),
             }
         }
     }

@@ -56,7 +56,12 @@
     "expandDown": "展开 ▼",
     "expandAll": "…展开全部（{size}KB）",
     "noMatch": "无匹配项",
-    "userDenied": "用户拒绝"
+    "userDenied": "用户拒绝",
+    "viewSession": "查看会话",
+    "systemSession": "系统会话",
+    "systemSessionEmpty": "无消息记录（会话文件可能已被清理）",
+    "systemPrompt": "指令",
+    "revealDir": "打开目录"
   },
   "time": {
     "justNow": "刚刚",
@@ -610,6 +615,8 @@
     "agentSummaryDesc": "自动生成 2-3 句话的会话摘要，方便回顾",
     "agentTranslate": "AI 翻译",
     "agentTranslateDesc": "将界面翻译为用户自定义的新语言",
+    "agentSessionPersist": "会话落盘",
+    "agentSessionPersistDesc": "将 Agent 调用与定时任务的执行过程保存为 Claude 会话文件（仅官方渠道路径），供事后追溯；关闭后不留痕。落盘目录不会出现在档案馆与搜索中",
     "agentAutoChannel": "自动（按链顺序）",
     "agentTest": "测试渠道",
     "agentLogs": "调用日志",
@@ -753,7 +760,10 @@
       "ask": "需确认",
       "additionalDirs": "附加目录",
       "empty": "无规则"
-    }
+    },
+    "agentFeature_search_terms": "搜索关键词",
+    "agentFeature_search_summarize": "搜索综述",
+    "agentSessionDirMissing": "暂无落盘会话（目录尚未创建）"
   },
   "notification": {
     "claudeAsking": "Claude 在提问",

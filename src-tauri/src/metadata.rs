@@ -106,11 +106,6 @@ pub fn is_deleted(session_id: &str) -> bool {
     with_store(|s| s.get(session_id).and_then(|m| m.deleted).unwrap_or(false))
 }
 
-pub fn agent_cwd() -> PathBuf {
-    let p = config::data_dir().join("agent");
-    let _ = fs::create_dir_all(&p);
-    p
-}
 
 fn extract_conversation_snippet(project_id: &str, session_id: &str) -> Option<(String, usize)> {
     let path = projects_dir()

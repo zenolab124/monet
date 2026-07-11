@@ -34,6 +34,8 @@ export interface RoutineExecutionLog {
   exitCode: number | null
   stdout: string
   stderr: string
+  /** 落盘会话 ID（会话落盘开启时才有），据此打开完整会话 */
+  sessionId?: string
 }
 
 export interface RoutineRow extends RoutineDefinition {

@@ -22,6 +22,7 @@ import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
 import TurnSignalCard from '@/components/settings/TurnSignalCard.vue'
+import SystemSessionViewer from '@/components/SystemSessionViewer.vue'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
@@ -66,6 +67,31 @@ const agentKeys = [
 async function loadAgentToggles() {
   agentToggles.value = await invoke<Record<string, boolean>>('get_agent_toggles')
 }
+
+// Agent 会话落盘（官方 CLI 路径）：开 = 保留可追溯记录，关 = 不留痕
+const agentSessionPersist = ref(true)
+
+async function loadAgentSessionPersist() {
+  agentSessionPersist.value = await invoke<boolean>('get_agent_session_persist')
+}
+
+async function toggleAgentSessionPersist() {
+  const next = !agentSessionPersist.value
+  agentSessionPersist.value = next
+  await invoke('set_agent_session_persist', { enabled: next })
+}
+
+async function revealAgentSessionDir() {
+  const dir = await invoke<{ dirName: string; path: string; exists: boolean }>('get_agent_session_dir')
+  if (!dir.exists) {
+    notifyTransient(t('settings.agentSessionDirMissing'))
+    return
+  }
+  await invoke('open_in_finder', { path: dir.path })
+}
+
+// 完整会话浮层（Agent 日志带 sessionId 时可打开）
+const viewingSession = ref<string | null>(null)
 
 function isAgentEnabled(key: string) {
   return agentToggles.value[key] ?? true
@@ -136,6 +162,8 @@ interface AgentLogEntry {
   outputTokens: number
   success: boolean
   error?: string
+  /** 官方 CLI 路径的落盘会话 ID（会话落盘开启时才有） */
+  sessionId?: string
 }
 const agentLogs = ref<AgentLogEntry[]>([])
 const agentLogsLoading = ref(false)
@@ -304,7 +332,7 @@ function withCurrent(list: { value: string; label: string }[], current: string) 
 const advisorMainOptions = computed(() => withCurrent(nonLegacyModels.value, advisorMain.value))
 const advisorModelOptions = computed(() => withCurrent(nonLegacyModels.value, advisorModel.value))
 
-onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -910,6 +938,24 @@ function onSaved() {
             </div>
           </div>
 
+          <!-- 会话落盘（全局行为，非单项能力） -->
+          <div class="agent-item mt-3">
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-medium">{{ $t('settings.agentSessionPersist') }}</div>
+              <div class="text-[11px] text-muted-foreground mt-0.5">{{ $t('settings.agentSessionPersistDesc') }}</div>
+              <button
+                class="text-[11px] text-primary hover:underline mt-1"
+                @click="revealAgentSessionDir"
+              >{{ $t('common.revealDir') }}</button>
+            </div>
+            <button
+              :class="['form-toggle', { on: agentSessionPersist }]"
+              @click="toggleAgentSessionPersist"
+            >
+              <span class="form-toggle-knob" />
+            </button>
+          </div>
+
           <!-- Agent 操作栏 -->
           <div class="mt-6 pt-4 border-t border-border flex items-center gap-4">
             <button
@@ -1064,6 +1110,13 @@ function onSaved() {
                   <span v-if="log.success" class="text-emerald-600 dark:text-emerald-400">OK</span>
                   <span v-else class="text-destructive cursor-help" :title="log.error">FAIL</span>
                 </td>
+                <td>
+                  <button
+                    v-if="log.sessionId"
+                    class="text-primary hover:underline whitespace-nowrap"
+                    @click="viewingSession = log.sessionId!"
+                  >{{ $t('common.viewSession') }}</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -1074,6 +1127,13 @@ function onSaved() {
       </div>
     </div>
   </div>
+
+  <!-- 完整会话浮层 -->
+  <SystemSessionViewer
+    v-if="viewingSession"
+    :session-id="viewingSession"
+    @close="viewingSession = null"
+  />
   </div>
 </template>
 

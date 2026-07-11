@@ -131,13 +131,19 @@ fn compute_day_boundary(day_start_hour: i8) -> (u64, String) {
     (ts, date_str)
 }
 
+/// 内置 Agent 工作目录的 projects 编码名（与主 App discovery/search/usage 同源清单）
+fn agent_dirs() -> &'static std::collections::HashSet<String> {
+    static CELL: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| app_lib::config::agent_project_dirs().into_iter().collect())
+}
+
 fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if name == "subagents" || name.contains("cc-space-agent") {
+            if name == "subagents" || agent_dirs().contains(name.as_ref()) {
                 continue;
             }
             collect_jsonl(&path, out);
@@ -219,6 +225,8 @@ fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>
         let path = entry.path();
         if !path.is_dir() { continue; }
         let proj_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        // 内置 Agent 目录不进项目榜（collect_jsonl 只在递归下降时过滤，入口目录须在此拦截）
+        if agent_dirs().contains(&proj_name) { continue; }
         // 目录名编码规则：首个 `-` 是根 `/`，其余 `-` 是路径分隔符
         let decoded_path = if proj_name.starts_with('-') {
             proj_name[1..].replace('-', "/")

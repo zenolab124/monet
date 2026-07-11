@@ -26,6 +26,9 @@ pub struct RoutineExecutionLog {
     pub exit_code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
+    /// 落盘会话 ID（agent_cwd 目录下的 <id>.jsonl）。会话落盘设置关闭时为 None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -266,11 +269,7 @@ fn truncate_str(s: &str, max: usize) -> String {
 // Execution
 // ---------------------------------------------------------------------------
 
-fn agent_cwd() -> PathBuf {
-    let p = config::data_dir().join("agent");
-    let _ = fs::create_dir_all(&p);
-    p
-}
+use crate::config::agent_cwd;
 
 fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
     let id = routine.id.clone();
@@ -291,17 +290,28 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
 
     tauri::async_runtime::spawn_blocking(move || {
 
+        // 会话落盘（与 Agent 能力同一设置）：落盘时指定 session id 并记入执行日志，
+        // 供事后在 agent_cwd 目录定位完整会话（可 claude --resume 追查）
+        let persist = crate::channels::agent_session_persist();
+        let session_id = uuid::Uuid::new_v4().to_string();
+
         // .app 环境 PATH 极简，裸命令名找不到 claude，必须走 locator 显式定位
         let output = match crate::claude_locator::locate() {
-            Ok(located) => Command::new(&located.path)
-                .arg("-p")
-                .arg(&prompt)
-                .arg("--output-format")
-                .arg("text")
-                .arg("--no-session-persistence")
-                .env("PATH", crate::streaming::enhanced_path())
-                .current_dir(agent_cwd())
-                .output(),
+            Ok(located) => {
+                let mut cmd = Command::new(&located.path);
+                cmd.arg("-p")
+                    .arg(&prompt)
+                    .arg("--output-format")
+                    .arg("text")
+                    .arg("--session-id")
+                    .arg(&session_id);
+                if !persist {
+                    cmd.arg("--no-session-persistence");
+                }
+                cmd.env("PATH", crate::streaming::enhanced_path())
+                    .current_dir(agent_cwd())
+                    .output()
+            }
             Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e)),
         };
 
@@ -315,6 +325,7 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
                 exit_code: out.status.code(),
                 stdout: truncate_str(&String::from_utf8_lossy(&out.stdout), 10240),
                 stderr: truncate_str(&String::from_utf8_lossy(&out.stderr), 4096),
+                session_id: persist.then(|| session_id.clone()),
             },
             Err(e) => RoutineExecutionLog {
                 routine_id: id.clone(),
@@ -323,6 +334,7 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
                 exit_code: Some(-1),
                 stdout: String::new(),
                 stderr: format!("spawn failed: {}", e),
+                session_id: None,
             },
         };
 

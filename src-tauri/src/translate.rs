@@ -222,9 +222,13 @@ fn translate_via_cli(
         "--output-format".to_string(),
         "text".to_string(),
     ]);
+    if !crate::channels::agent_session_persist() {
+        args.push("--no-session-persistence".to_string());
+    }
 
     let output = Command::new(&executable)
         .args(&args)
+        .current_dir(crate::config::agent_cwd())
         .env("PATH", enhanced_path())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

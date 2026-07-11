@@ -40,6 +40,9 @@ struct ExecutionLog {
     exit_code: Option<i32>,
     stdout: String,
     stderr: String,
+    /// 落盘会话 ID（agent cwd 目录下的 <id>.jsonl）。会话落盘设置关闭时为 None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
 }
 
 fn main() {
@@ -98,15 +101,25 @@ fn main() {
     // login shell 重探测由主 App 负责并通过缓存共享结果
     let started_at = Utc::now().to_rfc3339();
 
+    // 会话落盘（与 Agent 能力同一设置）：落盘时指定 session id 并记入执行日志，
+    // 供事后在 agent cwd 目录定位完整会话
+    let persist = agent_session_persist();
+    let session_id = uuid::Uuid::new_v4().to_string();
+
     let output = match claude_locator::locate_lightweight() {
-        Ok(located) => Command::new(&located.path)
-            .arg("-p")
-            .arg(&routine.prompt)
-            .arg("--output-format")
-            .arg("text")
-            .arg("--no-session-persistence")
-            .current_dir(agent_cwd())
-            .output(),
+        Ok(located) => {
+            let mut cmd = Command::new(&located.path);
+            cmd.arg("-p")
+                .arg(&routine.prompt)
+                .arg("--output-format")
+                .arg("text")
+                .arg("--session-id")
+                .arg(&session_id);
+            if !persist {
+                cmd.arg("--no-session-persistence");
+            }
+            cmd.current_dir(agent_cwd()).output()
+        }
         Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e)),
     };
 
@@ -120,6 +133,7 @@ fn main() {
             exit_code: out.status.code(),
             stdout: truncate(&String::from_utf8_lossy(&out.stdout), 10240),
             stderr: truncate(&String::from_utf8_lossy(&out.stderr), 4096),
+            session_id: persist.then(|| session_id.clone()),
         },
         Err(e) => ExecutionLog {
             routine_id: routine_id.clone(),
@@ -128,6 +142,7 @@ fn main() {
             exit_code: Some(-1),
             stdout: String::new(),
             stderr: format!("spawn failed: {}", e),
+            session_id: None,
         },
     };
 
@@ -401,6 +416,16 @@ fn read_wake_policy() -> String {
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("routineWakePolicy")?.as_str().map(String::from))
         .unwrap_or_else(|| "passive".to_string())
+}
+
+/// 会话落盘设置（与主 App channels::agent_session_persist 同一字段，默认落盘）
+fn agent_session_persist() -> bool {
+    let path = data_dir().join("settings.json");
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("agentSessionPersist")?.as_bool())
+        .unwrap_or(true)
 }
 
 /// 距上次键鼠输入的秒数（IOHIDSystem HIDIdleTime，纳秒），含蓝牙/USB 外接设备

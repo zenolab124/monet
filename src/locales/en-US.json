@@ -56,7 +56,12 @@
     "expandDown": "Expand ▼",
     "expandAll": "…Expand all ({size}KB)",
     "noMatch": "No match",
-    "userDenied": "User denied"
+    "userDenied": "User denied",
+    "viewSession": "View Session",
+    "systemSession": "System Session",
+    "systemSessionEmpty": "No messages (session file may have been removed)",
+    "systemPrompt": "Prompt",
+    "revealDir": "Reveal Folder"
   },
   "time": {
     "justNow": "Just now",
@@ -610,6 +615,8 @@
     "agentSummaryDesc": "Auto-generate 2-3 sentence session summaries for quick review",
     "agentTranslate": "AI Translate",
     "agentTranslateDesc": "Translate the UI into user-defined languages",
+    "agentSessionPersist": "Session Persistence",
+    "agentSessionPersistDesc": "Save agent calls and routine runs as Claude session files (official channel path only) for traceability; turn off to leave no trace. The directory never appears in Archive or Search",
     "agentAutoChannel": "Auto (chain order)",
     "agentTest": "Test Channel",
     "agentLogs": "Call Logs",
@@ -753,7 +760,10 @@
       "ask": "Ask",
       "additionalDirs": "Additional directories",
       "empty": "No rules"
-    }
+    },
+    "agentFeature_search_terms": "Search Terms",
+    "agentFeature_search_summarize": "Search Summary",
+    "agentSessionDirMissing": "No persisted sessions yet (directory not created)"
   },
   "notification": {
     "claudeAsking": "Claude is asking",

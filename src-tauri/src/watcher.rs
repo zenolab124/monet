@@ -60,6 +60,10 @@ pub fn start(app: &AppHandle) {
         // 避免把历史错误当新事件误报
         let mut file_sizes = snapshot_sizes(&root);
 
+        // 内置 Agent 工作目录：变化全部静音——Agent 落盘会话不进档案/搜索，
+        // 其写盘若触发 projects-changed，前端会因"未知项目"回退全量重扫（打穿 P0-2 增量优化）
+        let agent_dirs: HashSet<String> = crate::config::agent_project_dirs().into_iter().collect();
+
         let mut last_emit = Instant::now() - Duration::from_secs(10);
         let mut last_routines_emit = Instant::now() - Duration::from_secs(10);
         // 节流窗口内累积的会话变更 (project_id, session_id)；full 表示需要全量刷新
@@ -83,25 +87,34 @@ pub fn start(app: &AppHandle) {
                     }
 
                     // api_error 增量探测：每个事件都处理（需要 paths，不能合并丢弃）
+                    // Agent 目录跳过——Agent 调用失败有自己的 fallback 链和日志，不弹用户通知
                     for path in &event.paths {
                         if let Some((sid, pid)) = session_file_ids(&root, path) {
-                            probe_api_errors(&handle, path, &sid, &pid, &mut file_sizes);
+                            if !agent_dirs.contains(&pid) {
+                                probe_api_errors(&handle, path, &sid, &pid, &mut file_sizes);
+                            }
                         }
                     }
 
                     if !is_routine {
                         for path in &event.paths {
                             if let Some((sid, pid)) = session_file_ids(&root, path) {
-                                // 与 discovery 的会话定义保持一致：排除 agent- 前缀，
+                                // 与 discovery 的会话定义保持一致：排除 agent- 前缀与 Agent 目录，
                                 // 否则增量路径会把全量扫描不认的文件 push 成幽灵会话
-                                if !sid.starts_with("agent-") {
+                                if !sid.starts_with("agent-") && !agent_dirs.contains(&pid) {
                                     // 搜索缓存懒失效：只标 dirty，查询时才重提取
                                     crate::search::invalidate_file(path);
                                     pending_changes.insert((pid, sid));
                                 }
                             } else if path.parent() == Some(root.as_path()) {
-                                // 项目目录本身的创建/删除/重命名：无法增量定位
-                                pending_full = true;
+                                // 项目目录本身的创建/删除/重命名：无法增量定位；
+                                // Agent 目录自身的出现/消失除外（对项目列表不可见）
+                                let is_agent_dir = path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .is_some_and(|n| agent_dirs.contains(n));
+                                if !is_agent_dir {
+                                    pending_full = true;
+                                }
                             }
                             // 其余路径（subagents 深层文件、data_dir 内缓存写入等）
                             // 不影响项目列表，不触发事件

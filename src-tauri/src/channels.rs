@@ -191,6 +191,8 @@ pub struct AppSettings {
     pub channels: BTreeMap<String, ChannelMeta>,
     pub agent_toggles: BTreeMap<String, bool>,
     pub agent_preferences: BTreeMap<String, AgentFeaturePrefs>,
+    /// 内置 Agent 走官方 CLI 时是否保留会话落盘（可追溯）。None = 默认落盘
+    pub agent_session_persist: Option<bool>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -761,6 +763,23 @@ pub fn set_agent_toggle(key: String, enabled: bool) -> Result<(), String> {
 
 pub fn is_agent_enabled(key: &str) -> bool {
     load_app_settings().agent_toggles.get(key).copied().unwrap_or(true)
+}
+
+/// Agent 会话是否落盘（默认 true）。false 时 spawn CLI 附加 --no-session-persistence
+pub(crate) fn agent_session_persist() -> bool {
+    load_app_settings().agent_session_persist.unwrap_or(true)
+}
+
+#[tauri::command]
+pub fn get_agent_session_persist() -> bool {
+    agent_session_persist()
+}
+
+#[tauri::command]
+pub fn set_agent_session_persist(enabled: bool) -> Result<(), String> {
+    let mut settings = load_app_settings();
+    settings.agent_session_persist = Some(enabled);
+    save_app_settings(&settings)
 }
 
 #[tauri::command]

@@ -326,6 +326,33 @@ pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionDir {
+    /// projects 下的目录编码名（get_session_records 的 projectId）
+    pub dir_name: String,
+    /// 落盘目录绝对路径（Finder 打开用）
+    pub path: String,
+    /// 目录是否已存在（从未落盘时为 false，前端据此提示而非静默打开失败）
+    pub exists: bool,
+}
+
+/// 内置 Agent / routine 落盘会话所在目录——「查看会话」与「打开目录」共用
+#[tauri::command]
+pub fn get_agent_session_dir() -> AgentSessionDir {
+    let dir_name = crate::config::agent_project_dirs()
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let dir = projects_dir().join(&dir_name);
+    let exists = dir.is_dir();
+    AgentSessionDir {
+        dir_name,
+        path: dir.to_string_lossy().to_string(),
+        exists,
+    }
+}
+
 /// 在 Finder 中打开目录
 #[tauri::command]
 pub fn open_in_finder(path: String) -> Result<(), String> {

@@ -13,6 +13,42 @@ pub fn data_dir() -> &'static PathBuf {
     })
 }
 
+/// 内置 Agent 的专属工作目录：spawn CLI 时的 cwd 固定在这里，
+/// 与用户项目隔离（Agent 调用另有 --no-session-persistence 保证不落盘）
+pub fn agent_cwd() -> PathBuf {
+    let p = data_dir().join("agent");
+    let _ = std::fs::create_dir_all(&p);
+    p
+}
+
+/// Claude CLI 对 cwd 的 projects 目录编码：非字母数字字符一律替换为 `-`
+fn encode_project_dir(path: &std::path::Path) -> String {
+    path.to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+/// 内置 Agent 工作目录对应的 projects 编码名（含历史数据目录）。
+/// Agent 会话默认落盘（设置项 agentSessionPersist 可关，供事后追溯）；
+/// 这份清单是全部扫描面的软屏蔽口径：档案馆/搜索/watcher/用量统计/Widget
+/// 据此排除 Agent 会话目录，不混入用户视图
+pub fn agent_project_dirs() -> Vec<String> {
+    // CLI 对 cwd 先 canonicalize 再编码（symlink 场景逻辑路径会对不上），对齐口径；
+    // canonicalize 失败（目录尚不存在等）回落逻辑路径
+    let cwd = agent_cwd();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+    let mut names = vec![encode_project_dir(&canonical)];
+    if let Some(home) = dirs::home_dir() {
+        // 数据目录迁移前的旧位置 ~/.claude/cc-space/agent
+        let legacy = home.join(".claude").join("cc-space").join("agent");
+        let legacy = legacy.canonicalize().unwrap_or(legacy);
+        names.push(encode_project_dir(&legacy));
+    }
+    names.dedup();
+    names
+}
+
 /// 原子写文本文件（临时文件 + rename）。
 /// settings.json 等被主 App 与 runner 跨进程读写的文件必须走这里，
 /// 裸 fs::write 的 truncate-write 间隙会被并发读者读到半截 JSON

@@ -410,6 +410,18 @@ fn listener_loop(app: AppHandle) {
     let path = signal_path();
     rotate_if_oversized(&path);
 
+    // 内置 Agent / routine 的工作目录信号与用户无关，单点丢弃——
+    // 否则每次后台 Agent 调用都会触发「任务完成」系统通知。
+    // hook 上报的 cwd 是 canonicalize 后的路径（如 /tmp → /private/tmp），须对齐后比较
+    let agent_dir = fs::canonicalize(crate::config::agent_cwd())
+        .unwrap_or_else(|_| crate::config::agent_cwd());
+    let is_agent = |ev: &TurnSignalEvent| -> bool {
+        ev.cwd
+            .as_deref()
+            .map(std::path::Path::new)
+            .is_some_and(|c| c == agent_dir)
+    };
+
     // 启动重放：全量读一遍，重建每个 session 的最终状态（时效窗口内），再进入增量循环
     let mut offset: u64 = 0;
     if let Ok(content) = fs::read_to_string(&path) {
@@ -417,6 +429,9 @@ fn listener_loop(app: AppHandle) {
         let mut last: HashMap<String, TurnSignalEvent> = HashMap::new();
         for line in content.lines() {
             if let Some(ev) = parse_line(line) {
+                if is_agent(&ev) {
+                    continue;
+                }
                 last.insert(ev.session_id.clone(), ev);
             }
         }
@@ -455,6 +470,9 @@ fn listener_loop(app: AppHandle) {
         offset += consumed as u64;
         for line in buf[..consumed].lines() {
             if let Some(ev) = parse_line(line) {
+                if is_agent(&ev) {
+                    continue;
+                }
                 emit_event(&app, ev);
             }
         }

@@ -19,7 +19,8 @@ pub fn discover_all() -> Vec<Project> {
         _ => return vec![],
     };
 
-    // 收集所有项目目录
+    // 收集所有项目目录（排除内置 Agent 的工作目录，防旧版残留混入档案）
+    let agent_dirs = crate::config::agent_project_dirs();
     let entries: Vec<(PathBuf, String)> = fs::read_dir(&root)
         .ok()
         .into_iter()
@@ -30,6 +31,9 @@ pub fn discover_all() -> Vec<Project> {
                 return None;
             }
             let dir_name = entry.file_name().to_str()?.to_string();
+            if agent_dirs.contains(&dir_name) {
+                return None;
+            }
             Some((entry.path(), dir_name))
         })
         .collect();

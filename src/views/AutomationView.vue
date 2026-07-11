@@ -7,6 +7,7 @@ import { useAutomation, buildRows } from '@/composables/useAutomation'
 import { useRoutines, type RoutineDefinition, type RoutineRow, type RoutineExecutionLog } from '@/composables/useRoutines'
 import { renderMarkdownCached } from '@/composables/useMarkdown'
 import RoutineForm from '@/components/automation/RoutineForm.vue'
+import SystemSessionViewer from '@/components/SystemSessionViewer.vue'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
@@ -144,6 +145,9 @@ function sourceProjectName(r: RoutineRow): string {
 
 // --- 日志弹窗 ---
 const logPopup = ref<{ routine: RoutineRow; logs: RoutineExecutionLog[]; selected: number; loading: boolean } | null>(null)
+
+// 完整会话浮层（执行日志带 sessionId 时可打开）
+const viewingSession = ref<string | null>(null)
 
 async function openLogs(r: RoutineRow) {
   logPopup.value = { routine: r, logs: [], selected: 0, loading: true }
@@ -517,6 +521,11 @@ function renderLogContent(log: RoutineExecutionLog): string {
                 <span v-if="logPopup.logs[logPopup.selected].exitCode != null" :class="logPopup.logs[logPopup.selected].exitCode === 0 ? 'text-success' : 'text-destructive'">
                   {{ $t('automation.logs.exitCode', { code: logPopup.logs[logPopup.selected].exitCode }) }}
                 </span>
+                <button
+                  v-if="logPopup.logs[logPopup.selected].sessionId"
+                  class="text-primary hover:underline"
+                  @click="viewingSession = logPopup.logs[logPopup.selected].sessionId!"
+                >{{ $t('common.viewSession') }}</button>
               </div>
 
               <!-- stdout (Markdown) -->
@@ -532,6 +541,13 @@ function renderLogContent(log: RoutineExecutionLog): string {
         </div>
       </div>
     </div>
+
+    <!-- 完整会话浮层 -->
+    <SystemSessionViewer
+      v-if="viewingSession"
+      :session-id="viewingSession"
+      @close="viewingSession = null"
+    />
   </div>
 </template>
 

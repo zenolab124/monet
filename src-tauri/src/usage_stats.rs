@@ -234,6 +234,17 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
     let mut files = Vec::new();
     probe::collect_jsonl(&root, None, &mut files);
 
+    // 内置 Agent 落盘会话不计入用量：与档案/搜索/watcher 的软屏蔽口径一致
+    let agent_dirs: std::collections::HashSet<String> =
+        crate::config::agent_project_dirs().into_iter().collect();
+    files.retain(|p| {
+        p.strip_prefix(&root)
+            .ok()
+            .and_then(|rel| rel.components().next())
+            .map(|c| !agent_dirs.contains(c.as_os_str().to_string_lossy().as_ref()))
+            .unwrap_or(true)
+    });
+
     let buckets = files
         .par_iter()
         .map(|p| scan_file_cached(p))
