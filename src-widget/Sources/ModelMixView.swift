@@ -4,7 +4,9 @@ import WidgetKit
 struct ModelMixView: View {
     let entry: TodaySummaryEntry
 
-    private let barColors: [Color] = [.blue, .orange, .green, .purple, .pink]
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var barColors: [Color] { WidgetPalette.categorical(colorScheme) }
 
     var body: some View {
         if let data = entry.data {
@@ -55,11 +57,11 @@ struct ModelMixView: View {
             // Stacked bar with gaps
             if totalTokens > 0 {
                 GeometryReader { geo in
-                    HStack(spacing: 1) {
+                    HStack(spacing: 2) {
                         ForEach(Array(models.enumerated()), id: \.offset) { idx, m in
                             let w = max(geo.size.width * Double(m.tokens) / Double(totalTokens), 3)
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(barColors[idx % barColors.count].opacity(0.7))
+                                .fill(barColors[idx % barColors.count])
                                 .frame(width: w)
                         }
                     }
@@ -75,7 +77,7 @@ struct ModelMixView: View {
                 ForEach(Array(models.enumerated()), id: \.offset) { idx, m in
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(barColors[idx % barColors.count].opacity(0.7))
+                            .fill(barColors[idx % barColors.count])
                             .frame(width: 6, height: 6)
                         Text(WidgetData.formatModelName(m.model))
                             .font(.system(size: 10, weight: .medium, design: .monospaced))

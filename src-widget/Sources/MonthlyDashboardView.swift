@@ -4,7 +4,9 @@ import WidgetKit
 struct MonthlyDashboardView: View {
     let entry: TodaySummaryEntry
 
-    private let barColors: [Color] = [.blue, .purple, .orange, .green, .pink]
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var barColors: [Color] { WidgetPalette.categorical(colorScheme) }
 
     var body: some View {
         if let data = entry.data {
@@ -50,7 +52,7 @@ struct MonthlyDashboardView: View {
                 ForEach(Array(weekly.enumerated()), id: \.offset) { idx, day in
                     VStack(spacing: 2) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(idx == weekly.count - 1 ? Color.blue.opacity(0.6) : Color.primary.opacity(0.15))
+                            .fill(idx == weekly.count - 1 ? barColors[0] : Color.primary.opacity(0.15))
                             .frame(height: max(CGFloat(day.tokens) / CGFloat(maxT) * 50, 2))
                         Text(WidgetData.shortDate(day.date))
                             .font(.system(size: 7, weight: .medium, design: .monospaced))
@@ -65,11 +67,11 @@ struct MonthlyDashboardView: View {
             // Model mix stacked bar + legend
             if totalModelTokens > 0 {
                 GeometryReader { geo in
-                    HStack(spacing: 1) {
+                    HStack(spacing: 2) {
                         ForEach(Array(models.enumerated()), id: \.offset) { idx, m in
                             let w = max(geo.size.width * Double(m.tokens) / Double(totalModelTokens), 3)
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(barColors[idx % barColors.count].opacity(0.6))
+                                .fill(barColors[idx % barColors.count])
                                 .frame(width: w)
                         }
                     }
@@ -81,7 +83,7 @@ struct MonthlyDashboardView: View {
                     ForEach(Array(models.enumerated()), id: \.offset) { idx, m in
                         HStack(spacing: 3) {
                             Circle()
-                                .fill(barColors[idx % barColors.count].opacity(0.6))
+                                .fill(barColors[idx % barColors.count])
                                 .frame(width: 5, height: 5)
                             Text(m.model)
                                 .font(.system(size: 9, weight: .medium, design: .monospaced))
