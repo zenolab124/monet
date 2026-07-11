@@ -129,7 +129,7 @@ struct RefreshResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Cache
+// Cache (memory + disk)
 // ---------------------------------------------------------------------------
 
 struct CachedQuota {
@@ -149,6 +149,39 @@ struct TokenState {
 
 const CACHE_TTL: Duration = Duration::from_secs(120);
 const OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+
+#[derive(Serialize, Deserialize)]
+struct DiskCache {
+    info: QuotaInfo,
+    fetched_at_ms: i64,
+}
+
+fn disk_cache_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("quota-cache.json")
+}
+
+fn read_disk_cache() -> Option<(QuotaInfo, i64)> {
+    let content = std::fs::read_to_string(disk_cache_path()).ok()?;
+    let dc: DiskCache = serde_json::from_str(&content).ok()?;
+    Some((dc.info, dc.fetched_at_ms))
+}
+
+fn write_disk_cache(info: &QuotaInfo) {
+    let dc = DiskCache {
+        info: info.clone(),
+        fetched_at_ms: Utc::now().timestamp_millis(),
+    };
+    if let Ok(json) = serde_json::to_string(&dc) {
+        let _ = std::fs::write(disk_cache_path(), json);
+    }
+}
+
+fn disk_cache_age_secs() -> Option<i64> {
+    let content = std::fs::read_to_string(disk_cache_path()).ok()?;
+    let dc: DiskCache = serde_json::from_str(&content).ok()?;
+    let age = Utc::now().timestamp_millis() - dc.fetched_at_ms;
+    Some(age / 1000)
+}
 
 // ---------------------------------------------------------------------------
 // IPC commands
@@ -181,19 +214,45 @@ pub fn quota_available() -> bool {
 // ---------------------------------------------------------------------------
 
 fn fetch_and_cache() -> QuotaInfo {
+    if let Some(age) = disk_cache_age_secs() {
+        if age < CACHE_TTL.as_secs() as i64 {
+            if let Some((info, _)) = read_disk_cache() {
+                if info.error.is_none() {
+                    if let Ok(mut guard) = CACHE.lock() {
+                        *guard = Some(CachedQuota {
+                            info: info.clone(),
+                            fetched_at: Instant::now(),
+                        });
+                    }
+                    return info;
+                }
+            }
+        }
+    }
+
     let info = match fetch_quota_inner() {
         Ok(info) => info,
-        Err(e) => QuotaInfo {
-            session: None,
-            weekly: None,
-            weekly_models: vec![],
-            extra_usage: None,
-            plan: None,
-            account_email: None,
-            updated_at: Utc::now().to_rfc3339(),
-            error: Some(e),
+        Err(e) => {
+            if let Some((cached, _)) = read_disk_cache() {
+                if cached.error.is_none() {
+                    return cached;
+                }
+            }
+            QuotaInfo {
+                session: None,
+                weekly: None,
+                weekly_models: vec![],
+                extra_usage: None,
+                plan: None,
+                account_email: None,
+                updated_at: Utc::now().to_rfc3339(),
+                error: Some(e),
+            }
         },
     };
+    if info.error.is_none() {
+        write_disk_cache(&info);
+    }
     if let Ok(mut guard) = CACHE.lock() {
         *guard = Some(CachedQuota {
             info: info.clone(),
@@ -507,6 +566,92 @@ fn read_file_credential() -> Option<OAuthCredential> {
 // ---------------------------------------------------------------------------
 // Tray tooltip (已用语义)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Tray title (menu bar text next to icon)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayTitleConfig {
+    pub slots: Vec<TrayTitleSlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrayTitleSlot {
+    Session,
+    Weekly,
+    Model(String),
+}
+
+impl Default for TrayTitleConfig {
+    fn default() -> Self {
+        Self {
+            slots: vec![TrayTitleSlot::Session, TrayTitleSlot::Model("Fable".into())],
+        }
+    }
+}
+
+fn tray_title_config_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("tray-title.json")
+}
+
+pub fn read_tray_title_config() -> TrayTitleConfig {
+    std::fs::read_to_string(tray_title_config_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn get_tray_title_config() -> TrayTitleConfig {
+    read_tray_title_config()
+}
+
+#[tauri::command]
+pub fn set_tray_title_config(app: tauri::AppHandle, slots: Vec<TrayTitleSlot>) -> Result<(), String> {
+    let cfg = TrayTitleConfig { slots };
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(tray_title_config_path(), json).map_err(|e| e.to_string())?;
+
+    // Immediately update tray title from cached quota
+    use tauri::Manager;
+    if let Some(tray) = app.tray_by_id(&tauri::tray::TrayIconId::new("main-tray")) {
+        if let Ok(guard) = CACHE.lock() {
+            if let Some(cached) = guard.as_ref() {
+                let _ = tray.set_title(format_tray_title(&cached.info).as_deref());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn format_tray_title(info: &QuotaInfo) -> Option<String> {
+    let cfg = read_tray_title_config();
+    if cfg.slots.is_empty() { return None; }
+
+    let parts: Vec<String> = cfg.slots.iter().filter_map(|slot| {
+        match slot {
+            TrayTitleSlot::Session => {
+                info.session.as_ref().map(|s| format!("{:.0}%", s.used_percent))
+            }
+            TrayTitleSlot::Weekly => {
+                info.weekly.as_ref().map(|w| format!("{:.0}%", w.used_percent))
+            }
+            TrayTitleSlot::Model(name) => {
+                info.weekly_models.iter()
+                    .find(|m| {
+                        m.display_name.as_deref() == Some(name.as_str())
+                            || m.model.eq_ignore_ascii_case(name)
+                    })
+                    .map(|m| format!("{:.0}%", m.used_percent))
+            }
+        }
+    }).collect();
+
+    if parts.is_empty() { None } else { Some(parts.join(" | ")) }
+}
 
 pub fn format_tray_tooltip(info: &QuotaInfo) -> String {
     let mut parts = vec![];

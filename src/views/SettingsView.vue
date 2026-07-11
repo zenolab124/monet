@@ -259,6 +259,86 @@ async function setWidgetMonthMode(mode: string) {
   await invoke('set_widget_config', { dayStartHour: widgetDayStart.value, monthMode: mode }).catch(() => {})
 }
 
+// --- 托盘标题配置 ---
+type TraySlotKind = 'session' | 'weekly' | { model: string }
+interface TrayTitleConfig { slots: TraySlotKind[] }
+
+const traySlots = ref<TraySlotKind[]>([])
+const trayAvailableModels = ref<string[]>([])
+
+const traySlotOptions = computed(() => {
+  const opts = [
+    { key: 'session', label: t('settings.traySlotSession') },
+    { key: 'weekly', label: t('settings.traySlotWeekly') },
+  ]
+  for (const name of trayAvailableModels.value) {
+    opts.push({ key: `model:${name}`, label: t('settings.traySlotModel', { name }) })
+  }
+  return opts
+})
+
+function slotToKind(key: string): TraySlotKind {
+  if (key === 'session') return 'session'
+  if (key === 'weekly') return 'weekly'
+  if (key.startsWith('model:')) return { model: key.slice(6) }
+  return 'session'
+}
+
+function kindToKey(kind: TraySlotKind): string {
+  if (kind === 'session') return 'session'
+  if (kind === 'weekly') return 'weekly'
+  if (typeof kind === 'object' && 'model' in kind) return `model:${kind.model}`
+  return 'session'
+}
+
+function isTraySlotActive(key: string): boolean {
+  return traySlots.value.some(s => kindToKey(s) === key)
+}
+
+const SLOT_ORDER = ['session', 'weekly'] as const
+
+function sortSlots(slots: TraySlotKind[]): TraySlotKind[] {
+  return [...slots].sort((a, b) => {
+    const ka = kindToKey(a)
+    const kb = kindToKey(b)
+    const ia = SLOT_ORDER.indexOf(ka as any)
+    const ib = SLOT_ORDER.indexOf(kb as any)
+    const oa = ia >= 0 ? ia : SLOT_ORDER.length
+    const ob = ib >= 0 ? ib : SLOT_ORDER.length
+    return oa - ob
+  })
+}
+
+async function toggleTraySlot(key: string) {
+  const active = isTraySlotActive(key)
+  if (active) {
+    traySlots.value = traySlots.value.filter(s => kindToKey(s) !== key)
+  } else {
+    traySlots.value = sortSlots([...traySlots.value, slotToKind(key)])
+  }
+  await invoke('set_tray_title_config', { slots: traySlots.value }).catch(() => {})
+}
+
+interface QuotaInfo {
+  session: unknown
+  weekly: unknown
+  weeklyModels: { model: string; displayName: string | null; usedPercent: number }[]
+  error: string | null
+}
+
+async function loadTrayTitleConfig() {
+  try {
+    const cfg = await invoke<TrayTitleConfig>('get_tray_title_config')
+    traySlots.value = cfg.slots
+  } catch {}
+  try {
+    const qi = await invoke<QuotaInfo>('get_quota')
+    if (qi && !qi.error) {
+      trayAvailableModels.value = qi.weeklyModels.map(m => m.displayName || m.model)
+    }
+  } catch {}
+}
+
 // 系统授权状态：/etc/sudoers.d 白名单是否在位（与 policy 独立——
 // 切回被动后规则可保留，下次开启不再弹密码框）
 const wakeAuthorized = ref(false)
@@ -332,7 +412,7 @@ function withCurrent(list: { value: string; label: string }[], current: string) 
 const advisorMainOptions = computed(() => withCurrent(nonLegacyModels.value, advisorMain.value))
 const advisorModelOptions = computed(() => withCurrent(nonLegacyModels.value, advisorModel.value))
 
-onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig(); loadTrayTitleConfig() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -676,6 +756,21 @@ function onSaved() {
                 <option value="rolling">{{ $t('settings.widgetRolling30') }}</option>
               </select>
               <div class="setting-hint">{{ $t('settings.widgetMonthBoundaryHint') }}</div>
+            </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
+              <div class="flex flex-col gap-1.5">
+                <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
+                  <input
+                    type="checkbox"
+                    :checked="isTraySlotActive(slot.key)"
+                    class="accent-primary"
+                    @change="toggleTraySlot(slot.key)"
+                  />
+                  {{ slot.label }}
+                </label>
+              </div>
+              <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
             </div>
           </div>
         </section>
@@ -1093,6 +1188,7 @@ function onSaved() {
                 <th class="text-right">{{ $t('settings.agentLogsDuration') }}</th>
                 <th class="text-right">Tokens</th>
                 <th>{{ $t('settings.agentLogsStatus') }}</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>

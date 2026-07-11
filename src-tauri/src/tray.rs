@@ -148,10 +148,14 @@ fn is_chinese() -> bool {
 
 fn refresh_tray(app: &AppHandle) {
     let info = quota::refresh_quota();
+    if let Some(err) = &info.error {
+        log::warn!("quota fetch error: {err}");
+    }
     if let Ok(menu) = build_menu(app, Some(&info)) {
         if let Some(tray) = app.tray_by_id(&TrayIconId::new(TRAY_ID)) {
             let _ = tray.set_menu(Some(menu));
             let _ = tray.set_tooltip(Some(&quota::format_tray_tooltip(&info)));
+            let _ = tray.set_title(quota::format_tray_title(&info).as_deref());
             #[cfg(target_os = "macos")]
             patch_menu_styles(&tray);
         }

@@ -243,6 +243,8 @@ pub fn run() {
             quota::get_quota,
             quota::refresh_quota,
             quota::quota_available,
+            quota::get_tray_title_config,
+            quota::set_tray_title_config,
             menu::hide_main_window,
             menu::quit_app,
         ])
