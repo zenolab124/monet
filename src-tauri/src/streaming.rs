@@ -889,6 +889,16 @@ fn decode_stream_event(
     let event_type = value.get("type")?.as_str()?;
     let sid = session_id.to_string();
 
+    // 子 agent 的转发事件：顶层 parent_tool_use_id 非 null（实测 v2.1.x 子 agent 的
+    // assistant 快照带此标记，主对话恒 null）。不进主对话流——子 agent 内容由
+    // 异步面板从 subagents 转录呈现，混入主流会把子 agent 输出渲染进主会话区
+    if value
+        .get("parent_tool_use_id")
+        .map_or(false, |v| !v.is_null())
+    {
+        return None;
+    }
+
     match event_type {
         "stream_event" => {
             // CLI envelope: { type: "stream_event", event: <Anthropic SSE event> }
@@ -962,32 +972,8 @@ fn decode_stream_event(
                 model,
             })
         }
-        "progress" => {
-            // data.message.type 必须是 "assistant"
-            let data = value.get("data")?;
-            let outer_msg = data.get("message")?;
-            if outer_msg.get("type")?.as_str()? != "assistant" {
-                return None;
-            }
-            let inner_msg = outer_msg.get("message")?;
-            let message_id = inner_msg
-                .get("id")
-                .and_then(|v| v.as_str())
-                .or_else(|| value.get("uuid").and_then(|v| v.as_str()))
-                .unwrap_or("unknown")
-                .to_string();
-            let content: Vec<ContentBlock> = inner_msg
-                .get("content")
-                .and_then(|c| serde_json::from_value(c.clone()).ok())
-                .unwrap_or_default();
-            let model = inner_msg.get("model").and_then(|v| v.as_str()).map(String::from);
-            Some(StreamEvent::AssistantMessage {
-                session_id: sid,
-                message_id,
-                content,
-                model,
-            })
-        }
+        // "progress"（老版 CLI 的子任务进度转发容器）不再混入主流：
+        // 子 agent 内容归异步面板，主对话只渲染自己的消息
         "result" => {
             let result_text = value
                 .get("result")
