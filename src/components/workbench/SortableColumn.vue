@@ -33,6 +33,7 @@ const setHandle = (node: any) => { handleEl.value = node }
   min-width: 0;
   height: 100%;
   position: relative;
+  overflow: hidden;
   transition: width 250ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sortable-col-dragging {

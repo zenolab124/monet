@@ -373,11 +373,23 @@ function removeRaceLane(tabId: string, sessionId: string) {
   const si = tab.sessionIds.indexOf(sessionId)
   if (si >= 0) tab.sessionIds.splice(si, 1)
   const ci = tab.columns.findIndex(c => c.sessionId === sessionId)
-  if (ci >= 0) tab.columns.splice(ci, 1)
-  tab.columnSizes = equalSizes(tab.columns.length)
-
-  if (tab.race.lanes.length <= 1) {
-    delete tab.race
+  if (ci >= 0) {
+    tab.columnSizes[ci] = 0
+    setTimeout(() => {
+      const idx = tab.columns.findIndex(c => c.sessionId === sessionId)
+      if (idx >= 0) {
+        tab.columns.splice(idx, 1)
+        tab.columnSizes.splice(idx, 1)
+      }
+      tab.columnSizes = equalSizes(tab.columns.length)
+      if (tab.race && tab.race.lanes.length <= 1) {
+        delete tab.race
+      }
+    }, COLUMN_ANIM_MS)
+  } else {
+    if (tab.race.lanes.length <= 1) {
+      delete tab.race
+    }
   }
 }
 
@@ -513,33 +525,36 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
   return { collapsedSessionIds: [], focusedExisting: false }
 }
 
+const COLUMN_ANIM_MS = 250
+
 /**
- * 移除列并智能回收宽度:
- * - 溢出态(有滚动):直接丢弃宽度,总宽减少;若丢弃后能 fit 则按比例填满
- * - 非溢出态:邻居吃掉宽度,保持填满容器
+ * 移除列并智能回收宽度（带动画）:
+ * 先将目标列宽度缩到 0 触发 CSS transition，结束后再 splice 移除。
  */
 function reclaimColumnWidth(tab: WorkbenchTab, removedIndex: number) {
   const freed = tab.columnSizes[removedIndex]
-  const totalBefore = tab.columnSizes.reduce((s, w) => s + w, 0)
-  const freeBefore = containerFreeWidth(tab.columns.length)
-  const wasOverflowing = totalBefore > freeBefore
+  tab.columnSizes[removedIndex] = 0
 
-  tab.columns.splice(removedIndex, 1)
-  tab.columnSizes.splice(removedIndex, 1)
+  setTimeout(() => {
+    const currentIdx = tab.columns.findIndex((_, i) => i === removedIndex && tab.columnSizes[i] === 0)
+    if (currentIdx < 0) return
 
-  if (tab.columnSizes.length === 0) return
+    tab.columns.splice(currentIdx, 1)
+    tab.columnSizes.splice(currentIdx, 1)
 
-  if (wasOverflowing) {
-    const newTotal = totalBefore - freed
-    const newFree = containerFreeWidth(tab.columnSizes.length)
-    if (newTotal < newFree) {
-      const scale = newFree / newTotal
+    if (tab.columnSizes.length === 0) return
+
+    const totalAfter = tab.columnSizes.reduce((s, w) => s + w, 0)
+    const freeAfter = containerFreeWidth(tab.columnSizes.length)
+
+    if (totalAfter < freeAfter) {
+      const scale = freeAfter / totalAfter
       tab.columnSizes = tab.columnSizes.map(w => Math.max(minColumnWidth.value, Math.round(w * scale)))
+    } else {
+      const neighbor = Math.min(currentIdx, tab.columnSizes.length - 1)
+      tab.columnSizes[neighbor] += freed
     }
-  } else {
-    const neighbor = Math.min(removedIndex, tab.columnSizes.length - 1)
-    tab.columnSizes[neighbor] += freed
-  }
+  }, COLUMN_ANIM_MS)
 }
 
 /** 收起列回左列(仍激活,「收起非退出」) */
