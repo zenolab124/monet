@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, provide } from 'vue'
+import { ref, computed, provide, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SubAgentState, AsyncTask } from '@/composables/useSubAgents'
+import type { SubAgentState } from '@/composables/useSubAgents'
+import type { AsyncTaskItem, AsyncTaskState } from '@/composables/useAsyncTasks'
+import { isActive } from '@/composables/useAsyncTasks'
 import type { SubAgentMeta, SessionRecord, ContentBlock } from '@/types'
 import { shortModel, formatTokens } from '@/types'
 import { filterConsumedResults } from '@/utils/toolPair'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
+import AsyncTaskCard from './AsyncTaskCard.vue'
+import AsyncTaskDetail from './AsyncTaskDetail.vue'
 import MessageBlock from './MessageBlock.vue'
 import MsgClamp from './MsgClamp.vue'
 import UserMsgContent from './UserMsgContent.vue'
 
 const props = defineProps<{
-  tasks: AsyncTask[]
+  tasks: AsyncTaskItem[]
   openTabs: SubAgentState[]
   activeTabId: string | null
   projectId?: string | null
@@ -37,28 +41,89 @@ const activeAgent = computed(() =>
   props.openTabs.find(a => a.meta.agent_id === props.activeTabId) ?? null,
 )
 
-const view = ref<'list' | 'detail'>('list')
+// 三视图：列表 / agent 对话流 / 非 agent 任务详情
+const view = ref<'list' | 'agent' | 'task'>('list')
+const selectedKey = ref<string | null>(null)
+const selectedTask = computed(() =>
+  props.tasks.find(x => x.key === selectedKey.value) ?? null,
+)
 
-function onSelectAgent(meta: SubAgentMeta) {
+// 会话切换：面板实例跨会话复用（档案馆单 SessionDetail），视图状态必须归位，
+// 否则残留的 view='task'/'agent' 会因 key 失配落进空白 agent 分支
+watch(() => props.sessionId, () => {
+  view.value = 'list'
+  selectedKey.value = null
+})
+// 任务重算后 key 失配（孤儿 key 漂移/records 换血）：自动回列表兜底
+watch(selectedTask, (t) => {
+  if (view.value === 'task' && !t) view.value = 'list'
+})
+
+// ---- 两段式分区 ----
+const activeTasks = computed(() => props.tasks.filter(isActive))
+const finishedTasks = computed(() => {
+  const done = props.tasks.filter(x => !isActive(x))
+  // 已结束按结束时刻倒序（无结束时刻的排最后，按启动时刻倒序兜底）
+  return done.sort((a, b) =>
+    (b.endedAt ?? b.startedAt ?? '').localeCompare(a.endedAt ?? a.startedAt ?? ''))
+})
+
+// waiting 倒计时时钟：面板级 30s tick，全部卡片共享
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+onMounted(() => { ticker = setInterval(() => { now.value = Date.now() }, 30_000) })
+onUnmounted(() => { if (ticker) clearInterval(ticker) })
+
+function openAgentTranscript(meta: SubAgentMeta) {
   emit('selectAgent', meta)
-  view.value = 'detail'
+  view.value = 'agent'
 }
 
-function onSelectTask(task: AsyncTask) {
-  if (task.type === 'agent') {
-    const meta: SubAgentMeta = {
-      agent_id: task.id,
-      tool_use_id: task.toolUseId,
-      agent_type: task.label,
-      description: task.description,
-    }
-    onSelectAgent(meta)
+function onOpenTask(task: AsyncTaskItem) {
+  selectedKey.value = task.key
+  // agent 物种且已知转录 id → 对话流；其余（含流式中未拿到 agentId 的）→ 任务详情
+  if (task.species === 'agent' && task.agentId) {
+    openAgentTranscript({
+      agent_id: task.agentId,
+      tool_use_id: task.toolUseId ?? '',
+      agent_type: task.model ? `Agent (${shortModel(task.model)})` : 'Agent',
+      description: task.title,
+    })
+    return
   }
+  view.value = 'task'
 }
+
+/** 从主对话 Workflow/Agent 卡片直达：按 toolUseId 打开对应条目（SessionDetail 调用） */
+function openByToolUse(toolUseId: string): boolean {
+  const task = props.tasks.find(x => x.toolUseId === toolUseId)
+  if (!task) return false
+  onOpenTask(task)
+  return true
+}
+defineExpose({ openByToolUse })
 
 function backToList() {
   view.value = 'list'
 }
+
+const headerTitle = computed(() => {
+  if (view.value === 'list') return t('asyncTask.title')
+  if (view.value === 'agent') return activeAgent.value?.meta.description || activeAgent.value?.meta.agent_type || 'Agent'
+  return selectedTask.value?.title || t('asyncTask.title')
+})
+
+/** 详情头部状态徽章 */
+const STATE_BADGE: Record<AsyncTaskState, string> = {
+  running: 'bg-green-500/15 text-green-600 dark:text-green-400',
+  waiting: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  completed: 'bg-muted text-muted-foreground',
+  failed: 'bg-destructive/15 text-destructive',
+  killed: 'bg-orange-400/15 text-orange-500',
+  unknown: 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400',
+}
+
+// ---- agent 对话流分组（与主对话同一套渲染） ----
 
 interface MessageGroup {
   user: SessionRecord | null
@@ -104,17 +169,19 @@ const messageGroups = computed<MessageGroup[]>(() =>
     <!-- Header -->
     <div class="shrink-0 h-10 flex items-center px-3 border-b border-border gap-2">
       <button
-        v-if="view === 'detail'"
+        v-if="view !== 'list'"
         class="w-5 h-5 flex items-center justify-center rounded hover:bg-muted transition-colors"
         @click="backToList"
       >
         <span class="i-carbon-chevron-left w-3.5 h-3.5" />
       </button>
       <span v-if="view === 'list'" class="i-carbon-lightning w-3.5 h-3.5 text-claude shrink-0" />
-      <span class="text-xs font-semibold flex-1 truncate">
-        <template v-if="view === 'list'">{{ t('asyncTask.title') }}</template>
-        <template v-else>{{ activeAgent?.meta.description || activeAgent?.meta.agent_type || 'Agent' }}</template>
-      </span>
+      <span class="text-xs font-semibold flex-1 truncate">{{ headerTitle }}</span>
+      <span
+        v-if="view === 'task' && selectedTask"
+        class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0"
+        :class="STATE_BADGE[selectedTask.state]"
+      >{{ t(`asyncTask.state.${selectedTask.state}`) }}</span>
       <span
         v-if="view === 'list'"
         class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-claude/15 text-claude tabular-nums"
@@ -128,59 +195,54 @@ const messageGroups = computed<MessageGroup[]>(() =>
       </button>
     </div>
 
-    <!-- List View -->
+    <!-- List View：进行中 / 已结束 两段式 -->
     <div v-if="view === 'list'" class="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5 overscroll-contain">
-      <div
-        v-for="task in tasks"
-        :key="task.id"
-        class="overflow-hidden"
-      >
-        <div
-          class="px-2.5 py-2 rounded text-[11px]
-                 bg-background border border-border cursor-pointer
-                 transition-colors hover:bg-card hover:border-primary/40"
-          @click="onSelectTask(task)"
-        >
-          <div class="flex items-center gap-1.5 mb-1">
-            <span
-              class="px-1 py-0.5 rounded text-[9px] font-semibold shrink-0"
-              :class="task.type === 'workflow'
-                ? 'bg-claude/15 text-claude'
-                : 'bg-tag text-tag-foreground'"
-            >{{ task.type === 'workflow' ? 'Workflow' : task.label === 'general-purpose' ? 'Agent' : task.label }}</span>
-            <span class="flex-1" />
-            <button
-              v-if="task.toolUseId"
-              class="w-4 h-4 flex items-center justify-center rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              :title="t('asyncTask.locate')"
-              @click.stop="emit('locate', task.toolUseId)"
-            >
-              <span class="i-carbon-location w-3 h-3" />
-            </button>
-          </div>
-          <div class="text-foreground leading-relaxed">{{ task.description }}</div>
+      <template v-if="activeTasks.length">
+        <div class="flex items-center gap-1.5 px-0.5 pt-0.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+          <span class="text-[10px] font-semibold text-muted-foreground">{{ t('asyncTask.sectionActive') }}</span>
+          <span class="text-[10px] text-muted-foreground/60 tabular-nums">{{ activeTasks.length }}</span>
         </div>
-        <!-- Workflow 子 Agent 折叠列表 -->
-        <div v-if="task.type === 'workflow' && task.children.length" class="ml-6 mt-0.5 space-y-0.5">
-          <div
-            v-for="child in task.children"
-            :key="child.agent_id"
-            class="flex gap-1.5 px-2 py-1.5 rounded bg-background text-[10px]
-                   text-muted-foreground cursor-pointer hover:text-foreground hover:bg-card transition-colors"
-            @click.stop="onSelectAgent(child)"
-          >
-            <span class="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-1" />
-            <span class="flex-1 leading-relaxed">{{ child.description || child.agent_type || child.agent_id }}</span>
-          </div>
+        <AsyncTaskCard
+          v-for="task in activeTasks"
+          :key="task.key"
+          :task="task"
+          :now="now"
+          @open="onOpenTask"
+          @open-child="openAgentTranscript"
+          @locate="emit('locate', $event)"
+        />
+      </template>
+
+      <template v-if="finishedTasks.length">
+        <div class="flex items-center gap-1.5 px-0.5" :class="activeTasks.length ? 'pt-2' : ''">
+          <span class="text-[10px] font-semibold text-muted-foreground">{{ t('asyncTask.sectionFinished') }}</span>
+          <span class="text-[10px] text-muted-foreground/60 tabular-nums">{{ finishedTasks.length }}</span>
         </div>
-      </div>
+        <AsyncTaskCard
+          v-for="task in finishedTasks"
+          :key="task.key"
+          :task="task"
+          :now="now"
+          @open="onOpenTask"
+          @open-child="openAgentTranscript"
+          @locate="emit('locate', $event)"
+        />
+      </template>
 
       <div v-if="tasks.length === 0" class="text-center text-muted-foreground text-xs py-8">
         {{ t('asyncTask.empty') }}
       </div>
     </div>
 
-    <!-- Detail View -->
+    <!-- Task Detail View（bash/monitor/wakeup/workflow/generic）-->
+    <AsyncTaskDetail
+      v-else-if="view === 'task' && selectedTask"
+      :task="selectedTask"
+      @open-child="openAgentTranscript"
+    />
+
+    <!-- Agent Transcript View -->
     <template v-else>
       <div v-if="!activeAgent" class="flex-1 flex items-center justify-center">
         <p class="text-muted-foreground text-xs">{{ t('asyncTask.empty') }}</p>

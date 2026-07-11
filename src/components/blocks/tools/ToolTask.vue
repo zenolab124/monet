@@ -14,6 +14,7 @@ const { t } = useI18n()
 const findSubAgent = inject<(toolUseId: string) => SubAgentMeta | undefined>('findSubAgent')
 const toggleSubAgent = inject<(meta: SubAgentMeta) => void>('toggleSubAgent')
 const isSubAgentOpen = inject<(agentId: string) => boolean>('isSubAgentOpen')
+const openAsyncTask = inject<(toolUseId: string) => boolean>('openAsyncTask')
 
 const isWorkflow = computed(() => props.name === 'Workflow')
 
@@ -35,7 +36,12 @@ const isOpen = computed(() =>
 
 function onToggle() {
   const meta = matchedAgent.value
-  if (meta && toggleSubAgent) toggleSubAgent(meta)
+  if (meta && toggleSubAgent) {
+    toggleSubAgent(meta)
+    return
+  }
+  // 无 meta 匹配（Workflow 组 / 流式中未落盘）：走账本按 toolUseId 直达面板条目
+  openAsyncTask?.(props.toolUseId)
 }
 </script>
 
@@ -57,7 +63,7 @@ function onToggle() {
     <span class="font-medium text-foreground shrink-0">{{ typeLabel }}</span>
     <span v-if="description" class="text-muted-foreground truncate flex-1">{{ description }}</span>
     <span
-      v-if="matchedAgent"
+      v-if="matchedAgent || isWorkflow"
       class="shrink-0 text-[10px] text-primary tabular-nums"
     >{{ t('block.toolTask.viewDetail') }}</span>
   </div>

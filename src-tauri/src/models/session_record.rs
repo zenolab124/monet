@@ -35,6 +35,79 @@ pub struct UserRecord {
     #[serde(rename = "permissionMode")]
     pub permission_mode: Option<String>,
     pub message: Option<UserMessage>,
+    /// 顶层 toolUseResult 的异步任务精简提取（from_json_owned 回填，不直接反序列化，
+    /// 避免透传前台 Agent 完整报告等大体积字段）
+    #[serde(skip_deserializing)]
+    pub async_meta: Option<AsyncMeta>,
+    /// 顶层 origin.kind（"task-notification" = harness 注入的异步任务终态通知）
+    #[serde(skip_deserializing)]
+    pub origin_kind: Option<String>,
+}
+
+/// 异步任务账本所需的 toolUseResult 精简字段集。
+/// 各物种占位/回执的字段并集，全部可缺省；任一字段命中才挂载（见 extract_async_meta）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AsyncMeta {
+    /// 后台 Bash：任务 ID（b 前缀 base36），终态通知 <task-id> 与之相等
+    pub background_task_id: Option<String>,
+    /// "async_launched"（后台占位）/ "completed"（前台 Agent 完成）
+    pub status: Option<String>,
+    pub is_async: Option<bool>,
+    /// Agent：子 agent ID（hex），即 subagents/agent-<id>.jsonl 文件名
+    pub agent_id: Option<String>,
+    pub agent_type: Option<String>,
+    pub resolved_model: Option<String>,
+    pub description: Option<String>,
+    /// Workflow/Monitor：任务 ID（w/b 前缀）；通知 <task-id> 用它而非 run_id
+    pub task_id: Option<String>,
+    /// "local_workflow" / "local_bash"
+    pub task_type: Option<String>,
+    pub workflow_name: Option<String>,
+    /// Workflow：wf_ 前缀，= subagents/workflows/<run_id>/ 目录名
+    pub run_id: Option<String>,
+    pub summary: Option<String>,
+    pub output_file: Option<String>,
+    /// ScheduleWakeup：精确触发时刻 epoch_ms
+    pub scheduled_for: Option<f64>,
+    /// Monitor：超时与持续监视标记
+    pub timeout_ms: Option<u64>,
+    pub persistent: Option<bool>,
+    /// SendMessage：续聊目标 agent
+    pub resumed_agent_id: Option<String>,
+}
+
+/// 从顶层 toolUseResult Value 提取异步精简字段；无任何命中返回 None
+fn extract_async_meta(v: &Value) -> Option<AsyncMeta> {
+    let s = |key: &str| v.get(key).and_then(Value::as_str).map(String::from);
+    let meta = AsyncMeta {
+        background_task_id: s("backgroundTaskId"),
+        status: s("status"),
+        is_async: v.get("isAsync").and_then(Value::as_bool),
+        agent_id: s("agentId"),
+        agent_type: s("agentType"),
+        resolved_model: s("resolvedModel"),
+        description: s("description"),
+        task_id: s("taskId"),
+        task_type: s("taskType"),
+        workflow_name: s("workflowName"),
+        run_id: s("runId"),
+        summary: s("summary"),
+        output_file: s("outputFile"),
+        scheduled_for: v.get("scheduledFor").and_then(Value::as_f64),
+        timeout_ms: v.get("timeoutMs").and_then(Value::as_u64),
+        persistent: v.get("persistent").and_then(Value::as_bool),
+        resumed_agent_id: s("resumedAgentId"),
+    };
+    // 只认异步相关回执：普通工具（Read/Edit 等）的 toolUseResult 无这些锚点字段。
+    // status=="async_launched" 单独算锚点——未知新物种即便 ID 字段名不认识也能靠它兜底入账
+    let anchored = meta.background_task_id.is_some()
+        || meta.agent_id.is_some()
+        || meta.run_id.is_some()
+        || meta.task_id.is_some()
+        || meta.scheduled_for.is_some()
+        || meta.resumed_agent_id.is_some()
+        || meta.status.as_deref() == Some("async_launched");
+    anchored.then_some(meta)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,13 +210,88 @@ pub struct FileHistorySnapshotRecord {
     pub snapshot: Option<Value>,
 }
 
+#[cfg(test)]
+mod async_meta_tests {
+    use super::*;
+
+    fn parse_user(line: &str) -> UserRecord {
+        match SessionRecord::from_json_owned(serde_json::from_str(line).unwrap()) {
+            Some(SessionRecord::User(u)) => u,
+            other => panic!("expected user record, got {:?}", other.map(|_| "non-user")),
+        }
+    }
+
+    /// 后台 Bash 占位回执：backgroundTaskId 是任务 ID 的唯一可靠来源
+    #[test]
+    fn extracts_background_bash_placeholder() {
+        let u = parse_user(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Command running in background with ID: b03o4t7yd.","is_error":false}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"b03o4t7yd"}}"#,
+        );
+        let meta = u.async_meta.expect("should anchor on backgroundTaskId");
+        assert_eq!(meta.background_task_id.as_deref(), Some("b03o4t7yd"));
+    }
+
+    /// Workflow 启动占位：runId（目录名）与 taskId（通知配对键）都要拿到
+    #[test]
+    fn extracts_workflow_launch() {
+        let u = parse_user(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":"Workflow launched in background. Task ID: wwqexlaf1","is_error":false}]},"toolUseResult":{"status":"async_launched","taskId":"wwqexlaf1","taskType":"local_workflow","workflowName":"sweep","runId":"wf_51eaa4ea-64a","summary":"调研","transcriptDir":"/x","scriptPath":"/y"}}"#,
+        );
+        let meta = u.async_meta.unwrap();
+        assert_eq!(meta.run_id.as_deref(), Some("wf_51eaa4ea-64a"));
+        assert_eq!(meta.task_id.as_deref(), Some("wwqexlaf1"));
+        assert_eq!(meta.status.as_deref(), Some("async_launched"));
+    }
+
+    /// 终态通知投递体：origin.kind 是唯一可靠判别，需透传
+    #[test]
+    fn extracts_origin_kind() {
+        let u = parse_user(
+            r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>b03o4t7yd</task-id>\n<status>completed</status>\n</task-notification>"},"origin":{"kind":"task-notification"}}"#,
+        );
+        assert_eq!(u.origin_kind.as_deref(), Some("task-notification"));
+        assert!(u.async_meta.is_none());
+    }
+
+    /// 普通工具回执（Read/Edit 等）不挂 async_meta——锚点字段全缺
+    #[test]
+    fn ignores_plain_tool_results() {
+        let u = parse_user(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03","content":"file content","is_error":false}]},"toolUseResult":{"stdout":"ok","stderr":"","interrupted":false}}"#,
+        );
+        assert!(u.async_meta.is_none());
+        assert!(u.origin_kind.is_none());
+    }
+
+    /// ScheduleWakeup 回执：scheduledFor 精确触发时刻（倒计时数据源）
+    #[test]
+    fn extracts_wakeup_schedule() {
+        let u = parse_user(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_04","content":"Next wakeup scheduled","is_error":false}]},"toolUseResult":{"scheduledFor":1779006960000,"clampedDelaySeconds":90,"wasClamped":false}}"#,
+        );
+        let meta = u.async_meta.unwrap();
+        assert_eq!(meta.scheduled_for, Some(1779006960000.0));
+    }
+}
+
 /// 手动反序列化 SessionRecord，因为 JSONL 中的 type 字段值与 Rust 枚举变体不一致
 impl SessionRecord {
     /// 取所有权版本，避免 Value::clone 开销
     pub fn from_json_owned(value: Value) -> Option<Self> {
         let record_type = value.get("type")?.as_str()?.to_string();
         match record_type.as_str() {
-            "user" => serde_json::from_value(value).ok().map(SessionRecord::User),
+            "user" => {
+                let async_meta = value.get("toolUseResult").and_then(extract_async_meta);
+                let origin_kind = value
+                    .pointer("/origin/kind")
+                    .and_then(Value::as_str)
+                    .map(String::from);
+                serde_json::from_value(value).ok().map(|mut u: UserRecord| {
+                    u.async_meta = async_meta;
+                    u.origin_kind = origin_kind;
+                    SessionRecord::User(u)
+                })
+            }
             "assistant" => serde_json::from_value(value)
                 .ok()
                 .map(SessionRecord::Assistant),

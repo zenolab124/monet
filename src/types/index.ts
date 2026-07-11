@@ -62,8 +62,29 @@ export type ContentBlock =
   | { type: 'document'; source: { source_type: string; media_type: string }; title: string | null }
   | { type: string; [key: string]: unknown }
 
+/** 顶层 toolUseResult 的异步任务精简提取（Rust AsyncMeta，字段全可缺省） */
+export interface AsyncMeta {
+  background_task_id: string | null
+  status: string | null
+  is_async: boolean | null
+  agent_id: string | null
+  agent_type: string | null
+  resolved_model: string | null
+  description: string | null
+  task_id: string | null
+  task_type: string | null
+  workflow_name: string | null
+  run_id: string | null
+  summary: string | null
+  output_file: string | null
+  scheduled_for: number | null
+  timeout_ms: number | null
+  persistent: boolean | null
+  resumed_agent_id: string | null
+}
+
 export type SessionRecord =
-  | { type: 'user'; uuid: string | null; parent_uuid: string | null; session_id: string | null; timestamp: string | null; cwd: string | null; version: string | null; git_branch: string | null; is_sidechain: boolean | null; message: UserMessage | null }
+  | { type: 'user'; uuid: string | null; parent_uuid: string | null; session_id: string | null; timestamp: string | null; cwd: string | null; version: string | null; git_branch: string | null; is_sidechain: boolean | null; message: UserMessage | null; async_meta: AsyncMeta | null; origin_kind: string | null }
   | { type: 'assistant'; uuid: string | null; parent_uuid: string | null; session_id: string | null; timestamp: string | null; cwd: string | null; version: string | null; git_branch: string | null; is_sidechain: boolean | null; message: AssistantMessage | null }
   // system 记录字段随 Rust SystemRecord 的 rename_all = "camelCase" 序列化
   | { type: 'system'; subtype: string | null; content: string | null; level: string | null; timestamp: string | null; uuid: string | null; error: Record<string, unknown> | null; compactMetadata: Record<string, unknown> | null; retryAttempt: number | null; maxRetries: number | null }

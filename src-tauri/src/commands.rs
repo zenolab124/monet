@@ -966,6 +966,47 @@ pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMet
     result
 }
 
+/// 读取后台任务输出文件（/private/tmp/claude-<uid>/.../tasks/<id>.output）尾部。
+/// 该目录是 CLI 的临时区、可能已被系统清理——不存在时返回 None 而非报错。
+/// 路径白名单锁定在 claude 任务临时目录，防任意文件读取。
+#[tauri::command]
+pub fn read_task_output(path: String, max_bytes: Option<u64>) -> Option<String> {
+    let p = std::path::Path::new(&path);
+    // unix 固定形态 /tmp/claude-<uid>/…；Windows 无此形态，兜底认系统临时目录下的 claude-* 子树
+    let is_claude_tmp = path.starts_with("/private/tmp/claude-")
+        || path.starts_with("/tmp/claude-")
+        || p
+            .strip_prefix(std::env::temp_dir())
+            .ok()
+            .and_then(|rest| rest.components().next())
+            .is_some_and(|c| c.as_os_str().to_string_lossy().starts_with("claude-"));
+    if !is_claude_tmp || path.contains("..") {
+        return None;
+    }
+    let len = fs::metadata(p).ok()?.len();
+    let cap = max_bytes.unwrap_or(64 * 1024);
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut f = fs::File::open(p).ok()?;
+    let mut truncated = false;
+    if len > cap {
+        f.seek(SeekFrom::Start(len - cap)).ok()?;
+        truncated = true;
+    }
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    // 截断点可能落在多字节字符/行中间，去掉首个不完整行
+    let text = if truncated {
+        match text.find('\n') {
+            Some(i) => format!("…{}", &text[i + 1..]),
+            None => text.into_owned(),
+        }
+    } else {
+        text.into_owned()
+    };
+    Some(text)
+}
+
 #[tauri::command]
 pub fn get_subagent_records(
     project_id: String,

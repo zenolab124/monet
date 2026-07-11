@@ -1,20 +1,15 @@
-import { ref, computed, watch, onUnmounted, type WatchSource } from 'vue'
+import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { SubAgentMeta, SessionRecord } from '@/types'
+
+// 子 Agent 转录管理：磁盘扫描（meta.json 清单）+ 详情 tab 打开/关闭。
+// 任务发现与状态判定已移交异步账本（useAsyncTasks.buildAsyncLedger，从
+// records 流实时推导）——这里只负责"可下钻的转录"。
 
 export interface SubAgentState {
   meta: SubAgentMeta
   records: SessionRecord[]
   loading: boolean
-}
-
-export interface AsyncTask {
-  id: string
-  type: 'agent' | 'workflow'
-  label: string
-  description: string
-  toolUseId: string
-  children: SubAgentMeta[]
 }
 
 export function createSubAgentContext() {
@@ -25,49 +20,10 @@ export function createSubAgentContext() {
   const sidebarOpen = ref(false)
   let currentProjectId = ''
   let currentSessionId = ''
-  let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  const panelVisible = computed(() => sidebarOpen.value && allAgents.value.length > 0)
   const activeTab = computed(() =>
     openAgents.value.find(a => a.meta.agent_id === activeTabId.value) ?? null,
   )
-
-  const asyncTasks = computed<AsyncTask[]>(() => {
-    const agents = allAgents.value
-    const workflowGroups = new Map<string, SubAgentMeta[]>()
-    const directAgents: SubAgentMeta[] = []
-    for (const a of agents) {
-      if (a.workflow_id) {
-        const list = workflowGroups.get(a.workflow_id) ?? []
-        list.push(a)
-        workflowGroups.set(a.workflow_id, list)
-      } else {
-        directAgents.push(a)
-      }
-    }
-    const tasks: AsyncTask[] = []
-    for (const a of directAgents) {
-      tasks.push({
-        id: a.agent_id,
-        type: 'agent',
-        label: a.agent_type ?? 'Agent',
-        description: a.description ?? '',
-        toolUseId: a.tool_use_id,
-        children: [],
-      })
-    }
-    for (const [wfId, children] of workflowGroups) {
-      tasks.push({
-        id: wfId,
-        type: 'workflow',
-        label: 'Workflow',
-        description: `${children.length} agents`,
-        toolUseId: '',
-        children,
-      })
-    }
-    return tasks
-  })
 
   async function loadSubAgentList(projectId: string, sessionId: string) {
     currentProjectId = projectId
@@ -148,44 +104,12 @@ export function createSubAgentContext() {
     return openAgents.value.some(a => a.meta.agent_id === agentId)
   }
 
-  function startPolling(streamingRef: WatchSource<boolean>, unmatchedCheck: () => boolean) {
-    const stopWatch = watch(streamingRef, (streaming) => {
-      stopPolling()
-      if (streaming && unmatchedCheck()) {
-        pollTimer = setInterval(async () => {
-          if (!unmatchedCheck()) {
-            stopPolling()
-            return
-          }
-          await loadSubAgentList(currentProjectId, currentSessionId)
-          if (allAgents.value.length > 0 && !sidebarOpen.value) {
-            sidebarOpen.value = true
-          }
-        }, 2000)
-      }
-    })
-
-    onUnmounted(() => {
-      stopPolling()
-      stopWatch()
-    })
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
-  }
-
   return {
     subAgentMap,
     allAgents,
     openAgents,
     activeTabId,
-    panelVisible,
     activeTab,
-    asyncTasks,
     sidebarOpen,
     loadSubAgentList,
     findByToolUseId,
@@ -195,6 +119,5 @@ export function createSubAgentContext() {
     closeTab,
     closeAllTabs,
     isAgentOpen,
-    startPolling,
   }
 }

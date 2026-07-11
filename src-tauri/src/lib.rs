@@ -159,6 +159,7 @@ pub fn run() {
             commands::kill_external_session,
             commands::list_subagents,
             commands::get_subagent_records,
+            commands::read_task_output,
             commands::fork_session,
             commands::get_usage_stats,
             commands::get_schema_diagnosis,

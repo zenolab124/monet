@@ -151,7 +151,27 @@
   "asyncTask": {
     "title": "Async Tasks",
     "empty": "No async tasks",
-    "locate": "Locate in chat"
+    "locate": "Locate in chat",
+    "sectionActive": "Active",
+    "sectionFinished": "Finished",
+    "state": {
+      "running": "Running",
+      "waiting": "Waiting",
+      "completed": "Completed",
+      "failed": "Failed",
+      "killed": "Stopped",
+      "unknown": "Inconclusive"
+    },
+    "exitCode": "exit code {code}",
+    "countdown": "wakes in {min} min",
+    "command": "Command",
+    "wakePrompt": "Wake-up task",
+    "wakeAt": "Scheduled for",
+    "events": "Events",
+    "result": "Result",
+    "agents": "Agents",
+    "output": "Output",
+    "outputMissing": "Output file cleaned up or missing"
   },
   "session": {
     "notExist": "Session does not exist or has been deleted",

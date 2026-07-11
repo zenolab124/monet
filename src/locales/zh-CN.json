@@ -151,7 +151,27 @@
   "asyncTask": {
     "title": "异步任务",
     "empty": "暂无异步任务",
-    "locate": "定位到对话中"
+    "locate": "定位到对话中",
+    "sectionActive": "进行中",
+    "sectionFinished": "已结束",
+    "state": {
+      "running": "运行中",
+      "waiting": "等待唤醒",
+      "completed": "已完成",
+      "failed": "失败",
+      "killed": "已停止",
+      "unknown": "结论不明"
+    },
+    "exitCode": "退出码 {code}",
+    "countdown": "{min} 分钟后唤醒",
+    "command": "命令",
+    "wakePrompt": "唤醒后任务",
+    "wakeAt": "预定触发时刻",
+    "events": "事件",
+    "result": "结果",
+    "agents": "子 Agent",
+    "output": "输出",
+    "outputMissing": "输出文件已清理或不存在"
   },
   "session": {
     "notExist": "会话不存在或已删除",

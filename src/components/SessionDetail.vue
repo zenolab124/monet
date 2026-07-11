@@ -53,6 +53,7 @@ import {
   type RespondExtra,
 } from '@/composables/usePermissionRequests'
 import { createSubAgentContext } from '@/composables/useSubAgents'
+import { buildAsyncLedger, isActive, type AsyncTaskItem } from '@/composables/useAsyncTasks'
 import type { SubAgentMeta } from '@/types'
 import AsyncTaskPanel from './AsyncTaskPanel.vue'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
@@ -185,13 +186,11 @@ const toolResultMap = computed(() => {
 })
 provide('toolResultMap', toolResultMap)
 
-// --- 异步任务面板（子 Agent / Workflow）---
+// --- 异步任务面板（后台 Bash / Agent / Workflow / Monitor / Wakeup）---
 const {
-  subAgentMap,
+  allAgents: subAgentList,
   openAgents: subAgentTabs,
-  panelVisible: asyncPanelVisible,
   activeTabId: subAgentActiveTabId,
-  asyncTasks,
   sidebarOpen: asyncSidebarOpen,
   openSidebar: openAsyncPanel,
   loadSubAgentList,
@@ -201,12 +200,33 @@ const {
   closeTab: closeSubAgentTab,
   closeAllTabs: closeAllSubAgents,
   isAgentOpen,
-  startPolling,
 } = createSubAgentContext()
+
+// 账本：从 records + 流式增量实时推导所有异步任务（发现不再依赖磁盘轮询）；
+// workflow 子 agent 清单由磁盘扫描按 runId 关联进条目。
+// live = 自有流式 或 外部 claude 进程在跑（跟看）——外部活会话的无终态任务算 running 而非 unknown
+const asyncTasks = computed<AsyncTaskItem[]>(() => {
+  const ledger = buildAsyncLedger(records.value ?? [], stream.value.streamingTurns, stream.value.streaming || externalRunning.value)
+  return ledger.map(item =>
+    item.species === 'workflow' && item.runId
+      ? { ...item, children: subAgentList.value.filter(a => a.workflow_id === item.runId) }
+      : item,
+  )
+})
+const asyncActiveCount = computed(() => asyncTasks.value.filter(isActive).length)
+const asyncPanelVisible = computed(() => asyncSidebarOpen.value && asyncTasks.value.length > 0)
+const asyncPanelRef = ref<InstanceType<typeof AsyncTaskPanel> | null>(null)
 
 provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
 provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
 provide('isSubAgentOpen', (agentId: string) => isAgentOpen(agentId))
+// 主对话工具卡（Workflow/后台 Bash 等）直达面板条目：按 toolUseId 打开
+provide('openAsyncTask', (toolUseId: string) => {
+  if (!asyncTasks.value.some(x => x.toolUseId === toolUseId)) return false
+  openAsyncPanel()
+  nextTick(() => asyncPanelRef.value?.openByToolUse(toolUseId))
+  return true
+})
 
 // --- 异步面板手风琴展开：列宽 + 侧边栏 width 同步 transition ---
 const columnIndex = inject<ComputedRef<number>>('columnIndex', undefined as any)
@@ -244,23 +264,14 @@ watch(asyncPanelVisible, async (open) => {
   }
 })
 
-const ASYNC_TOOL_NAMES = new Set(['Agent', 'Task', 'Workflow'])
-
-function hasUnmatchedAgentToolUse(): boolean {
-  for (const turn of stream.value.streamingTurns) {
-    for (const b of turn.content) {
-      if (b.type === 'tool_use' && ASYNC_TOOL_NAMES.has((b as any).name)) {
-        if (!subAgentMap.value.has((b as any).id)) return true
-      }
-    }
+// 流式结束补扫转录清单：晚落盘的 agent meta / workflow children 兜底
+// （任务发现本身由账本从 records 实时推导，不依赖此扫描）
+watch(() => stream.value.streaming, (streaming, was) => {
+  if (was && !streaming) {
+    const cs = currentSession.value
+    if (cs) loadSubAgentList(cs.projectId, cs.summary.id)
   }
-  return false
-}
-
-startPolling(
-  () => stream.value.streaming,
-  hasUnmatchedAgentToolUse,
-)
+})
 
 // --- 斜杠命令(FR-004)状态 ---
 
@@ -1761,12 +1772,14 @@ async function onReload() {
         class="p-1 rounded transition-colors flex items-center gap-1"
         :class="asyncSidebarOpen
           ? 'text-claude bg-claude/10'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+          : asyncActiveCount > 0
+            ? 'text-claude hover:bg-muted'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
         :title="$t('asyncTask.title')"
         @click="asyncSidebarOpen ? closeAsyncPanel() : openAsyncPanel()"
       >
-        <span class="i-carbon-lightning w-3.5 h-3.5" :class="stream.streaming && 'animate-pulse'" />
-        <span class="text-[10px] font-semibold tabular-nums leading-none">{{ asyncTasks.length }}</span>
+        <span class="i-carbon-lightning w-3.5 h-3.5" :class="asyncActiveCount > 0 && 'animate-pulse'" />
+        <span class="text-[10px] font-semibold tabular-nums leading-none">{{ asyncActiveCount > 0 ? asyncActiveCount : asyncTasks.length }}</span>
       </button>
     </SessionTopBar>
 
@@ -2202,6 +2215,7 @@ async function onReload() {
       :style="{ width: asyncPanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
     >
       <AsyncTaskPanel
+        ref="asyncPanelRef"
         :tasks="asyncTasks"
         :open-tabs="subAgentTabs"
         :active-tab-id="subAgentActiveTabId"
