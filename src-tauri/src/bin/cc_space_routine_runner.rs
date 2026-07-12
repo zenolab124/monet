@@ -403,10 +403,29 @@ fn maybe_sleep_after_run() {
         "active wake: user idle {}s, sleeping",
         idle.unwrap_or_default()
     );
-    let _ = Command::new("osascript")
+    // 锁屏下 System Events sleep 会被静默拒绝（Apple Events 受限），
+    // 首选 sudoers 白名单授权的 pmset sleepnow（强制睡眠，无 GUI 依赖）；
+    // 授权不在位再降级 osascript，失败必须留痕
+    if let Ok(o) = Command::new("sudo")
+        .args(["-n", "/usr/bin/pmset", "sleepnow"])
+        .output()
+    {
+        if o.status.success() {
+            return;
+        }
+    }
+    match Command::new("osascript")
         .arg("-e")
         .arg("tell application \"System Events\" to sleep")
-        .output();
+        .output()
+    {
+        Ok(o) if !o.status.success() => eprintln!(
+            "osascript sleep failed: {}",
+            String::from_utf8_lossy(&o.stderr).trim()
+        ),
+        Err(e) => eprintln!("osascript sleep spawn failed: {}", e),
+        _ => {}
+    }
 }
 
 fn read_wake_policy() -> String {
