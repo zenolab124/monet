@@ -624,6 +624,13 @@ fn resolve_owner(pid: u32, table: &std::collections::HashMap<u32, (u32, String)>
     None
 }
 
+/// 检测 CC Space 自身是否为该会话持有长活进程（webview 刷新后 processAlive 状态校准用）。
+/// 与 check_session_running 互补：那边只看外部进程，这边只看自有进程。
+#[tauri::command]
+pub fn has_own_process(session_id: String) -> bool {
+    crate::streaming::get_own_pid(&session_id).is_some()
+}
+
 /// 检测某会话是否有**外部** claude CLI 进程在运行，并解析归属方。
 /// 排除 CC Space 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
 #[tauri::command]

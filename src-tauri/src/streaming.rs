@@ -830,21 +830,33 @@ fn read_stream(
 
     // stdout EOF —— 进程已退出
 
-    // 判断是否属于非预期退出（close_session 会先从 map 移除再 SIGTERM，
-    // 所以 map 中仍存在 = 非预期退出，需要上报错误）
-    let was_unexpected = {
+    // 判断退出性质（close_session 会先从 map 移除再 SIGTERM）：
+    // - map 中仍是本进程 = 非预期退出，需要上报错误
+    // - map 中是别的 Arc = 已被新进程顶替（模型/渠道变更重启），会话进程实际还活着
+    let (was_unexpected, superseded) = {
         let mut map = ACTIVE_PROCESSES.lock().unwrap();
-        if let Some(m) = map.as_mut() {
-            if m.get(session_id).is_some_and(|c| Arc::ptr_eq(c, &process)) {
+        let is_self = map
+            .as_ref()
+            .and_then(|m| m.get(session_id))
+            .is_some_and(|c| Arc::ptr_eq(c, &process));
+        if is_self {
+            if let Some(m) = map.as_mut() {
                 m.remove(session_id);
-                true
-            } else {
-                false
             }
+            (true, false)
         } else {
-            false
+            let superseded = map.as_ref().is_some_and(|m| m.contains_key(session_id));
+            (false, superseded)
         }
     };
+
+    // 进程退出的独立信号（与 stream-done 的"轮次结束"语义分离）：
+    // 前端靠它维护 processAlive——turn 结束后长活进程仍在跑后台任务（Workflow/子 agent）
+    // 时，异步账本据此把无终态条目判为 running 而非 unknown。被顶替时不发，防止
+    // 旧进程 EOF 迟到把新进程的活态翻掉。
+    if !superseded {
+        let _ = app.emit("session-process-exited", json!({ "session_id": session_id }));
+    }
 
     if was_unexpected {
         // 等待并检查退出状态

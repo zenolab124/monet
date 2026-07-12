@@ -12,6 +12,7 @@ import {
   useStreaming,
   useSessionStream,
   finishedDirty,
+  syncProcessAlive,
 } from '@/composables/useStreaming'
 import { useSessionSettings, type ChannelMark } from '@/composables/useSessionSettings'
 import { useRunConfig } from '@/composables/useRunConfig'
@@ -204,9 +205,12 @@ const {
 
 // 账本：从 records + 流式增量实时推导所有异步任务（发现不再依赖磁盘轮询）；
 // workflow 子 agent 清单由磁盘扫描按 runId 关联进条目。
-// live = 自有流式 或 外部 claude 进程在跑（跟看）——外部活会话的无终态任务算 running 而非 unknown
+// live = 自有流式 或 自持长活进程存活 或 外部 claude 进程在跑（跟看）。
+// processAlive 那条腿兜住「turn 已结束但进程还在跑后台任务（Workflow/子 agent）」——
+// 缺它时这类条目会被误判 unknown 掉进"已结束"区
 const asyncTasks = computed<AsyncTaskItem[]>(() => {
-  const ledger = buildAsyncLedger(records.value ?? [], stream.value.streamingTurns, stream.value.streaming || externalRunning.value)
+  const live = stream.value.streaming || stream.value.processAlive || externalRunning.value
+  const ledger = buildAsyncLedger(records.value ?? [], stream.value.streamingTurns, live)
   return ledger.map(item =>
     item.species === 'workflow' && item.runId
       ? { ...item, children: subAgentList.value.filter(a => a.workflow_id === item.runId) }
@@ -1709,6 +1713,8 @@ watch(
       if (cs.summary.id !== followSessionId) {
         followSessionId = cs.summary.id
         startExternalFollow()
+        // webview 刷新后前端 processAlive 丢失而长活进程可能还在，按 Rust 进程表校准
+        syncProcessAlive(cs.summary.id)
       }
     } else {
       loadedSessionId = null

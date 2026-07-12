@@ -184,7 +184,10 @@ interface LedgerEntry extends AsyncTaskItem {
 export function buildAsyncLedger(
   records: SessionRecord[],
   streamingTurns: StreamingTurn[],
-  /** 会话是否活跃：本会话流式中，或外部 claude 进程正在跑（跟看）——决定无终态条目算 running 还是 unknown */
+  /**
+   * 会话是否活跃：本会话流式中 / 自持长活进程存活（turn 结束后仍在跑后台任务）/
+   * 外部 claude 进程正在跑（跟看）——决定无终态条目算 running 还是 unknown
+   */
   live: boolean,
 ): AsyncTaskItem[] {
   const byToolUse = new Map<string, LedgerEntry>()

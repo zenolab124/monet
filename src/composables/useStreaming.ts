@@ -79,6 +79,14 @@ export interface SessionStreamState {
   realOutputTokens: number | null
   /** Remote Control 是否已启用（open_session 自动启用，手动可关） */
   rcActive: boolean
+  /**
+   * CC Space 自持长活进程是否存活。与 streaming 是两回事：turn 结束（result 到达）
+   * 后进程继续活着跑后台任务（Workflow/子 agent/后台 bash）。异步账本的 live 判据
+   * 靠它避免把「turn 已结束但后台任务在跑」的条目误判为 unknown。
+   * 写入源：stream-event 到达置 true（进程在说话必然活着）、
+   * session-process-exited 置 false、syncProcessAlive 按 Rust 进程表校准。
+   */
+  processAlive: boolean
 }
 
 interface BlockDeltaPayload {
@@ -131,6 +139,7 @@ function createState(): SessionStreamState {
     realUsedTokens: null,
     realOutputTokens: null,
     rcActive: false,
+    processAlive: false,
   }
 }
 
@@ -170,6 +179,25 @@ export function anyStreaming(): boolean {
     if (s.streaming) return true
   }
   return false
+}
+
+// 进程代际计数：exited 事件 bump。invoke 与 event 走不同 IPC 通道无序保证，
+// 校准的 true 结果若晚于 exited 事件到达，靠代际比对丢弃，防止活态卡 true
+const processEpoch = new Map<string, number>()
+
+/** 按 Rust 进程表校准某会话的 processAlive——webview 刷新后前端状态丢失而长活进程还在，加载会话时调用 */
+export async function syncProcessAlive(sessionId: string): Promise<void> {
+  const epoch = processEpoch.get(sessionId) ?? 0
+  try {
+    const alive = await invoke<boolean>('has_own_process', { sessionId })
+    // 降级（false）永远安全；升级（true）仅在 invoke 期间无进程退出时可信。
+    // false 晚到覆盖新进程 true 的反向场景由下一条 stream-event 立即纠正
+    if (!alive || (processEpoch.get(sessionId) ?? 0) === epoch) {
+      getStream(sessionId).processAlive = alive
+    }
+  } catch {
+    // 校准失败保持现值（事件流仍会驱动更新）
+  }
 }
 
 // ---- 打字机批 flush（全局单队列，key=messageId#index 天然多流安全） ----
@@ -545,6 +573,10 @@ export async function initStreamListeners(): Promise<void> {
     if (!sid) return
     const state = getStream(sid)
 
+    // 进程在发事件必然存活。error 除外：它也是进程异常退出的临终报错载体，
+    // 且 spawn 失败等场景只有 error 没有后续 exited 事件，置 true 会卡死活态
+    if (payload.kind !== 'error') state.processAlive = true
+
     switch (payload.kind) {
       case 'block_start':
         // partial messages 模式下,content_block_start 首次出现某 index 的块——
@@ -730,6 +762,15 @@ export async function initStreamListeners(): Promise<void> {
   await listen<{ session_id: string }>('stream-done', (event) => {
     const sid = event.payload?.session_id
     if (sid) finishStream(sid)
+  })
+
+  // 长活进程真正退出（与 stream-done 的"轮次结束"语义分离）。
+  // 被新进程顶替的旧进程 EOF 不发此事件（Rust 端 superseded 判定），活态不抖动
+  await listen<{ session_id: string }>('session-process-exited', (event) => {
+    const sid = event.payload?.session_id
+    if (!sid) return
+    processEpoch.set(sid, (processEpoch.get(sid) ?? 0) + 1)
+    getStream(sid).processAlive = false
   })
 
   // Remote Control 判决:rcActive 的唯一写入源(CLI 对 rc-* 请求的 success/error 真值),

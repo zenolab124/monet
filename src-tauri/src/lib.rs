@@ -157,6 +157,7 @@ pub fn run() {
             commands::set_permission_mode,
             commands::get_cli_settings,
             commands::check_session_running,
+            commands::has_own_process,
             commands::kill_external_session,
             commands::list_subagents,
             commands::get_subagent_records,
