@@ -807,10 +807,12 @@ function observeAnchorGroups() {
       }
     }, { root: sc, threshold: 0 })
   }
-  // WeakMap 基线保留：重挂后首次回调 diff=0 不误补偿；断连期间的变化照常补偿
+  // WeakMap 基线保留：重挂后首次回调 diff=0 不误补偿；断连期间的变化照常补偿。
+  // 观察集与 cv 类解耦(回归审查 R5):末组已豁免 msg-group-cv,若按类选择器收集,
+  // 末组在视口上方增高(图片异步加载等)时将失去锚定补偿——按结构属性收集全部组
   anchorRO?.disconnect()
   posIO.disconnect()
-  for (const el of sc.querySelectorAll('.msg-group-cv')) {
+  for (const el of sc.querySelectorAll('[data-anchor-index]')) {
     anchorRO?.observe(el)
     posIO.observe(el)
   }
@@ -1338,9 +1340,24 @@ let programmaticTimer = 0
  *  onScroll 事后读到的已是贴底值——脱离手势被吞,表现为"滚不上去被拽回" */
 let wheelUpIntentAt = 0
 
+/** 亚阈值上滚累积:单次 |deltaY|≤3 的极缓滚轮不触发脱离、又被 contentRO 逐帧
+ *  贴回,曾表现为"流式期缓慢上滚永远滚不上去"(审计遗留⑤)。200ms 窗口内累积
+ *  凑够阈值同样视为有效上滚;下滚清零,方向交替的触控板噪声天然被挡 */
+let wheelUpAcc = 0
+let wheelAccAt = 0
+
 function onScrollWheel(e: WheelEvent) {
-  if (e.deltaY < -3) {
-    wheelUpIntentAt = performance.now()
+  if (e.deltaY >= 0) {
+    wheelUpAcc = 0
+    return
+  }
+  const now = performance.now()
+  if (now - wheelAccAt > 200) wheelUpAcc = 0
+  wheelAccAt = now
+  wheelUpAcc += e.deltaY
+  if (wheelUpAcc < -3) {
+    wheelUpAcc = 0
+    wheelUpIntentAt = now
     const el = scrollContainer.value
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 5) return
     followStreaming.value = false
@@ -1401,23 +1418,25 @@ function scrollToBottom(force = false) {
   if (!force && !followStreaming.value) return
   if (scrollCoalesced) return
   scrollCoalesced = true
+  // 仅在真的会产生位移时置 programmaticScroll:已贴底时写 scrollTop 无位移
+  // 无 scroll 事件,标志空转置位 50ms 会把期间的滚动条拖拽/键盘上滚吞成程序
+  // 滚动(审计遗留④——输入框每次按键都会走到这里,触发面很宽)
+  const applyScroll = (el: HTMLElement) => {
+    if (el.scrollTop >= el.scrollHeight - el.clientHeight) return
+    programmaticScroll = true
+    clearTimeout(programmaticTimer)
+    programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
+    el.scrollTop = el.scrollHeight
+  }
   nextTick(() => {
     requestAnimationFrame(() => {
       scrollCoalesced = false
       const el = scrollContainer.value
       if (!el) return
-      programmaticScroll = true
-      clearTimeout(programmaticTimer)
-      programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
-      el.scrollTop = el.scrollHeight
+      applyScroll(el)
       // 内容刚挂载时 scrollHeight 可能还是 0，延迟重试一次
       if (el.scrollHeight <= el.clientHeight) {
-        requestAnimationFrame(() => {
-          programmaticScroll = true
-          clearTimeout(programmaticTimer)
-          programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
-          el.scrollTop = el.scrollHeight
-        })
+        requestAnimationFrame(() => applyScroll(el))
       }
     })
   })
@@ -1446,9 +1465,11 @@ watch(scrollContentEl, (el) => {
       const target = sc.scrollHeight - sc.clientHeight
       if (sc.scrollTop < target) {
         sc.scrollTop = target
-        // 同步基线:贴底位移不计入 onScroll 的手势 delta,不会被误判为用户滚动
-        lastScrollTop = sc.scrollTop
       }
+      // 基线无条件同步(不只写入分支):内容净缩时浏览器把 scrollTop 向上钳位,
+      // 该位移若漏进 onScroll 的手势 delta,会被误判为用户上滚而关闭跟随
+      // (落账瞬间视口跳中部的根因之一)。RO 回调先于下一帧 rAF,在此吸收钳位量
+      lastScrollTop = sc.scrollTop
     })
   }
   contentRO.observe(el)
@@ -1854,12 +1875,16 @@ async function onReload() {
           <span>{{ channelMarkLabel(m) }}</span>
           <div class="flex-1 h-px bg-border" />
         </div>
-        <!-- 按轮次分组:每组包含一条用户消息 + 后续回复,sticky 限制在组内 -->
+        <!-- 按轮次分组:每组包含一条用户消息 + 后续回复,sticky 限制在组内。
+             末组豁免 cv:落账时新组若按 contain-intrinsic-size 300px 估高参与首帧布局,
+             scrollHeight 瞬时净缩会让浏览器把 scrollTop 钳离底部(视口跳中部);
+             底部组永在视口内,cv 对它零收益 -->
         <div
           v-for="(group, gi) in messageGroups"
           :key="group.user?.uuid || `group-${gi}`"
           :data-anchor-index="gi"
-          class="space-y-4 msg-group-cv"
+          class="space-y-4"
+          :class="gi < messageGroups.length - 1 ? 'msg-group-cv' : ''"
         >
           <!-- 跨天分隔:这轮起进入新的一天(首组标会话起始日) -->
           <div v-if="dayDividers[gi]" class="channel-mark">
