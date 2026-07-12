@@ -16,21 +16,6 @@ const { notifyTransient } = useNotifications()
 
 const expandedSet = computed(() => new Set(activeTab.value.columns.map(c => c.sessionId)))
 
-const currentCwd = computed(() => {
-  for (const sid of activeTab.value.sessionIds) {
-    for (const p of projects.value) {
-      const s = p.sessions.find(s => s.id === sid)
-      if (s?.cwd) return s.cwd
-    }
-  }
-  return null
-})
-
-function quickNewSession() {
-  if (!currentCwd.value) return
-  createDraftSession(currentCwd.value)
-}
-
 const hint = computed(() => {
   const n = activeTab.value.sessionIds.length
   const m = activeTab.value.columns.length
@@ -253,28 +238,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
         </div>
       </Transition>
 
-      <div v-if="currentCwd" class="flex gap-1.5">
-        <button
-          class="flex-1 min-h-10 border border-dashed border-border rounded text-xs text-muted-foreground
-                 flex items-center justify-center gap-1 hover:text-primary hover:border-primary transition-colors"
-          :title="currentCwd"
-          @click="quickNewSession"
-        >
-          <span class="text-sm">＋</span>
-          <span class="truncate max-w-28">{{ currentCwd.split('/').pop() }}</span>
-        </button>
-        <button
-          ref="triggerRef"
-          class="shrink-0 min-h-10 px-3 border border-dashed border-border rounded text-xs text-muted-foreground
-                 flex items-center justify-center hover:text-primary hover:border-primary transition-colors"
-          :title="$t('workbench.rail.openSession')"
-          @click="togglePopover"
-        >
-          <span class="i-carbon-overflow-menu-vertical w-3.5 h-3.5" />
-        </button>
-      </div>
       <button
-        v-else
         ref="triggerRef"
         class="w-full min-h-10 border border-dashed border-border rounded text-xs text-muted-foreground
                flex items-center justify-center gap-1.5 hover:text-primary hover:border-primary transition-colors"

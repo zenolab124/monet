@@ -30,7 +30,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state, openSession } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state, openSession, createDraftSession } = useWorkbench()
 
 provide('columnIndex', computed(() => props.index))
 provide('tabId', computed(() => props.tabId))
@@ -113,6 +113,13 @@ async function onFork() {
   }
 }
 
+function onNewSession() {
+  const session = projects.value.flatMap(p => p.sessions).find(s => s.id === props.column.sessionId)
+  const cwd = session?.cwd || draftCwd(props.column.sessionId)
+  if (!cwd) return
+  createDraftSession(cwd)
+}
+
 function onCollapse() {
   collapseColumn(props.tabId, props.column.sessionId)
 }
@@ -184,6 +191,14 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
           @click.stop="emit('startRace')"
         >
           <span class="i-app-horse w-3 h-3" />
+        </button>
+        <button
+          class="icon-btn icon-btn-sm"
+          v-tooltip="$t('workbench.column.newSession')"
+          @pointerdown.stop
+          @click.stop="onNewSession"
+        >
+          <span class="i-carbon-add w-3 h-3" />
         </button>
         <button
           class="icon-btn icon-btn-sm"

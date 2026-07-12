@@ -280,6 +280,7 @@
       "rcClosed": "Remote Control 已关闭",
       "rcFailed": "Remote Control 操作失败",
       "fork": "分叉会话",
+      "newSession": "新建会话",
       "forkCreated": "会话已分叉",
       "forkFailed": "分叉失败"
     },
