@@ -6,17 +6,17 @@ import SwiftUI
 /// 不要再叠 opacity（会破坏验证过的对 surface 对比度）。
 /// 换色前先过 dataviz 六检查（明度带/色度下限/CVD 分离/对比度）。
 enum WidgetPalette {
-    /// 分类槽位：蓝 → 琥珀 → 青绿 → 淡紫 → 玫红
+    /// 分类槽位：琥珀 → 蓝 → 青绿 → 淡紫 → 玫红
     static func categorical(_ scheme: ColorScheme) -> [Color] {
         scheme == .dark ? dark : light
     }
 
     private static let dark: [Color] = [
-        Color(hex: 0x3987E5), Color(hex: 0xC98500), Color(hex: 0x199E70),
+        Color(hex: 0xC98500), Color(hex: 0x3987E5), Color(hex: 0x199E70),
         Color(hex: 0x9085E9), Color(hex: 0xD55181),
     ]
     private static let light: [Color] = [
-        Color(hex: 0x2A78D6), Color(hex: 0xB37A00), Color(hex: 0x16966C),
+        Color(hex: 0xB37A00), Color(hex: 0x2A78D6), Color(hex: 0x16966C),
         Color(hex: 0x6153C6), Color(hex: 0xD55181),
     ]
 }
