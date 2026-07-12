@@ -1,6 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import i18n from '../locales'
+import { evictSessionTransients } from './useStreaming'
 
 /**
  * 工作台状态模型（v2.1.0 FR-001/002/004 + NFR-002）
@@ -631,11 +632,13 @@ function updateColumnSize(tabId: string, index: number, desiredLeftWidth: number
   }
 }
 
-/** 会话离开工作台后,若不再被任何 tab 持有则关闭进程(断 Remote Control) */
+/** 会话离开工作台后,若不再被任何 tab 持有则关闭进程(断 Remote Control),
+ *  并驱逐 useStreaming 传输态缓存(否则 streams/turnIndex 等模块级 Map 单调增长) */
 function teardownSession(sessionId: string) {
   const stillReferenced = state.value.tabs.some(t => t.sessionIds.includes(sessionId))
   if (!stillReferenced) {
     invoke('close_session', { sessionId }).catch(() => {})
+    evictSessionTransients(sessionId)
   }
 }
 

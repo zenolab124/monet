@@ -34,6 +34,12 @@ export interface StreamingTurn {
   content: ContentBlock[]
   /** 本轮实际运行的模型真值(流式期实时标注,与落账后的 message.model 同源) */
   model?: string
+  /**
+   * 该 turn 是否仍在传输中。与会话级 streaming 解耦:CLI 自发轮(task-notification
+   * 唤醒)在 streaming=false 下到达,靠它走 plain 降级渲染管线(否则每帧全文 shiki
+   * 重解析)且在用户直发时豁免清场。completeFinish / 落账摘除时结束。
+   */
+  live?: boolean
 }
 
 /** 监控卡尾部行：普通文本 / 等宽工具行 / 错误行 */
@@ -584,7 +590,7 @@ export async function initStreamListeners(): Promise<void> {
         if (payload.message_id && payload.index !== undefined && payload.content_block) {
           let entry = turnIndex.get(payload.message_id)
           if (!entry) {
-            const turn: StreamingTurn = { messageId: payload.message_id, content: [], model: payload.model }
+            const turn: StreamingTurn = { messageId: payload.message_id, content: [], model: payload.model, live: true }
             state.streamingTurns.push(turn)
             // reactive 数组里取回代理对象,保证后续 mutate 走响应式
             const reactiveTurn = state.streamingTurns[state.streamingTurns.length - 1]
@@ -734,6 +740,7 @@ export async function initStreamListeners(): Promise<void> {
               messageId: mid,
               content: strippedContent,
               model: payload.model,
+              live: true,
             })
             const reactiveTurn = state.streamingTurns[state.streamingTurns.length - 1]
             turnIndex.set(mid, { turn: reactiveTurn, sessionId: sid })
@@ -759,9 +766,21 @@ export async function initStreamListeners(): Promise<void> {
     }
   })
 
-  await listen<{ session_id: string }>('stream-done', (event) => {
+  // 轮次归属分流:自发轮(CLI 被 task-notification 唤醒,result 带 origin → initiator=auto)
+  // 不得冒领用户消息的 streaming 标志——用户在后台任务期间发的消息还在 CLI 队列里,
+  // 自发轮的 done 若走 finishStream 会提前收尾:落账 reload 匹配不到未落盘的用户
+  // 消息、真轮的 done 又被 !streaming 守卫吞掉,落账链就此断裂(消息重复出现/消失)。
+  // initiator 缺失(emit_error / EOF 兜底路径)按 user 处理;user 语义但 streaming
+  // 已 false 的失配(打标遗漏的边角)同样转 auto 收尾,不再静默丢弃。
+  await listen<{ session_id: string; initiator?: string }>('stream-done', (event) => {
     const sid = event.payload?.session_id
-    if (sid) finishStream(sid)
+    if (!sid) return
+    const state = streams.get(sid)
+    if (event.payload?.initiator === 'auto' || (state && !state.streaming)) {
+      landAutoTurn(sid)
+      return
+    }
+    finishStream(sid)
   })
 
   // 长活进程真正退出（与 stream-done 的"轮次结束"语义分离）。
@@ -769,8 +788,26 @@ export async function initStreamListeners(): Promise<void> {
   await listen<{ session_id: string }>('session-process-exited', (event) => {
     const sid = event.payload?.session_id
     if (!sid) return
-    processEpoch.set(sid, (processEpoch.get(sid) ?? 0) + 1)
-    getStream(sid).processAlive = false
+    // streams.get 而非 getStream:已驱逐(evictSessionTransients)的会话完全跳过,
+    // 临终事件不得在 streams/processEpoch 重建任何条目(泄漏)
+    const s = streams.get(sid)
+    if (s) {
+      processEpoch.set(sid, (processEpoch.get(sid) ?? 0) + 1)
+      s.processAlive = false
+      // live 失效保险:进程已死必无在传 turn,且其记录永无落盘可能——不清则
+      // typing-dots 常驻/状态永不 idle/渲染卡 plain(回归审查 R2,已证实)
+      let hadLive = false
+      for (const t of s.streamingTurns) {
+        if (t.live) {
+          t.live = false
+          hadLive = true
+        }
+      }
+      if (hadLive) {
+        streamingTick.value++
+        markTailDirty(sid)
+      }
+    }
   })
 
   // Remote Control 判决:rcActive 的唯一写入源(CLI 对 rc-* 请求的 success/error 真值),
@@ -780,6 +817,93 @@ export async function initStreamListeners(): Promise<void> {
   await listen<{ session_id: string; active: boolean }>('rc-status', (event) => {
     getStream(event.payload.session_id).rcActive = event.payload.active
   })
+}
+
+// ---- 自发轮收尾(task-notification 唤醒的后台任务收尾轮) ----
+
+/** 自发轮落账信号:SessionDetail 各实例 watch 它,命中自己会话时静默 reload */
+export const autoTurnLanded = ref(0)
+/** 待落账会话 → done 时刻在播 turn 的 messageId 快照(信号 payload,消费方认领后删除)。
+ *  快照供落账后降级孤儿 live 用:fresh 里没有对应记录的快照 turn 说明该轮记录
+ *  不会再落盘(崩溃/ID 失配),live 必须降级,否则永久卡「进行中」。连环自发轮合并快照 */
+export const autoLandedSessions = new Map<string, Set<string>>()
+
+/**
+ * 自发轮结束收尾:与 finishStream 的本质区别是**不动 streaming / pending**——
+ * streaming 标志属于用户 send 的轮次,自发轮无权翻转它;pending 气泡的退场
+ * 只由落账匹配驱动。这里只做传输层收尾 + 发落账信号:
+ * 挂载中的 SessionDetail 静默 reload 并摘除已落账 turn(原子切换到历史区),
+ * 未挂载的会话靠 finishedDirty 在下次加载时 force reload 兜底。
+ */
+function landAutoTurn(sessionId: string) {
+  const state = streams.get(sessionId)
+  if (!state) return
+  console.log(`%c ========== [stream] landAutoTurn(自发轮收尾) sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
+  // 该轮已结束,残字直接全量落地(自发轮不做排空等待,马上要与历史区做原子切换)
+  flushTextDeltas(true, sessionId)
+  state.activeTool = null
+  markTailDirty(sessionId)
+  streamingTick.value++
+  finishedDirty.add(sessionId)
+  // 快照当刻在播 turn:落账后据此降级未落盘的孤儿 live。不在此直接清 live——
+  // 落账前清会让 keepLive 清扫掉 turn 而 records 尚无副本,内容闪失
+  const liveIds = new Set(state.streamingTurns.filter(t => t.live).map(t => t.messageId))
+  const prev = autoLandedSessions.get(sessionId)
+  if (prev) liveIds.forEach(id => prev.add(id))
+  else autoLandedSessions.set(sessionId, liveIds)
+  autoTurnLanded.value++
+}
+
+/** 落账后降级孤儿 live:快照内、recs 中无对应 assistant 记录的 turn 说明其记录
+ *  不会再落盘,live 置 false(渲染转终态、忙态解除)。快照守卫防误伤等待期间新开的轮 */
+function demoteUnlandedTurns(
+  sessionId: string,
+  snapshot: Set<string>,
+  recs: ReadonlyArray<{ type: string; message?: unknown }>,
+) {
+  const state = streams.get(sessionId)
+  if (!state) return
+  const landed = new Set<string>()
+  for (const r of recs) {
+    if (r.type !== 'assistant') continue
+    const id = (r.message as { id?: string } | null | undefined)?.id
+    if (id) landed.add(id)
+  }
+  let changed = false
+  for (const t of state.streamingTurns) {
+    if (t.live && snapshot.has(t.messageId) && !landed.has(t.messageId)) {
+      t.live = false
+      changed = true
+    }
+  }
+  if (changed) {
+    streamingTick.value++
+    markTailDirty(sessionId)
+  }
+}
+
+/**
+ * 摘除已在 recs 中落账的流式 turn:历史区同 messageId 记录解除
+ * streamingMessageIds 过滤,与 turn 卸载同一 batch 原子切换,无双显无空窗。
+ * 用户轮正在流式时也安全——其 messageId 尚未落盘,不会被摘。
+ */
+function removeLandedTurns(sessionId: string, recs: ReadonlyArray<{ type: string; message?: unknown }>) {
+  const state = streams.get(sessionId)
+  if (!state || !state.streamingTurns.length) return
+  const landed = new Set<string>()
+  for (const r of recs) {
+    if (r.type !== 'assistant') continue
+    const id = (r.message as { id?: string } | null | undefined)?.id
+    if (id) landed.add(id)
+  }
+  if (!landed.size) return
+  const keep = state.streamingTurns.filter(t => !landed.has(t.messageId))
+  if (keep.length === state.streamingTurns.length) return
+  for (const t of state.streamingTurns) {
+    if (landed.has(t.messageId)) dropTurnTransients(t.messageId)
+  }
+  state.streamingTurns = keep
+  markTailDirty(sessionId)
 }
 
 /**
@@ -821,6 +945,9 @@ function completeFinish(sessionId: string) {
     return
   }
   state.streaming = false
+  // turn 传输态同步结束:BlockText 的 plain→shiki 上色由 streaming||live 联合 prop
+  // 翻 false 触发,同一实例 patch 一次(维持零重挂契约)
+  for (const t of state.streamingTurns) t.live = false
   probeFinishFlip(sessionId)
   frameWatchRelease()
   finishedDirty.add(sessionId)
@@ -857,8 +984,13 @@ async function sendMessage(
     return
   }
 
-  // 清掉上一轮的 turn 索引、残余 pending 与尾部
-  for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
+  // 清掉上一轮的 turn 索引、残余 pending 与尾部。
+  // 豁免仍在播的自发轮(live):清掉它会让后续快照以 alreadyKnown=0 重建 turn,
+  // 整段任务回答从第一个字重播;保留则渲染连续,其落账摘除由 landAutoTurn 驱动
+  const liveTurns = state.streamingTurns.filter(t => t.live)
+  for (const t of state.streamingTurns) {
+    if (!t.live) dropTurnTransients(t.messageId)
+  }
   tailTextAcc.delete(sessionId)
 
   state.streaming = true
@@ -867,7 +999,7 @@ async function sendMessage(
   state.pendingUserMessage = message
   state.pendingImages = opts.images?.length ? opts.images : null
   state.pendingSentAt = Date.now()
-  state.streamingTurns = []
+  state.streamingTurns = liveTurns
   state.startedAt = Date.now()
   state.activeTool = null
   state.tail = []
@@ -920,12 +1052,16 @@ async function retrySession(sessionId: string): Promise<boolean> {
 /** 清空某会话的流式渲染区(不影响磁盘 jsonl)。供 /clear 与会话切换使用。
  *  keepPending:保留 pending 用户消息——流结束 reload 场景用,气泡的退场由
  *  「历史区落账匹配成功」驱动(clearPendingUserMessage),而非 reload 无条件批清;
- *  否则守卫误判 reload 成功而用户消息未落账时,两个显示源皆空 = 消息凭空消失 */
-function clearStreamingTurns(sessionId: string, opts?: { keepPending?: boolean }) {
+ *  否则守卫误判 reload 成功而用户消息未落账时,两个显示源皆空 = 消息凭空消失。
+ *  keepLive:豁免仍在播的自发轮 turn(未落账,清了会被后续快照重建从头重播) */
+function clearStreamingTurns(sessionId: string, opts?: { keepPending?: boolean; keepLive?: boolean }) {
   const state = streams.get(sessionId)
   if (!state) return
-  for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
-  state.streamingTurns = []
+  const keep = opts?.keepLive ? state.streamingTurns.filter(t => t.live) : []
+  for (const t of state.streamingTurns) {
+    if (!keep.includes(t)) dropTurnTransients(t.messageId)
+  }
+  state.streamingTurns = keep
   if (!opts?.keepPending) {
     state.pendingUserMessage = null
     state.pendingImages = null
@@ -968,13 +1104,31 @@ async function stopStreaming(sessionId: string) {
   }
 }
 
-/** 关闭会话进程（SIGTERM → 5s → SIGKILL） */
+/** 驱逐某会话的前端传输态缓存。streams/turnIndex/tailTextAcc 等模块级 Map
+ *  没有其他 delete 路径，长时运行 + 频繁开关会话下单调增长（审计遗留⑦）。
+ *  调用方：closeSession 与 useWorkbench.teardownSession（会话离开工作台的
+ *  真实关闭路径直接 invoke close_session，必须同步走这里，否则驱逐是死代码） */
+export function evictSessionTransients(sessionId: string) {
+  const state = streams.get(sessionId)
+  if (state) {
+    for (const t of state.streamingTurns) dropTurnTransients(t.messageId)
+  }
+  tailTextAcc.delete(sessionId)
+  drainingStreams.delete(sessionId)
+  processEpoch.delete(sessionId)
+  autoLandedSessions.delete(sessionId)
+  finishedDirty.delete(sessionId)
+  streams.delete(sessionId)
+}
+
+/** 关闭会话进程（SIGTERM → 5s → SIGKILL），并驱逐该会话的前端传输态缓存 */
 async function closeSession(sessionId: string) {
   try {
     await invoke('close_session', { sessionId })
   } catch (_) {
     // ignore
   }
+  evictSessionTransients(sessionId)
 }
 
 export function useStreaming() {
@@ -989,5 +1143,7 @@ export function useStreaming() {
     clearPendingUserMessage,
     removePendingQueueItem,
     consumePendingQueue,
+    removeLandedTurns,
+    demoteUnlandedTurns,
   }
 }

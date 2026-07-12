@@ -13,6 +13,8 @@ import {
   useSessionStream,
   finishedDirty,
   syncProcessAlive,
+  autoTurnLanded,
+  autoLandedSessions,
 } from '@/composables/useStreaming'
 import { useSessionSettings, type ChannelMark } from '@/composables/useSessionSettings'
 import { useRunConfig } from '@/composables/useRunConfig'
@@ -88,7 +90,7 @@ const { goToSession } = useNotifications()
 const detail = createSessionDetail()
 const { records, loading, error, loadRecords, reloadRecords, clearRecords } = detail
 
-const { sendMessage, stopStreaming, clearStreamingTurns, clearPendingUserMessage, getStream, removePendingQueueItem, consumePendingQueue } = useStreaming()
+const { sendMessage, stopStreaming, clearStreamingTurns, clearPendingUserMessage, getStream, removePendingQueueItem, consumePendingQueue, removeLandedTurns, demoteUnlandedTurns } = useStreaming()
 
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const featureBannerShown = ref(false)
@@ -218,6 +220,15 @@ const asyncTasks = computed<AsyncTaskItem[]>(() => {
   )
 })
 const asyncActiveCount = computed(() => asyncTasks.value.filter(isActive).length)
+
+/** 自持长活进程忙 = 自发轮在途(live turn 在播):此窗口发消息应排队而非直发——
+ *  CLI 串行,直发会打断在播轮渲染且排队"没有回应"(审计遗留①)。
+ *  判据必须是「真正占用 CLI 主循环」的在途轮次,不能用账本 active 计数——
+ *  armed wakeup 恒 waiting、常驻 Monitor 恒 running,都与主循环空闲无关,
+ *  误当忙态会让消息滞留数小时甚至永久(回归审查 R1,已证实) */
+const ownProcessBusy = computed(() =>
+  stream.value.processAlive && stream.value.streamingTurns.some(t => t.live),
+)
 const asyncPanelVisible = computed(() => asyncSidebarOpen.value && asyncTasks.value.length > 0)
 const asyncPanelRef = ref<InstanceType<typeof AsyncTaskPanel> | null>(null)
 
@@ -613,6 +624,10 @@ const streamingMessageIds = computed(() =>
   new Set(stream.value.streamingTurns.map(t => t.messageId)),
 )
 
+/** 存在传输中的自发轮(task-notification 后台收尾轮,streaming=false 下进行):
+ *  typing-dots 等进行中指示据此补位,不显示"空闲下凭空吐内容" */
+const hasLiveTurn = computed(() => stream.value.streamingTurns.some(t => t.live))
+
 /** 进入消息流的 system 子类型（其余 system 记录为噪音，不渲染） */
 const VISIBLE_SYSTEM_SUBTYPES = new Set(['api_error', 'compact_boundary'])
 
@@ -624,8 +639,12 @@ function stripInjections(text: string): string {
 }
 
 /** 在 recs 中寻找 pending 用户消息对应的落账 user record uuid。
- *  只认发送时刻之后的记录(5s 时钟容差,records 为追加序、扫到更早即停);
- *  文本消息按剥离注入后 trim 相等匹配,纯图片消息按含 image 块匹配。 */
+ *  只认发送时刻之后的记录(5s 时钟容差,records 为追加序、扫到更早即停)。
+ *  三层匹配(审计遗留③——TAG_RE 白名单失配曾致气泡与历史长期双显):
+ *  1. 命令形态:透传斜杠命令落账为 <command-name> 包装,按命令名比对(全等必失配);
+ *  2. 精确层:剥离注入 + 空白折叠归一后相等;纯图片消息按含 image 块匹配;
+ *  3. 宽松兜底:精确失败时,认领发送时刻之后剥离注入仍有实文的最新 user record——
+ *     失配也能收敛,气泡不至长驻;误认领仅提前退场气泡,消息本体已在历史区,不丢。 */
 function findLandedUserUuid(
   recs: SessionRecord[],
   pendingText: string | null,
@@ -633,7 +652,10 @@ function findLandedUserUuid(
   sentAt: number,
 ): string | null {
   if (!pendingText && !hasImages) return null
-  const target = (pendingText ?? '').trim()
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const target = norm(pendingText ?? '')
+  const cmdName = target.startsWith('/') ? target.slice(1).split(' ')[0] : null
+  let fallback: string | null = null
   for (let i = recs.length - 1; i >= 0; i--) {
     const r = recs[i]
     if (r.type !== 'user') continue
@@ -641,22 +663,27 @@ function findLandedUserUuid(
     if (ts && sentAt && ts < sentAt - 5000) break
     const content = r.message?.content
     if (!content) continue
-    if (typeof content === 'string') {
-      if (target && stripInjections(content).trim() === target) return r.uuid
+    const rawText = typeof content === 'string'
+      ? content
+      : content
+          .filter((b: ContentBlock) => b.type === 'text')
+          .map(b => (b as { text?: string }).text ?? '')
+          .join('')
+    if (!target) {
+      if (typeof content !== 'string' && content.some((b: ContentBlock) => b.type === 'image')) return r.uuid
       continue
     }
-    if (target) {
-      const text = content
-        .filter((b: ContentBlock) => b.type === 'text')
-        .map(b => stripInjections((b as { text?: string }).text ?? ''))
-        .join('')
-        .trim()
-      if (text === target) return r.uuid
-    } else if (content.some((b: ContentBlock) => b.type === 'image')) {
-      return r.uuid
+    // 命令层要求 ts >= sentAt:落账由 CLI 收到消息后写盘(同机时钟必晚于发送),
+    // 无下界会让 5s 容差窗内的旧同名命令记录提前认领新命令气泡(回归审查 R4)
+    if (cmdName && ts >= sentAt) {
+      const m = rawText.match(/<command-name>\s*\/?([^<\s]+)\s*<\/command-name>/)
+      if (m && m[1] === cmdName) return r.uuid
     }
+    const stripped = norm(stripInjections(rawText))
+    if (stripped === target) return r.uuid
+    if (!fallback && ts >= sentAt && stripped) fallback = r.uuid
   }
-  return null
+  return fallback
 }
 
 /** pending 用户消息在历史区的落账 record uuid(落账接管信号)。
@@ -1313,7 +1340,7 @@ async function handleSend() {
     images,
     permissionMode: settings.value.permissionMode,
   }
-  if (externalRunning.value) {
+  if (externalRunning.value || ownProcessBusy.value) {
     stream.value.pendingQueue.push({ message: text, opts })
     return
   }
@@ -1531,9 +1558,67 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     // 否则会清掉新一轮刚到的 streamingTurns,造成新回复消失
     if (getStream(sid).streaming) return
     // keepPending:气泡退场由落账匹配驱动(pendingLandedUuid watch),重试尽头仍未
-    // 落账时保留气泡等下一轮 reload——宁可气泡多活一会,不可消息凭空消失
-    clearStreamingTurns(sid, { keepPending: true })
-    if (cs.summary.cwd) consumePendingQueue(sid, cs.summary.cwd)
+    // 落账时保留气泡等下一轮 reload——宁可气泡多活一会,不可消息凭空消失。
+    // keepLive:豁免此刻可能已开播的下一个自发轮(清了会被快照重建从头重播);
+    // 随后按落账摘除其中已落盘的,只留真正在播的
+    clearStreamingTurns(sid, { keepPending: true, keepLive: true })
+    if (newRecords) removeLandedTurns(sid, newRecords)
+    maybeConsumeQueue()
+  }
+})
+
+/**
+ * 队列消费单点(审计遗留①⑥):所有"会话转入空闲"的沿都调它,空闲条件自查——
+ * 本地流式/外部进程/自持进程忙(后台任务在跑)任一为真都不消费,等下一个沿。
+ * consumePendingQueue 自身有 streaming 守卫 + 同步 shift,多沿并发天然防重。
+ */
+function maybeConsumeQueue() {
+  if (stream.value.streaming || externalRunning.value || ownProcessBusy.value) return
+  const cs = currentSession.value
+  if (cs?.summary.cwd) consumePendingQueue(cs.summary.id, cs.summary.cwd)
+}
+
+// 忙态翻空闲即消费:自发轮落账摘除(live 清空)、进程退出清 live 等一切翻 false
+// 的路径统一走这个沿——ownProcessBusy 闸门拦下的消息在此发出
+watch(ownProcessBusy, (busy) => {
+  if (!busy) maybeConsumeQueue()
+})
+
+// 自发轮落账:CLI 被 task-notification 唤醒的后台任务收尾轮结束(stream-done
+// initiator=auto)时静默 reload,把已落账 turn 摘除——与历史区同 batch 原子切换。
+// 不动 streaming/pending:那是用户轮的领地;pendingLandedUuid 若在本次 reload
+// 中匹配成功(用户消息恰在此期间落盘),气泡走既有契约自然退场
+watch(autoTurnLanded, async () => {
+  const cs = currentSession.value
+  const snapshot = cs ? autoLandedSessions.get(cs.summary.id) : undefined
+  if (!cs || !snapshot) return
+  const sid = cs.summary.id
+  autoLandedSessions.delete(sid)
+  await new Promise(r => setTimeout(r, 300))
+  let fresh: SessionRecord[] | null = null
+  try {
+    fresh = await invoke<SessionRecord[]>('get_session_records', {
+      projectId: cs.projectId,
+      sessionId: sid,
+    })
+  } catch { /* 失败留给 finishedDirty 下次加载兜底 */ }
+  if (!fresh || fresh.length <= records.value.length) {
+    await new Promise(r => setTimeout(r, 400))
+    try {
+      fresh = await invoke<SessionRecord[]>('get_session_records', {
+        projectId: cs.projectId,
+        sessionId: sid,
+      })
+    } catch { /* 同上 */ }
+  }
+  if (effectiveSessionId.value !== sid || !fresh) return
+  if (fresh.length >= records.value.length) {
+    records.value = fresh
+    // 同一同步段摘除已落账 turn:历史区解除 streamingMessageIds 过滤,原子切换;
+    // 快照内未落盘的孤儿 turn 降级 live(记录不会再来,防永久卡「进行中」)
+    removeLandedTurns(sid, fresh)
+    demoteUnlandedTurns(sid, snapshot, fresh)
+    finishedDirty.delete(sid)
   }
 })
 
@@ -1635,11 +1720,13 @@ async function probeExternal() {
       externalIdleTicks = 0
       await silentReloadRecords()
       stopExternalFollow()
-      const cs = currentSession.value
-      if (cs?.summary.cwd) consumePendingQueue(effectiveSessionId.value!, cs.summary.cwd)
+      maybeConsumeQueue()
     } else {
-      // 进程未运行且从未标记过运行态,累积空轮次后停止探测
+      // 进程未运行且从未标记过运行态,累积空轮次后停止探测。
+      // 顺带补一次队列消费:externalRunning 的两条撤销路径(切会话/本地流式起)
+      // 不经过上面的退出分支,排队消息曾在此滞留(审计遗留⑥)
       externalIdleTicks++
+      maybeConsumeQueue()
       if (externalIdleTicks >= 4) {
         stopExternalFollow()
       }
@@ -1726,7 +1813,12 @@ watch(
         await loadRecords(cs.projectId, cs.summary.id, force)
         loadSubAgentList(cs.projectId, cs.summary.id)
         if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
-          clearStreamingTurns(cs.summary.id)
+          // keepPending:后台落账的 force reload 可能早于用户消息落盘(CLI 还在
+          // 排队处理),裸清会让气泡与历史区两源皆空=消息凭空消失;退场统一交给
+          // pendingLandedUuid 落账匹配。keepLive:在播自发轮同理不清;
+          // 已落账的 live 残留(无人消费信号的自发轮)按 records 摘除
+          clearStreamingTurns(cs.summary.id, { keepPending: true, keepLive: true })
+          removeLandedTurns(cs.summary.id, records.value)
         }
         // 搜索命中定位优先于默认滚底
         if (!consumeScrollTarget()) scrollToBottom(true)
@@ -1752,7 +1844,10 @@ async function onReload() {
   await reloadRecords()
   const sid = effectiveSessionId.value
   if (sid && !stream.value.streaming) {
-    clearStreamingTurns(sid)
+    // keepPending/keepLive 同 force 路径:手动刷新不得清掉未落账的用户消息气泡
+    // 与在播自发轮——「宁可气泡多活一会,不可消息凭空消失」
+    clearStreamingTurns(sid, { keepPending: true, keepLive: true })
+    removeLandedTurns(sid, records.value)
     startExternalFollow()
   }
 }
@@ -2032,7 +2127,7 @@ async function onReload() {
                 <!-- 本轮实际运行模型的真值(message_start 回显),从首字起与落账后标注同源 -->
                 <span v-if="turn.model" class="text-muted-foreground font-normal">({{ shortModel(turn.model) }})</span>
               </span>
-              <span v-if="!stream.streaming && stream.realUsedTokens" class="text-muted-foreground/70 font-normal tabular-nums">
+              <span v-if="!stream.streaming && !turn.live && stream.realUsedTokens" class="text-muted-foreground/70 font-normal tabular-nums">
                 {{ formatTokens(stream.realUsedTokens) }} in
                 <template v-if="stream.realOutputTokens"> · {{ formatTokens(stream.realOutputTokens) }} out</template>
               </span>
@@ -2042,7 +2137,7 @@ async function onReload() {
                 v-for="(block, i) in filterConsumedResults(turn.content)"
                 :key="i"
                 :block="block"
-                :streaming="stream.streaming"
+                :streaming="stream.streaming || !!turn.live"
               />
             </TransitionGroup>
           </div>
@@ -2057,7 +2152,7 @@ async function onReload() {
         </div>
       </div>
 
-      <div v-if="stream.streaming || externalRunning" class="flex items-center gap-1 py-2 pl-5">
+      <div v-if="stream.streaming || externalRunning || hasLiveTurn" class="flex items-center gap-1 py-2 pl-5">
         <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
       </div>
 

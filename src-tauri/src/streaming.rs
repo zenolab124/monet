@@ -822,9 +822,20 @@ fn read_stream(
             }
         }
 
-        // "result" 标记一轮结束（进程继续活着等下一条 stdin 消息）
+        // "result" 标记一轮结束（进程继续活着等下一条 stdin 消息）。
+        // 轮次归属：CLI 自发轮（task-notification 唤醒的后台任务收尾轮）的 result 带
+        // origin 字段（如 {"kind":"task-notification"}），用户 send 的轮没有——实测确认。
+        // 前端靠 initiator 区分：auto 轮不得冒领用户消息的 streaming 标志/落账收尾，
+        // 否则后台任务期间发消息会出现轮次边界错乱（消息重复出现/消失）
         if raw_type == "result" {
-            let _ = app.emit("stream-done", json!({ "session_id": session_id }));
+            let is_auto = value.get("origin").is_some_and(|v| !v.is_null());
+            let _ = app.emit(
+                "stream-done",
+                json!({
+                    "session_id": session_id,
+                    "initiator": if is_auto { "auto" } else { "user" },
+                }),
+            );
         }
     }
 

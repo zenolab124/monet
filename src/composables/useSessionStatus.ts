@@ -65,7 +65,9 @@ export function useSessionStatus(
       (sid && persistentToasts.value.some(t => t.kind === 'error' && t.sessionId === sid))
     ) {
       key = 'error'
-    } else if (stream.value.streaming) {
+    } else if (stream.value.streaming || stream.value.streamingTurns.some(t => t.live)) {
+      // live turn:CLI 自发轮(task-notification 后台任务收尾轮)在 streaming=false
+      // 下进行中——内容正在流入,不应显示空闲(审计遗留②)
       const tool = stream.value.activeTool
       if (tool?.startsWith('Workflow')) key = 'workflow'
       else if (tool) key = 'waiting_tool'
