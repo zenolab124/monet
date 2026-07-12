@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Monet — Logo 概念稿</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "SF Pro", "PingFang SC", sans-serif;
+    background: #EFE9DC;
+    color: #33302A;
+    padding: 48px 56px 80px;
+  }
+  h1 { font-size: 26px; letter-spacing: -0.3px; }
+  .sub { color: #7A7365; margin-top: 6px; font-size: 14px; }
+  section {
+    background: #FBF8F1;
+    border: 1px solid #E2D9C6;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-top: 28px;
+  }
+  h2 { font-size: 18px; }
+  h2 .tag {
+    font-size: 12px; font-weight: 600; color: #A9553E;
+    border: 1px solid #D9BFB2; border-radius: 99px;
+    padding: 2px 10px; margin-left: 10px; vertical-align: 2px;
+  }
+  .concept { color: #7A7365; font-size: 13px; margin-top: 6px; max-width: 720px; line-height: 1.7; }
+  .row { display: flex; align-items: flex-end; gap: 40px; margin-top: 26px; flex-wrap: wrap; }
+  .cell { text-align: center; }
+  .cell .cap { font-size: 11px; color: #A39A88; margin-top: 8px; }
+  .cell svg { display: block; border-radius: 22.37%; box-shadow: 0 6px 18px rgba(51,48,42,.14), 0 1px 3px rgba(51,48,42,.10); }
+  .ladder { display: flex; align-items: flex-end; gap: 22px; }
+  .env { display: flex; gap: 24px; margin-top: 26px; flex-wrap: wrap; align-items: center; }
+  .dock {
+    display: flex; align-items: center; gap: 14px;
+    background: linear-gradient(180deg, rgba(40,40,44,.92), rgba(24,24,28,.94));
+    border-radius: 18px; padding: 10px 18px;
+  }
+  .dock svg { border-radius: 22.37%; }
+  .mbar { display: flex; align-items: center; gap: 8px; border-radius: 8px; padding: 4px 12px; font-size: 12px; }
+  .mbar.light { background: #F4F2EE; border: 1px solid #DDD8CE; color: #333; }
+  .mbar.dark  { background: #26262A; border: 1px solid #3A3A40; color: #EEE; }
+  .envcap { font-size: 11px; color: #A39A88; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- ═══ 方向 A:印象·日出 ═══ -->
+    <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E8663F" stop-opacity=".28"/>
+      <stop offset="100%" stop-color="#E8663F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="seaA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#33434F"/>
+      <stop offset="100%" stop-color="#28353F"/>
+    </linearGradient>
+    <symbol id="logo-a" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="url(#seaA)"/>
+      <!-- 雾面海天:并置大笔触 -->
+      <g>
+        <rect x="90" y="148" width="420" height="56" rx="28" fill="#40566A" opacity=".40" transform="rotate(-2 300 176)"/>
+        <rect x="565" y="225" width="370" height="52" rx="26" fill="#243039" opacity=".45"/>
+        <rect x="60" y="520" width="470" height="54" rx="27" fill="#41586B" opacity=".42" transform="rotate(-1 295 547)"/>
+        <rect x="540" y="632" width="420" height="50" rx="25" fill="#233039" opacity=".55" transform="rotate(1 750 657)"/>
+        <rect x="90" y="762" width="360" height="48" rx="24" fill="#41586B" opacity=".30"/>
+        <rect x="620" y="864" width="330" height="44" rx="22" fill="#233039" opacity=".45"/>
+      </g>
+      <!-- 光晕 + 太阳 -->
+      <circle cx="600" cy="342" r="255" fill="url(#sunGlow)"/>
+      <circle cx="600" cy="342" r="134" fill="#E56340"/>
+      <circle cx="600" cy="342" r="134" fill="#F0764E" opacity=".35" transform="translate(-8 -8)"/>
+      <!-- 水面倒影:三笔 -->
+      <rect x="468" y="556" width="234" height="42" rx="21" fill="#E8663F" opacity=".92" transform="rotate(-1.5 585 577)"/>
+      <rect x="528" y="668" width="172" height="40" rx="20" fill="#E8663F" opacity=".66" transform="rotate(1 614 688)"/>
+      <rect x="488" y="778" width="128" height="38" rx="19" fill="#E8663F" opacity=".42"/>
+    </symbol>
+    <symbol id="glyph-a" viewBox="0 0 24 24">
+      <circle cx="12" cy="8.2" r="4.6"/>
+      <rect x="7.6" y="15.4" width="8.8" height="2.5" rx="1.25"/>
+      <rect x="9.4" y="19.5" width="5.2" height="2.5" rx="1.25"/>
+    </symbol>
+
+    <!-- ═══ 方向 B:并列笔触(工作台多列) ═══ -->
+    <symbol id="logo-b" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="#F2EBDC"/>
+      <rect x="240" y="336" width="122" height="436" rx="61" fill="#5A6B57" transform="rotate(-2 301 554)"/>
+      <rect x="451" y="232" width="122" height="540" rx="61" fill="#E0714A" transform="rotate(1.6 512 502)"/>
+      <rect x="662" y="386" width="122" height="386" rx="61" fill="#A9553E" transform="rotate(-1.2 723 579)"/>
+    </symbol>
+    <symbol id="glyph-b" viewBox="0 0 24 24">
+      <rect x="4.6" y="8" width="3.4" height="12" rx="1.7"/>
+      <rect x="10.3" y="4" width="3.4" height="16" rx="1.7"/>
+      <rect x="16" y="9.5" width="3.4" height="10.5" rx="1.7"/>
+    </symbol>
+
+    <!-- ═══ 方向 C:笔触 M ═══ -->
+    <symbol id="logo-c" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="#37453E"/>
+      <g fill="none" stroke-width="104" stroke-linecap="round">
+        <path d="M 278 742 L 278 328" stroke="#F2EBDC"/>
+        <path d="M 296 344 L 502 648" stroke="#F2EBDC"/>
+        <path d="M 728 344 L 522 648" stroke="#E0714A"/>
+        <path d="M 746 742 L 746 328" stroke="#F2EBDC"/>
+      </g>
+    </symbol>
+    <symbol id="glyph-c" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+        <path d="M 5.4 19 L 5.4 5.8"/>
+        <path d="M 5.8 6.2 L 12 15.4"/>
+        <path d="M 18.2 6.2 L 12 15.4"/>
+        <path d="M 18.6 19 L 18.6 5.8"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<h1>Monet — Logo 概念稿</h1>
+<div class="sub">三个方向 × 尺寸阶梯 × Dock / 菜单栏环境模拟 · 图标底形为 macOS squircle 近似</div>
+
+<!-- ════════ 方向 A ════════ -->
+<section>
+  <h2>A · 印象日出 <span class="tag">推荐</span></h2>
+  <p class="concept">
+    取自《印象·日出》——"印象派"一词的诞生之作。雾蓝海面、一轮橙日、水面三笔橙色倒影。
+    橙色呼应 Claude 品牌色;日出 = 每个会话的开始;骨架只有"一圆三横",16px 依然成立。
+    背景的并置大笔触在大尺寸提供印象派质感,小尺寸自动隐没不构成噪声。
+  </p>
+  <div class="row">
+    <div class="cell"><svg width="220" height="220"><use href="#logo-a"/></svg><div class="cap">512pt 展示</div></div>
+    <div class="ladder">
+      <div class="cell"><svg width="128" height="128"><use href="#logo-a"/></svg><div class="cap">128</div></div>
+      <div class="cell"><svg width="64" height="64"><use href="#logo-a"/></svg><div class="cap">64</div></div>
+      <div class="cell"><svg width="32" height="32"><use href="#logo-a"/></svg><div class="cap">32</div></div>
+      <div class="cell"><svg width="16" height="16"><use href="#logo-a"/></svg><div class="cap">16 favicon</div></div>
+    </div>
+  </div>
+  <div class="env">
+    <div class="dock">
+      <svg width="56" height="56"><use href="#logo-a"/></svg>
+      <svg width="56" height="56"><use href="#logo-b"/></svg>
+      <svg width="56" height="56"><use href="#logo-c"/></svg>
+    </div><span class="envcap">← Dock 模拟(三方向同场对比)</span>
+    <div class="mbar light"><svg width="16" height="16" fill="#1d1d1f"><use href="#glyph-a"/></svg> 菜单栏 · 亮</div>
+    <div class="mbar dark"><svg width="16" height="16" fill="#f0f0f0"><use href="#glyph-a"/></svg> 菜单栏 · 暗</div>
+  </div>
+</section>
+
+<!-- ════════ 方向 B ════════ -->
+<section>
+  <h2>B · 并列笔触</h2>
+  <p class="concept">
+    印象派的本质是并置笔触,远看成像;Monet 工作台的本质是并列多列会话。三道高低错落的圆头笔触同时是两者——
+    Paper 米色卡纸底,墨绿 / 橙 / 砖红取自项目主题点缀色。最"产品化"、小尺寸最锐利的方向,
+    代价是失去一眼可认的莫奈具象锚点,且有被读成"图表工具"的风险。
+  </p>
+  <div class="row">
+    <div class="cell"><svg width="220" height="220"><use href="#logo-b"/></svg><div class="cap">512pt 展示</div></div>
+    <div class="ladder">
+      <div class="cell"><svg width="128" height="128"><use href="#logo-b"/></svg><div class="cap">128</div></div>
+      <div class="cell"><svg width="64" height="64"><use href="#logo-b"/></svg><div class="cap">64</div></div>
+      <div class="cell"><svg width="32" height="32"><use href="#logo-b"/></svg><div class="cap">32</div></div>
+      <div class="cell"><svg width="16" height="16"><use href="#logo-b"/></svg><div class="cap">16 favicon</div></div>
+    </div>
+  </div>
+  <div class="env">
+    <div class="mbar light"><svg width="16" height="16" fill="#1d1d1f"><use href="#glyph-b"/></svg> 菜单栏 · 亮</div>
+    <div class="mbar dark"><svg width="16" height="16" fill="#f0f0f0"><use href="#glyph-b"/></svg> 菜单栏 · 暗</div>
+  </div>
+</section>
+
+<!-- ════════ 方向 C ════════ -->
+<section>
+  <h2>C · 笔触 M</h2>
+  <p class="concept">
+    Monogram 保底方向:四笔圆头笔画拼出 M,深墨绿底、米白笔画、第三笔橙色点睛(与 A/B 共享色板)。
+    永远安全、永远不出错,但记忆点最弱——世界上叫 M 的 logo 太多了。
+  </p>
+  <div class="row">
+    <div class="cell"><svg width="220" height="220"><use href="#logo-c"/></svg><div class="cap">512pt 展示</div></div>
+    <div class="ladder">
+      <div class="cell"><svg width="128" height="128"><use href="#logo-c"/></svg><div class="cap">128</div></div>
+      <div class="cell"><svg width="64" height="64"><use href="#logo-c"/></svg><div class="cap">64</div></div>
+      <div class="cell"><svg width="32" height="32"><use href="#logo-c"/></svg><div class="cap">32</div></div>
+      <div class="cell"><svg width="16" height="16"><use href="#logo-c"/></svg><div class="cap">16 favicon</div></div>
+    </div>
+  </div>
+  <div class="env">
+    <div class="mbar light"><svg width="16" height="16" style="color:#1d1d1f"><use href="#glyph-c"/></svg> 菜单栏 · 亮</div>
+    <div class="mbar dark"><svg width="16" height="16" style="color:#f0f0f0"><use href="#glyph-c"/></svg> 菜单栏 · 暗</div>
+  </div>
+</section>
+
+</body>
+</html>

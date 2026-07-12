@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Monet — 日出三版对比</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "SF Pro", "PingFang SC", sans-serif;
+    background: #EFE9DC;
+    color: #33302A;
+    padding: 48px 56px 80px;
+  }
+  h1 { font-size: 26px; letter-spacing: -0.3px; }
+  .sub { color: #7A7365; margin-top: 6px; font-size: 14px; }
+  section {
+    background: #FBF8F1;
+    border: 1px solid #E2D9C6;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-top: 28px;
+  }
+  h2 { font-size: 17px; }
+  h2 .tag {
+    font-size: 12px; font-weight: 600; color: #A9553E;
+    border: 1px solid #D9BFB2; border-radius: 99px;
+    padding: 2px 10px; margin-left: 10px; vertical-align: 2px;
+  }
+  .concept { color: #7A7365; font-size: 13px; margin-top: 6px; max-width: 780px; line-height: 1.7; }
+  .trio { display: flex; gap: 44px; margin-top: 8px; flex-wrap: wrap; }
+  .cell { text-align: center; }
+  .cell .cap { font-size: 12px; color: #7A7365; margin-top: 10px; font-weight: 600; }
+  .cell .cap small { display: block; font-weight: 400; color: #A39A88; margin-top: 2px; }
+  .cell svg { display: block; border-radius: 22.37%; box-shadow: 0 6px 18px rgba(51,48,42,.14), 0 1px 3px rgba(51,48,42,.10); }
+  .ladder { display: flex; align-items: flex-end; gap: 14px; margin-top: 14px; justify-content: center; }
+  .ladder svg { border-radius: 22.37%; box-shadow: 0 2px 8px rgba(51,48,42,.12); }
+  .env { display: flex; gap: 24px; margin-top: 26px; flex-wrap: wrap; align-items: center; }
+  .dock {
+    display: flex; align-items: center; gap: 14px;
+    border-radius: 18px; padding: 10px 18px;
+  }
+  .dock.dark  { background: linear-gradient(180deg, rgba(40,40,44,.92), rgba(24,24,28,.94)); }
+  .dock.light { background: linear-gradient(180deg, rgba(240,240,242,.95), rgba(214,214,218,.95)); border: 1px solid #CFCFD4; }
+  .dock svg { border-radius: 22.37%; }
+  .envcap { font-size: 11px; color: #A39A88; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- 共用:径向渐变光晕(第一版的正确手法) -->
+    <radialGradient id="glowF1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E8663F" stop-opacity=".30"/>
+      <stop offset="55%" stop-color="#E8663F" stop-opacity=".14"/>
+      <stop offset="100%" stop-color="#E8663F" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowF2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ED6A3C" stop-opacity=".34"/>
+      <stop offset="55%" stop-color="#ED6A3C" stop-opacity=".15"/>
+      <stop offset="100%" stop-color="#ED6A3C" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowF3" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E8663F" stop-opacity=".26"/>
+      <stop offset="55%" stop-color="#E8663F" stop-opacity=".11"/>
+      <stop offset="100%" stop-color="#E8663F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="seaF1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#33434F"/>
+      <stop offset="100%" stop-color="#28353F"/>
+    </linearGradient>
+    <linearGradient id="seaF2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#697D8C"/>
+      <stop offset="100%" stop-color="#4D5F6E"/>
+    </linearGradient>
+
+    <!-- F1:第一版原样(基准) -->
+    <symbol id="logo-f1" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="url(#seaF1)"/>
+      <g>
+        <rect x="90" y="148" width="420" height="56" rx="28" fill="#40566A" opacity=".40" transform="rotate(-2 300 176)"/>
+        <rect x="565" y="225" width="370" height="52" rx="26" fill="#243039" opacity=".45"/>
+        <rect x="60" y="520" width="470" height="54" rx="27" fill="#41586B" opacity=".42" transform="rotate(-1 295 547)"/>
+        <rect x="540" y="632" width="420" height="50" rx="25" fill="#233039" opacity=".55" transform="rotate(1 750 657)"/>
+        <rect x="90" y="762" width="360" height="48" rx="24" fill="#41586B" opacity=".30"/>
+        <rect x="620" y="864" width="330" height="44" rx="22" fill="#233039" opacity=".45"/>
+      </g>
+      <circle cx="600" cy="342" r="255" fill="url(#glowF1)"/>
+      <circle cx="600" cy="342" r="134" fill="#E56340"/>
+      <circle cx="600" cy="342" r="134" fill="#F0764E" opacity=".35" transform="translate(-8 -8)"/>
+      <rect x="468" y="556" width="234" height="42" rx="21" fill="#E8663F" opacity=".92" transform="rotate(-1.5 585 577)"/>
+      <rect x="528" y="668" width="172" height="40" rx="20" fill="#E8663F" opacity=".66" transform="rotate(1 614 688)"/>
+      <rect x="488" y="778" width="128" height="38" rx="19" fill="#E8663F" opacity=".42"/>
+    </symbol>
+
+    <!-- F2:晨雾版(第一版手法,底调亮到原画的晨雾蓝灰) -->
+    <symbol id="logo-f2" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="url(#seaF2)"/>
+      <g>
+        <rect x="90" y="148" width="420" height="56" rx="28" fill="#7E93A2" opacity=".5" transform="rotate(-2 300 176)"/>
+        <rect x="565" y="225" width="370" height="52" rx="26" fill="#445666" opacity=".4"/>
+        <rect x="60" y="520" width="470" height="54" rx="27" fill="#7E93A2" opacity=".45" transform="rotate(-1 295 547)"/>
+        <rect x="540" y="632" width="420" height="50" rx="25" fill="#425464" opacity=".5" transform="rotate(1 750 657)"/>
+        <rect x="90" y="762" width="360" height="48" rx="24" fill="#7E93A2" opacity=".32"/>
+        <rect x="620" y="864" width="330" height="44" rx="22" fill="#425464" opacity=".45"/>
+      </g>
+      <circle cx="600" cy="342" r="262" fill="url(#glowF2)"/>
+      <circle cx="600" cy="342" r="134" fill="#ED6A3C"/>
+      <circle cx="600" cy="342" r="134" fill="#F58054" opacity=".4" transform="translate(-9 -9)"/>
+      <rect x="468" y="556" width="234" height="42" rx="21" fill="#ED6A3C" opacity=".92" transform="rotate(-1.5 585 577)"/>
+      <rect x="528" y="668" width="172" height="40" rx="20" fill="#ED6A3C" opacity=".64" transform="rotate(1 614 688)"/>
+      <rect x="488" y="778" width="128" height="38" rx="19" fill="#ED6A3C" opacity=".40"/>
+    </symbol>
+
+    <!-- F3:墨绿主题底 · 正确手法重做(radial 光晕 + 实色阶梯倒影) -->
+    <symbol id="logo-f3" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="#35443E"/>
+      <g>
+        <rect x="90" y="148" width="420" height="56" rx="28" fill="#41544B" opacity=".8" transform="rotate(-2 300 176)"/>
+        <rect x="565" y="225" width="370" height="52" rx="26" fill="#2B3831" opacity=".8"/>
+        <rect x="60" y="520" width="470" height="54" rx="27" fill="#41544B" opacity=".7" transform="rotate(-1 295 547)"/>
+        <rect x="540" y="632" width="420" height="50" rx="25" fill="#2B3831" opacity=".85" transform="rotate(1 750 657)"/>
+        <rect x="90" y="762" width="360" height="48" rx="24" fill="#41544B" opacity=".55"/>
+        <rect x="620" y="864" width="330" height="44" rx="22" fill="#2B3831" opacity=".8"/>
+      </g>
+      <circle cx="600" cy="342" r="255" fill="url(#glowF3)"/>
+      <circle cx="600" cy="342" r="134" fill="#E8663F"/>
+      <circle cx="600" cy="342" r="134" fill="#F0764E" opacity=".35" transform="translate(-8 -8)"/>
+      <!-- 倒影:实色阶梯(橙→砖→深砖),不靠透明度,避免与绿底混浊 -->
+      <rect x="468" y="556" width="234" height="42" rx="21" fill="#DD6039" transform="rotate(-1.5 585 577)"/>
+      <rect x="528" y="668" width="172" height="40" rx="20" fill="#A9533A" transform="rotate(1 614 688)"/>
+      <rect x="488" y="778" width="128" height="38" rx="19" fill="#77463A"/>
+    </symbol>
+  </defs>
+</svg>
+
+<h1>Monet — 日出三版对比</h1>
+<div class="sub">光晕统一改回径向渐变(第一版手法);F3 倒影改为实色阶梯,不再与底色混浊 · 米底版因"亮底无光晕"的物理矛盾放弃</div>
+
+<section>
+  <h2>三版并排 · 512pt</h2>
+  <p class="concept">
+    <b>F1</b> 第一版原样,基准对照。
+    <b>F2</b> 同一手法,底色调亮到《印象·日出》原画的晨雾蓝灰——原画本就是亮调的,解决"太暗"且更忠于出处。
+    <b>F3</b> Paper 主题深墨绿底,用正确手法重做:径向光晕 + 实色阶梯倒影(橙→砖红→深砖,莫奈式并置异色而非同色渐隐)。
+  </p>
+  <div class="trio">
+    <div class="cell">
+      <svg width="230" height="230"><use href="#logo-f1"/></svg>
+      <div class="cap">F1 · 暮色海(第一版)<small>雾蓝深底 · 基准</small></div>
+      <div class="ladder">
+        <svg width="64" height="64"><use href="#logo-f1"/></svg>
+        <svg width="32" height="32"><use href="#logo-f1"/></svg>
+        <svg width="16" height="16"><use href="#logo-f1"/></svg>
+      </div>
+    </div>
+    <div class="cell">
+      <svg width="230" height="230"><use href="#logo-f2"/></svg>
+      <div class="cap">F2 · 晨雾海(调亮)<small>原画晨雾蓝灰 · 亮而有光</small></div>
+      <div class="ladder">
+        <svg width="64" height="64"><use href="#logo-f2"/></svg>
+        <svg width="32" height="32"><use href="#logo-f2"/></svg>
+        <svg width="16" height="16"><use href="#logo-f2"/></svg>
+      </div>
+    </div>
+    <div class="cell">
+      <svg width="230" height="230"><use href="#logo-f3"/></svg>
+      <div class="cap">F3 · 墨绿主题底(重做)<small>Paper 深绿 · 实色倒影</small></div>
+      <div class="ladder">
+        <svg width="64" height="64"><use href="#logo-f3"/></svg>
+        <svg width="32" height="32"><use href="#logo-f3"/></svg>
+        <svg width="16" height="16"><use href="#logo-f3"/></svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>环境验证</h2>
+  <div class="env">
+    <div class="dock light">
+      <svg width="56" height="56"><use href="#logo-f1"/></svg>
+      <svg width="56" height="56"><use href="#logo-f2"/></svg>
+      <svg width="56" height="56"><use href="#logo-f3"/></svg>
+    </div><span class="envcap">亮色 Dock</span>
+    <div class="dock dark">
+      <svg width="56" height="56"><use href="#logo-f1"/></svg>
+      <svg width="56" height="56"><use href="#logo-f2"/></svg>
+      <svg width="56" height="56"><use href="#logo-f3"/></svg>
+    </div><span class="envcap">暗色 Dock</span>
+  </div>
+</section>
+
+</body>
+</html>

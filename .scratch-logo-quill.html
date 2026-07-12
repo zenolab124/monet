@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Monet — 羽毛笔方向</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "SF Pro", "PingFang SC", sans-serif;
+    background: #EFE9DC;
+    color: #33302A;
+    padding: 48px 56px 80px;
+  }
+  h1 { font-size: 26px; letter-spacing: -0.3px; }
+  .sub { color: #7A7365; margin-top: 6px; font-size: 14px; }
+  section {
+    background: #FBF8F1;
+    border: 1px solid #E2D9C6;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-top: 28px;
+  }
+  h2 { font-size: 18px; }
+  h2 .tag {
+    font-size: 12px; font-weight: 600; color: #A9553E;
+    border: 1px solid #D9BFB2; border-radius: 99px;
+    padding: 2px 10px; margin-left: 10px; vertical-align: 2px;
+  }
+  .concept { color: #7A7365; font-size: 13px; margin-top: 6px; max-width: 720px; line-height: 1.7; }
+  .row { display: flex; align-items: flex-end; gap: 40px; margin-top: 26px; flex-wrap: wrap; }
+  .cell { text-align: center; }
+  .cell .cap { font-size: 11px; color: #A39A88; margin-top: 8px; }
+  .cell svg { display: block; border-radius: 22.37%; box-shadow: 0 6px 18px rgba(51,48,42,.14), 0 1px 3px rgba(51,48,42,.10); }
+  .ladder { display: flex; align-items: flex-end; gap: 22px; }
+  .env { display: flex; gap: 24px; margin-top: 26px; flex-wrap: wrap; align-items: center; }
+  .dock {
+    display: flex; align-items: center; gap: 14px;
+    background: linear-gradient(180deg, rgba(40,40,44,.92), rgba(24,24,28,.94));
+    border-radius: 18px; padding: 10px 18px;
+  }
+  .dock svg { border-radius: 22.37%; }
+  .mbar { display: flex; align-items: center; gap: 8px; border-radius: 8px; padding: 4px 12px; font-size: 12px; }
+  .mbar.light { background: #F4F2EE; border: 1px solid #DDD8CE; color: #333; }
+  .mbar.dark  { background: #26262A; border: 1px solid #3A3A40; color: #EEE; }
+  .envcap { font-size: 11px; color: #A39A88; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- 裸羽毛(无底无墨滴,45° 斜置,笔尖朝左下)供 D1/D2 复用 -->
+    <symbol id="quill-shape" viewBox="0 0 1024 1024">
+      <g transform="rotate(45 512 512)">
+        <!-- 右瓣(宽,墨绿主色) -->
+        <path d="M 512 195 C 610 250 665 360 655 500 C 645 545 610 570 560 545 C 535 530 518 500 512 470 Z" fill="#5A6B57"/>
+        <!-- 左瓣(窄,深墨绿) -->
+        <path d="M 512 205 C 445 250 405 340 408 470 C 412 520 440 545 478 530 C 495 520 506 495 512 468 Z" fill="#47563F"/>
+        <!-- 羽片 V 形缺口(米色负空间,羽毛分叉感) -->
+        <path d="M 672 372 L 592 418 L 662 454 Z" fill="#F2EBDC"/>
+        <path d="M 398 330 L 452 366 L 402 392 Z" fill="#F2EBDC"/>
+        <!-- 印象派笔触片:橙 + 浅绿 -->
+        <rect x="560" y="290" width="28" height="138" rx="14" fill="#E0714A" opacity=".92" transform="rotate(-26 574 359)"/>
+        <rect x="438" y="322" width="24" height="112" rx="12" fill="#7A8B72" opacity=".85" transform="rotate(22 450 378)"/>
+        <!-- 羽轴 + 裸杆段 -->
+        <path d="M 512 850 C 504 720 505 640 508 560 C 512 440 516 320 512 200" fill="none" stroke="#33302A" stroke-width="18" stroke-linecap="round"/>
+        <!-- 笔尖 -->
+        <path d="M 512 874 L 494 818 L 530 818 Z" fill="#33302A"/>
+      </g>
+    </symbol>
+
+    <!-- D1:羽毛笔 · 日出墨滴 -->
+    <symbol id="logo-d1" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="#F2EBDC"/>
+      <use href="#quill-shape"/>
+      <!-- 墨滴 = 橙色日头 -->
+      <circle cx="206" cy="852" r="44" fill="#E0714A"/>
+    </symbol>
+
+    <!-- D2:羽毛笔正在画《印象·日出》 -->
+    <symbol id="logo-d2" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="#F2EBDC"/>
+      <!-- 日出:橙日 + 两道倒影笔触 -->
+      <circle cx="380" cy="565" r="100" fill="#E0714A"/>
+      <rect x="282" y="742" width="200" height="40" rx="20" fill="#E0714A" opacity=".62" transform="rotate(-1.5 382 762)"/>
+      <rect x="316" y="846" width="132" height="36" rx="18" fill="#E0714A" opacity=".38"/>
+      <!-- 羽毛缩放置右上,笔尖抵日头右上缘 -->
+      <use href="#quill-shape" transform="translate(244 -148) scale(0.82)"/>
+    </symbol>
+
+    <!-- D3:画笔(对照组,莫奈的正统工具) -->
+    <symbol id="logo-d3" viewBox="0 0 1024 1024">
+      <rect width="1024" height="1024" rx="230" fill="#F2EBDC"/>
+      <g transform="rotate(45 512 512)">
+        <!-- 笔杆(木色) -->
+        <rect x="486" y="128" width="52" height="384" rx="26" fill="#C9BFA8"/>
+        <!-- 金属箍 -->
+        <rect x="478" y="508" width="68" height="58" rx="10" fill="#8A8375"/>
+        <!-- 刷毛(墨绿) -->
+        <path d="M 480 566 L 544 566 C 550 656 538 722 512 786 C 486 722 474 656 480 566 Z" fill="#47563F"/>
+        <!-- 刷尖蘸橙 -->
+        <path d="M 494 706 C 500 742 506 764 512 786 C 518 764 524 742 530 706 C 524 716 500 716 494 706 Z" fill="#E0714A"/>
+      </g>
+      <!-- 刚刷出的一道橙色笔触 -->
+      <path d="M 200 848 Q 300 796 412 826" fill="none" stroke="#E0714A" stroke-width="54" stroke-linecap="round"/>
+    </symbol>
+
+    <!-- 菜单栏 glyph:极简羽毛 + 墨点 -->
+    <symbol id="glyph-quill" viewBox="0 0 24 24">
+      <path d="M 19.5 3.5 C 13 4.5 8 8.5 6.2 14.6 C 8 15.2 10 15 11.8 14 C 15.5 12 18.5 8.5 19.5 3.5 Z"/>
+      <path d="M 5 20 L 9.5 12.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="4.2" cy="20.4" r="1.7"/>
+    </symbol>
+  </defs>
+</svg>
+
+<h1>Monet — 羽毛笔方向</h1>
+<div class="sub">D1 羽毛笔 · D2 羽笔画日出 · D3 画笔对照组 · 全部使用 Paper 主题色板(米纸 / 墨 / 墨绿 / 浅绿 / 砖红橙)</div>
+
+<!-- ════════ D1 ════════ -->
+<section>
+  <h2>D1 · 羽毛笔,日出墨滴</h2>
+  <p class="concept">
+    你的原想法的正统演绎:45° 斜置羽毛笔,米色卡纸底。两处缝合 Monet:
+    羽片不是整片剪影,而是由墨绿深浅 + 一枚橙、一枚浅绿的<b>并置笔触块</b>构成(远看羽毛,近看印象派);
+    笔尖落下的那滴墨是<b>橙色的</b>——掉的不是墨,是《印象·日出》的那轮太阳。
+  </p>
+  <div class="row">
+    <div class="cell"><svg width="220" height="220"><use href="#logo-d1"/></svg><div class="cap">512pt 展示</div></div>
+    <div class="ladder">
+      <div class="cell"><svg width="128" height="128"><use href="#logo-d1"/></svg><div class="cap">128</div></div>
+      <div class="cell"><svg width="64" height="64"><use href="#logo-d1"/></svg><div class="cap">64</div></div>
+      <div class="cell"><svg width="32" height="32"><use href="#logo-d1"/></svg><div class="cap">32</div></div>
+      <div class="cell"><svg width="16" height="16"><use href="#logo-d1"/></svg><div class="cap">16 favicon</div></div>
+    </div>
+  </div>
+  <div class="env">
+    <div class="dock">
+      <svg width="56" height="56"><use href="#logo-d1"/></svg>
+      <svg width="56" height="56"><use href="#logo-d2"/></svg>
+      <svg width="56" height="56"><use href="#logo-d3"/></svg>
+    </div><span class="envcap">← Dock 模拟(D1 / D2 / D3 同场)</span>
+    <div class="mbar light"><svg width="16" height="16" fill="#1d1d1f" style="color:#1d1d1f"><use href="#glyph-quill"/></svg> 菜单栏 · 亮</div>
+    <div class="mbar dark"><svg width="16" height="16" fill="#f0f0f0" style="color:#f0f0f0"><use href="#glyph-quill"/></svg> 菜单栏 · 暗</div>
+  </div>
+</section>
+
+<!-- ════════ D2 ════════ -->
+<section>
+  <h2>D2 · 羽笔正在画日出</h2>
+  <p class="concept">
+    融合版:同一支羽毛笔缩小移到右上,笔尖抵着刚画完的橙日,水面两道倒影笔触。
+    叙事最完整——"Monet 之手正在纸上画出他的日出",羽毛笔(你的想法)与成名作(名字的出处)同框。
+    代价是元素密度高,32px 以下开始拥挤,如实标注。
+  </p>
+  <div class="row">
+    <div class="cell"><svg width="220" height="220"><use href="#logo-d2"/></svg><div class="cap">512pt 展示</div></div>
+    <div class="ladder">
+      <div class="cell"><svg width="128" height="128"><use href="#logo-d2"/></svg><div class="cap">128</div></div>
+      <div class="cell"><svg width="64" height="64"><use href="#logo-d2"/></svg><div class="cap">64</div></div>
+      <div class="cell"><svg width="32" height="32"><use href="#logo-d2"/></svg><div class="cap">32</div></div>
+      <div class="cell"><svg width="16" height="16"><use href="#logo-d2"/></svg><div class="cap">16 favicon</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ D3 ════════ -->
+<section>
+  <h2>D3 · 画笔(对照组)</h2>
+  <p class="concept">
+    符号自洽版:把羽毛笔换成莫奈真正的工具——扁头画笔。木色笔杆、金属箍、墨绿刷毛、刷尖蘸橙,
+    笔下刚刷出一道橙色笔触。如果你看完觉得"还是想要笔的意象,但羽毛笔的文豪感确实不对味",这就是答案;
+    如果羽毛笔的优雅压倒符号考据,那就选 D1。
+  </p>
+  <div class="row">
+    <div class="cell"><svg width="220" height="220"><use href="#logo-d3"/></svg><div class="cap">512pt 展示</div></div>
+    <div class="ladder">
+      <div class="cell"><svg width="128" height="128"><use href="#logo-d3"/></svg><div class="cap">128</div></div>
+      <div class="cell"><svg width="64" height="64"><use href="#logo-d3"/></svg><div class="cap">64</div></div>
+      <div class="cell"><svg width="32" height="32"><use href="#logo-d3"/></svg><div class="cap">32</div></div>
+      <div class="cell"><svg width="16" height="16"><use href="#logo-d3"/></svg><div class="cap">16 favicon</div></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>
