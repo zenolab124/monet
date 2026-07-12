@@ -211,42 +211,38 @@ fn install_mcp_binary() -> Result<PathBuf, String> {
 }
 
 /// 启动自愈：MCP 已注册则同步安装的二进制到最新版并收敛签名形态。
-/// register_mcp 是唯一安装入口，存量用户的旧 adhoc 安装靠这里迁移到稳定 DR
+/// 更名迁移：旧 "cc-space" 条目存在时自动执行完整 register_mcp（装新二进制 + 写新条目 + 清旧条目）
 pub fn startup_sync_mcp() {
     std::thread::spawn(|| {
-        let registered = fs::read_to_string(claude_settings_path())
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .as_ref()
-            .and_then(|v| v.get("mcpServers"))
-            .and_then(serde_json::Value::as_object)
-            .is_some_and(|servers| servers.contains_key("monet"));
-        if registered {
+        let parsed: serde_json::Value = match fs::read_to_string(claude_settings_path()) {
+            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Err(_) => return,
+        };
+        let servers = parsed
+            .get("mcpServers")
+            .and_then(serde_json::Value::as_object);
+        let has_monet = servers.is_some_and(|s| s.contains_key("monet"));
+        let has_legacy = servers
+            .and_then(|s| s.get("cc-space"))
+            .and_then(|v| v.get("command"))
+            .and_then(|c| c.as_str())
+            .is_some_and(|cmd| cmd.contains("cc-space"));
+
+        if has_legacy && !has_monet {
+            // 旧条目在、新条目不在：执行完整注册（含清扫旧条目）
+            if let Err(e) = register_mcp_inner() {
+                log::warn!("MCP legacy→monet migration failed: {e}");
+            }
+        } else if has_monet {
             if let Err(e) = install_mcp_binary() {
-                log::warn!("MCP binary startup sync failed: {}", e);
+                log::warn!("MCP binary startup sync failed: {e}");
             }
         }
     });
 }
 
-#[tauri::command]
-pub fn get_mcp_status() -> serde_json::Value {
-    let path = claude_settings_path();
-    let settings: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-
-    let registered = settings
-        .get("mcpServers")
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|servers| servers.contains_key("monet"));
-
-    serde_json::json!({ "registered": registered })
-}
-
-#[tauri::command]
-pub fn register_mcp() -> Result<(), String> {
+/// register_mcp 的核心逻辑，startup_sync 和手动注册共用
+fn register_mcp_inner() -> Result<(), String> {
     let mcp_path = install_mcp_binary()?;
     let settings_path = claude_settings_path();
 
@@ -283,8 +279,6 @@ pub fn register_mcp() -> Result<(), String> {
         serde_json::Value::Object(server_config),
     );
 
-    // 清扫旧版遗留注册：更名前写入的 "cc-space" 条目指向已不存在的旧二进制。
-    // 仅当其 command 含 "cc-space"（确认是本产品旧注册，而非用户自建同名 server）才移除。
     let stale_legacy = mcp_servers
         .get("cc-space")
         .and_then(|v| v.get("command"))
@@ -298,6 +292,27 @@ pub fn register_mcp() -> Result<(), String> {
     let json_str = serde_json::to_string_pretty(&serde_json::Value::Object(settings))
         .map_err(|e| format!("序列化失败: {}", e))?;
     fs::write(&settings_path, json_str).map_err(|e| format!("写入失败: {}", e))
+}
+
+#[tauri::command]
+pub fn get_mcp_status() -> serde_json::Value {
+    let path = claude_settings_path();
+    let settings: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let registered = settings
+        .get("mcpServers")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|servers| servers.contains_key("monet"));
+
+    serde_json::json!({ "registered": registered })
+}
+
+#[tauri::command]
+pub fn register_mcp() -> Result<(), String> {
+    register_mcp_inner()
 }
 
 #[tauri::command]
