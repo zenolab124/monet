@@ -2,7 +2,7 @@ import WidgetKit
 import SwiftUI
 
 @main
-struct CCSpaceWidgetBundle: WidgetBundle {
+struct MonetWidgetBundle: WidgetBundle {
     var body: some Widget {
         TodaySummaryWidget()
         TokenWidget()

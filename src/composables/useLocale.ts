@@ -3,11 +3,13 @@ import { invoke } from '@tauri-apps/api/core'
 import { setLocale, registerLocale, builtinLocales } from '../locales'
 import type { MessageSchema } from '../locales'
 import zhCN from '../locales/zh-CN.json'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
-const STORAGE_KEY = 'cc-space-locale'
+const STORAGE_KEY = 'monet-locale'
+const LEGACY_STORAGE_KEY = 'cc-space-locale' // 旧 key(更名前),一次性迁移读取用
 
 function getStored(): string {
-  return localStorage.getItem(STORAGE_KEY) || 'zh-CN'
+  return readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY) || 'zh-CN'
 }
 
 const locale = ref(getStored())

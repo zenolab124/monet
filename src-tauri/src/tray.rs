@@ -27,7 +27,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         )
         .icon_as_template(true)
         .menu(&menu)
-        .tooltip("CC Space")
+        .tooltip("Monet")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "refresh" => {
@@ -89,7 +89,7 @@ fn build_menu(
         }
     }
 
-    let show_label = if zh { "打开 CC Space" } else { "Open CC Space" };
+    let show_label = if zh { "打开 Monet" } else { "Open Monet" };
     let refresh_label = if zh { "刷新额度" } else { "Refresh Quota" };
     let quit_label = if zh { "退出" } else { "Quit" };
 

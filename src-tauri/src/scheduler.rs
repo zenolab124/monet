@@ -68,7 +68,7 @@ pub fn install_runner_binary() -> Result<(), String> {
             let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
         }
         #[cfg(target_os = "macos")]
-        crate::signing::sign(&target, "com.ccspace.desktop.cc-space-routine-runner");
+        crate::signing::sign(&target, "io.github.zenolab124.monet.routine-runner");
     }
 
     Ok(())
@@ -101,9 +101,9 @@ fn bundled_runner_path() -> PathBuf {
 
 fn runner_bin_name() -> &'static str {
     if cfg!(target_os = "windows") {
-        "cc-space-routine-runner.exe"
+        "monet-routine-runner.exe"
     } else {
-        "cc-space-routine-runner"
+        "monet-routine-runner"
     }
 }
 
@@ -140,27 +140,42 @@ mod platform {
     use std::fs;
     use std::process::Command;
 
-    fn plist_path(routine_id: &str) -> PathBuf {
+    const LABEL_PREFIX: &str = "io.github.zenolab124.monet.routine.";
+    // 旧前缀（CC Space 时期）：仅用于查找/删除兼容，不再新建
+    const LEGACY_LABEL_PREFIX: &str = "com.cc-space.routine.";
+
+    fn launch_agents_dir() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_default()
             .join("Library")
             .join("LaunchAgents")
-            .join(format!("com.cc-space.routine.{}.plist", routine_id))
+    }
+
+    fn plist_path(routine_id: &str) -> PathBuf {
+        launch_agents_dir().join(format!("{}{}.plist", LABEL_PREFIX, routine_id))
+    }
+
+    fn legacy_plist_path(routine_id: &str) -> PathBuf {
+        launch_agents_dir().join(format!("{}{}.plist", LEGACY_LABEL_PREFIX, routine_id))
     }
 
     fn label(routine_id: &str) -> String {
-        format!("com.cc-space.routine.{}", routine_id)
+        format!("{}{}", LABEL_PREFIX, routine_id)
     }
 
     pub fn is_registered(routine_id: &str) -> bool {
-        plist_path(routine_id).exists()
+        // 新旧两套前缀任一在位即视为已注册
+        plist_path(routine_id).exists() || legacy_plist_path(routine_id).exists()
     }
 
     pub fn needs_update(routine: &RoutineDefinition, runner_path: &Path) -> bool {
         let path = plist_path(&routine.id);
         let existing = match fs::read_to_string(&path) {
             Ok(s) => s,
-            Err(_) => return true,
+            // 新前缀 plist 不存在：若旧前缀 plist 在位，视为已注册且不强制迁移
+            // （老任务保持旧名；用户编辑/开关会经 update_routine 显式 unregister+register
+            // 自然换新）。两者皆无才是真正需要注册。
+            Err(_) => return !legacy_plist_path(&routine.id).exists(),
         };
         let calendar_intervals = match cron_to_calendar_intervals(&routine.cron_expression) {
             Ok(ci) => ci,
@@ -176,10 +191,7 @@ mod platform {
     }
 
     pub fn cleanup_orphans(known_ids: &std::collections::HashSet<&str>) {
-        let agents_dir = dirs::home_dir()
-            .unwrap_or_default()
-            .join("Library")
-            .join("LaunchAgents");
+        let agents_dir = launch_agents_dir();
         let entries = match fs::read_dir(&agents_dir) {
             Ok(e) => e,
             Err(_) => return,
@@ -187,10 +199,12 @@ mod platform {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if let Some(id) = name
-                .strip_prefix("com.cc-space.routine.")
-                .and_then(|s| s.strip_suffix(".plist"))
-            {
+            // 新旧两套前缀都识别；孤儿一律回收（unregister 内部同时清新旧 plist）
+            let id = name.strip_suffix(".plist").and_then(|stem| {
+                stem.strip_prefix(LABEL_PREFIX)
+                    .or_else(|| stem.strip_prefix(LEGACY_LABEL_PREFIX))
+            });
+            if let Some(id) = id {
                 if !known_ids.contains(id) {
                     log::info!("cleaning up orphaned routine agent: {}", id);
                     let _ = unregister(id);
@@ -241,19 +255,19 @@ mod platform {
     }
 
     pub fn unregister(routine_id: &str) -> Result<(), String> {
-        let path = plist_path(routine_id);
-
         let uid = Command::new("id").arg("-u").output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .unwrap_or_else(|_| "501".to_string());
         let domain_target = format!("gui/{}", uid);
 
-        let _ = Command::new("launchctl")
-            .args(["bootout", &domain_target, &path.to_string_lossy()])
-            .output();
-
-        if path.exists() {
-            let _ = fs::remove_file(&path);
+        // 新旧两套前缀都尝试卸载：bootout 各自 plist 后删文件（旧任务照常可删）
+        for path in [plist_path(routine_id), legacy_plist_path(routine_id)] {
+            let _ = Command::new("launchctl")
+                .args(["bootout", &domain_target, &path.to_string_lossy()])
+                .output();
+            if path.exists() {
+                let _ = fs::remove_file(&path);
+            }
         }
 
         Ok(())
@@ -453,6 +467,11 @@ mod platform {
     use std::process::Command;
 
     fn task_name(routine_id: &str) -> String {
+        format!("Monet\\Routine-{}", routine_id)
+    }
+
+    // 旧任务名（CC Space 时期）：仅用于查找/删除兼容，不再新建
+    fn legacy_task_name(routine_id: &str) -> String {
         format!("CC-Space\\Routine-{}", routine_id)
     }
 
@@ -464,10 +483,14 @@ mod platform {
     }
 
     pub fn is_registered(routine_id: &str) -> bool {
-        let output = Command::new("schtasks")
-            .args(["/Query", "/TN", &task_name(routine_id)])
-            .output();
-        output.map_or(false, |o| o.status.success())
+        // 新旧两套任务名任一存在即视为已注册
+        let query = |tn: &str| {
+            Command::new("schtasks")
+                .args(["/Query", "/TN", tn])
+                .output()
+                .map_or(false, |o| o.status.success())
+        };
+        query(&task_name(routine_id)) || query(&legacy_task_name(routine_id))
     }
 
     pub fn needs_update(_routine: &RoutineDefinition, _runner_path: &Path) -> bool {
@@ -491,6 +514,10 @@ mod platform {
                 let _ = fs::write(&xml_file, &xml);
                 let _ = Command::new("schtasks")
                     .args(["/Create", "/TN", &task_name(&routine.id), "/XML", &xml_file.to_string_lossy(), "/F"])
+                    .output();
+                // 新任务已建，删除同 id 的旧任务名，避免新旧双份被调度重复执行
+                let _ = Command::new("schtasks")
+                    .args(["/Delete", "/TN", &legacy_task_name(&routine.id), "/F"])
                     .output();
             }
         }
@@ -523,12 +550,21 @@ mod platform {
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
+
+        // 新任务已建，删除同 id 的旧任务名，避免新旧双份被调度重复执行
+        let _ = Command::new("schtasks")
+            .args(["/Delete", "/TN", &legacy_task_name(&routine.id), "/F"])
+            .output();
         Ok(())
     }
 
     pub fn unregister(routine_id: &str) -> Result<(), String> {
+        // 新旧两套任务名都尝试删除（旧任务照常可删）
         let _ = Command::new("schtasks")
             .args(["/Delete", "/TN", &task_name(routine_id), "/F"])
+            .output();
+        let _ = Command::new("schtasks")
+            .args(["/Delete", "/TN", &legacy_task_name(routine_id), "/F"])
             .output();
         let xml = xml_path(routine_id);
         if xml.exists() {
@@ -606,15 +642,26 @@ mod platform {
     }
 
     fn service_name(routine_id: &str) -> String {
-        format!("cc-space-routine-{}.service", routine_id)
+        format!("monet-routine-{}.service", routine_id)
     }
 
     fn timer_name(routine_id: &str) -> String {
+        format!("monet-routine-{}.timer", routine_id)
+    }
+
+    // 旧 unit 名（CC Space 时期）：仅用于查找/删除兼容，不再新建
+    fn legacy_service_name(routine_id: &str) -> String {
+        format!("cc-space-routine-{}.service", routine_id)
+    }
+
+    fn legacy_timer_name(routine_id: &str) -> String {
         format!("cc-space-routine-{}.timer", routine_id)
     }
 
     pub fn is_registered(routine_id: &str) -> bool {
+        // 新旧两套 timer 名任一存在即视为已注册
         unit_dir().join(timer_name(routine_id)).exists()
+            || unit_dir().join(legacy_timer_name(routine_id)).exists()
     }
 
     pub fn needs_update(_routine: &RoutineDefinition, _runner_path: &Path) -> bool {
@@ -632,7 +679,7 @@ mod platform {
         let _ = fs::create_dir_all(&dir);
 
         let service = format!(
-            "[Unit]\nDescription=CC Space Routine: {name}\n\n[Service]\nType=oneshot\nExecStart={runner} --routine-id {id}\n",
+            "[Unit]\nDescription=Monet Routine: {name}\n\n[Service]\nType=oneshot\nExecStart={runner} --routine-id {id}\n",
             name = routine.name,
             runner = runner_path.display(),
             id = routine.id,
@@ -640,7 +687,7 @@ mod platform {
 
         let on_calendar = cron_to_systemd_calendar(&routine.cron_expression)?;
         let timer = format!(
-            "[Unit]\nDescription=Timer for CC Space Routine: {name}\n\n[Timer]\nOnCalendar={cal}\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+            "[Unit]\nDescription=Timer for Monet Routine: {name}\n\n[Timer]\nOnCalendar={cal}\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
             name = routine.name,
             cal = on_calendar,
         );
@@ -669,13 +716,19 @@ mod platform {
     }
 
     pub fn unregister(routine_id: &str) -> Result<(), String> {
+        // 新旧两套 unit 名都尝试停用+删除（旧任务照常可删）
         let _ = Command::new("systemctl")
             .args(["--user", "disable", "--now", &timer_name(routine_id)])
+            .output();
+        let _ = Command::new("systemctl")
+            .args(["--user", "disable", "--now", &legacy_timer_name(routine_id)])
             .output();
 
         let dir = unit_dir();
         let _ = fs::remove_file(dir.join(service_name(routine_id)));
         let _ = fs::remove_file(dir.join(timer_name(routine_id)));
+        let _ = fs::remove_file(dir.join(legacy_service_name(routine_id)));
+        let _ = fs::remove_file(dir.join(legacy_timer_name(routine_id)));
 
         let _ = Command::new("systemctl")
             .args(["--user", "daemon-reload"])

@@ -1,4 +1,4 @@
-当前客户端为 CC Space，支持在 Markdown 中渲染内嵌 HTML。请在以下场景主动使用 HTML 增强表达，替代纯 Markdown 的垂直流式输出：
+当前客户端为 Monet，支持在 Markdown 中渲染内嵌 HTML。请在以下场景主动使用 HTML 增强表达，替代纯 Markdown 的垂直流式输出：
 
 ## 触发场景
 

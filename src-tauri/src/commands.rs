@@ -148,7 +148,7 @@ pub async fn request_system_permission(kind: String) -> Result<String, String> {
         let reset_if_denied = |service: &str, currently: &str| {
             if currently == "denied" {
                 let _ = std::process::Command::new("tccutil")
-                    .args(["reset", service, "com.ccspace.desktop"])
+                    .args(["reset", service, "io.github.zenolab124.monet"])
                     .output();
             }
         };
@@ -218,7 +218,7 @@ pub async fn run_runner_health_check(
         // 与真实 routine 完全一致的启动机制（plist + bootstrap 到 gui 域）。
         // 不用 launchctl submit：submit 的 job 挂在提交者会话下，会继承
         // 主 app 的 TCC 语境，检测结果失真
-        let label = "com.cc-space.health-check";
+        let label = "io.github.zenolab124.monet.health-check";
         let uid = std::process::Command::new("id")
             .arg("-u")
             .output()
@@ -236,7 +236,7 @@ pub async fn run_runner_health_check(
             Some(other) => return Err(format!("unsupported prompt kind: {}", other)),
             None => String::new(),
         };
-        let plist_path = std::env::temp_dir().join("com.cc-space.health-check.plist");
+        let plist_path = std::env::temp_dir().join("io.github.zenolab124.monet.health-check.plist");
         let plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -307,12 +307,12 @@ pub fn get_runner_health_snapshot() -> Option<serde_json::Value> {
         .and_then(|s| serde_json::from_str(&s).ok())
 }
 
-/// 与 runner 侧硬编码一致：launchd 语境没有 CC_SPACE_DATA_DIR，
+/// 与 runner 侧硬编码一致：launchd 语境没有 MONET_DATA_DIR，
 /// 双侧统一走默认家目录，避免 dev 环境变量导致读写错位
 fn runner_health_result_path() -> std::path::PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
-        .join(".cc-space")
+        .join(".monet")
         .join("permissions-runner.json")
 }
 
@@ -552,7 +552,7 @@ fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
     false
 }
 
-/// 扫描外部 claude 进程：命中匹配且非 CC Space 自持进程的 pid 列表。
+/// 扫描外部 claude 进程：命中匹配且非 Monet 自持进程的 pid 列表。
 /// 交互式 REPL（命令行不带 session-id）检测不到，属已知边界。
 /// Windows 无 ps，Command 失败时返回空表优雅降级。
 fn scan_external_claude(session_id: &str) -> Vec<u32> {
@@ -624,7 +624,7 @@ fn resolve_owner(pid: u32, table: &std::collections::HashMap<u32, (u32, String)>
     None
 }
 
-/// 检测 CC Space 自身是否为该会话持有长活进程（webview 刷新后 processAlive 状态校准用）。
+/// 检测 Monet 自身是否为该会话持有长活进程（webview 刷新后 processAlive 状态校准用）。
 /// 与 check_session_running 互补：那边只看外部进程，这边只看自有进程。
 #[tauri::command]
 pub fn has_own_process(session_id: String) -> bool {
@@ -632,7 +632,7 @@ pub fn has_own_process(session_id: String) -> bool {
 }
 
 /// 检测某会话是否有**外部** claude CLI 进程在运行，并解析归属方。
-/// 排除 CC Space 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
+/// 排除 Monet 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
 #[tauri::command]
 pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
     match scan_external_claude(&session_id).first() {
@@ -644,8 +644,8 @@ pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
     }
 }
 
-/// 终止指定会话的外部 CLI 进程（用户在 CC Space 点"停止"并确认后调用）。
-/// SIGTERM 温和终止；排除 CC Space 自身持有的长活进程。
+/// 终止指定会话的外部 CLI 进程（用户在 Monet 点"停止"并确认后调用）。
+/// SIGTERM 温和终止；排除 Monet 自身持有的长活进程。
 #[tauri::command]
 pub fn kill_external_session(session_id: String) -> bool {
     let pids = scan_external_claude(&session_id);

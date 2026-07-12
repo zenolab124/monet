@@ -47,7 +47,7 @@ struct SessionProcess {
 static ACTIVE_PROCESSES: Mutex<Option<HashMap<String, Arc<Mutex<SessionProcess>>>>> =
     Mutex::new(None);
 
-/// 获取 CC Space 为指定会话持有的长活进程 PID（check_session_running 排除自有进程用）
+/// 获取 Monet 为指定会话持有的长活进程 PID（check_session_running 排除自有进程用）
 pub fn get_own_pid(session_id: &str) -> Option<u32> {
     ACTIVE_PROCESSES
         .lock()
@@ -221,19 +221,19 @@ fn open_session(
         Some(p) => p,
         None => {
             PermissionService::stop_for(session_id);
-            return Err("未找到 cc-space-mcp 二进制，无法启动权限服务".to_string());
+            return Err("未找到 monet-mcp 二进制，无法启动权限服务".to_string());
         }
     };
 
     // 3. MCP 配置
     let mcp_config = json!({
         "mcpServers": {
-            "cc-space": {
+            "monet": {
                 "type": "stdio",
                 "command": mcp_binary.to_string_lossy().into_owned(),
                 "args": [],
                 "env": {
-                    "CC_SPACE_PERMISSION_SOCK": socket_path.to_string_lossy().into_owned()
+                    "MONET_PERMISSION_SOCK": socket_path.to_string_lossy().into_owned()
                 }
             }
         }
@@ -273,7 +273,7 @@ fn open_session(
         "--mcp-config".to_string(),
         mcp_config,
         "--permission-prompt-tool".to_string(),
-        "mcp__cc-space__approve_tool_use".to_string(),
+        "mcp__monet__approve_tool_use".to_string(),
     ]);
 
     let ultracode = effort == Some("ultracode");
@@ -721,14 +721,14 @@ fn emit_error(app: &AppHandle, session_id: &str, message: String) {
     let _ = app.emit("stream-done", json!({ "session_id": session_id }));
 }
 
-/// 定位 cc-space-mcp 二进制
+/// 定位 monet-mcp 二进制
 ///
 /// 顺序：
-/// 1. 环境变量 `CC_SPACE_MCP_BIN`（手动覆盖）
+/// 1. 环境变量 `MONET_MCP_BIN`（手动覆盖）
 /// 2. 与当前进程同目录（生产打包后 sidecar 就在主程序旁）
 /// 3. cargo target 目录（开发模式：current_exe 直接就是 target/{debug,release}/app）
 fn find_mcp_binary() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("CC_SPACE_MCP_BIN") {
+    if let Ok(p) = std::env::var("MONET_MCP_BIN") {
         let path = PathBuf::from(p);
         if path.is_file() {
             return Some(path);
@@ -736,12 +736,12 @@ fn find_mcp_binary() -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let candidate = dir.join("cc-space-mcp");
+            let candidate = dir.join("monet-mcp");
             if candidate.is_file() {
                 return Some(candidate);
             }
-            // dev: tauri 启动时 current_exe 在 target/debug，二进制名为 cc_space_mcp
-            let candidate2 = dir.join("cc_space_mcp");
+            // dev: tauri 启动时 current_exe 在 target/debug，二进制名为 monet_mcp
+            let candidate2 = dir.join("monet_mcp");
             if candidate2.is_file() {
                 return Some(candidate2);
             }

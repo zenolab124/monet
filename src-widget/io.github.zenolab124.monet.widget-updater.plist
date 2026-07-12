@@ -3,16 +3,16 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.ccspace.widget-updater</string>
+	<string>io.github.zenolab124.monet.widget-updater</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Applications/CC Space.app/Contents/MacOS/widget-updater</string>
+		<string>/Applications/Monet.app/Contents/MacOS/widget-updater</string>
 	</array>
 	<key>StartInterval</key>
 	<integer>1800</integer>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/tmp/cc-space-widget-updater.log</string>
+	<string>/tmp/monet-widget-updater.log</string>
 </dict>
 </plist>

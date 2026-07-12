@@ -1,7 +1,7 @@
 //! Routine 数据结构单一事实源。
 //!
-//! routines.json 有三个写者：主 App（routines.rs）、MCP server（cc-space-mcp）、
-//! runner（cc-space-routine-runner），后两者会整文件重写——任何一方用缺字段的
+//! routines.json 有三个写者：主 App（routines.rs）、MCP server（monet-mcp）、
+//! runner（monet-routine-runner），后两者会整文件重写——任何一方用缺字段的
 //! 本地副本序列化，都会把其他方写入的字段抹掉。因此结构定义必须共享：
 //! 本文件同时被 app_lib（mod routine_types）和两个 bin（#[path] mod）编译，
 //! 只允许依赖 std / serde，禁止 use crate::* 引用宿主 crate 的其他模块。

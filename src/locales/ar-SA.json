@@ -231,7 +231,7 @@
     "routinesTitle": "المهام المجدولة (Routines)",
     "newRoutine": "جديد",
     "noRoutines": "لا توجد مهام مجدولة",
-    "routinesHint": "بعد الإنشاء، سيتم تنفيذ أوامر Claude تلقائياً وفق الجدول أثناء تشغيل CC Space",
+    "routinesHint": "بعد الإنشاء، سيتم تنفيذ أوامر Claude تلقائياً وفق الجدول أثناء تشغيل Monet",
     "routineColumns": {
       "name": "الاسم",
       "schedule": "الجدول الزمني",

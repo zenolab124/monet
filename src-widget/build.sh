@@ -8,11 +8,11 @@ cd "$SCRIPT_DIR"
 # --- 参数 ---
 # 签名身份默认本机自签长效证书（scripts/setup-signing.sh 创建）：
 # TCC 授权钉在 identifier+证书 的 designated requirement 上，重新构建不丢权限
-SIGN_ID="${SIGN_ID:-CC Space Signing}"
-SIGNING_KEYCHAIN="$HOME/Library/Keychains/cc-space-signing.keychain-db"
-SIGNING_PASS_FILE="$HOME/.cc-space/signing/keychain-password"
+SIGN_ID="${SIGN_ID:-Monet Signing}"
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/monet-signing.keychain-db"
+SIGNING_PASS_FILE="$HOME/.monet/signing/keychain-password"
 CONFIG="${1:-Release}"
-APP_BUNDLE="${2:-../src-tauri/target/release/bundle/macos/CC Space.app}"
+APP_BUNDLE="${2:-../src-tauri/target/release/bundle/macos/Monet.app}"
 XCODE="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 
 if [ ! -d "$APP_BUNDLE" ]; then
@@ -25,8 +25,8 @@ fi
 echo "=> Building widget extension..."
 DEVELOPER_DIR="$XCODE" xcodegen generate --quiet 2>/dev/null || DEVELOPER_DIR="$XCODE" xcodegen generate
 DEVELOPER_DIR="$XCODE" xcodebuild build \
-    -project CCSpaceWidget.xcodeproj \
-    -target CCSpaceWidgetExtension \
+    -project MonetWidget.xcodeproj \
+    -target MonetWidgetExtension \
     -configuration "$CONFIG" \
     CODE_SIGNING_ALLOWED=NO \
     CONFIGURATION_BUILD_DIR=build/"$CONFIG" \
@@ -40,8 +40,8 @@ echo "=> Building widget-updater..."
 echo "=> Embedding into app bundle..."
 PLUGINS_DIR="$APP_BUNDLE/Contents/PlugIns"
 mkdir -p "$PLUGINS_DIR"
-rm -rf "$PLUGINS_DIR/CCSpaceWidgetExtension.appex"
-cp -R "build/$CONFIG/CCSpaceWidgetExtension.appex" "$PLUGINS_DIR/"
+rm -rf "$PLUGINS_DIR/MonetWidgetExtension.appex"
+cp -R "build/$CONFIG/MonetWidgetExtension.appex" "$PLUGINS_DIR/"
 cp ../src-tauri/target/release/widget-updater "$APP_BUNDLE/Contents/MacOS/widget-updater"
 
 # --- 签名 ---
@@ -51,17 +51,17 @@ if [ -f "$SIGNING_PASS_FILE" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
     security unlock-keychain -p "$(cat "$SIGNING_PASS_FILE")" "$SIGNING_KEYCHAIN"
 fi
 codesign --force --options runtime --sign "$SIGN_ID" \
-    --entitlements CCSpaceWidgetExtension.entitlements \
-    "$PLUGINS_DIR/CCSpaceWidgetExtension.appex"
-# 辅助二进制单独签固定 identifier：被安装到 ~/.cc-space/bin 后 DR 依旧稳定
+    --entitlements MonetWidgetExtension.entitlements \
+    "$PLUGINS_DIR/MonetWidgetExtension.appex"
+# 辅助二进制单独签固定 identifier：被安装到 ~/.monet/bin 后 DR 依旧稳定
 for BIN in "$APP_BUNDLE/Contents/MacOS/"*; do
     NAME=$(basename "$BIN")
     [ "$NAME" = "app" ] && continue
     codesign --force --options runtime --sign "$SIGN_ID" \
-        --identifier "com.ccspace.desktop.$NAME" "$BIN"
+        --identifier "io.github.zenolab124.monet.$NAME" "$BIN"
 done
 codesign --force --options runtime --sign "$SIGN_ID" \
-    --entitlements ../src-tauri/CCSpace.entitlements "$APP_BUNDLE"
+    --entitlements ../src-tauri/Monet.entitlements "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
 # --- 打 DMG ---

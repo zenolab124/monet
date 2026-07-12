@@ -6,14 +6,14 @@ use tauri::{
 use crate::{agent, streaming};
 
 pub fn create(app: &AppHandle) -> Result<Menu<Wry>, tauri::Error> {
-    let app_menu = SubmenuBuilder::new(app, "CC Space")
+    let app_menu = SubmenuBuilder::new(app, "Monet")
         .about(None)
         .separator()
         .hide()
         .hide_others()
         .show_all()
         .separator()
-        .item(&MenuItemBuilder::new("退出 CC Space").id("quit").accelerator("CmdOrCtrl+Q").build(app)?)
+        .item(&MenuItemBuilder::new("退出 Monet").id("quit").accelerator("CmdOrCtrl+Q").build(app)?)
         .build()?;
 
     let close_tab = MenuItemBuilder::new("关闭标签页")

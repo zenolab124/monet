@@ -125,7 +125,7 @@ struct HeatmapView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private func buildCalendarGrid(heatmap: [DayTokens], today: Date) -> [[DayTokens?]] {
@@ -204,6 +204,6 @@ struct HeatmapView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

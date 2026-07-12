@@ -1,12 +1,14 @@
 import { ref, watch } from 'vue'
+import { readMigratedStorage } from '../../utils/storageMigrate'
 
-const STORAGE_KEY = 'cc-space:feature:html-visual'
+const STORAGE_KEY = 'monet:feature:html-visual'
+const LEGACY_STORAGE_KEY = 'cc-space:feature:html-visual' // 旧 key,一次性迁移读取用
 
-const enabled = ref(localStorage.getItem(STORAGE_KEY) === 'true')
+const enabled = ref(readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY) === 'true')
 
 watch(enabled, v => localStorage.setItem(STORAGE_KEY, String(v)))
 
-export const HTML_VISUAL_PROMPT = `当前客户端为 CC Space，支持在 Markdown 中渲染内嵌 HTML。请在以下场景主动使用 HTML 增强表达，替代纯 Markdown 的垂直流式输出：
+export const HTML_VISUAL_PROMPT = `当前客户端为 Monet，支持在 Markdown 中渲染内嵌 HTML。请在以下场景主动使用 HTML 增强表达，替代纯 Markdown 的垂直流式输出：
 
 触发场景：
 1. 横向对比：方案优劣、参数矩阵、多维对照 → flex 并排卡片

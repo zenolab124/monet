@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import i18n from '../locales'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
 export interface SchemaProperty {
   type?: string | string[]
@@ -124,8 +125,10 @@ interface ExtractedDefault {
   confidence: 'high' | 'medium' | 'low'
 }
 
-const TRANSLATIONS_STORAGE_KEY = 'cc-space:settings-translations'
-const DEFAULTS_STORAGE_KEY = 'cc-space:settings-defaults:v2'
+const TRANSLATIONS_STORAGE_KEY = 'monet:settings-translations'
+const DEFAULTS_STORAGE_KEY = 'monet:settings-defaults:v2'
+const LEGACY_TRANSLATIONS_STORAGE_KEY = 'cc-space:settings-translations' // 旧 key,一次性迁移读取用
+const LEGACY_DEFAULTS_STORAGE_KEY = 'cc-space:settings-defaults:v2' // 旧 key,一次性迁移读取用
 
 const schema = ref<Record<string, SchemaProperty>>({})
 const settings = ref<Record<string, unknown>>({})
@@ -139,7 +142,7 @@ let loaded = false
 
 function loadCachedTranslations() {
   try {
-    const raw = localStorage.getItem(TRANSLATIONS_STORAGE_KEY)
+    const raw = readMigratedStorage(TRANSLATIONS_STORAGE_KEY, LEGACY_TRANSLATIONS_STORAGE_KEY)
     if (raw) translations.value = JSON.parse(raw)
   } catch { /* ignore */ }
 }
@@ -150,7 +153,7 @@ function saveCachedTranslations() {
 
 function loadCachedDefaults() {
   try {
-    const raw = localStorage.getItem(DEFAULTS_STORAGE_KEY)
+    const raw = readMigratedStorage(DEFAULTS_STORAGE_KEY, LEGACY_DEFAULTS_STORAGE_KEY)
     if (raw) extractedDefaults.value = JSON.parse(raw)
   } catch { /* ignore */ }
 }

@@ -95,7 +95,7 @@ struct MonthlyDashboardView: View {
                 }
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private func statBlock(_ value: String, _ label: LocalizedStringKey, _ trend: Int?) -> some View {
@@ -126,6 +126,6 @@ struct MonthlyDashboardView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

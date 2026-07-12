@@ -6,8 +6,8 @@
 	<true/>
 	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
 	<array>
-		<string>/tmp/cc-space-widget-data.json</string>
-		<string>/private/tmp/cc-space-widget-data.json</string>
+		<string>/tmp/monet-widget-data.json</string>
+		<string>/private/tmp/monet-widget-data.json</string>
 	</array>
 </dict>
 </plist>

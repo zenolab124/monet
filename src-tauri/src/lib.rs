@@ -2,7 +2,7 @@ use tauri::Manager;
 
 mod cache;
 mod channels;
-/// pub：定位逻辑同时被 cc-space-routine-runner 以 #[path] 方式复用
+/// pub：定位逻辑同时被 monet-routine-runner 以 #[path] 方式复用
 pub mod claude_locator;
 pub mod config;
 mod commands;
@@ -23,12 +23,12 @@ mod agent;
 mod automation;
 mod metadata;
 mod routines;
-/// pub：结构定义同时被 cc-space-mcp / cc-space-routine-runner 以 #[path] 方式复用
+/// pub：结构定义同时被 monet-mcp / monet-routine-runner 以 #[path] 方式复用
 pub mod routine_types;
-/// pub：搜索引擎同时被 cc-space-mcp 以 #[path] 方式复用（search_sessions 工具）
+/// pub：搜索引擎同时被 monet-mcp 以 #[path] 方式复用（search_sessions 工具）
 pub mod search;
 mod scheduler;
-/// pub：唤醒计划逻辑同时被 cc-space-routine-runner 以 #[path] 方式复用
+/// pub：唤醒计划逻辑同时被 monet-routine-runner 以 #[path] 方式复用
 pub mod wake;
 #[cfg(target_os = "macos")]
 mod signing;
@@ -46,14 +46,14 @@ mod widget;
 extern "C" {
     /// src/native/high_refresh.m：swizzle WKWebView 初始化器解锁 ProMotion 高刷。
     /// 必须先于任何 WKWebView 创建执行——feature 仅在创建时刻读取
-    fn cc_space_install_high_refresh_unlock();
+    fn monet_install_high_refresh_unlock();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "macos")]
     unsafe {
-        cc_space_install_high_refresh_unlock();
+        monet_install_high_refresh_unlock();
     }
     tauri::Builder::default()
         // ccimg 自定义协议：历史区图片按需取（base64 已从 records 剥离）。

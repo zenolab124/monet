@@ -231,7 +231,7 @@
     "routinesTitle": "Tâches planifiées (Routines)",
     "newRoutine": "Nouveau",
     "noRoutines": "Aucune tâche planifiée",
-    "routinesHint": "Une fois créées, les instructions Claude s'exécuteront automatiquement selon le planning tant que CC Space est en cours d'exécution",
+    "routinesHint": "Une fois créées, les instructions Claude s'exécuteront automatiquement selon le planning tant que Monet est en cours d'exécution",
     "routineColumns": {
       "name": "Nom",
       "schedule": "Planning",

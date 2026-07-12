@@ -1,13 +1,13 @@
-# CC Space
+# Monet
 
-A desktop app for browsing, searching, and managing [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions.
+Mission Control for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — a desktop app to browse, search, and manage your sessions.
 
 Built with [Tauri 2](https://tauri.app/) + [Vue 3](https://vuejs.org/).
 
 > **[中文说明](README.zh-CN.md)**
 
 <!-- TODO: add screenshot here -->
-<!-- ![CC Space screenshot](docs/screenshot.png) -->
+<!-- ![Monet screenshot](docs/screenshot.png) -->
 
 ## Features
 
@@ -39,8 +39,8 @@ Download the latest `.dmg` from [Releases](../../releases).
 ### Build
 
 ```bash
-git clone https://github.com/zenolab124/cc-space.git
-cd cc-space
+git clone https://github.com/zenolab124/monet.git
+cd monet
 pnpm install
 pnpm tauri build
 ```
@@ -55,7 +55,7 @@ pnpm tauri dev
 
 ## How It Works
 
-CC Space reads Claude Code session data from `~/.claude/projects/`. It **never writes** to these JSONL files — all metadata (titles, tags, archive status) is stored separately in `~/.claude/cc-space/`.
+Monet reads Claude Code session data from `~/.claude/projects/`. It **never writes** to these JSONL files — all metadata (titles, tags, archive status) is stored separately in `~/.monet/`.
 
 ## Tech Stack
 

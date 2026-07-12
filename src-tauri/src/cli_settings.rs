@@ -12,12 +12,12 @@ static SCHEMA_CACHE: Mutex<Option<Value>> = Mutex::new(None);
 
 const SCHEMA_URL: &str = "https://json.schemastore.org/claude-code-settings.json";
 
-fn cc_space_dir() -> PathBuf {
+fn data_dir() -> PathBuf {
     config::data_dir().to_path_buf()
 }
 
 fn schema_cache_path() -> PathBuf {
-    cc_space_dir().join("settings-schema.json")
+    data_dir().join("settings-schema.json")
 }
 
 fn claude_settings_path() -> PathBuf {
@@ -61,7 +61,7 @@ fn fetch_and_cache_schema() {
     let Ok(text) = resp.text() else { return };
 
     if let Ok(val) = serde_json::from_str::<Value>(&text) {
-        let dir = cc_space_dir();
+        let dir = data_dir();
         let _ = fs::create_dir_all(&dir);
         let _ = fs::write(schema_cache_path(), &text);
 
@@ -154,9 +154,9 @@ fn is_codesigned(_path: &std::path::Path) -> bool {
 
 fn mcp_bin_name() -> &'static str {
     if cfg!(target_os = "windows") {
-        "cc-space-mcp.exe"
+        "monet-mcp.exe"
     } else {
-        "cc-space-mcp"
+        "monet-mcp"
     }
 }
 
@@ -204,7 +204,7 @@ fn install_mcp_binary() -> Result<PathBuf, String> {
             let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o755));
         }
         #[cfg(target_os = "macos")]
-        crate::signing::sign(&target, "com.ccspace.desktop.cc-space-mcp");
+        crate::signing::sign(&target, "io.github.zenolab124.monet.mcp");
     }
 
     Ok(target)
@@ -220,7 +220,7 @@ pub fn startup_sync_mcp() {
             .as_ref()
             .and_then(|v| v.get("mcpServers"))
             .and_then(serde_json::Value::as_object)
-            .is_some_and(|servers| servers.contains_key("cc-space"));
+            .is_some_and(|servers| servers.contains_key("monet"));
         if registered {
             if let Err(e) = install_mcp_binary() {
                 log::warn!("MCP binary startup sync failed: {}", e);
@@ -240,7 +240,7 @@ pub fn get_mcp_status() -> serde_json::Value {
     let registered = settings
         .get("mcpServers")
         .and_then(serde_json::Value::as_object)
-        .is_some_and(|servers| servers.contains_key("cc-space"));
+        .is_some_and(|servers| servers.contains_key("monet"));
 
     serde_json::json!({ "registered": registered })
 }
@@ -269,19 +269,31 @@ pub fn register_mcp() -> Result<(), String> {
     );
     server_config.insert("args".to_string(), serde_json::json!([]));
 
-    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+    if let Ok(dir) = std::env::var("MONET_DATA_DIR") {
         let mut env = serde_json::Map::new();
         env.insert(
-            "CC_SPACE_DATA_DIR".to_string(),
+            "MONET_DATA_DIR".to_string(),
             serde_json::Value::String(dir),
         );
         server_config.insert("env".to_string(), serde_json::Value::Object(env));
     }
 
     mcp_servers.insert(
-        "cc-space".to_string(),
+        "monet".to_string(),
         serde_json::Value::Object(server_config),
     );
+
+    // 清扫旧版遗留注册：更名前写入的 "cc-space" 条目指向已不存在的旧二进制。
+    // 仅当其 command 含 "cc-space"（确认是本产品旧注册，而非用户自建同名 server）才移除。
+    let stale_legacy = mcp_servers
+        .get("cc-space")
+        .and_then(|v| v.get("command"))
+        .and_then(|c| c.as_str())
+        .is_some_and(|cmd| cmd.contains("cc-space"));
+    if stale_legacy {
+        mcp_servers.remove("cc-space");
+        log::info!("removed stale legacy MCP registration 'cc-space' (superseded by 'monet')");
+    }
 
     let json_str = serde_json::to_string_pretty(&serde_json::Value::Object(settings))
         .map_err(|e| format!("序列化失败: {}", e))?;
@@ -302,7 +314,7 @@ pub fn unregister_mcp() -> Result<(), String> {
         .get_mut("mcpServers")
         .and_then(serde_json::Value::as_object_mut)
     {
-        servers.remove("cc-space");
+        servers.remove("monet");
     }
 
     let json_str = serde_json::to_string_pretty(&serde_json::Value::Object(settings))

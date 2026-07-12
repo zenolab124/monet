@@ -1,4 +1,4 @@
-//! macOS 运行时代码签名：给安装到 ~/.cc-space/bin 的辅助二进制签名。
+//! macOS 运行时代码签名：给安装到 ~/.monet/bin 的辅助二进制签名。
 //!
 //! 优先级：已带稳定 DR 的预签（build.sh 产物，签名内嵌证书随文件拷贝依然
 //! 有效，不依赖本机钥匙串）> 本机自签证书重签（scripts/setup-signing.sh
@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
 
-const IDENTITY: &str = "CC Space Signing";
+const IDENTITY: &str = "Monet Signing";
 
 /// 目标已带有效签名且 DR 非 cdhash（即 identifier+证书 稳定形态）
 fn has_stable_signature(path: &Path) -> bool {
@@ -50,9 +50,9 @@ fn unlock_keychain() -> bool {
     let Some(home) = std::env::var_os("HOME") else { return false };
     let home = std::path::PathBuf::from(home);
     // 签名基建是机器级产物，路径与 setup-signing.sh 保持硬编码一致，
-    // 不随 CC_SPACE_DATA_DIR 漂移
-    let pass_file = home.join(".cc-space/signing/keychain-password");
-    let keychain = home.join("Library/Keychains/cc-space-signing.keychain-db");
+    // 不随 MONET_DATA_DIR 漂移
+    let pass_file = home.join(".monet/signing/keychain-password");
+    let keychain = home.join("Library/Keychains/monet-signing.keychain-db");
     let Ok(pass) = std::fs::read_to_string(&pass_file) else { return false };
     Command::new("security")
         .arg("unlock-keychain")

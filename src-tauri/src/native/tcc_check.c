@@ -7,7 +7,7 @@
 #include <string.h>
 
 // 自动化（Apple Events）：ask=false 时纯查询零弹窗
-int cc_space_ae_permission(const char *bundle_id, bool ask) {
+int monet_ae_permission(const char *bundle_id, bool ask) {
     AEAddressDesc target;
     OSStatus err = AECreateDesc(typeApplicationBundleID, bundle_id,
                                 strlen(bundle_id), &target);
@@ -24,12 +24,12 @@ int cc_space_ae_permission(const char *bundle_id, bool ask) {
     }
 }
 
-int cc_space_ax_trusted(void) {
+int monet_ax_trusted(void) {
     return AXIsProcessTrusted() ? 0 : 1;
 }
 
 // 辅助功能授权引导：把本进程加入系统设置列表并弹出引导窗
-int cc_space_ax_prompt(void) {
+int monet_ax_prompt(void) {
     CFStringRef keys[] = { kAXTrustedCheckOptionPrompt };
     CFBooleanRef values[] = { kCFBooleanTrue };
     CFDictionaryRef opts = CFDictionaryCreate(
@@ -40,11 +40,11 @@ int cc_space_ax_prompt(void) {
     return trusted ? 0 : 1;
 }
 
-int cc_space_screen_preflight(void) {
+int monet_screen_preflight(void) {
     return CGPreflightScreenCaptureAccess() ? 0 : 1;
 }
 
 // 首次调用弹系统授权窗；已 denied 时不再弹（需深链系统设置）
-int cc_space_screen_request(void) {
+int monet_screen_request(void) {
     return CGRequestScreenCaptureAccess() ? 0 : 1;
 }

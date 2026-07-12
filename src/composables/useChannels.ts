@@ -15,7 +15,7 @@ export interface ChannelInfo {
   scope: string
   agentModel: string | null
   availableModels: string[]
-  /** CC Space 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传) */
+  /** Monet 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传) */
   modelEnv: Record<string, string>
   /** 渠道默认模型(official 存元数据;第三方即文件 env.ANTHROPIC_MODEL) */
   defaultModel: string | null
@@ -105,6 +105,8 @@ async function setOfficialDefaults(model: string | null, effort: string | null):
   await refreshChannels()
 }
 
+// 更名前(CC Space 时期)由已废弃的 useAppDefaults 写入的历史 key,保持原名不改为
+// monet:——改名会读不到老用户既有数据,迁移失效。此 key 只读不写、迁移后即删除。
 const LEGACY_APP_DEFAULTS_KEY = 'cc-space:app-defaults'
 
 /**

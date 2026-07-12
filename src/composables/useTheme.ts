@@ -2,8 +2,10 @@ import { ref, computed, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import i18n from '../locales'
 import { THEMES, getTheme, type ThemeMeta } from './themeRegistry'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
-const STORAGE_KEY = 'cc-space-theme'
+const STORAGE_KEY = 'monet-theme'
+const LEGACY_STORAGE_KEY = 'cc-space-theme' // 旧 key,一次性迁移读取用
 
 interface ThemeConfig {
   version: 2
@@ -12,7 +14,7 @@ interface ThemeConfig {
 }
 
 function loadConfig(): ThemeConfig {
-  const raw = localStorage.getItem(STORAGE_KEY)
+  const raw = readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY)
   if (!raw) return { version: 2, lightTheme: 'paper', darkTheme: 'ink' }
 
   if (raw === 'system') return { version: 2, lightTheme: 'paper', darkTheme: 'ink' }

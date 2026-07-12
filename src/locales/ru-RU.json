@@ -231,7 +231,7 @@
     "routinesTitle": "Запланированные задачи (Routines)",
     "newRoutine": "Создать",
     "noRoutines": "Запланированных задач пока нет",
-    "routinesHint": "После создания CC Space будет автоматически выполнять команды Claude по расписанию",
+    "routinesHint": "После создания Monet будет автоматически выполнять команды Claude по расписанию",
     "routineColumns": {
       "name": "Название",
       "schedule": "Расписание",

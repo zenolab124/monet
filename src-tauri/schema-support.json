@@ -1,5 +1,5 @@
 {
-  "$comment": "CC Space 对 Claude Code 数据格式的支持声明（单一事实源）。schema-probe 读取本文件与本地 JSONL 真实数据做三态 diff（已支持/已忽略/未知）。新增类型支持或决策忽略时必须同步更新本文件——ignored 每条必须写明理由。",
+  "$comment": "Monet 对 Claude Code 数据格式的支持声明（单一事实源）。schema-probe 读取本文件与本地 JSONL 真实数据做三态 diff（已支持/已忽略/未知）。新增类型支持或决策忽略时必须同步更新本文件——ignored 每条必须写明理由。",
   "recordTypes": {
     "supported": ["user", "assistant", "ai-title", "custom-title", "system"],
     "ignored": {

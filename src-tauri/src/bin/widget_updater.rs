@@ -69,10 +69,10 @@ struct WidgetConfig {
 }
 
 fn data_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("CC_SPACE_DATA_DIR") {
+    if let Ok(d) = std::env::var("MONET_DATA_DIR") {
         PathBuf::from(d)
     } else {
-        dirs::home_dir().unwrap_or_default().join(".cc-space")
+        dirs::home_dir().unwrap_or_default().join(".monet")
     }
 }
 
@@ -92,7 +92,7 @@ fn projects_dir() -> PathBuf {
 fn widget_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
-        .join("Library/Containers/com.ccspace.desktop.widget/Data/widget-data.json")
+        .join("Library/Containers/io.github.zenolab124.monet.widget/Data/widget-data.json")
 }
 
 fn compute_day_boundary(day_start_hour: i8) -> (u64, String) {

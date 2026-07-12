@@ -592,7 +592,7 @@ mod tests {
     impl Fixture {
         fn new(case: &str) -> Self {
             let root = std::env::temp_dir().join(format!(
-                "cc-space-workshop-test-{}-{}",
+                "monet-workshop-test-{}-{}",
                 std::process::id(),
                 case
             ));

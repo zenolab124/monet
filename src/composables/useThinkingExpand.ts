@@ -1,15 +1,17 @@
 import { ref, watch } from 'vue'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
 /**
  * 思考块全局展开状态:点开任意思考块 = 全部展开,再点 = 全部折叠。
  * 状态持久化到 localStorage,新渲染的思考块(含流式新产出、跨会话)都跟随该状态。
  */
 
-const STORAGE_KEY = 'cc-space:thinking-expanded'
+const STORAGE_KEY = 'monet:thinking-expanded'
+const LEGACY_STORAGE_KEY = 'cc-space:thinking-expanded' // 旧 key,一次性迁移读取用
 
 function load(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) === '1'
+    return readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY) === '1'
   } catch (_) {
     return false
   }

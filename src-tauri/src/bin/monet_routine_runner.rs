@@ -200,8 +200,8 @@ fn run_health_check(prompt: Option<&str>) {
             "fullDiskAccess": tcc::check_full_disk_access(),
         },
     });
-    // 结果路径与主 App 读取侧硬编码一致（launchd 语境无 CC_SPACE_DATA_DIR）
-    let dir = dirs::home_dir().unwrap_or_default().join(".cc-space");
+    // 结果路径与主 App 读取侧硬编码一致（launchd 语境无 MONET_DATA_DIR）
+    let dir = dirs::home_dir().unwrap_or_default().join(".monet");
     let _ = fs::create_dir_all(&dir);
     let _ = fs::write(
         dir.join("permissions-runner.json"),
@@ -218,15 +218,15 @@ fn parse_args() -> String {
         }
         i += 1;
     }
-    eprintln!("usage: cc-space-routine-runner --routine-id <uuid>");
+    eprintln!("usage: monet-routine-runner --routine-id <uuid>");
     std::process::exit(1);
 }
 
 fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+    if let Ok(dir) = std::env::var("MONET_DATA_DIR") {
         PathBuf::from(dir)
     } else {
-        dirs::home_dir().unwrap_or_default().join(".cc-space")
+        dirs::home_dir().unwrap_or_default().join(".monet")
     }
 }
 

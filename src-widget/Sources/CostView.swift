@@ -46,7 +46,7 @@ struct CostView: View {
                 .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(.tertiary.opacity(0.7))
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private var emptyView: some View {
@@ -58,6 +58,6 @@ struct CostView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

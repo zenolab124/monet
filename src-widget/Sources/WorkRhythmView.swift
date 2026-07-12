@@ -67,7 +67,7 @@ struct WorkRhythmView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private static func hourColor(_ hour: Int, intensity: CGFloat, isPeak: Bool) -> Color {
@@ -96,6 +96,6 @@ struct WorkRhythmView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

@@ -9,7 +9,7 @@
 // WKWebView 的指定初始化器，在创建瞬间对传入 configuration 关闭该 feature。
 //
 // 防御：feature key 不存在（未来 WebKit 更名/移除）时静默无操作，保持 60fps。
-// 由 Rust 侧在 tauri::Builder 运行前调用 cc_space_install_high_refresh_unlock()。
+// 由 Rust 侧在 tauri::Builder 运行前调用 monet_install_high_refresh_unlock()。
 
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
@@ -17,7 +17,7 @@
 
 static IMP g_orig_init = NULL;
 
-static void cc_space_disable_sixty_clamp(WKWebViewConfiguration *config) {
+static void monet_disable_sixty_clamp(WKWebViewConfiguration *config) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
     SEL featuresSel = NSSelectorFromString(@"_experimentalFeatures");
@@ -35,15 +35,15 @@ static void cc_space_disable_sixty_clamp(WKWebViewConfiguration *config) {
 #pragma clang diagnostic pop
 }
 
-static id cc_space_swizzled_init(id self, SEL _cmd, CGRect frame, WKWebViewConfiguration *config) {
-    if (config) cc_space_disable_sixty_clamp(config);
+static id monet_swizzled_init(id self, SEL _cmd, CGRect frame, WKWebViewConfiguration *config) {
+    if (config) monet_disable_sixty_clamp(config);
     return ((id (*)(id, SEL, CGRect, id))g_orig_init)(self, _cmd, frame, config);
 }
 
-void cc_space_install_high_refresh_unlock(void) {
+void monet_install_high_refresh_unlock(void) {
     if (g_orig_init) return; // 幂等
     Method m = class_getInstanceMethod([WKWebView class], @selector(initWithFrame:configuration:));
     if (!m) return;
     g_orig_init = method_getImplementation(m);
-    method_setImplementation(m, (IMP)cc_space_swizzled_init);
+    method_setImplementation(m, (IMP)monet_swizzled_init);
 }

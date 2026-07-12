@@ -177,9 +177,9 @@ export function getContextWindow(modelStr: string | null): number {
 //   - max   不支持:claude-3-* / opus-4-0/4-1/4-5 / sonnet-4-0/4-5 / haiku-4-5
 //   - ultracode 要求 xhigh-capable 模型,否则静默不生效
 //   - 渠道映射的 _SUPPORTED_CAPABILITIES 声明:CLI 仅在 bedrock/vertex 等 provider
-//     下消费;firstParty(含 base_url 中转,即 CC Space 的渠道形态)下被忽略,
+//     下消费;firstParty(含 base_url 中转,即 Monet 的渠道形态)下被忽略,
 //     第三方模型 effort 原样透传、由第三方 API 自行处理——故第三方模型不标注,
-//     除非渠道声明了能力(CC Space 自己消费声明作为 UI 标注,语义与 CLI 一致)
+//     除非渠道声明了能力(Monet 自己消费声明作为 UI 标注,语义与 CLI 一致)
 //
 // 返回三态:true=支持 / false=不支持(CLI 会降级,UI 标「不支持」) / undefined=未知(不标注)。
 // 名单可能随 CLI 更新过时,故 UI 只做软提示不拦截选择。

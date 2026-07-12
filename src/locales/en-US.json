@@ -1,7 +1,7 @@
 {
   "app": {
     "quit": "Quit",
-    "quitConfirm": "Quit CC Space?"
+    "quitConfirm": "Quit Monet?"
   },
   "common": {
     "confirm": "Confirm",
@@ -348,7 +348,7 @@
     "routinesTitle": "Scheduled Tasks (Routines)",
     "newRoutine": "New",
     "noRoutines": "No scheduled tasks",
-    "routinesHint": "After creation, Claude commands will be executed on schedule while CC Space is running",
+    "routinesHint": "After creation, Claude commands will be executed on schedule while Monet is running",
     "routineColumns": {
       "name": "Name",
       "schedule": "Schedule",
@@ -463,7 +463,7 @@
       "diagnose": "Diagnose installs",
       "diagHide": "Hide diagnosis",
       "singleOk": "Only one installation found — no conflicts.",
-      "multiWarning": "Found {count} separate installations — which one your terminal uses depends on PATH order and may differ from CC Space.",
+      "multiWarning": "Found {count} separate installations — which one your terminal uses depends on PATH order and may differ from Monet.",
       "default": "Active",
       "verUnknown": "unknown",
       "methodOfficial": "Official",
@@ -491,10 +491,10 @@
     "permissionsNav": "Permissions",
     "permCheck": {
       "title": "Permission Checkup",
-      "desc": "macOS records permission grants per process. CC Space has two ledgers: the main app (foreground sessions and workbench tasks) and the background task runner (scheduled tasks launched independently by launchd). Missing permissions cause silent failures — grant everything here in one pass.",
+      "desc": "macOS records permission grants per process. Monet has two ledgers: the main app (foreground sessions and workbench tasks) and the background task runner (scheduled tasks launched independently by launchd). Missing permissions cause silent failures — grant everything here in one pass.",
       "appGroup": "Main App",
       "runnerGroup": "Background Task Runner",
-      "runnerGroupDesc": "Scheduled tasks are launched by launchd with a permission ledger separate from the main app. The check runs a self-test through the real launchd path (identical context to scheduled tasks). First-time grants happen via system prompts during an actual run, or manually in System Settings for cc-space-routine-runner.",
+      "runnerGroupDesc": "Scheduled tasks are launched by launchd with a permission ledger separate from the main app. The check runs a self-test through the real launchd path (identical context to scheduled tasks). First-time grants happen via system prompts during an actual run, or manually in System Settings for monet-routine-runner.",
       "refresh": "Re-check",
       "runCheck": "Run Check",
       "checking": "Checking…",
@@ -505,8 +505,8 @@
       "requestFailed": "Permission request failed",
       "runnerCheckFailed": "Runner check failed",
       "stillDenied": "Still denied",
-      "stillDeniedHint": "The system won't prompt again for denied records. Open the corresponding System Settings panel, remove the old cc-space-routine-runner entry, then hit Request again",
-      "screenRestartHint": "If you just allowed screen recording, restart CC Space for it to take effect",
+      "stillDeniedHint": "The system won't prompt again for denied records. Open the corresponding System Settings panel, remove the old monet-routine-runner entry, then hit Request again",
+      "screenRestartHint": "If you just allowed screen recording, restart Monet for it to take effect",
       "status": {
         "granted": "Granted",
         "denied": "Denied",
@@ -646,7 +646,7 @@
     "agentFeature_test": "Channel Test",
     "labDesc": "Experimental features, may be unstable.",
     "htmlVisual": "HTML Visual Enhancement",
-    "htmlVisualDesc": "Guide AI to embed HTML in Markdown for side-by-side comparisons, info cards, collapsible sections, etc. Injects prompt via --append-system-prompt, only affects CC Space workbench sessions.",
+    "htmlVisualDesc": "Guide AI to embed HTML in Markdown for side-by-side comparisons, info cards, collapsible sections, etc. Injects prompt via --append-system-prompt, only affects Monet workbench sessions.",
     "htmlVisualBanner": "HTML Visual Enhancement enabled",
     "diagDesc": "Scan all session files and check record type and tool parsing coverage.",
     "channelForm": {
@@ -873,7 +873,7 @@
     "checkClipboard": "Please check clipboard permissions",
     "terminalFailed": "Failed to open terminal",
     "automationDenied": "Automation permission denied",
-    "automationDeniedHint": "Allow CC Space to control Terminal in System Settings → Privacy & Security → Automation",
+    "automationDeniedHint": "Allow Monet to control Terminal in System Settings → Privacy & Security → Automation",
     "vscodeFailed": "Failed to open VS Code",
     "deleteFailed": "Delete failed",
     "tokenTotalInput": "Total input",

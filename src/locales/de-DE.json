@@ -231,7 +231,7 @@
     "routinesTitle": "Geplante Aufgaben (Routines)",
     "newRoutine": "Neu erstellen",
     "noRoutines": "Keine geplanten Aufgaben",
-    "routinesHint": "Nach dem Erstellen werden Claude-Anweisungen während der CC Space-Laufzeit planmäßig automatisch ausgeführt",
+    "routinesHint": "Nach dem Erstellen werden Claude-Anweisungen während der Monet-Laufzeit planmäßig automatisch ausgeführt",
     "routineColumns": {
       "name": "Name",
       "schedule": "Zeitplan",

@@ -86,7 +86,7 @@ export interface SessionStreamState {
   /** Remote Control 是否已启用（open_session 自动启用，手动可关） */
   rcActive: boolean
   /**
-   * CC Space 自持长活进程是否存活。与 streaming 是两回事：turn 结束（result 到达）
+   * Monet 自持长活进程是否存活。与 streaming 是两回事：turn 结束（result 到达）
    * 后进程继续活着跑后台任务（Workflow/子 agent/后台 bash）。异步账本的 live 判据
    * 靠它避免把「turn 已结束但后台任务在跑」的条目误判为 unknown。
    * 写入源：stream-event 到达置 true（进程在说话必然活着）、

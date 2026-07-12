@@ -5,10 +5,25 @@ static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn data_dir() -> &'static PathBuf {
     DATA_DIR.get_or_init(|| {
-        if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+        if let Ok(dir) = std::env::var("MONET_DATA_DIR") {
             PathBuf::from(dir)
         } else {
-            dirs::home_dir().unwrap_or_default().join(".cc-space")
+            let home = dirs::home_dir().unwrap_or_default();
+            let target = home.join(".monet");
+            // 数据目录更名迁移(cc-space → monet):新目录尚未建立且旧目录仍在时，
+            // 整体 rename 搬迁;失败则回退沿用旧目录(不丢数据,仅打日志)。
+            // OnceLock 初始化只跑一次,迁移检测无高频代价。
+            if !target.exists() {
+                let legacy = home.join(".cc-space");
+                if legacy.is_dir() {
+                    if let Err(e) = std::fs::rename(&legacy, &target) {
+                        // 本文件经 #[path] 编进精简 bin(monet-mcp),坚持 std-only,不引 log
+                        eprintln!("[monet] 数据目录迁移 ~/.cc-space → ~/.monet 失败,继续沿用旧目录: {e}");
+                        return legacy;
+                    }
+                }
+            }
+            target
         }
     })
 }

@@ -1,22 +1,22 @@
-name: CCSpaceWidget
+name: MonetWidget
 options:
-  bundleIdPrefix: com.ccspace.desktop
+  bundleIdPrefix: io.github.zenolab124.monet
   deploymentTarget:
     macOS: "26.0"
 
 targets:
-  CCSpaceWidgetExtension:
+  MonetWidgetExtension:
     type: app-extension
     platform: macOS
     sources:
       - path: Sources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.ccspace.desktop.widget
-        PRODUCT_NAME: CCSpaceWidgetExtension
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.zenolab124.monet.widget
+        PRODUCT_NAME: MonetWidgetExtension
         SWIFT_VERSION: "5.9"
         INFOPLIST_FILE: Sources/Info.plist
-        CODE_SIGN_ENTITLEMENTS: CCSpaceWidgetExtension.entitlements
+        CODE_SIGN_ENTITLEMENTS: MonetWidgetExtension.entitlements
         MARKETING_VERSION: "2.2.0"
         CURRENT_PROJECT_VERSION: 4
     dependencies:

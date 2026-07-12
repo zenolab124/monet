@@ -231,7 +231,7 @@
     "routinesTitle": "Tac vu dinh ky (Routines)",
     "newRoutine": "Tao moi",
     "noRoutines": "Chua co tac vu dinh ky",
-    "routinesHint": "Sau khi tao, CC Space se tu dong thuc thi lenh Claude theo lich trong thoi gian chay",
+    "routinesHint": "Sau khi tao, Monet se tu dong thuc thi lenh Claude theo lich trong thoi gian chay",
     "routineColumns": {
       "name": "Ten",
       "schedule": "Lich trinh",

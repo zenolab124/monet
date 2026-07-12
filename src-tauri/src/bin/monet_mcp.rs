@@ -1,11 +1,11 @@
-//! cc-space MCP server
+//! Monet MCP server
 //!
 //! stdio JSON-RPC 2.0 server，双职能：
 //! 1. 权限审批（--permission-prompt-tool）：通过 Unix socket 与主进程通信
 //! 2. 通用工具：直接读写数据目录，暴露 routine 管理等能力
 //!
 //! tool 列表根据环境动态组装：
-//! - CC_SPACE_PERMISSION_SOCK 存在 → 包含 approve_tool_use
+//! - MONET_PERMISSION_SOCK 存在 → 包含 approve_tool_use
 //! - 始终包含 routine_list / routine_create / routine_delete
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -18,7 +18,7 @@ use std::time::Duration;
 use chrono::Utc;
 use serde_json::{json, Value};
 
-const SERVER_NAME: &str = "cc-space";
+const SERVER_NAME: &str = "monet";
 const SERVER_VERSION: &str = "0.2.0";
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -171,7 +171,7 @@ fn handle_initialize(id: Value, req: &Value) -> Value {
             "protocolVersion": PROTOCOL_VERSION,
             "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
             "capabilities": { "tools": {} },
-            "instructions": "CC Space provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them. CC Space also provides search_sessions: full-text search over the user's Claude Code session history (~/.claude/projects). When the user asks to recall a past conversation/decision/discussion, prefer search_sessions over grepping JSONL files directly — it returns clean text with session locators in milliseconds."
+            "instructions": "Monet provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them. Monet also provides search_sessions: full-text search over the user's Claude Code session history (~/.claude/projects). When the user asks to recall a past conversation/decision/discussion, prefer search_sessions over grepping JSONL files directly — it returns clean text with session locators in milliseconds."
         }
     })
 }
@@ -196,7 +196,7 @@ fn handle_tools_list(id: Value) -> Value {
 
     tools.push(json!({
         "name": "routine_list",
-        "description": "List all scheduled routines in CC Space.",
+        "description": "List all scheduled routines in Monet.",
         "inputSchema": {
             "type": "object",
             "properties": {}
@@ -395,7 +395,7 @@ fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 fn has_permission_socket() -> bool {
-    std::env::var("CC_SPACE_PERMISSION_SOCK").is_ok()
+    std::env::var("MONET_PERMISSION_SOCK").is_ok()
 }
 
 fn handle_approve_tool_use(arguments: &Value) -> Result<String, String> {
@@ -421,8 +421,8 @@ fn handle_approve_tool_use(arguments: &Value) -> Result<String, String> {
 
 #[cfg(unix)]
 fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String> {
-    let sock_path = std::env::var("CC_SPACE_PERMISSION_SOCK")
-        .map_err(|_| "环境变量 CC_SPACE_PERMISSION_SOCK 未设置".to_string())?;
+    let sock_path = std::env::var("MONET_PERMISSION_SOCK")
+        .map_err(|_| "环境变量 MONET_PERMISSION_SOCK 未设置".to_string())?;
 
     let mut stream = UnixStream::connect(&sock_path)
         .map_err(|e| format!("连接 {} 失败：{}", sock_path, e))?;

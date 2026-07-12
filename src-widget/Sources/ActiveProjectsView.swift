@@ -50,7 +50,7 @@ struct ActiveProjectsView: View {
                 }
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private var emptyView: some View {
@@ -62,6 +62,6 @@ struct ActiveProjectsView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

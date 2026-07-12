@@ -1,13 +1,13 @@
-# CC Space
+# Monet
 
-浏览、搜索和管理 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 会话的桌面应用。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 的任务控制中心 —— 浏览、搜索、管理会话的桌面应用。
 
 基于 [Tauri 2](https://tauri.app/) + [Vue 3](https://vuejs.org/) 构建。
 
 > **[English](README.md)**
 
 <!-- TODO: 添加截图 -->
-<!-- ![CC Space 截图](docs/screenshot.png) -->
+<!-- ![Monet 截图](docs/screenshot.png) -->
 
 ## 功能
 
@@ -39,8 +39,8 @@
 ### 构建
 
 ```bash
-git clone https://github.com/zenolab124/cc-space.git
-cd cc-space
+git clone https://github.com/zenolab124/monet.git
+cd monet
 pnpm install
 pnpm tauri build
 ```
@@ -55,7 +55,7 @@ pnpm tauri dev
 
 ## 工作原理
 
-CC Space 读取 `~/.claude/projects/` 下的 Claude Code 会话数据，**绝不写入** JSONL 文件 — 所有增值数据（标题、标签、归档状态）存储在独立目录 `~/.claude/cc-space/`。
+Monet 读取 `~/.claude/projects/` 下的 Claude Code 会话数据，**绝不写入** JSONL 文件 — 所有增值数据（标题、标签、归档状态）存储在独立目录 `~/.monet/`。
 
 ## 技术栈
 

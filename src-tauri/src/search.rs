@@ -10,7 +10,7 @@
 //! - 缓存：内存 HashMap 为查询主体；落盘按项目分片存 data_dir()/search/v1/，
 //!   mtime+size 判失效；写盘走 atomic_write（主 App 与 MCP 进程并发写安全）
 //! - 增量：watcher 报变更只标 dirty，查询时懒重提取（天然去抖）
-//! - 双进程：主 App 与 cc_space_mcp 二进制共用本模块（bin 侧 #[path] 引入），
+//! - 双进程：主 App 与 monet_mcp 二进制共用本模块（bin 侧 #[path] 引入），
 //!   MCP 拉起时 warm() 对账 mtime 自补增量，不依赖主 App 存活
 //!
 //! 查询语义：空格分词多词 AND（会话级——每词在会话任意处出现即可），
@@ -27,7 +27,7 @@ use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-// 主 App 与 cc_space_mcp bin 双端编译：bin 侧在其 crate root 以
+// 主 App 与 monet_mcp bin 双端编译：bin 侧在其 crate root 以
 // #[path = "../config.rs"] mod config; 提供同名模块，crate::config 两边都成立
 use crate::config;
 
@@ -881,7 +881,7 @@ mod tests {
     /// 提取：user 字符串 content、assistant text 块、标题、噪音剔除、sidechain 剔除
     #[test]
     fn extract_basics() {
-        let dir = std::env::temp_dir().join("cc-space-search-test-extract");
+        let dir = std::env::temp_dir().join("monet-search-test-extract");
         fs::create_dir_all(&dir).unwrap();
         let lines = vec![
             user_line("u1", "修复流式渲染的死锁问题"),
@@ -951,8 +951,8 @@ mod tests {
     #[test]
     #[ignore]
     fn smoke_real_data() {
-        let tmp = std::env::temp_dir().join("cc-space-search-smoke");
-        std::env::set_var("CC_SPACE_DATA_DIR", &tmp);
+        let tmp = std::env::temp_dir().join("monet-search-smoke");
+        std::env::set_var("MONET_DATA_DIR", &tmp);
 
         let t0 = std::time::Instant::now();
         let status = warm();

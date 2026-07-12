@@ -59,7 +59,7 @@ struct TodaySummaryView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private var emptyView: some View {
@@ -71,6 +71,6 @@ struct TodaySummaryView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

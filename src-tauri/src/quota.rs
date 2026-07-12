@@ -277,7 +277,7 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
-        .header("User-Agent", "cc-space/1.0")
+        .header("User-Agent", "monet/1.0")
         .send()
         .map_err(|e| format!("Network error: {e}"))?;
 
@@ -665,7 +665,7 @@ pub fn format_tray_tooltip(info: &QuotaInfo) -> String {
         parts.push(format!("Plan: {plan}"));
     }
     if parts.is_empty() {
-        "CC Space".into()
+        "Monet".into()
     } else {
         parts.join("\n")
     }

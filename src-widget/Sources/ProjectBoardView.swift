@@ -57,7 +57,7 @@ struct ProjectBoardView: View {
                 }
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private var emptyView: some View {
@@ -69,6 +69,6 @@ struct ProjectBoardView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

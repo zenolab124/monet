@@ -1,7 +1,9 @@
 import { ref } from 'vue'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
-const STORAGE_KEY = 'cc-space-zoom'
+const STORAGE_KEY = 'monet-zoom'
+const LEGACY_STORAGE_KEY = 'cc-space-zoom' // 旧 key,一次性迁移读取用
 const DEFAULT_ZOOM = 1
 const MIN_ZOOM = 0.7
 const MAX_ZOOM = 1.5
@@ -10,7 +12,7 @@ const STEP = 0.05
 const zoomLevel = ref(loadZoom())
 
 function loadZoom(): number {
-  const raw = Number(localStorage.getItem(STORAGE_KEY))
+  const raw = Number(readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY))
   return clamp(raw || DEFAULT_ZOOM)
 }
 

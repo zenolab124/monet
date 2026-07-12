@@ -1,7 +1,7 @@
 {
   "app": {
     "quit": "退出",
-    "quitConfirm": "确定退出 CC Space？"
+    "quitConfirm": "确定退出 Monet？"
   },
   "common": {
     "confirm": "确认",
@@ -348,7 +348,7 @@
     "routinesTitle": "定时任务（Routines）",
     "newRoutine": "新建",
     "noRoutines": "暂无定时任务",
-    "routinesHint": "创建后，CC Space 运行期间将按计划自动执行 Claude 指令",
+    "routinesHint": "创建后，Monet 运行期间将按计划自动执行 Claude 指令",
     "routineColumns": {
       "name": "名称",
       "schedule": "时间计划",
@@ -463,7 +463,7 @@
       "diagnose": "诊断多安装",
       "diagHide": "收起诊断",
       "singleOk": "仅发现一个安装，无冲突。",
-      "multiWarning": "发现 {count} 个独立安装——终端实际使用哪个取决于 PATH 顺序，可能与 CC Space 使用的不一致。",
+      "multiWarning": "发现 {count} 个独立安装——终端实际使用哪个取决于 PATH 顺序，可能与 Monet 使用的不一致。",
       "default": "生效中",
       "verUnknown": "版本未知",
       "methodOfficial": "官方安装",
@@ -491,10 +491,10 @@
     "permissionsNav": "权限",
     "permCheck": {
       "title": "权限体检",
-      "desc": "macOS 按进程记录权限授权。CC Space 有两本账：主应用（前台会话与工作台任务）和后台任务 Runner（launchd 独立启动的定时任务）。缺失的权限会导致对应功能静默失败，建议在此一次授齐。",
+      "desc": "macOS 按进程记录权限授权。Monet 有两本账：主应用（前台会话与工作台任务）和后台任务 Runner（launchd 独立启动的定时任务）。缺失的权限会导致对应功能静默失败，建议在此一次授齐。",
       "appGroup": "主应用",
       "runnerGroup": "后台任务 Runner",
-      "runnerGroupDesc": "定时任务由 launchd 独立启动，权限账本与主应用分开。检测会经 launchd 真实链路运行一次自检（与定时任务完全相同的语境）。首次授权需在定时任务实际运行时通过系统弹窗完成，或在系统设置中手动为 cc-space-routine-runner 开启。",
+      "runnerGroupDesc": "定时任务由 launchd 独立启动，权限账本与主应用分开。检测会经 launchd 真实链路运行一次自检（与定时任务完全相同的语境）。首次授权需在定时任务实际运行时通过系统弹窗完成，或在系统设置中手动为 monet-routine-runner 开启。",
       "refresh": "重新检测",
       "runCheck": "运行检测",
       "checking": "检测中…",
@@ -505,8 +505,8 @@
       "requestFailed": "授权请求失败",
       "runnerCheckFailed": "Runner 检测失败",
       "stillDenied": "仍被拒绝",
-      "stillDeniedHint": "系统对已拒绝的记录不再弹窗。请打开系统设置对应面板，删除 cc-space-routine-runner 旧条目后再点「请求授权」",
-      "screenRestartHint": "若已在弹窗中允许屏幕录制，需重启 CC Space 后生效",
+      "stillDeniedHint": "系统对已拒绝的记录不再弹窗。请打开系统设置对应面板，删除 monet-routine-runner 旧条目后再点「请求授权」",
+      "screenRestartHint": "若已在弹窗中允许屏幕录制，需重启 Monet 后生效",
       "status": {
         "granted": "已授权",
         "denied": "已拒绝",
@@ -646,7 +646,7 @@
     "agentFeature_test": "渠道测试",
     "labDesc": "实验性功能，可能不稳定。",
     "htmlVisual": "HTML 增强渲染",
-    "htmlVisualDesc": "引导 AI 在 Markdown 中嵌入 HTML 实现横向对比、信息卡片、折叠块等富表达。通过 --append-system-prompt 注入提示词，仅影响 CC Space 工作台会话。",
+    "htmlVisualDesc": "引导 AI 在 Markdown 中嵌入 HTML 实现横向对比、信息卡片、折叠块等富表达。通过 --append-system-prompt 注入提示词，仅影响 Monet 工作台会话。",
     "htmlVisualBanner": "HTML 增强渲染已启用",
     "diagDesc": "扫描所有会话文件，检查记录类型和工具的解析覆盖率。",
     "channelForm": {
@@ -873,7 +873,7 @@
     "checkClipboard": "请检查剪贴板权限",
     "terminalFailed": "终端打开失败",
     "automationDenied": "自动化权限被拒",
-    "automationDeniedHint": "请在「系统设置 → 隐私与安全性 → 自动化」中允许 CC Space 控制「终端」",
+    "automationDeniedHint": "请在「系统设置 → 隐私与安全性 → 自动化」中允许 Monet 控制「终端」",
     "vscodeFailed": "VS Code 打开失败",
     "deleteFailed": "删除失败",
     "tokenTotalInput": "总输入",

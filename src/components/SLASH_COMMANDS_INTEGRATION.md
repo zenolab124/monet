@@ -253,7 +253,7 @@ function handleModelSwitch(modelName: string, sessionId: string) {
 | `native`           | `/clear` | 调 `useStreaming` 新增的 `clearStreamingTurns()` + 在 `SessionDetail` 内部加 `hideHistory` 标志,模板 `v-if="!hideHistory"` 隐藏历史消息列表 |
 | `native`           | `/new`   | 调 `useSplitLayout` 的 `splitPane(activePaneId, null)`(开新 pane) 或新增 `useSplitLayout.newSessionInProject(projectId)`               |
 | `native`           | `/cd`    | 验证 arg 是否在 `useProjects.projects.value.map(p => p.cwd)` 里;命中则切换到该项目;不命中提示"路径未发现"                       |
-| `pass`             | `/model` | 调用新增的 `useSessionSettings.setModel(sid, name)`,持久化到 `localStorage`,key 为 `cc-space:session-settings:<sid>`                  |
+| `pass`             | `/model` | 调用新增的 `useSessionSettings.setModel(sid, name)`,持久化到 `localStorage`,key 为 `monet:session-settings:<sid>`                  |
 | `invalid`          | 任意     | 显示 `parsed.reason` 在输入框上方,**不清空输入**让用户修正                                                                        |
 
 ---
@@ -318,7 +318,7 @@ function newSessionInProject(projectId: string) {
 ```ts
 /**
  * 按 sessionId 持久化的会话设置(模型 / 努力等级)
- * key: cc-space:session-settings:<sid>
+ * key: monet:session-settings:<sid>
  *
  * 与 FR-006 共享同一份存储
  */

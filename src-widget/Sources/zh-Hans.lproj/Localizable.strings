@@ -2,7 +2,7 @@
 "widget.title" = "今日";
 "widget.sessions" = "会话";
 "widget.tokens" = "tokens";
-"widget.empty" = "打开 CC Space";
+"widget.empty" = "打开 Monet";
 
 // Today Summary (Small)
 "widget.displayName" = "今日总结";

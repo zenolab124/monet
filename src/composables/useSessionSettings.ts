@@ -1,9 +1,10 @@
 import { ref, computed, watch, type Ref, type ComputedRef } from 'vue'
 import { useCliDefaults } from './useCliDefaults'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
 /**
  * 会话级设置(模型/努力等级/渠道)按 sessionId 持久化到 localStorage。
- * key 格式严格遵循 PRD FR-006:`cc-space:session-settings:<sid>`
+ * key 格式严格遵循 PRD FR-006:`monet:session-settings:<sid>`
  */
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -16,7 +17,7 @@ export type EffortSetting = EffortLevel | 'ultracode' | null
 
 /**
  * 渠道切换记账(本地横线):jsonl 不存渠道(同 effort 不可还原的先例),
- * 切换事件只在 CC Space 自己的账本里,外部会话/清本地数据后无从还原
+ * 切换事件只在 Monet 自己的账本里,外部会话/清本地数据后无从还原
  */
 export interface ChannelMark {
   /** 切换发生时历史区最后一条消息 uuid;会话起点切换为 null */
@@ -69,10 +70,15 @@ export const DEFAULT_SETTINGS: SessionSettings = {
 /** 顾问模式锁定的主模型(硬编码,未来设置页全局配置——见 docs/settings-backlog.md 第 3 条) */
 export const ADVISOR_MAIN_MODEL = 'claude-sonnet-4-6'
 
-const KEY_PREFIX = 'cc-space:session-settings:'
+const KEY_PREFIX = 'monet:session-settings:'
+const LEGACY_KEY_PREFIX = 'cc-space:session-settings:' // 旧 key 前缀(更名前),一次性迁移读取用
 
 function storageKey(sid: string): string {
   return `${KEY_PREFIX}${sid}`
+}
+
+function legacyStorageKey(sid: string): string {
+  return `${LEGACY_KEY_PREFIX}${sid}`
 }
 
 const VALID_EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -99,7 +105,7 @@ function sanitizeMarks(raw: unknown): ChannelMark[] {
 
 function loadFromStorage(sid: string): SessionSettings {
   try {
-    const raw = localStorage.getItem(storageKey(sid))
+    const raw = readMigratedStorage(storageKey(sid), legacyStorageKey(sid))
     if (!raw) return { ...structuredClone(DEFAULT_SETTINGS), permissionMode: getDefaultPermissionMode() }
     const parsed = JSON.parse(raw) as Partial<SessionSettings>
     const effort: EffortSetting = parsed.effort && VALID_STORED.includes(parsed.effort)
@@ -143,6 +149,8 @@ function saveToStorage(sid: string, settings: SessionSettings) {
 function removeFromStorage(sid: string) {
   try {
     localStorage.removeItem(storageKey(sid))
+    // 显式 reset 时一并清掉旧 key,否则下次加载会被旧 key 迁移「复活」旧设置
+    localStorage.removeItem(legacyStorageKey(sid))
   } catch (_) {}
 }
 

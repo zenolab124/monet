@@ -231,7 +231,7 @@
     "routinesTitle": "定時タスク（Routines）",
     "newRoutine": "新規作成",
     "noRoutines": "定時タスクはまだありません",
-    "routinesHint": "作成後、CC Space の実行中にスケジュールに従って Claude の指示が自動実行されます",
+    "routinesHint": "作成後、Monet の実行中にスケジュールに従って Claude の指示が自動実行されます",
     "routineColumns": {
       "name": "名前",
       "schedule": "スケジュール",

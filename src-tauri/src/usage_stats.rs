@@ -327,7 +327,7 @@ mod tests {
     /// FR-001 规则 2/3/4：id 去重进 map、synthetic 与缺 timestamp 不进桶、缺 cache 字段按 0
     #[test]
     fn scan_file_buckets() {
-        let path = std::env::temp_dir().join("cc-space-test-usage.jsonl");
+        let path = std::env::temp_dir().join("monet-test-usage.jsonl");
         let mut f = std::fs::File::create(&path).unwrap();
         let mk = |id: &str, model: &str, ts: &str| {
             format!(

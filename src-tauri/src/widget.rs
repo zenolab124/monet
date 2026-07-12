@@ -27,7 +27,7 @@ fn widget_config_path() -> PathBuf {
 
 fn widget_container_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| {
-        h.join("Library/Containers/com.ccspace.desktop.widget/Data/widget-data.json")
+        h.join("Library/Containers/io.github.zenolab124.monet.widget/Data/widget-data.json")
     })
 }
 
@@ -50,10 +50,23 @@ pub fn set_widget_config(day_start_hour: i8, month_mode: String) -> Result<(), S
     std::fs::write(widget_config_path(), json).map_err(|e| e.to_string())
 }
 
-const LAUNCH_AGENT_LABEL: &str = "com.ccspace.widget-updater";
+const LAUNCH_AGENT_LABEL: &str = "io.github.zenolab124.monet.widget-updater";
 
 pub fn ensure_launch_agent() {
     let Some(home) = dirs::home_dir() else { return };
+
+    // 旧标签清理:更名前(com.ccspace.widget-updater)安装的 LaunchAgent 会在用户机
+    // 残留,检测到旧 plist 就卸载并删除(失败不阻断新装)
+    let legacy_plist = home
+        .join("Library/LaunchAgents")
+        .join("com.ccspace.widget-updater.plist");
+    if legacy_plist.exists() {
+        let _ = Command::new("launchctl")
+            .args(["remove", "com.ccspace.widget-updater"])
+            .output();
+        let _ = std::fs::remove_file(&legacy_plist);
+    }
+
     let plist_path = home.join("Library/LaunchAgents").join(format!("{LAUNCH_AGENT_LABEL}.plist"));
 
     let updater = std::env::current_exe()
@@ -81,7 +94,7 @@ pub fn ensure_launch_agent() {
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/tmp/cc-space-widget-updater.log</string>
+	<string>/tmp/monet-widget-updater.log</string>
 </dict>
 </plist>"#
     );

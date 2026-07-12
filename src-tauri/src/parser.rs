@@ -353,7 +353,7 @@ mod tests {
     /// 同时覆盖完整路径（前 max_lines）与轻量路径（之后）共享去重集
     #[test]
     fn summary_dedups_usage_by_message_id() {
-        let path = std::env::temp_dir().join("cc-space-test-dedup.jsonl");
+        let path = std::env::temp_dir().join("monet-test-dedup.jsonl");
         let mut f = fs::File::create(&path).unwrap();
         // 完整路径内：同 id 两行 + 无 id 一行
         writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();

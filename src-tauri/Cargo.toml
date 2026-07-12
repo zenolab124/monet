@@ -17,8 +17,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 # 独立的 stdio MCP server 二进制，被 claude CLI 通过 --mcp-config 拉起
 [[bin]]
-name = "cc-space-mcp"
-path = "src/bin/cc_space_mcp.rs"
+name = "monet-mcp"
+path = "src/bin/monet_mcp.rs"
 
 # Claude Code 数据格式差距探测器（dev 工具），读 schema-support.json 声明做三态 diff
 [[bin]]
@@ -77,8 +77,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes"] }
 
 [[bin]]
-name = "cc-space-routine-runner"
-path = "src/bin/cc_space_routine_runner.rs"
+name = "monet-routine-runner"
+path = "src/bin/monet_routine_runner.rs"
 
 [[bin]]
 name = "widget-updater"

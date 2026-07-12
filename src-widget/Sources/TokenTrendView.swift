@@ -103,7 +103,7 @@ struct TokenTrendView: View {
                 }
             }
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 
     private func dateTicks(days: [DayTokens], ticks: [Int], todayStr: String) -> some View {
@@ -129,6 +129,6 @@ struct TokenTrendView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .widgetURL(URL(string: "ccspace://home"))
+        .widgetURL(URL(string: "monet://home"))
     }
 }

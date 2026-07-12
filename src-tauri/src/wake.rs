@@ -1,10 +1,11 @@
 // 定时唤醒（macOS pmset）单一事实源：主 App（scheduler.rs 经 mod 引用）与
-// cc-space-routine-runner（#[path] 引用）双端共享，接口只收 cron 表达式字符串，
+// monet-routine-runner（#[path] 引用）双端共享，接口只收 cron 表达式字符串，
 // 不依赖 RoutineDefinition，避免 #[path] 重复引入导致的类型不等价。
 //
-// 授权模型：/etc/sudoers.d/cc-space 白名单（仅 /usr/bin/pmset），开启功能时
+// 授权模型：/etc/sudoers.d/monet 白名单（仅 /usr/bin/pmset），开启功能时
 // osascript 提权写入一次，之后所有 pmset 读写走 `sudo -n` 静默。规则不在位时
-// 绝不弹系统授权框——返回 NoAuthorization 由调用方降级。
+// 绝不弹系统授权框——返回 NoAuthorization 由调用方降级。旧版授权文件在安装成功
+// 后 / 撤销时一并提权清理（见 LEGACY_SUDOERS_PATH），不再新建。
 //
 // 唤醒机制：pmset schedule wake 一次性事件多点覆盖（pmset repeat 每类事件仅保
 // 留一条，无法承载多 routine 时刻表），未来 24h 窗口滚动续设，runner 每次执行
@@ -23,7 +24,15 @@ pub enum SyncOutcome {
     NoAuthorization,
 }
 
-pub const SUDOERS_PATH: &str = "/etc/sudoers.d/cc-space";
+pub const SUDOERS_PATH: &str = "/etc/sudoers.d/monet";
+
+/// 旧版（CC Space 时期）授权文件与其 staging：安装新文件成功后 / 撤销时一并提权
+/// 删除，不再新建。授权状态检测靠能力探测（authorization_present 的 `sudo -n
+/// pmset`），天然覆盖新旧任一文件在位的情形，无需按路径判断。
+#[cfg(target_os = "macos")]
+const LEGACY_SUDOERS_PATH: &str = "/etc/sudoers.d/cc-space";
+#[cfg(target_os = "macos")]
+const LEGACY_SUDOERS_STAGING: &str = "/etc/sudoers.d/.cc-space.staging";
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -72,7 +81,7 @@ mod imp {
 
         let rule = format!("{} ALL=(root) NOPASSWD: /usr/bin/pmset\n", username);
 
-        let tmp = std::env::temp_dir().join(format!("cc-space-sudoers-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("monet-sudoers-{}", std::process::id()));
         std::fs::write(&tmp, &rule).map_err(|e| format!("write sudoers tmp: {}", e))?;
 
         let check = Command::new("/usr/sbin/visudo")
@@ -87,11 +96,15 @@ mod imp {
             ));
         }
 
+        // 安装新文件成功后（&&），best-effort 提权删除旧版文件；rm 失败不阻断整条命令
+        // （{{ ... || true; }} 把失败吞掉），且只在 install+mv 成功后才执行，全程一次弹窗。
         let shell_cmd = format!(
-            "/usr/bin/install -m 0440 -o root -g wheel '{tmp}' '{staging}' && /bin/mv -f '{staging}' '{dest}'",
+            "/usr/bin/install -m 0440 -o root -g wheel '{tmp}' '{staging}' && /bin/mv -f '{staging}' '{dest}' && {{ /bin/rm -f '{legacy}' '{legacy_staging}' || true; }}",
             tmp = tmp.to_string_lossy(),
-            staging = "/etc/sudoers.d/.cc-space.staging",
+            staging = "/etc/sudoers.d/.monet.staging",
             dest = super::SUDOERS_PATH,
+            legacy = super::LEGACY_SUDOERS_PATH,
+            legacy_staging = super::LEGACY_SUDOERS_STAGING,
         );
         let result = run_privileged(&shell_cmd);
         let _ = std::fs::remove_file(&tmp);
@@ -100,7 +113,14 @@ mod imp {
 
     /// 提权移除 sudoers 规则（用户在设置页主动点击，弹窗在预期内）
     pub fn remove_authorization() -> Result<(), String> {
-        run_privileged(&format!("/bin/rm -f '{}'", super::SUDOERS_PATH))
+        // 撤销：新旧授权文件与两处 staging 一并删除（一次提权弹窗，rm -f 幂等）
+        run_privileged(&format!(
+            "/bin/rm -f '{}' '{}' '{}' '{}'",
+            super::SUDOERS_PATH,
+            super::LEGACY_SUDOERS_PATH,
+            "/etc/sudoers.d/.monet.staging",
+            super::LEGACY_SUDOERS_STAGING,
+        ))
     }
 
     /// osascript 提权执行 shell 命令。用户点「不允许」→ Err("cancelled")

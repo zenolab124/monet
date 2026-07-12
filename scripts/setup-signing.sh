@@ -1,5 +1,5 @@
 #!/bin/bash
-# CC Space 本机签名身份基建（幂等，可重复执行）
+# Monet 本机签名身份基建（幂等，可重复执行）
 #
 # 背景：macOS TCC 权限授权钉在应用的 designated requirement 上。adhoc 签名的
 # DR 退化为 cdhash（二进制内容哈希），每次重新编译授权即失效。本脚本创建一张
@@ -11,18 +11,18 @@
 # 证书签任意二进制并继承已授予的 TCC 权限；能读到密码文件即已同权，可接受。
 #
 # 产物：
-#   - 钥匙串 ~/Library/Keychains/cc-space-signing.keychain-db（专用，免交互解锁）
-#   - 钥匙串密码 ~/.cc-space/signing/keychain-password（0600，运行时解锁用）
-#   - 证书副本 ~/.cc-space/signing/cc-space-signing.pem（公开部分，重挂信任用）
-#   - 私钥备份 ~/.cc-space/signing/backup.p12（防钥匙串文件损坏；密码即上面的
+#   - 钥匙串 ~/Library/Keychains/monet-signing.keychain-db（专用，免交互解锁）
+#   - 钥匙串密码 ~/.monet/signing/keychain-password（0600，运行时解锁用）
+#   - 证书副本 ~/.monet/signing/monet-signing.pem（公开部分，重挂信任用）
+#   - 私钥备份 ~/.monet/signing/backup.p12（防钥匙串文件损坏；密码即上面的
 #     keychain-password。防不了整个 signing 目录被删——那要靠 Time Machine）
 set -euo pipefail
 
-IDENTITY="${CCSPACE_SIGN_ID:-CC Space Signing}"
-KEYCHAIN="$HOME/Library/Keychains/cc-space-signing.keychain-db"
-SIGNING_DIR="$HOME/.cc-space/signing"
+IDENTITY="${MONET_SIGN_ID:-Monet Signing}"
+KEYCHAIN="$HOME/Library/Keychains/monet-signing.keychain-db"
+SIGNING_DIR="$HOME/.monet/signing"
 PASS_FILE="$SIGNING_DIR/keychain-password"
-CERT_PEM="$SIGNING_DIR/cc-space-signing.pem"
+CERT_PEM="$SIGNING_DIR/monet-signing.pem"
 BACKUP_P12="$SIGNING_DIR/backup.p12"
 CERT_DAYS=5475  # 15 年
 
@@ -147,7 +147,7 @@ $SUDO security add-trusted-cert -d -r trustRoot -p codeSign \
 echo "=> 冒烟验证"
 security find-identity -v -p codesigning | grep -F "$IDENTITY"
 cp /bin/ls "$TMP_DIR/smoke"
-codesign --force --sign "$IDENTITY" --identifier com.ccspace.smoke "$TMP_DIR/smoke"
+codesign --force --sign "$IDENTITY" --identifier io.github.zenolab124.monet.smoke "$TMP_DIR/smoke"
 codesign --verify --strict "$TMP_DIR/smoke"
 echo "=> designated requirement："
 codesign -d -r- "$TMP_DIR/smoke" 2>&1 | grep designated

@@ -18,7 +18,7 @@
 //! std spawn 有 BatBadBut 注入防护问题，故候选表与 where 结果均只收 .exe；
 //! npm-on-Windows 用户需官方原生安装或手动指定路径。
 //!
-//! 本文件同时被 app_lib（mod claude_locator）和 cc-space-routine-runner
+//! 本文件同时被 app_lib（mod claude_locator）和 monet-routine-runner
 //! （#[path] mod）编译，只允许依赖 std / dirs / serde / serde_json，
 //! 禁止 use crate::* 引用宿主 crate 的其他模块。
 
@@ -81,14 +81,14 @@ fn invalidate_mem() {
 }
 
 // ---------------------------------------------------------------------------
-// settings.json 读写（与主 App / runner 共用 ~/.cc-space/settings.json）
+// settings.json 读写（与主 App / runner 共用 ~/.monet/settings.json）
 // ---------------------------------------------------------------------------
 
 fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CC_SPACE_DATA_DIR") {
+    if let Ok(dir) = std::env::var("MONET_DATA_DIR") {
         PathBuf::from(dir)
     } else {
-        dirs::home_dir().unwrap_or_default().join(".cc-space")
+        dirs::home_dir().unwrap_or_default().join(".monet")
     }
 }
 
@@ -563,7 +563,7 @@ mod tests {
 
     #[test]
     fn settings_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("cc-space-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("monet-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("settings.json");
 
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn write_setting_refuses_to_clobber_corrupt_file() {
-        let dir = std::env::temp_dir().join(format!("cc-space-test-corrupt-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("monet-test-corrupt-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("settings.json");
 

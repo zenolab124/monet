@@ -1,13 +1,13 @@
 //! 权限请求服务
 //!
-//! 在主进程内启动 Unix socket server，作为 cc-space-mcp 子进程与前端的桥梁。
+//! 在主进程内启动 Unix socket server，作为 monet-mcp 子进程与前端的桥梁。
 //! v2.1.0 起按会话隔离：每个流式会话一个 PermissionService 实例（工作台多列并行）。
 //! 主流程：
-//! 1. `PermissionService::start(app, session_id)` 绑定 `/tmp/cc-space-perm-<pid>-<rand>.sock`
-//! 2. 接受连接（每条连接对应 cc-space-mcp 转发的一次权限请求）
+//! 1. `PermissionService::start(app, session_id)` 绑定 `/tmp/monet-perm-<pid>-<rand>.sock`
+//! 2. 接受连接（每条连接对应 monet-mcp 转发的一次权限请求）
 //! 3. emit Tauri Event `permission-request` 给前端（payload 带 sessionId）
 //! 4. 前端通过 `respond_permission` Tauri Command 回写决策（allow/deny）
-//! 5. service 把决策写回 socket，cc-space-mcp 据此返回 claude CLI
+//! 5. service 把决策写回 socket，monet-mcp 据此返回 claude CLI
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -35,7 +35,7 @@ struct PendingRequest {
 #[derive(Debug, Clone)]
 enum Decision {
     /// 携带可选 updatedInput：交互工具（AskUserQuestion 等）经此回传用户答案，
-    /// None 时 cc-space-mcp 回填原始 input
+    /// None 时 monet-mcp 回填原始 input
     Allow(Option<Value>),
     Deny(String),
 }
@@ -71,7 +71,7 @@ struct PermissionRequestPayload {
 }
 
 impl PermissionService {
-    /// 启动指定会话的权限服务，返回实例（socket 路径注入 cc-space-mcp 子进程环境变量）
+    /// 启动指定会话的权限服务，返回实例（socket 路径注入 monet-mcp 子进程环境变量）
     pub fn start(app: AppHandle, session_id: &str) -> Result<Arc<Self>, String> {
         // 同会话旧实例先停（同会话重发场景）
         Self::stop_for(session_id);
@@ -163,7 +163,7 @@ impl PermissionService {
     ///
     /// 同会话连发场景下，每个 streaming turn 新建一个 socket。旧 turn 的 read_stream
     /// 线程退出时若按 session_id 盲调 stop_for，会误删新 turn 刚注册的服务（socket 被
-    /// shutdown → 新 turn 的 cc-space-mcp 连接 Connection refused / pending 被强制 deny）。
+    /// shutdown → 新 turn 的 monet-mcp 连接 Connection refused / pending 被强制 deny）。
     /// 用 socket 路径做实例身份校验：被新 turn 接管后旧线程不再触碰。
     pub fn stop_if_socket(session_id: &str, socket_path: &std::path::Path) {
         let service = {
@@ -212,7 +212,7 @@ fn make_socket_path() -> PathBuf {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let pid = std::process::id();
-    PathBuf::from(format!("/tmp/cc-space-perm-{}-{}.sock", pid, nanos))
+    PathBuf::from(format!("/tmp/monet-perm-{}-{}.sock", pid, nanos))
 }
 
 /// accept loop：每条连接 spawn 一个处理线程
@@ -355,7 +355,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         let b = make_socket_path();
         assert_ne!(a, b);
-        assert!(a.to_string_lossy().starts_with("/tmp/cc-space-perm-"));
+        assert!(a.to_string_lossy().starts_with("/tmp/monet-perm-"));
     }
 
     #[test]

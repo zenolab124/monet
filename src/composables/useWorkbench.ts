@@ -2,6 +2,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import i18n from '../locales'
 import { evictSessionTransients } from './useStreaming'
+import { readMigratedStorage } from '../utils/storageMigrate'
 
 /**
  * 工作台状态模型（v2.1.0 FR-001/002/004 + NFR-002）
@@ -59,13 +60,15 @@ interface WorkbenchState {
   drafts: Record<string, string>
 }
 
-const STORAGE_KEY = 'cc-space-workbench'
-const MIN_WIDTH_KEY = 'cc-space-min-column-width'
+const STORAGE_KEY = 'monet-workbench'
+const MIN_WIDTH_KEY = 'monet-min-column-width'
+const LEGACY_STORAGE_KEY = 'cc-space-workbench' // 旧 key,一次性迁移读取用
+const LEGACY_MIN_WIDTH_KEY = 'cc-space-min-column-width' // 旧 key,一次性迁移读取用
 const DEFAULT_MIN_COLUMN_WIDTH = 360
 const ABSOLUTE_MIN_COLUMN_WIDTH = 200
 
 const minColumnWidth = ref(
-  Math.max(ABSOLUTE_MIN_COLUMN_WIDTH, Number(localStorage.getItem(MIN_WIDTH_KEY)) || DEFAULT_MIN_COLUMN_WIDTH)
+  Math.max(ABSOLUTE_MIN_COLUMN_WIDTH, Number(readMigratedStorage(MIN_WIDTH_KEY, LEGACY_MIN_WIDTH_KEY)) || DEFAULT_MIN_COLUMN_WIDTH)
 )
 
 /** 右区四周边距与列间隙(与 WorkbenchColumns 的 PAD/GAP 一致) */
@@ -138,7 +141,7 @@ function saveState() {
 /** 严格校验反序列化结果,任一处不符即整体作废 */
 function loadState(): WorkbenchState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<WorkbenchState>
     if (!parsed || typeof parsed !== 'object') return null
@@ -403,7 +406,7 @@ function resetRaceLanes(tabId: string) {
 
   const oldSettings: Array<{ sid: string; raw: string | null }> = oldLanes.map(lane => ({
     sid: lane.sessionId,
-    raw: localStorage.getItem(`cc-space:session-settings:${lane.sessionId}`),
+    raw: localStorage.getItem(`monet:session-settings:${lane.sessionId}`),
   }))
 
   for (const lane of oldLanes) {
@@ -430,7 +433,7 @@ function resetRaceLanes(tabId: string) {
       label: i18n.global.t('workbench.race.laneLabel', { n: i + 1 }),
     })
     if (oldSettings[i].raw) {
-      localStorage.setItem(`cc-space:session-settings:${sid}`, oldSettings[i].raw!)
+      localStorage.setItem(`monet:session-settings:${sid}`, oldSettings[i].raw!)
     }
   }
   tab.columnSizes = equalSizes(lanes.length)

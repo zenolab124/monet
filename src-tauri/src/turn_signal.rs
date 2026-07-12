@@ -3,7 +3,7 @@
 //!
 //! 边界声明：本模块唯一触碰 CLI 领地的动作是读改写 `~/.claude/settings.json` 的
 //! `hooks` 键——这是官方给外部工具的扩展点（写前备份、原子替换、幂等、可完整卸载）。
-//! hook 脚本与信号文件都在 `~/.cc-space/` 领地内，JSONL transcript 保持零写入。
+//! hook 脚本与信号文件都在 `~/.monet/` 领地内，JSONL transcript 保持零写入。
 
 use std::collections::HashMap;
 use std::fs;
@@ -66,7 +66,7 @@ fn unix_now() -> u64 {
 fn script_body(signal: &PathBuf) -> String {
     format!(
         r#"#!/bin/sh
-# CC Space 会话状态跟踪信号钩子 —— 由 CC Space 生成，设置 → 扩展中卸载即自动移除。
+# Monet 会话状态跟踪信号钩子 —— 由 Monet 生成，设置 → 扩展中卸载即自动移除。
 STATE="$1"
 SIG="{sig}"
 PAYLOAD=$(cat | tr -d '\n')
@@ -181,7 +181,7 @@ fn read_settings() -> Result<Value, String> {
     }
 }
 
-/// 备份 settings.json 到 ~/.cc-space/backups/（仅当原文件存在）
+/// 备份 settings.json 到 ~/.monet/backups/（仅当原文件存在）
 fn backup_settings() -> Result<(), String> {
     let src = settings_path();
     if !src.exists() {
@@ -203,7 +203,7 @@ fn write_settings(root: &Value) -> Result<(), String> {
     }
     let formatted =
         serde_json::to_string_pretty(root).map_err(|e| format!("序列化 settings.json 失败: {e}"))?;
-    let tmp = path.with_extension("json.cc-space-tmp");
+    let tmp = path.with_extension("json.monet-tmp");
     fs::write(&tmp, format!("{formatted}\n")).map_err(|e| format!("写入临时文件失败: {e}"))?;
     fs::rename(&tmp, &path).map_err(|e| format!("替换 settings.json 失败: {e}"))?;
     Ok(())
@@ -491,7 +491,7 @@ mod tests {
                 "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-own" }] }]
             }
         });
-        let marker = "/tmp/cc-space/hooks/turn-signal.sh";
+        let marker = "/tmp/monet/hooks/turn-signal.sh";
         for (event, state) in EVENTS {
             merge_hook(&mut root, event, state, marker, marker);
         }

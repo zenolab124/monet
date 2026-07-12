@@ -8,14 +8,14 @@
 #[cfg(target_os = "macos")]
 mod native {
     extern "C" {
-        pub fn cc_space_ae_permission(
+        pub fn monet_ae_permission(
             bundle_id: *const std::os::raw::c_char,
             ask: bool,
         ) -> i32;
-        pub fn cc_space_ax_trusted() -> i32;
-        pub fn cc_space_ax_prompt() -> i32;
-        pub fn cc_space_screen_preflight() -> i32;
-        pub fn cc_space_screen_request() -> i32;
+        pub fn monet_ax_trusted() -> i32;
+        pub fn monet_ax_prompt() -> i32;
+        pub fn monet_screen_preflight() -> i32;
+        pub fn monet_screen_request() -> i32;
     }
 }
 
@@ -37,29 +37,29 @@ pub fn check_automation(bundle_id: &str, ask: bool) -> &'static str {
     let Ok(c) = std::ffi::CString::new(bundle_id) else {
         return "unknown";
     };
-    status_name(unsafe { native::cc_space_ae_permission(c.as_ptr(), ask) })
+    status_name(unsafe { native::monet_ae_permission(c.as_ptr(), ask) })
 }
 
 #[cfg(target_os = "macos")]
 pub fn check_accessibility() -> &'static str {
-    status_name(unsafe { native::cc_space_ax_trusted() })
+    status_name(unsafe { native::monet_ax_trusted() })
 }
 
 #[cfg(target_os = "macos")]
 pub fn check_screen_capture() -> &'static str {
-    status_name(unsafe { native::cc_space_screen_preflight() })
+    status_name(unsafe { native::monet_screen_preflight() })
 }
 
 /// 屏幕录制授权请求：未决时弹窗；已 denied 不再弹（需深链系统设置）
 #[cfg(target_os = "macos")]
 pub fn request_screen_capture() -> &'static str {
-    status_name(unsafe { native::cc_space_screen_request() })
+    status_name(unsafe { native::monet_screen_request() })
 }
 
 /// 辅助功能授权引导：把本进程加入系统设置列表并弹引导窗
 #[cfg(target_os = "macos")]
 pub fn prompt_accessibility() -> &'static str {
-    status_name(unsafe { native::cc_space_ax_prompt() })
+    status_name(unsafe { native::monet_ax_prompt() })
 }
 
 /// 完全磁盘访问没有查询 API，试读 FDA 保护路径推断：

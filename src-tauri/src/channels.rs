@@ -1,4 +1,4 @@
-//! 多渠道(profile)配置域:`~/.claude/cc-space/`
+//! 多渠道(profile)配置域:`~/.monet/`
 //!
 //! - `settings.json`        应用设置:默认会话/Agent 渠道 + 渠道展示元数据
 //! - `channels/<id>.json`   纯净 Claude Code settings 格式(顶层 env 块等),
@@ -33,7 +33,7 @@ pub const DEFENSE_ENV_KEYS: [&str; 4] = [
     "CLAUDE_CODE_USE_FOUNDRY",
 ];
 
-/// CC Space 托管的「模型角色映射」env 键(共 21 个),存于 channels/<id>.json 顶层 env 块。
+/// Monet 托管的「模型角色映射」env 键(共 21 个),存于 channels/<id>.json 顶层 env 块。
 /// 四角色 FABLE/OPUS/SONNET/HAIKU 各 4 键(重定向落点/显示名/描述/能力)+ 自定义第五槽 4 键 + 兜底 1 键。
 /// save_channel(model_env=Some) 时整命名空间替换:先移除全部 21 键再写入非空值;
 /// ChannelView.model_env 回传这些键的当前值(模型 ID 非敏感,明文回传)。
@@ -84,20 +84,20 @@ pub const UI_MANAGED_MODEL_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_MODEL",
 ];
 
-fn cc_space_dir() -> PathBuf {
+fn data_dir() -> PathBuf {
     config::data_dir().to_path_buf()
 }
 
 fn channels_dir() -> PathBuf {
-    cc_space_dir().join("channels")
+    data_dir().join("channels")
 }
 
 fn runtime_dir() -> PathBuf {
-    cc_space_dir().join("runtime")
+    data_dir().join("runtime")
 }
 
 fn settings_path() -> PathBuf {
-    cc_space_dir().join("settings.json")
+    data_dir().join("settings.json")
 }
 
 pub fn channel_file_path(id: &str) -> PathBuf {
@@ -122,18 +122,20 @@ pub fn validate_id(id: &str) -> Result<(), String> {
 
 // ---- 应用设置(settings.json) ----
 
+/// 渠道文件(channels/<id>.json)扩展元数据。持久化键名固定为 `_ccSpace`——
+/// 存量渠道文件的既定磁盘格式,读取兼容不可改(改键名会丢已存渠道的模型清单)。
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase", default)]
-pub struct CcSpaceExt {
+pub struct ChannelExt {
     pub available_models: Vec<String>,
     pub agent_model: Option<String>,
 }
 
-pub(crate) fn read_cc_space_ext(id: &str) -> Option<CcSpaceExt> {
+pub(crate) fn read_channel_ext(id: &str) -> Option<ChannelExt> {
     let text = fs::read_to_string(channel_file_path(id)).ok()?;
     let root: Value = serde_json::from_str(&text).ok()?;
     root.get("_ccSpace")
-        .and_then(|v| serde_json::from_value::<CcSpaceExt>(v.clone()).ok())
+        .and_then(|v| serde_json::from_value::<ChannelExt>(v.clone()).ok())
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -343,7 +345,7 @@ fn resolve_channel_credentials(channel_id: &str, settings: &AppSettings, model_o
     let protocol = meta.map_or("anthropic", |m| m.protocol()).to_string();
     let (base_url, token) = read_channel_credentials(channel_id)?;
     let agent_model = model_override
-        .or_else(|| read_cc_space_ext(channel_id).and_then(|e| e.agent_model));
+        .or_else(|| read_channel_ext(channel_id).and_then(|e| e.agent_model));
     Some(AgentChannelCredentials {
         id: channel_id.to_string(), is_official: false,
         base_url: Some(base_url), token: Some(token),
@@ -390,7 +392,7 @@ pub struct ChannelView {
     pub scope: String,
     pub agent_model: Option<String>,
     pub available_models: Vec<String>,
-    /// CC Space 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传)
+    /// Monet 托管的模型角色映射键当前值(MODEL_ENV_KEYS 过滤自 env 块,明文回传)
     pub model_env: BTreeMap<String, String>,
     /// 渠道默认模型(official 读 meta;第三方读文件 env.ANTHROPIC_MODEL)
     pub default_model: Option<String>,
@@ -484,9 +486,9 @@ fn build_channel_view(id: &str, meta: &ChannelMeta) -> ChannelView {
         .unwrap_or_default();
     let cc_ext = parsed.as_ref()
         .and_then(|v| v.get("_ccSpace"))
-        .and_then(|v| serde_json::from_value::<CcSpaceExt>(v.clone()).ok())
+        .and_then(|v| serde_json::from_value::<ChannelExt>(v.clone()).ok())
         .unwrap_or_default();
-    // 从 env 块过滤出 CC Space 托管的模型角色映射键(明文回传)
+    // 从 env 块过滤出 Monet 托管的模型角色映射键(明文回传)
     let model_env = env
         .map(|e| {
             MODEL_ENV_KEYS

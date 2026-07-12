@@ -84,7 +84,7 @@ onMounted(refresh)
         </li>
         <li class="ext-writes-item">
           {{ t('settings.turnSignal.writes2') }}
-          <span class="ext-path">{{ status?.scriptPath || '~/.cc-space/hooks/turn-signal.sh' }}</span>
+          <span class="ext-path">{{ status?.scriptPath || '~/.monet/hooks/turn-signal.sh' }}</span>
         </li>
         <li class="ext-writes-item">{{ t('settings.turnSignal.writes3') }}</li>
       </ul>

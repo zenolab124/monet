@@ -231,7 +231,7 @@
     "routinesTitle": "Tarefas agendadas (Routines)",
     "newRoutine": "Criar",
     "noRoutines": "Nenhuma tarefa agendada",
-    "routinesHint": "Após criação, as instruções Claude serão executadas automaticamente conforme o agendamento enquanto o CC Space estiver aberto",
+    "routinesHint": "Após criação, as instruções Claude serão executadas automaticamente conforme o agendamento enquanto o Monet estiver aberto",
     "routineColumns": {
       "name": "Nome",
       "schedule": "Agendamento",

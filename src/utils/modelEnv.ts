@@ -1,6 +1,6 @@
 // 渠道「模型角色映射」的 env 命名空间契约(前后端严格一致)。
 //
-// 渠道 channels/<id>.json 顶层 env 块内,由 CC Space 托管的 21 个模型映射键。
+// 渠道 channels/<id>.json 顶层 env 块内,由 Monet 托管的 21 个模型映射键。
 // Rust 侧 save_channel 的 modelEnv 参数按「整命名空间替换」语义写入这些键;
 // ChannelView.modelEnv 从 env 块过滤出这些键当前值回传(明文,模型 ID 非敏感)。
 //

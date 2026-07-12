@@ -231,7 +231,7 @@
     "routinesTitle": "งานตั้งเวลา (Routines)",
     "newRoutine": "สร้างใหม่",
     "noRoutines": "ยังไม่มีงานตั้งเวลา",
-    "routinesHint": "หลังสร้างแล้ว CC Space จะรันคำสั่ง Claude ตามกำหนดเวลาโดยอัตโนมัติขณะที่แอปทำงานอยู่",
+    "routinesHint": "หลังสร้างแล้ว Monet จะรันคำสั่ง Claude ตามกำหนดเวลาโดยอัตโนมัติขณะที่แอปทำงานอยู่",
     "routineColumns": {
       "name": "ชื่อ",
       "schedule": "กำหนดเวลา",

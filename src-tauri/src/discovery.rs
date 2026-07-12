@@ -144,7 +144,7 @@ fn decode_path(encoded: &str) -> String {
             } else {
                 format!("{}/{}", resolved, candidate)
             };
-            // 合并可延伸到最后一个 part:尾目录名含 - 是最常见场景(如 cc-space-tauri)
+            // 合并可延伸到最后一个 part:尾目录名含 - 是最常见场景(如 monet-tauri)
             if Path::new(&test_path).exists() {
                 best_len = j - i;
                 break;

@@ -2,7 +2,7 @@
 "widget.title" = "Today";
 "widget.sessions" = "sessions";
 "widget.tokens" = "tokens";
-"widget.empty" = "Open CC Space";
+"widget.empty" = "Open Monet";
 
 // Today Summary (Small)
 "widget.displayName" = "Today's Summary";

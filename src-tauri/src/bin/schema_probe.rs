@@ -40,7 +40,7 @@ fn print_unknown(map: &BTreeMap<String, Entry>) {
 }
 
 fn print_report(report: &Report) {
-    println!("=== CC Space Schema 探测报告 ===");
+    println!("=== Monet Schema 探测报告 ===");
     println!(
         "扫描 {} 文件（含子会话 {}）/ {} 行 / 解析失败 {} 行 / 耗时 {:.1}s",
         report.scanned_files,
