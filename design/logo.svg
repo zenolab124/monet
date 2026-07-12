@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Monet — 主 logo「暮色海」(Impression, Sunrise) · 满幅版(GitHub 头像/社交用) -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E8663F" stop-opacity=".30"/>
+      <stop offset="55%" stop-color="#E8663F" stop-opacity=".14"/>
+      <stop offset="100%" stop-color="#E8663F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#33434F"/>
+      <stop offset="100%" stop-color="#28353F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#sea)"/>
+  <g>
+    <rect x="90" y="148" width="420" height="56" rx="28" fill="#40566A" opacity=".40" transform="rotate(-2 300 176)"/>
+    <rect x="565" y="225" width="370" height="52" rx="26" fill="#243039" opacity=".45"/>
+    <rect x="60" y="520" width="470" height="54" rx="27" fill="#41586B" opacity=".42" transform="rotate(-1 295 547)"/>
+    <rect x="540" y="632" width="420" height="50" rx="25" fill="#233039" opacity=".55" transform="rotate(1 750 657)"/>
+    <rect x="90" y="762" width="360" height="48" rx="24" fill="#41586B" opacity=".30"/>
+    <rect x="620" y="864" width="330" height="44" rx="22" fill="#233039" opacity=".45"/>
+  </g>
+  <circle cx="600" cy="342" r="255" fill="url(#glow)"/>
+  <circle cx="600" cy="342" r="134" fill="#E56340"/>
+  <circle cx="600" cy="342" r="134" fill="#F0764E" opacity=".35" transform="translate(-8 -8)"/>
+  <rect x="468" y="556" width="234" height="42" rx="21" fill="#E8663F" opacity=".92" transform="rotate(-1.5 585 577)"/>
+  <rect x="528" y="668" width="172" height="40" rx="20" fill="#E8663F" opacity=".66" transform="rotate(1 614 688)"/>
+  <rect x="488" y="778" width="128" height="38" rx="19" fill="#E8663F" opacity=".42"/>
+</svg>

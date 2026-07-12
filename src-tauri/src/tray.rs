@@ -20,10 +20,11 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let menu = build_menu(app, None)?;
 
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
-        .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
-            Image::from_bytes(include_bytes!("../icons/32x32.png"))
-                .expect("failed to load tray icon")
-        }))
+        .icon(
+            // 专用 template glyph(日出剪影):主图标是满幅 squircle,template 化会变实心方块
+            Image::from_bytes(include_bytes!("../icons/tray-template.png"))
+                .expect("failed to load tray icon"),
+        )
         .icon_as_template(true)
         .menu(&menu)
         .tooltip("CC Space")

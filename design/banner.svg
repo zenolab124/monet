@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" role="img" aria-label="Monet — Mission Control for Claude Code">
+  <defs>
+    <radialGradient id="bglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E8663F" stop-opacity=".30"/>
+      <stop offset="55%" stop-color="#E8663F" stop-opacity=".14"/>
+      <stop offset="100%" stop-color="#E8663F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bsea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#33434F"/>
+      <stop offset="100%" stop-color="#28353F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="320" rx="24" fill="url(#bsea)"/>
+  <!-- 海天笔触 -->
+  <g>
+    <rect x="60" y="46" width="300" height="30" rx="15" fill="#40566A" opacity=".40" transform="rotate(-1.5 210 61)"/>
+    <rect x="880" y="60" width="330" height="28" rx="14" fill="#243039" opacity=".5"/>
+    <rect x="500" y="120" width="260" height="26" rx="13" fill="#41586B" opacity=".30"/>
+    <rect x="40" y="196" width="300" height="28" rx="14" fill="#41586B" opacity=".42" transform="rotate(-1 190 210)"/>
+    <rect x="900" y="216" width="320" height="26" rx="13" fill="#233039" opacity=".6" transform="rotate(1 1060 229)"/>
+    <rect x="420" y="262" width="280" height="26" rx="13" fill="#41586B" opacity=".28"/>
+    <rect x="1000" y="150" width="230" height="26" rx="13" fill="#40566A" opacity=".3"/>
+  </g>
+  <!-- 日出 -->
+  <circle cx="240" cy="122" r="128" fill="url(#bglow)"/>
+  <circle cx="240" cy="122" r="64" fill="#E56340"/>
+  <circle cx="240" cy="122" r="64" fill="#F0764E" opacity=".35" transform="translate(-4 -4)"/>
+  <rect x="178" y="222" width="110" height="20" rx="10" fill="#E8663F" opacity=".92" transform="rotate(-1.5 233 232)"/>
+  <rect x="206" y="256" width="82" height="19" rx="9.5" fill="#E8663F" opacity=".66" transform="rotate(1 247 265)"/>
+  <rect x="188" y="288" width="62" height="18" rx="9" fill="#E8663F" opacity=".42"/>
+  <!-- 字标 -->
+  <text x="520" y="184" font-family="ui-sans-serif, -apple-system, 'SF Pro Display', 'Segoe UI', 'Helvetica Neue', sans-serif" font-size="118" font-weight="700" letter-spacing="1" fill="#F2EBDC">Monet</text>
+  <text x="526" y="240" font-family="ui-sans-serif, -apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', sans-serif" font-size="30" font-weight="500" letter-spacing=".5" fill="#93A7B4">Mission Control for Claude Code</text>
+</svg>
