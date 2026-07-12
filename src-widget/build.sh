@@ -6,13 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # --- 参数 ---
-# 签名身份默认本机自签长效证书（scripts/setup-signing.sh 创建）：
-# TCC 授权钉在 identifier+证书 的 designated requirement 上，重新构建不丢权限
 SIGN_ID="${SIGN_ID:-Monet Signing}"
 SIGNING_KEYCHAIN="$HOME/Library/Keychains/monet-signing.keychain-db"
 SIGNING_PASS_FILE="$HOME/.monet/signing/keychain-password"
 CONFIG="${1:-Release}"
-APP_BUNDLE="${2:-../src-tauri/target/release/bundle/macos/Monet.app}"
+_RAW_BUNDLE="${2:-../src-tauri/target/release/bundle/macos/Monet.app}"
+APP_BUNDLE="$(cd "$(dirname "$_RAW_BUNDLE")" && pwd)/$(basename "$_RAW_BUNDLE")"
 XCODE="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 
 if [ ! -d "$APP_BUNDLE" ]; then
@@ -46,21 +45,27 @@ cp ../src-tauri/target/release/widget-updater "$APP_BUNDLE/Contents/MacOS/widget
 
 # --- 签名 ---
 echo "=> Signing..."
-# 自签证书钥匙串可能处于锁定状态，签名前解锁
-if [ -f "$SIGNING_PASS_FILE" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
-    security unlock-keychain -p "$(cat "$SIGNING_PASS_FILE")" "$SIGNING_KEYCHAIN"
+if security find-identity -v -p codesigning | grep -q "$SIGN_ID"; then
+    if [ -f "$SIGNING_PASS_FILE" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
+        security unlock-keychain -p "$(cat "$SIGNING_PASS_FILE")" "$SIGNING_KEYCHAIN"
+    fi
+    CODESIGN_ARGS=(--force --options runtime --sign "$SIGN_ID")
+else
+    echo "   identity '$SIGN_ID' not found, falling back to adhoc signing"
+    echo "   (run scripts/setup-signing.sh to create a stable signing identity)"
+    CODESIGN_ARGS=(--force --sign -)
 fi
-codesign --force --options runtime --sign "$SIGN_ID" \
+
+codesign "${CODESIGN_ARGS[@]}" \
     --entitlements MonetWidgetExtension.entitlements \
     "$PLUGINS_DIR/MonetWidgetExtension.appex"
-# 辅助二进制单独签固定 identifier：被安装到 ~/.monet/bin 后 DR 依旧稳定
 for BIN in "$APP_BUNDLE/Contents/MacOS/"*; do
     NAME=$(basename "$BIN")
     [ "$NAME" = "app" ] && continue
-    codesign --force --options runtime --sign "$SIGN_ID" \
+    codesign "${CODESIGN_ARGS[@]}" \
         --identifier "io.github.zenolab124.monet.$NAME" "$BIN"
 done
-codesign --force --options runtime --sign "$SIGN_ID" \
+codesign "${CODESIGN_ARGS[@]}" \
     --entitlements ../src-tauri/Monet.entitlements "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
@@ -73,7 +78,14 @@ mkdir -p "$DMG_DIR"
 rm -f "$DMG_PATH"
 
 echo "=> Creating DMG..."
-hdiutil create -volname "$APP_NAME" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$DMG_PATH" -quiet
+DMG_STAGE=$(mktemp -d)
+cp -R "$APP_BUNDLE" "$DMG_STAGE/"
+if diskutil image create from --help &>/dev/null; then
+    diskutil image create from --format UDZO --volumeName "$APP_NAME" "$DMG_STAGE" "$DMG_PATH"
+else
+    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DMG_PATH" -quiet
+fi
+rm -rf "$DMG_STAGE"
 
 echo "=> Done!"
 echo "   App: $APP_BUNDLE"
