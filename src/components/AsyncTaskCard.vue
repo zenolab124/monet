@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AsyncTaskItem, AsyncSpecies, AsyncTaskState } from '@/composables/useAsyncTasks'
+import { isActive, type AsyncTaskItem, type AsyncSpecies, type AsyncTaskState } from '@/composables/useAsyncTasks'
 import type { SubAgentMeta } from '@/types'
 import { formatTokens } from '@/types'
 
@@ -40,11 +40,34 @@ const STATE_DOT: Record<AsyncTaskState, string> = {
 
 const species = computed(() => SPECIES_META[props.task.species] ?? SPECIES_META.generic)
 
+// 活跃任务秒级计时器
+const elapsed = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+function startTimer() {
+  stopTimer()
+  if (!isActive(props.task) || !props.task.startedAt) return
+  const t0 = new Date(props.task.startedAt).getTime()
+  elapsed.value = Math.max(0, Math.round((Date.now() - t0) / 1000))
+  elapsedTimer = setInterval(() => { elapsed.value++ }, 1000)
+}
+function stopTimer() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+}
+watch(() => [props.task.state, props.task.startedAt] as const, () => {
+  if (isActive(props.task)) startTimer(); else stopTimer()
+}, { immediate: true })
+onUnmounted(stopTimer)
+
 /** 元信息：耗时 / tokens / 退出码 / 唤醒倒计时，按可用性拼接 */
 const metaLine = computed(() => {
   const parts: string[] = []
   const u = props.task.usage
-  if (u?.durationMs) parts.push(formatDuration(u.durationMs))
+  if (isActive(props.task) && props.task.startedAt) {
+    parts.push(formatDuration(elapsed.value * 1000))
+  } else if (u?.durationMs) {
+    parts.push(formatDuration(u.durationMs))
+  }
   if (u?.tokens) parts.push(`${formatTokens(u.tokens)} tok`)
   if (props.task.exitCode !== null && props.task.state === 'failed') {
     parts.push(t('asyncTask.exitCode', { code: props.task.exitCode }))
@@ -95,6 +118,10 @@ function formatDuration(ms: number): string {
         </button>
       </div>
       <div class="text-foreground leading-relaxed line-clamp-2">{{ task.title || task.detail || task.key }}</div>
+      <!-- 活跃任务不确定进度条 -->
+      <div v-if="isActive(task)" class="mt-1.5 h-0.5 rounded-full bg-border overflow-hidden">
+        <div class="h-full w-1/3 rounded-full bg-claude/60 animate-shimmer" />
+      </div>
     </div>
     <!-- Workflow 子 Agent 折叠列表 -->
     <div v-if="task.species === 'workflow' && task.children.length" class="ml-6 mt-0.5 space-y-0.5">
@@ -111,3 +138,13 @@ function formatDuration(ms: number): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+.animate-shimmer {
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+</style>

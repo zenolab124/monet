@@ -272,11 +272,25 @@ watch(asyncPanelVisible, async (open) => {
     })
   } else {
     asyncPanelExpanded.value = false
-    if (hasCol) tab!.columnSizes[idx!] = sidebarTargetWidth.value
+    const doubled = sidebarTargetWidth.value * 2
+    if (hasCol && Math.abs(tab!.columnSizes[idx!] - doubled) < 20) {
+      tab!.columnSizes[idx!] = sidebarTargetWidth.value
+    }
     setTimeout(() => {
       asyncPanelDom.value = false
     }, 260)
   }
+})
+
+// 外部列宽变化（新增列均分等）致列宽不足：自动收起面板防溢出
+watch(() => {
+  const tab = wbActiveTab.value
+  const idx = columnIndex?.value
+  if (!tab || idx == null || idx < 0 || idx >= tab.columnSizes.length) return undefined
+  return tab.columnSizes[idx]
+}, (colW) => {
+  if (!asyncPanelExpanded.value || colW == null) return
+  if (colW < sidebarTargetWidth.value * 2 - 20) closeAsyncPanel()
 })
 
 // 流式结束补扫转录清单：晚落盘的 agent meta / workflow children 兜底
