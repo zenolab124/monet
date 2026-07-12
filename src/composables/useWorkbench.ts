@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import i18n from '../locales'
 import { evictSessionTransients } from './useStreaming'
@@ -527,34 +527,33 @@ function expandSession(tabId: string, sessionId: string, atIndex?: number): Expa
 }
 
 const COLUMN_ANIM_MS = 250
+const suppressColumnTransition = ref(false)
 
 /**
  * 移除列并智能回收宽度（带动画）:
  * 先将目标列宽度缩到 0 触发 CSS transition，结束后再 splice 移除。
  */
 function reclaimColumnWidth(tab: WorkbenchTab, removedIndex: number) {
-  const freed = tab.columnSizes[removedIndex]
   tab.columnSizes[removedIndex] = 0
 
   setTimeout(() => {
     const currentIdx = tab.columns.findIndex((_, i) => i === removedIndex && tab.columnSizes[i] === 0)
     if (currentIdx < 0) return
 
+    suppressColumnTransition.value = true
     tab.columns.splice(currentIdx, 1)
     tab.columnSizes.splice(currentIdx, 1)
 
-    if (tab.columnSizes.length === 0) return
-
-    const totalAfter = tab.columnSizes.reduce((s, w) => s + w, 0)
-    const freeAfter = containerFreeWidth(tab.columnSizes.length)
-
-    if (totalAfter < freeAfter) {
-      const scale = freeAfter / totalAfter
-      tab.columnSizes = tab.columnSizes.map(w => Math.max(minColumnWidth.value, Math.round(w * scale)))
-    } else {
-      const neighbor = Math.min(currentIdx, tab.columnSizes.length - 1)
-      tab.columnSizes[neighbor] += freed
+    if (tab.columnSizes.length > 0) {
+      const totalAfter = tab.columnSizes.reduce((s, w) => s + w, 0)
+      const freeAfter = containerFreeWidth(tab.columnSizes.length)
+      if (totalAfter < freeAfter) {
+        const neighbor = Math.min(currentIdx, tab.columnSizes.length - 1)
+        tab.columnSizes[neighbor] += freeAfter - totalAfter
+      }
     }
+
+    nextTick(() => { suppressColumnTransition.value = false })
   }, COLUMN_ANIM_MS)
 }
 
@@ -686,5 +685,6 @@ export function useWorkbench() {
     updateColumnSize,
     resetColumnSizes,
     setMinColumnWidth,
+    suppressColumnTransition,
   }
 }

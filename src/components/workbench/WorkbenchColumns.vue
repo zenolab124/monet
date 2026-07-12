@@ -21,6 +21,7 @@ const {
   minColumnWidth,
   draftCwd,
   state,
+  suppressColumnTransition,
 } = useWorkbench()
 const { t } = useI18n()
 const { projects } = useProjects()
@@ -168,7 +169,7 @@ watch(focusColumnRequest, async (req) => {
         :tab-id="activeTab.id"
         :index="i"
         :flex="activeTab.columnSizes[i]"
-        :resizing="dragging"
+        :resizing="dragging || suppressColumnTransition"
       >
         <template #default="{ isDragging: colDragging, handleRef }">
           <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" :dragging="colDragging" :handle-ref="handleRef" @start-race="onStartRace(col.sessionId)" />
