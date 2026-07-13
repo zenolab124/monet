@@ -353,6 +353,7 @@ watch(effectiveSessionId, () => {
   bannerHookEvents.value = []
   lastScrollTop = 0
   lastSnapScrollTop = 0
+  finishTransition = false
 })
 
 // --- 权限请求(仅工作台列交互;档案馆只读不渲染) ---
@@ -1390,6 +1391,10 @@ let wheelUpIntentAt = 0
  *  凑够阈值同样视为有效上滚;下滚清零,方向交替的触控板噪声天然被挡 */
 let wheelUpAcc = 0
 let wheelAccAt = 0
+/** streaming→false 后到 records reload 完成之间的过渡期:
+ *  此间一切 scrollTop 位移都是程序行为(shiki上色/dots消失/records替换),
+ *  onScroll 不做脱离判定,contentRO 持续贴底 */
+let finishTransition = false
 
 function onScrollWheel(e: WheelEvent) {
   if (e.deltaY >= 0) {
@@ -1421,6 +1426,7 @@ function onScroll() {
     lastScrollTop = el.scrollTop
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (performance.now() - resumedAt < 300) return
+    if (finishTransition) return
     if (delta < 0 && lastSnapScrollTop - el.scrollTop > 10 && distFromBottom > 5) {
       followStreaming.value = false
     } else if (delta > 0 && !followStreaming.value) {
@@ -1532,14 +1538,32 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     const cs = currentSession.value
     if (!cs) return
     const sid = cs.summary.id
+    // 档案馆只读实例不跑 reload 流程:v-show 保活下两个实例 watch 同一 stream,
+    // 重复 reload + clearStreamingTurns 的时差会让工作台实例弹跳。
+    // finishedDirty 标记留给档案馆下次加载时兜底刷新
+    if (!interactive.value) return
     console.log(`%c ========== [detail] streaming→false, wait 300ms sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     // 立即删除 finishedDirty，防止 meta generation 触发 currentSession watch 时误判为后台落账
     finishedDirty.delete(sid)
-    // streaming→false 瞬间 typing dots 消失致内容缩高、scrollTop 被浏览器钳位——
-    // 立即归底防 onScroll rAF 把钳位误判为用户上滚而关闭跟随
-    scrollToBottom(true)
+    // 进入过渡期:typing dots 消失 + shiki 上色 + records reload 的密集布局变化，
+    // 此间 onScroll 不做脱离判定，contentRO 持续贴底
+    finishTransition = true
+    followStreaming.value = true
+    resumedAt = performance.now()
+    // nextTick 等 DOM patch 完成(typing dots 移除),然后同步贴底——
+    // 不走 rAF,在 paint 前完成,用户看不到弹跳帧
+    await nextTick()
+    {
+      const scEl = scrollContainer.value
+      if (scEl) {
+        scEl.scrollTop = scEl.scrollHeight
+        lastScrollTop = scEl.scrollTop
+        lastSnapScrollTop = scEl.scrollTop
+      }
+    }
     if (SKIP_RECORDS_RELOAD) {
       console.log('%c ========== [detail] SKIP_RECORDS_RELOAD — 跳过 records 更新 ==========', 'color:#ef4444;font-weight:bold')
+      finishTransition = false
       return
     }
     // pending 用户消息是否已在 recs 中落账(无 pending 视为已落账,不阻塞)。
@@ -1572,22 +1596,35 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         // ignore
       }
     }
-    if (effectiveSessionId.value !== sid) return
+    if (effectiveSessionId.value !== sid) { finishTransition = false; return }
     console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     if (newRecords) records.value = newRecords
     // 新流式已启动(用户在 300ms 窗口内再次发送):只落账 records,不动新 turns——
     // 否则会清掉新一轮刚到的 streamingTurns,造成新回复消失
-    if (getStream(sid).streaming) return
+    if (getStream(sid).streaming) { finishTransition = false; return }
     // keepPending:气泡退场由落账匹配驱动(pendingLandedUuid watch),重试尽头仍未
     // 落账时保留气泡等下一轮 reload——宁可气泡多活一会,不可消息凭空消失。
     // keepLive:豁免此刻可能已开播的下一个自发轮(清了会被快照重建从头重播);
     // 随后按落账摘除其中已落盘的,只留真正在播的
     clearStreamingTurns(sid, { keepPending: true, keepLive: true })
     if (newRecords) removeLandedTurns(sid, newRecords)
-    // 落账切换完成:流式区→历史区高度可能变化,强制归底防弹跳
+    // 落账切换完成:强制归底(nextTick 同步写,不走 rAF——
+    // rAF 会多一帧延迟,那一帧用户看到弹跳)
+    // finishTransition 在 nextTick 之后再关——DOM patch 期间浏览器可能钳位 scrollTop
+    // 触发 onScroll rAF,此时过渡期必须仍在位才能屏蔽误脱离
     followStreaming.value = true
     resumedAt = performance.now()
-    scrollToBottom(true)
+    await nextTick()
+    const scEl = scrollContainer.value
+    if (scEl) {
+      programmaticScroll = true
+      clearTimeout(programmaticTimer)
+      programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
+      scEl.scrollTop = scEl.scrollHeight
+      lastScrollTop = scEl.scrollTop
+      lastSnapScrollTop = scEl.scrollTop
+    }
+    finishTransition = false
     maybeConsumeQueue()
   }
 })
@@ -1614,6 +1651,7 @@ watch(ownProcessBusy, (busy) => {
 // 不动 streaming/pending:那是用户轮的领地;pendingLandedUuid 若在本次 reload
 // 中匹配成功(用户消息恰在此期间落盘),气泡走既有契约自然退场
 watch(autoTurnLanded, async () => {
+  if (!interactive.value) return
   const cs = currentSession.value
   const snapshot = cs ? autoLandedSessions.get(cs.summary.id) : undefined
   if (!cs || !snapshot) return
@@ -1982,7 +2020,7 @@ async function onReload() {
     >
     <!-- 内容包裹层:所有增高源(打字机/晚到turn/落账替换/图片/cv解冻/横幅)都反映为它的高度变化,
          contentRO 观察它实现水平触发的滚动跟随 -->
-    <div ref="scrollContentEl" class="space-y-4">
+    <div ref="scrollContentEl" class="space-y-4 pb-8 relative">
       <template v-if="!hideHistory">
         <!-- 渠道切换横线:会话起点的切换(本地记账,jsonl 无渠道信息) -->
         <div
@@ -2152,9 +2190,15 @@ async function onReload() {
                 <!-- 本轮实际运行模型的真值(message_start 回显),从首字起与落账后标注同源 -->
                 <span v-if="turn.model" class="text-muted-foreground font-normal">({{ shortModel(turn.model) }})</span>
               </span>
-              <span v-if="!stream.streaming && !turn.live && stream.realUsedTokens" class="text-muted-foreground/70 font-normal tabular-nums">
-                {{ formatTokens(stream.realUsedTokens) }} in
-                <template v-if="stream.realOutputTokens"> · {{ formatTokens(stream.realOutputTokens) }} out</template>
+              <span
+                class="text-muted-foreground/70 font-normal tabular-nums"
+                :style="{ visibility: !stream.streaming && !turn.live && stream.realUsedTokens ? 'visible' : 'hidden' }"
+              >
+                <template v-if="stream.realUsedTokens">
+                  {{ formatTokens(stream.realUsedTokens) }} in
+                  <template v-if="stream.realOutputTokens"> · {{ formatTokens(stream.realOutputTokens) }} out</template>
+                </template>
+                <template v-else>&nbsp;</template>
               </span>
             </div>
             <TransitionGroup name="block-fade" tag="div" appear>
@@ -2177,7 +2221,10 @@ async function onReload() {
         </div>
       </div>
 
-      <div v-if="stream.streaming || externalRunning || hasLiveTurn" class="flex items-center gap-1 py-2 pl-5">
+      <div
+        v-if="stream.streaming || externalRunning || hasLiveTurn"
+        class="absolute bottom-1 left-0 flex items-center gap-1 pl-5"
+      >
         <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
       </div>
 
