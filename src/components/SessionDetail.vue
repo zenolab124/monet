@@ -352,6 +352,7 @@ watch(effectiveSessionId, () => {
   bannerCwd.value = ''
   bannerHookEvents.value = []
   lastScrollTop = 0
+  lastSnapScrollTop = 0
 })
 
 // --- 权限请求(仅工作台列交互;档案馆只读不渲染) ---
@@ -884,7 +885,9 @@ onMounted(() => {
       sc.scrollTop += delta
       // 校正 onScroll 基线:补偿位移不计入用户手势 delta(负补偿曾被误判为
       // "用户上滚"而静默关闭跟随);clamp 时以实际生效量为准
-      lastScrollTop += sc.scrollTop - before
+      const actual = sc.scrollTop - before
+      lastScrollTop += actual
+      lastSnapScrollTop += actual
     }
     performance.measure('anchor-comp', { start: perfT0, duration: performance.now() - perfT0 })
   })
@@ -1370,6 +1373,7 @@ function onInputKeydown(e: KeyboardEvent) {
 
 const followStreaming = ref(true)
 let lastScrollTop = 0
+let lastSnapScrollTop = 0
 let resumedAt = 0
 let scrollCoalesced = false
 let scrollRafId = 0
@@ -1399,9 +1403,6 @@ function onScrollWheel(e: WheelEvent) {
   if (wheelUpAcc < -3) {
     wheelUpAcc = 0
     wheelUpIntentAt = now
-    const el = scrollContainer.value
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 5) return
-    followStreaming.value = false
   }
 }
 
@@ -1420,7 +1421,7 @@ function onScroll() {
     lastScrollTop = el.scrollTop
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (performance.now() - resumedAt < 300) return
-    if (delta < 0 && distFromBottom > 5) {
+    if (delta < 0 && lastSnapScrollTop - el.scrollTop > 10) {
       followStreaming.value = false
     } else if (delta > 0 && !followStreaming.value) {
       // 恢复阈值必须窄:曾是 max(半屏,400),触控板惯性衰减的微小下滑就会在
@@ -1429,12 +1430,14 @@ function onScroll() {
       if (distFromBottom < 48) {
         followStreaming.value = true
         resumedAt = performance.now()
+        lastSnapScrollTop = el.scrollTop
       }
     }
     // 兜底：到底部就恢复，不依赖 delta 方向
     if (!followStreaming.value && distFromBottom < 2) {
       followStreaming.value = true
       resumedAt = performance.now()
+      lastSnapScrollTop = el.scrollTop
     }
   })
 }
@@ -1468,6 +1471,7 @@ function scrollToBottom(force = false) {
     clearTimeout(programmaticTimer)
     programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
     el.scrollTop = el.scrollHeight
+    lastSnapScrollTop = el.scrollTop
   }
   nextTick(() => {
     requestAnimationFrame(() => {
@@ -1507,10 +1511,10 @@ watch(scrollContentEl, (el) => {
       if (sc.scrollTop < target) {
         sc.scrollTop = target
       }
-      // 基线无条件同步(不只写入分支):内容净缩时浏览器把 scrollTop 向上钳位,
+      // 基线无条件同步:内容净缩时浏览器把 scrollTop 向上钳位,
       // 该位移若漏进 onScroll 的手势 delta,会被误判为用户上滚而关闭跟随
-      // (落账瞬间视口跳中部的根因之一)。RO 回调先于下一帧 rAF,在此吸收钳位量
       lastScrollTop = sc.scrollTop
+      lastSnapScrollTop = sc.scrollTop
     })
   }
   contentRO.observe(el)
@@ -1577,6 +1581,10 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     // 随后按落账摘除其中已落盘的,只留真正在播的
     clearStreamingTurns(sid, { keepPending: true, keepLive: true })
     if (newRecords) removeLandedTurns(sid, newRecords)
+    // 落账切换完成:流式区→历史区高度可能变化,强制归底防弹跳
+    followStreaming.value = true
+    resumedAt = performance.now()
+    scrollToBottom(true)
     maybeConsumeQueue()
   }
 })
