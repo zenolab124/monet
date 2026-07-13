@@ -106,15 +106,11 @@ async function applySessionChanges(changes: SessionChange[]) {
   projects.value.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
 }
 
-/** 切换项目选中状态 */
+/** 切换项目选中状态(单选：点已选中的取消，点未选中的替换) */
 function toggleProject(id: string) {
-  const s = new Set(selectedProjectIds.value)
-  if (s.has(id)) {
-    s.delete(id)
-  } else {
-    s.add(id)
-  }
-  selectedProjectIds.value = s
+  selectedProjectIds.value = selectedProjectIds.value.has(id)
+    ? new Set()
+    : new Set([id])
 }
 
 /** 全选/全不选 */
