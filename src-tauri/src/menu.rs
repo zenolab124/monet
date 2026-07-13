@@ -68,8 +68,46 @@ pub fn hide_main_window(app: AppHandle) {
 }
 
 #[tauri::command]
+pub fn hide_to_tray(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    set_activation_policy_accessory();
+}
+
+#[tauri::command]
 pub fn quit_app(app: AppHandle) {
     streaming::close_all_sessions();
     agent::shutdown();
     app.exit(0);
+}
+
+pub fn restore_from_tray(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    set_activation_policy_regular();
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_activation_policy_accessory() {
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    use objc2_foundation::MainThreadMarker;
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_activation_policy_regular() {
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    use objc2_foundation::MainThreadMarker;
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    }
 }

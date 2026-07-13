@@ -8,7 +8,7 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
-use crate::{agent, quota, streaming};
+use crate::{agent, menu, quota, streaming};
 
 #[cfg(target_os = "macos")]
 const TAB_STOP_PT: f64 = 220.0;
@@ -29,14 +29,15 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .tooltip("Monet")
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => show_main_window(app),
+            "show" => menu::restore_from_tray(app),
             "refresh" => {
                 let handle = app.clone();
                 std::thread::spawn(move || refresh_tray(&handle));
             }
-            "quit" => {
-                show_main_window(app);
-                let _ = app.emit("menu:request-quit", ());
+            "tray-quit" => {
+                streaming::close_all_sessions();
+                agent::shutdown();
+                app.exit(0);
             }
             _ => {}
         })
@@ -95,7 +96,7 @@ fn build_menu(
     b = b.item(&MenuItemBuilder::new(show_label).id("show").build(app)?);
     b = b.item(&MenuItemBuilder::new(refresh_label).id("refresh").build(app)?);
     b = b.item(&PredefinedMenuItem::separator(app)?);
-    b = b.item(&MenuItemBuilder::new(quit_label).id("quit").build(app)?);
+    b = b.item(&MenuItemBuilder::new(quit_label).id("tray-quit").build(app)?);
 
     Ok(b.build()?)
 }
@@ -276,13 +277,6 @@ fn patch_menu_styles(tray: &tauri::tray::TrayIcon<tauri::Wry>) {
             }
         }
     });
-}
-
-fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
 }
 
 fn start_quota_timer(app: AppHandle) {

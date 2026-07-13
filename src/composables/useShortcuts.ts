@@ -8,7 +8,7 @@ import i18n from '../locales'
 const t = () => i18n.global.t
 
 export async function initShortcuts() {
-  const { confirm } = useConfirm()
+  const { confirm, confirmMulti } = useConfirm()
   const { state, closeTab, activeTab } = useWorkbench()
   const { activeSection } = useUiState()
 
@@ -29,8 +29,13 @@ export async function initShortcuts() {
   })
 
   await listen('menu:request-quit', async () => {
-    const ok = await confirm(t()('app.quitConfirm'), t()('app.quit'))
-    if (ok) {
+    const choice = await confirmMulti(t()('app.quitConfirm'), [
+      { label: t()('app.quitFull'), value: 'quit', style: 'destructive' },
+      { label: t()('app.keepTray'), value: 'hide', style: 'success' },
+    ])
+    if (choice === 'hide') {
+      await invoke('hide_to_tray')
+    } else if (choice === 'quit') {
       await invoke('quit_app')
     }
   })

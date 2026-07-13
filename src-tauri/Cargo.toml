@@ -72,6 +72,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSFont", "NSParagraphStyle", "NSText", "NSAttributedString",
     "NSMenu", "NSMenuItem", "NSStatusItem", "NSColor",
+    "NSApplication", "NSResponder", "NSRunningApplication",
     "objc2-core-foundation",
 ] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes"] }

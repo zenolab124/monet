@@ -247,6 +247,7 @@ pub fn run() {
             quota::get_tray_title_config,
             quota::set_tray_title_config,
             menu::hide_main_window,
+            menu::hide_to_tray,
             menu::quit_app,
         ])
         .build(tauri::generate_context!())

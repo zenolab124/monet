@@ -1,7 +1,9 @@
 {
   "app": {
     "quit": "Quit",
-    "quitConfirm": "Quit Monet?"
+    "quitConfirm": "Quit Monet?",
+    "keepTray": "Keep in Menu Bar",
+    "quitFull": "Quit Completely"
   },
   "common": {
     "confirm": "Confirm",

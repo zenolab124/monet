@@ -1,7 +1,9 @@
 {
   "app": {
     "quit": "退出",
-    "quitConfirm": "确定退出 Monet？"
+    "quitConfirm": "退出 Monet？",
+    "keepTray": "保留菜单栏",
+    "quitFull": "完全退出"
   },
   "common": {
     "confirm": "确认",
