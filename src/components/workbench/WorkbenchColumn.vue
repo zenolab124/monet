@@ -174,16 +174,8 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
       >
         <span class="i-carbon-remote-connection w-3 h-3" />
       </button>
-      <!-- 普通模式:分叉 + 赛马 + 收起 + 关闭 -->
+      <!-- 普通模式:赛马 + 分叉 + 新建 + 收起 + 关闭 -->
       <template v-if="!isRace">
-        <button
-          class="icon-btn icon-btn-sm"
-          v-tooltip="$t('workbench.column.fork')"
-          @pointerdown.stop
-          @click.stop="onFork"
-        >
-          <span class="i-carbon-branch w-3 h-3" />
-        </button>
         <button
           class="icon-btn icon-btn-sm"
           v-tooltip="$t('workbench.race.startRace')"
@@ -191,6 +183,14 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
           @click.stop="emit('startRace')"
         >
           <span class="i-app-horse w-3 h-3" />
+        </button>
+        <button
+          class="icon-btn icon-btn-sm"
+          v-tooltip="$t('workbench.column.fork')"
+          @pointerdown.stop
+          @click.stop="onFork"
+        >
+          <span class="i-carbon-branch w-3 h-3" />
         </button>
         <button
           class="icon-btn icon-btn-sm"

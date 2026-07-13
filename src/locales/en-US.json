@@ -280,7 +280,7 @@
       "rcClosed": "Remote Control disabled",
       "rcFailed": "Remote Control operation failed",
       "fork": "Fork session",
-      "newSession": "New session",
+      "newSession": "New session in this project",
       "forkCreated": "Session forked",
       "forkFailed": "Fork failed"
     },
