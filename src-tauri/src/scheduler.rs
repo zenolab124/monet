@@ -172,10 +172,8 @@ mod platform {
         let path = plist_path(&routine.id);
         let existing = match fs::read_to_string(&path) {
             Ok(s) => s,
-            // 新前缀 plist 不存在：若旧前缀 plist 在位，视为已注册且不强制迁移
-            // （老任务保持旧名；用户编辑/开关会经 update_routine 显式 unregister+register
-            // 自然换新）。两者皆无才是真正需要注册。
-            Err(_) => return !legacy_plist_path(&routine.id).exists(),
+            // 新前缀 plist 不存在：旧前缀在位则需要迁移（重建为新前缀+新路径）
+            Err(_) => return true,
         };
         let calendar_intervals = match cron_to_calendar_intervals(&routine.cron_expression) {
             Ok(ci) => ci,
