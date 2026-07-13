@@ -2,6 +2,7 @@ import { computed, type ComputedRef } from 'vue'
 import type { SessionSettings, EffortSetting } from './useSessionSettings'
 import { ADVISOR_MAIN_MODEL } from './useSessionSettings'
 import { useChannels, resolveChannel, OFFICIAL_CHANNEL_ID } from './useChannels'
+import { useCliDefaults } from './useCliDefaults'
 
 /**
  * 运行配置同源解析层。
@@ -22,10 +23,10 @@ export type ValueSource = 'session' | 'channel' | 'cli' | 'advisor'
 export interface ResolvedRunConfig {
   /** 解析后的注入渠道 id;null = 官方(零注入) */
   channelId: string | null
-  /** 发送用模型;undefined = 不传 --model(CLI 默认) */
+  /** 发送用模型;undefined = CLI 默认值也未设置 */
   model: string | undefined
   modelSource: ValueSource
-  /** 发送用思考强度;undefined = 不传 --effort(CLI 默认) */
+  /** 发送用思考强度;undefined = CLI 默认值也未设置 */
   effort: NonNullable<EffortSetting> | undefined
   effortSource: ValueSource
   /** 当前渠道声明的默认模型/思考强度(供设置回显与下拉标注) */
@@ -49,6 +50,7 @@ function sanitizeEffort(raw: string | null | undefined): NonNullable<EffortSetti
  */
 export function resolveRunConfig(settings: SessionSettings): ResolvedRunConfig {
   const { channels } = useChannels()
+  const { cliDefaults } = useCliDefaults()
   const channelId = resolveChannel(settings.channelId)
   // 渠道默认统一从 ChannelInfo 读:官方对应 id='official' 的条目(meta 承载)
   const info = channels.value.find(c => c.id === (channelId ?? OFFICIAL_CHANNEL_ID)) ?? null
@@ -68,7 +70,7 @@ export function resolveRunConfig(settings: SessionSettings): ResolvedRunConfig {
     model = channelDefaultModel
     modelSource = 'channel'
   } else {
-    model = undefined
+    model = cliDefaults.value.model ?? undefined
     modelSource = 'cli'
   }
 
@@ -82,7 +84,10 @@ export function resolveRunConfig(settings: SessionSettings): ResolvedRunConfig {
     effort = channelDefaultEffort
     effortSource = 'channel'
   } else {
-    effort = undefined
+    const cliEffort = cliDefaults.value.ultracode
+      ? 'ultracode' as NonNullable<EffortSetting>
+      : sanitizeEffort(cliDefaults.value.effort_level) ?? undefined
+    effort = cliEffort
     effortSource = 'cli'
   }
 
