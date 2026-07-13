@@ -26,7 +26,7 @@ const appRows: PermRow[] = [
   { key: 'fullDiskAccess', icon: 'i-carbon-data-base', panel: 'allFiles', requestable: false },
   { key: 'accessibility', icon: 'i-carbon-accessibility', panel: 'accessibility', requestable: true },
   { key: 'screenCapture', icon: 'i-carbon-screen', panel: 'screenRecording', requestable: true },
-  { key: 'localNetwork', icon: 'i-carbon-network-3', panel: 'localNetwork', requestable: false },
+  { key: 'localNetwork', icon: 'i-carbon-network-3', panel: 'localNetwork', requestable: true },
 ]
 
 // runner 账本：launchd 启动的定时任务（含其中 Claude 用到的能力）归因挂 runner
@@ -44,7 +44,6 @@ const runnerChecking = ref(false)
 const requesting = ref<string | null>(null)
 
 function appStatus(key: string): Status {
-  if (key === 'localNetwork') return 'unknown'
   return appPerms.value[key] ?? 'unknown'
 }
 

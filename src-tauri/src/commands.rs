@@ -136,6 +136,7 @@ pub fn check_system_permissions() -> serde_json::Value {
         "accessibility": crate::tcc::check_accessibility(),
         "screenCapture": crate::tcc::check_screen_capture(),
         "fullDiskAccess": crate::tcc::check_full_disk_access(),
+        "localNetwork": probe_local_network(),
     })
 }
 
@@ -172,11 +173,37 @@ pub async fn request_system_permission(kind: String) -> Result<String, String> {
                 reset_if_denied("Accessibility", crate::tcc::check_accessibility());
                 Ok(crate::tcc::prompt_accessibility().to_string())
             }
+            "localNetwork" => {
+                Ok(probe_local_network().to_string())
+            }
             _ => Err(format!("unsupported permission kind: {}", kind)),
         }
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// 探测本地网络权限：加入 mDNS 组播组触发系统弹窗,通过连接成败推断授权状态。
+/// Apple 不提供 API 查 Local Network 权限,这是社区通用的间接检测法。
+fn probe_local_network() -> &'static str {
+    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    let sock = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(s) => s,
+        Err(_) => return "unknown",
+    };
+    let multicast = Ipv4Addr::new(224, 0, 0, 251);
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok();
+    // join_multicast 会触发 macOS 本地网络授权弹窗(未授权时)
+    if sock.join_multicast_v4(&multicast, &Ipv4Addr::UNSPECIFIED).is_err() {
+        return "denied";
+    }
+    // 发一个 mDNS 空查询到 224.0.0.251:5353
+    let target = SocketAddrV4::new(multicast, 5353);
+    let query: [u8; 12] = [0; 12]; // 最小合法 DNS header
+    match sock.send_to(&query, target) {
+        Ok(_) => "granted",
+        Err(_) => "denied",
+    }
 }
 
 /// 打开系统设置对应隐私面板（白名单锚点）
