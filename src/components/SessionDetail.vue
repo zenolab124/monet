@@ -1421,7 +1421,7 @@ function onScroll() {
     lastScrollTop = el.scrollTop
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (performance.now() - resumedAt < 300) return
-    if (delta < 0 && lastSnapScrollTop - el.scrollTop > 10) {
+    if (delta < 0 && lastSnapScrollTop - el.scrollTop > 10 && distFromBottom > 5) {
       followStreaming.value = false
     } else if (delta > 0 && !followStreaming.value) {
       // 恢复阈值必须窄:曾是 max(半屏,400),触控板惯性衰减的微小下滑就会在
@@ -1535,6 +1535,9 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     console.log(`%c ========== [detail] streaming→false, wait 300ms sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     // 立即删除 finishedDirty，防止 meta generation 触发 currentSession watch 时误判为后台落账
     finishedDirty.delete(sid)
+    // streaming→false 瞬间 typing dots 消失致内容缩高、scrollTop 被浏览器钳位——
+    // 立即归底防 onScroll rAF 把钳位误判为用户上滚而关闭跟随
+    scrollToBottom(true)
     if (SKIP_RECORDS_RELOAD) {
       console.log('%c ========== [detail] SKIP_RECORDS_RELOAD — 跳过 records 更新 ==========', 'color:#ef4444;font-weight:bold')
       return
