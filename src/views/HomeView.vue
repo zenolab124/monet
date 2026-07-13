@@ -22,16 +22,8 @@ const {
 const { projects, loading: projectsLoading, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 
-watch(
-  activeSection,
-  (section) => {
-    if (section === 'home') {
-      ensureLoaded()
-      loadProjects()
-    }
-  },
-  { immediate: true },
-)
+// 首页已屏蔽,待后续重新设计时恢复
+// watch(activeSection, (section) => { if (section === 'home') { ensureLoaded(); loadProjects() } }, { immediate: true })
 
 // macOS WidgetKit 数据同步（保留）
 watch(

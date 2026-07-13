@@ -7,7 +7,7 @@ const STORAGE_KEY = 'monet-ui'
 const LEGACY_STORAGE_KEY = 'cc-space-ui' // 旧 key,一次性迁移读取用
 
 /** ActivityBar 区域（v2.1.0 点亮工作台；sessions 语义为档案馆；settings 自多渠道起点亮；workshop 自 v2.3.0 点亮；automation 自 v2.4.0 点亮；search 自全局搜索起点亮） */
-export type AppSection = 'workbench' | 'sessions' | 'search' | 'home' | 'settings' | 'workshop' | 'automation'
+export type AppSection = 'workbench' | 'sessions' | 'search' | 'settings' | 'workshop' | 'automation'
 
 interface UiState {
   sidebarsCollapsed: boolean
@@ -22,7 +22,7 @@ function loadState(): UiState {
     const raw = readMigratedStorage(STORAGE_KEY, LEGACY_STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      const validSections: AppSection[] = ['workbench', 'sessions', 'search', 'home', 'settings', 'workshop', 'automation']
+      const validSections: AppSection[] = ['workbench', 'sessions', 'search', 'settings', 'workshop', 'automation']
       return {
         sidebarsCollapsed: !!parsed.sidebarsCollapsed,
         activeSection: validSections.includes(parsed.activeSection)

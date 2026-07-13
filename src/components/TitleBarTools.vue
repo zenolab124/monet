@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
 import { useSessions } from '@/composables/useSessions'
-import { useHomeStats } from '@/composables/useHomeStats'
 import { useAutomation } from '@/composables/useAutomation'
 import { useWorkbench } from '@/composables/useWorkbench'
 
@@ -29,9 +28,6 @@ function onKeydown(e: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
-
-// --- 首页 ---
-const { refresh: homeRefresh, usageLoading: homeRefreshing } = useHomeStats()
 
 // --- 自动化 ---
 const { config: autoConfig, refresh: autoRefresh, loadingConfig, loadingStats } = useAutomation()
@@ -78,11 +74,6 @@ async function openGlobalConfig() {
       />
     </div>
   </template>
-
-  <!-- 首页 -->
-  <button v-if="activeSection === 'home'" class="icon-btn icon-btn-sm" :disabled="homeRefreshing" v-tooltip="$t('titlebar.recalculate')" @click="homeRefresh">
-    <span class="i-carbon-renew w-3.5 h-3.5" :class="{ 'animate-spin': homeRefreshing }" />
-  </button>
 
   <!-- 自动化 -->
   <template v-if="activeSection === 'automation'">

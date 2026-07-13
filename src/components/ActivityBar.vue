@@ -24,7 +24,6 @@ const topDomains = computed<DomainItem[]>(() => [
   { key: 'search', icon: 'i-carbon-search', label: t('activity.search'), section: 'search' },
   { key: 'workshop', icon: 'i-carbon-tools', label: t('activity.workshop'), section: 'workshop' },
   { key: 'automation', icon: 'i-carbon-bot', label: t('activity.automation'), section: 'automation' },
-  { key: 'home', icon: 'i-carbon-home', label: t('activity.home'), section: 'home' },
 ])
 
 function onItemClick(item: DomainItem) {

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+
+// --- 环境检测（原 ClaudeEnvCard） ---
 
 interface ClaudeEnvInfo {
   installedVersion: string | null
@@ -81,11 +83,81 @@ async function diagnose() {
   finally { diagging.value = false }
 }
 
-onMounted(check)
+// --- 二进制路径定位（原 ClaudeBinaryCard） ---
+
+interface LocateInfo {
+  path: string | null
+  source: 'manual' | 'cached' | 'scan' | 'loginShell' | null
+  manualPath: string | null
+  manualValid: boolean
+  attempted: string[]
+}
+
+const binInfo = ref<LocateInfo | null>(null)
+const binLoading = ref(false)
+const manualInput = ref('')
+const binError = ref('')
+
+const SOURCE_KEYS: Record<string, string> = {
+  manual: 'settings.claudeBin.sourceManual',
+  cached: 'settings.claudeBin.sourceCached',
+  scan: 'settings.claudeBin.sourceScan',
+  loginShell: 'settings.claudeBin.sourceLoginShell',
+}
+
+/** 优先取 binInfo（locator 更权威），回退 info.binaryPath */
+const displayPath = computed(() => binInfo.value?.path ?? info.value?.binaryPath ?? null)
+
+function applyBinInfo(next: LocateInfo) {
+  binInfo.value = next
+  manualInput.value = next.manualPath ?? ''
+}
+
+async function loadBin() {
+  binLoading.value = true
+  try {
+    applyBinInfo(await invoke<LocateInfo>('get_claude_binary_info'))
+  } catch { /* ignore */ }
+  finally { binLoading.value = false }
+}
+
+async function saveManual() {
+  binError.value = ''
+  binLoading.value = true
+  try {
+    applyBinInfo(await invoke<LocateInfo>('set_claude_binary_path', {
+      path: manualInput.value.trim() || null,
+    }))
+  } catch (e) {
+    binError.value = String(e)
+  } finally { binLoading.value = false }
+}
+
+async function clearManual() {
+  manualInput.value = ''
+  await saveManual()
+}
+
+async function redetect() {
+  binError.value = ''
+  binLoading.value = true
+  try {
+    applyBinInfo(await invoke<LocateInfo>('redetect_claude_binary'))
+  } catch { /* ignore */ }
+  finally { binLoading.value = false }
+}
+
+// --- 初始化 ---
+
+onMounted(() => {
+  check()
+  loadBin()
+})
 </script>
 
 <template>
   <div class="env-card">
+    <!-- 第一行：标题 + 状态 badges + 按钮 -->
     <div class="flex items-center gap-2">
       <span class="i-carbon-cloud-download w-3.5 h-3.5 text-muted-foreground" />
       <span class="text-[11.5px] font-medium">{{ t('settings.claudeEnv.title') }}</span>
@@ -97,9 +169,14 @@ onMounted(check)
         <span v-else class="env-badge ok">{{ t('settings.claudeEnv.upToDate') }}</span>
         <span v-if="info.installedVersion" class="env-badge off">{{ t(METHOD_KEYS[info.installMethod] ?? METHOD_KEYS.unknown) }}</span>
       </template>
+      <!-- 二进制来源 badge -->
+      <span
+        v-if="binInfo?.path && binInfo.source"
+        class="env-badge off"
+      >{{ t(SOURCE_KEYS[binInfo.source] ?? '') }}</span>
 
       <span class="flex-1" />
-      <button class="env-btn" :disabled="checking || upgrading" @click="check">
+      <button class="env-btn" :disabled="checking || upgrading || binLoading" @click="() => { check(); loadBin() }">
         {{ t('settings.claudeEnv.refresh') }}
       </button>
       <button class="env-btn" :disabled="diagging" @click="diagnose">
@@ -107,11 +184,11 @@ onMounted(check)
       </button>
     </div>
 
-    <!-- 版本对比行:可升级时橙色高亮目标版本 -->
+    <!-- 第二行：版本号 + 升级按钮 -->
     <div v-if="info?.installedVersion" class="mt-1.5 flex items-baseline gap-1.5 font-mono text-[13px]">
       <span class="text-foreground">{{ info.installedVersion }}</span>
       <template v-if="info.updateAvailable && info.latestVersion">
-        <span class="text-muted-foreground">→</span>
+        <span class="text-muted-foreground">&rarr;</span>
         <span class="text-accent font-semibold">{{ info.latestVersion }}</span>
       </template>
       <button
@@ -124,10 +201,52 @@ onMounted(check)
         {{ upgrading ? t('settings.claudeEnv.upgrading') : t('settings.claudeEnv.upgrade') }}
       </button>
     </div>
-    <p v-if="info?.binaryPath" class="env-path" :title="info.binaryPath">{{ info.binaryPath }}</p>
+
+    <!-- 第三行：二进制路径（统一显示，不重复） -->
+    <p v-if="displayPath" class="env-path" :title="displayPath">{{ displayPath }}</p>
     <p v-if="info && !info.latestVersion" class="text-[10px] text-muted-foreground mt-0.5">
       {{ t('settings.claudeEnv.latestUnknown') }}
     </p>
+
+    <!-- 手动路径无效提示 -->
+    <p v-if="binInfo?.manualPath && !binInfo.manualValid" class="text-[10.5px] text-destructive mt-1">
+      {{ t('settings.claudeBin.manualInvalid') }}
+    </p>
+
+    <!-- 探测失败：展示尝试清单 -->
+    <div v-if="binInfo && !binInfo.path" class="mt-1.5">
+      <p class="text-[10.5px] text-destructive">{{ t('settings.claudeBin.attemptedTitle') }}</p>
+      <ul class="mt-0.5 space-y-0.5">
+        <li v-for="a in binInfo.attempted" :key="a" class="env-path !mt-0">{{ a }}</li>
+      </ul>
+    </div>
+
+    <!-- 第四行：手动路径输入 + 保存/清除/重检测 -->
+    <div class="flex gap-1.5 items-center mt-2">
+      <input
+        v-model="manualInput"
+        class="env-input flex-1"
+        :placeholder="t('settings.claudeBin.manualPlaceholder')"
+        spellcheck="false"
+        @keydown.enter="saveManual"
+      >
+      <button class="env-btn" :disabled="binLoading" @click="saveManual">
+        {{ t('common.save') }}
+      </button>
+      <button
+        v-if="binInfo?.manualPath"
+        class="env-btn"
+        :disabled="binLoading"
+        @click="clearManual"
+      >
+        {{ t('common.clear') }}
+      </button>
+      <button class="env-btn" :disabled="binLoading" @click="redetect">
+        {{ t('settings.claudeBin.redetect') }}
+      </button>
+    </div>
+
+    <p v-if="binError" class="text-[10.5px] text-destructive mt-1">{{ binError }}</p>
 
     <!-- 升级结果 -->
     <p
@@ -189,6 +308,20 @@ onMounted(check)
   color: var(--muted-foreground);
   margin-top: 2px;
   word-break: break-all;
+}
+.env-input {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--background);
+  color: var(--foreground);
+  min-width: 0;
+}
+.env-input:focus {
+  outline: none;
+  border-color: var(--ring);
 }
 .env-btn {
   border: 1px solid var(--border);

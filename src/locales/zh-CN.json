@@ -442,6 +442,8 @@
   "settings": {
     "title": "设置",
     "general": "常规",
+    "appearance": "外观",
+    "system": "系统",
     "channels": "渠道",
     "models": "模型",
     "lab": "实验室",

@@ -13,11 +13,9 @@ import { useUiState } from '@/composables/useUiState'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import { useLocale } from '@/composables/useLocale'
-import { useHomeStats } from '@/composables/useHomeStats'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
 import OfficialDefaultsForm from '@/components/settings/OfficialDefaultsForm.vue'
 import PaperSelect from '@/components/settings/PaperSelect.vue'
-import DiagnosisCard from '@/components/home/DiagnosisCard.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
@@ -40,7 +38,6 @@ const {
   scanCcSwitch, importCcSwitch,
 } = useChannels()
 const { activeSection } = useUiState()
-const { diag, diagLoading, diagError, diagAt, retryDiag, ensureLoaded } = useHomeStats()
 const { confirm } = useConfirm()
 const { notifyTransient } = useNotifications()
 const {
@@ -52,6 +49,30 @@ const { minColumnWidth, setMinColumnWidth } = useWorkbench()
 const { zoomLevel, setZoom, MIN_ZOOM, MAX_ZOOM, STEP } = useZoom()
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const { config: themeConfig, themes: themeList, setLightTheme, setDarkTheme } = useTheme()
+
+// MCP Server 注册
+const mcpRegistered = ref(false)
+const mcpLoading = ref(false)
+
+async function loadMcpStatus() {
+  try {
+    const status = await invoke<{ registered: boolean }>('get_mcp_status')
+    mcpRegistered.value = status.registered
+  } catch {}
+}
+
+async function toggleMcp() {
+  mcpLoading.value = true
+  try {
+    if (mcpRegistered.value) {
+      await invoke('unregister_mcp')
+    } else {
+      await invoke('register_mcp')
+    }
+    await loadMcpStatus()
+  } catch {}
+  finally { mcpLoading.value = false }
+}
 
 const agentToggles = ref<Record<string, boolean>>({})
 const agentKeys = [
@@ -195,8 +216,8 @@ const agentLogsStats = computed(() => {
   return { total: logs.length, totalInput, totalOutput, successCount }
 })
 
-type Tab = 'general' | 'channels' | 'models' | 'agent' | 'claude-code' | 'permissions' | 'extensions' | 'lab' | 'diag'
-const activeTab = ref<Tab>('general')
+type Tab = 'appearance' | 'channels' | 'agent' | 'claude-code' | 'permissions' | 'extensions' | 'lab' | 'system'
+const activeTab = ref<Tab>('appearance')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
 /** official 渠道轻量编辑(仅默认模型/思考强度两字段) */
@@ -392,32 +413,13 @@ async function removeWakeAuthorization() {
   await loadWakePolicy()
 }
 
-// 模型 — 暂用本地状态
-const advisorMain = ref('claude-sonnet-4-6')
-const advisorModel = ref('claude-fable-5')
-const hideCreditsModels = ref(false)
-const autoDetectModels = ref(false)
 
-// 顾问主/顾问模型下拉:从 MODELS 非 legacy 项派生(单源,消灭硬编码 <option>)。
-// 行为兼容:若当前值不在派生列表(如默认 claude-sonnet-4-6 为 legacy 项),附加显示。
-const nonLegacyModels = computed(() =>
-  MODELS.filter(m => !m.legacy).map(m => ({ value: m.id, label: m.label })),
-)
-function withCurrent(list: { value: string; label: string }[], current: string) {
-  if (current && !list.some(o => o.value === current)) {
-    return [...list, { value: current, label: current }]
-  }
-  return list
-}
-const advisorMainOptions = computed(() => withCurrent(nonLegacyModels.value, advisorMain.value))
-const advisorModelOptions = computed(() => withCurrent(nonLegacyModels.value, advisorModel.value))
 
-onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig(); loadTrayTitleConfig() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig(); loadTrayTitleConfig(); loadMcpStatus() })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
     refreshChannels().then(() => probeAllChannels())
-    ensureLoaded()
   }
 })
 
@@ -524,14 +526,11 @@ function onSaved() {
       <h1 class="side-title">
         <span class="i-carbon-settings w-4 h-4 opacity-70" />{{ $t('settings.title') }}
       </h1>
-      <button :class="['side-item', { active: activeTab === 'general' }]" @click="activeTab = 'general'">
-        <span class="i-carbon-settings-adjust w-3.5 h-3.5" />{{ $t('settings.general') }}
+      <button :class="['side-item', { active: activeTab === 'appearance' }]" @click="activeTab = 'appearance'">
+        <span class="i-carbon-paint-brush w-3.5 h-3.5" />{{ $t('settings.appearance') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'channels' }]" @click="activeTab = 'channels'">
         <span class="i-carbon-connect w-3.5 h-3.5" />{{ $t('settings.channels') }}
-      </button>
-      <button :class="['side-item', { active: activeTab === 'models' }]" @click="activeTab = 'models'">
-        <span class="i-carbon-bot w-3.5 h-3.5" />{{ $t('settings.models') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'agent' }]" @click="activeTab = 'agent'">
         <span class="i-carbon-machine-learning w-3.5 h-3.5" />{{ $t('settings.agent') }}
@@ -548,8 +547,8 @@ function onSaved() {
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
         <span class="i-carbon-chemistry w-3.5 h-3.5" />{{ $t('settings.lab') }}
       </button>
-      <button :class="['side-item', { active: activeTab === 'diag' }]" @click="activeTab = 'diag'">
-        <span class="i-carbon-debug w-3.5 h-3.5" />{{ $t('settings.diagnostics') }}
+      <button :class="['side-item', { active: activeTab === 'system' }]" @click="activeTab = 'system'">
+        <span class="i-carbon-settings-adjust w-3.5 h-3.5" />{{ $t('settings.system') }}
       </button>
     </nav>
 
@@ -557,9 +556,9 @@ function onSaved() {
     <div :class="['flex-1 min-w-0', activeTab === 'claude-code' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto']">
       <div :class="['settings-body', { 'flex-1 min-h-0 flex flex-col': activeTab === 'claude-code' }]">
 
-        <!-- ====== 常规 ====== -->
-        <section v-show="activeTab === 'general'">
-          <h2 class="section-title">{{ $t('settings.general') }}</h2>
+        <!-- ====== 外观 ====== -->
+        <section v-show="activeTab === 'appearance'">
+          <h2 class="section-title">{{ $t('settings.appearance') }}</h2>
           <div class="settings-grid">
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.themeLight') }}</div>
@@ -659,45 +658,6 @@ function onSaved() {
                 </div>
               </div>
             </div>
-
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.routineWake') }}</div>
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
-                  <input
-                    type="radio"
-                    name="wake-policy"
-                    value="passive"
-                    :checked="wakePolicy === 'passive'"
-                    class="accent-primary"
-                    @change="setWakePolicy('passive')"
-                  />
-                  {{ $t('settings.routineWakePassive') }}
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
-                  <input
-                    type="radio"
-                    name="wake-policy"
-                    value="active"
-                    :checked="wakePolicy === 'active'"
-                    class="accent-primary"
-                    @change="setWakePolicy('active')"
-                  />
-                  {{ $t('settings.routineWakeActive') }}
-                </label>
-                <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground ml-5">{{ $t('settings.routineWakeActiveSub') }}</span>
-                <div v-if="wakeAuthorized" class="flex items-center gap-2 ml-5 text-[11px] text-muted-foreground">
-                  <span>{{ $t('settings.routineWakeAuthorized') }}</span>
-                  <button
-                    class="underline underline-offset-2 hover:text-foreground transition-colors"
-                    @click="removeWakeAuthorization"
-                  >
-                    {{ $t('settings.routineWakeRemoveAuth') }}
-                  </button>
-                </div>
-              </div>
-              <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
-            </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.zoomLevel') }}</div>
               <div class="flex items-center gap-2.5">
@@ -714,7 +674,6 @@ function onSaved() {
               </div>
               <div class="setting-hint">{{ $t('settings.zoomLevelHint') }}</div>
             </div>
-
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.minColumnWidth') }}</div>
               <div class="flex items-center gap-2">
@@ -729,48 +688,6 @@ function onSaved() {
                 <span class="text-[11px] text-muted-foreground">px</span>
               </div>
               <div class="setting-hint">{{ $t('settings.minColumnWidthHint') }}</div>
-            </div>
-
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
-              <select
-                :value="widgetDayStart"
-                class="form-select w-full"
-                @change="setWidgetDayStart(Number(($event.target as HTMLSelectElement).value))"
-              >
-                <option :value="0">{{ $t('settings.widgetMidnight') }}</option>
-                <option :value="5">{{ $t('settings.widgetFiveAm') }}</option>
-                <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
-              </select>
-              <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
-            </div>
-
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.widgetMonthBoundary') }}</div>
-              <select
-                :value="widgetMonthMode"
-                class="form-select w-full"
-                @change="setWidgetMonthMode(($event.target as HTMLSelectElement).value)"
-              >
-                <option value="natural">{{ $t('settings.widgetNaturalMonth') }}</option>
-                <option value="rolling">{{ $t('settings.widgetRolling30') }}</option>
-              </select>
-              <div class="setting-hint">{{ $t('settings.widgetMonthBoundaryHint') }}</div>
-            </div>
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
-              <div class="flex flex-col gap-1.5">
-                <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
-                  <input
-                    type="checkbox"
-                    :checked="isTraySlotActive(slot.key)"
-                    class="accent-primary"
-                    @change="toggleTraySlot(slot.key)"
-                  />
-                  {{ slot.label }}
-                </label>
-              </div>
-              <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
             </div>
           </div>
         </section>
@@ -964,43 +881,6 @@ function onSaved() {
           <p v-else-if="ccSwitchOpen && !ccSwitchProviders.length && !ccSwitchScanning" class="mt-2 text-xs text-muted-foreground">{{ $t('settings.ccSwitchEmpty') }}</p>
         </section>
 
-        <!-- ====== 模型 ====== -->
-        <section v-show="activeTab === 'models'">
-          <h2 class="section-title">{{ $t('settings.models') }}</h2>
-          <div class="settings-grid">
-            <!-- 顾问模式 -->
-            <div class="sub-card">
-              <h3 class="sub-card-title">{{ $t('settings.advisorMode') }}</h3>
-              <div class="setting-cell mb-2">
-                <div class="setting-label">{{ $t('settings.primaryModel') }}</div>
-                <select v-model="advisorMain" class="form-select w-full">
-                  <option v-for="o in advisorMainOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-                </select>
-              </div>
-              <div class="setting-cell">
-                <div class="setting-label">{{ $t('settings.advisorModel') }}</div>
-                <select v-model="advisorModel" class="form-select w-full">
-                  <option v-for="o in advisorModelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-                </select>
-              </div>
-              <p class="text-[11px] text-accent mt-2">{{ $t('settings.advisorWarning') }}</p>
-            </div>
-
-            <!-- 模型可见性 -->
-            <div class="sub-card">
-              <h3 class="sub-card-title">{{ $t('settings.modelVisibility') }}</h3>
-              <label class="form-checkbox-row">
-                <input v-model="hideCreditsModels" type="checkbox" />
-                <span>{{ $t('settings.hide1mModels') }}</span>
-              </label>
-              <label class="form-checkbox-row">
-                <input v-model="autoDetectModels" type="checkbox" />
-                <span>{{ $t('settings.autoDetect') }}</span>
-              </label>
-            </div>
-          </div>
-        </section>
-
         <!-- ====== Agent ====== -->
         <section v-show="activeTab === 'agent'">
           <h2 class="section-title">{{ $t('settings.agent') }}</h2>
@@ -1098,7 +978,38 @@ function onSaved() {
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
             {{ $t('settings.extensionsDesc') }}
           </p>
-          <TurnSignalCard />
+          <div class="flex flex-col gap-3">
+            <!-- MCP Server 注册 -->
+            <div class="mcp-card">
+              <div class="flex items-center gap-2">
+                <span class="i-carbon-plug w-3.5 h-3.5 text-muted-foreground" />
+                <span class="text-[11.5px] font-medium">{{ $t('settings.mcp.title') }}</span>
+                <span :class="['mcp-status', { active: mcpRegistered }]">
+                  {{ mcpRegistered ? $t('settings.mcp.registered') : $t('settings.mcp.notRegistered') }}
+                </span>
+                <button
+                  :class="['form-toggle ml-auto', { on: mcpRegistered }]"
+                  :disabled="mcpLoading"
+                  @click="toggleMcp"
+                >
+                  <span class="form-toggle-knob" />
+                </button>
+              </div>
+              <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
+                {{ $t('settings.mcp.description') }}
+              </p>
+            </div>
+            <TurnSignalCard />
+            <div class="settings-grid">
+              <div class="setting-cell">
+                <label class="form-toggle">
+                  <input v-model="htmlVisualEnabled" type="checkbox">
+                  <span>{{ $t('settings.htmlVisual') }}</span>
+                </label>
+                <p class="form-hint">{{ $t('settings.htmlVisualDesc') }}</p>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- ====== 实验室 ====== -->
@@ -1107,34 +1018,95 @@ function onSaved() {
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
             {{ $t('settings.labDesc') }}
           </p>
-          <div class="settings-grid mb-4">
-            <div class="setting-cell">
-              <label class="form-toggle">
-                <input v-model="htmlVisualEnabled" type="checkbox">
-                <span>{{ $t('settings.htmlVisual') }}</span>
-              </label>
-              <p class="form-hint">{{ $t('settings.htmlVisualDesc') }}</p>
-            </div>
-          </div>
           <div class="iframe-zone">
             <span class="iframe-badge">IFRAME</span>
             <AgentIframeDemo />
           </div>
         </section>
 
-        <!-- ====== 诊断 ====== -->
-        <section v-show="activeTab === 'diag'">
-          <h2 class="section-title">{{ $t('settings.diagnostics') }}</h2>
-          <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-            {{ $t('settings.diagDesc') }}
-          </p>
-          <DiagnosisCard
-            :diag="diag"
-            :loading="diagLoading"
-            :error="diagError"
-            :scanned-at="diagAt"
-            @retry="retryDiag"
-          />
+        <!-- ====== 系统 ====== -->
+        <section v-show="activeTab === 'system'">
+          <h2 class="section-title">{{ $t('settings.system') }}</h2>
+          <div class="settings-grid">
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.routineWake') }}</div>
+              <div class="flex flex-col gap-1.5">
+                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
+                  <input
+                    type="radio"
+                    name="wake-policy"
+                    value="passive"
+                    :checked="wakePolicy === 'passive'"
+                    class="accent-primary"
+                    @change="setWakePolicy('passive')"
+                  />
+                  {{ $t('settings.routineWakePassive') }}
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
+                  <input
+                    type="radio"
+                    name="wake-policy"
+                    value="active"
+                    :checked="wakePolicy === 'active'"
+                    class="accent-primary"
+                    @change="setWakePolicy('active')"
+                  />
+                  {{ $t('settings.routineWakeActive') }}
+                </label>
+                <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground ml-5">{{ $t('settings.routineWakeActiveSub') }}</span>
+                <div v-if="wakeAuthorized" class="flex items-center gap-2 ml-5 text-[11px] text-muted-foreground">
+                  <span>{{ $t('settings.routineWakeAuthorized') }}</span>
+                  <button
+                    class="underline underline-offset-2 hover:text-foreground transition-colors"
+                    @click="removeWakeAuthorization"
+                  >
+                    {{ $t('settings.routineWakeRemoveAuth') }}
+                  </button>
+                </div>
+              </div>
+              <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
+            </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
+              <div class="flex flex-col gap-1.5">
+                <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
+                  <input
+                    type="checkbox"
+                    :checked="isTraySlotActive(slot.key)"
+                    class="accent-primary"
+                    @change="toggleTraySlot(slot.key)"
+                  />
+                  {{ slot.label }}
+                </label>
+              </div>
+              <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
+            </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
+              <select
+                :value="widgetDayStart"
+                class="form-select w-full"
+                @change="setWidgetDayStart(Number(($event.target as HTMLSelectElement).value))"
+              >
+                <option :value="0">{{ $t('settings.widgetMidnight') }}</option>
+                <option :value="5">{{ $t('settings.widgetFiveAm') }}</option>
+                <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
+            </div>
+            <div class="setting-cell">
+              <div class="setting-label">{{ $t('settings.widgetMonthBoundary') }}</div>
+              <select
+                :value="widgetMonthMode"
+                class="form-select w-full"
+                @change="setWidgetMonthMode(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="natural">{{ $t('settings.widgetNaturalMonth') }}</option>
+                <option value="rolling">{{ $t('settings.widgetRolling30') }}</option>
+              </select>
+              <div class="setting-hint">{{ $t('settings.widgetMonthBoundaryHint') }}</div>
+            </div>
+          </div>
         </section>
 
       </div>
@@ -1473,5 +1445,25 @@ function onSaved() {
 }
 .agent-logs-table tbody tr:hover {
   background: var(--muted);
+}
+
+/* MCP 卡片 */
+.mcp-card {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.mcp-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.mcp-status.active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: hsl(var(--primary) / 0.08);
 }
 </style>

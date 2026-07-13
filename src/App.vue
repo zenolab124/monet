@@ -7,7 +7,6 @@ import ActivityBar from '@/components/ActivityBar.vue'
 import WorkbenchTabs from '@/components/workbench/WorkbenchTabs.vue'
 import SessionsView from '@/views/SessionsView.vue'
 import SearchView from '@/views/SearchView.vue'
-import HomeView from '@/views/HomeView.vue'
 import WorkbenchView from '@/views/WorkbenchView.vue'
 import WorkshopView from '@/views/WorkshopView.vue'
 import AutomationView from '@/views/AutomationView.vue'
@@ -198,7 +197,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <SearchView v-show="activeSection === 'search'" class="flex-1 min-w-0" />
         <WorkshopView v-show="activeSection === 'workshop'" class="flex-1 min-w-0" />
         <AutomationView v-show="activeSection === 'automation'" class="flex-1 min-w-0" />
-        <HomeView v-show="activeSection === 'home'" class="flex-1 min-w-0" />
         <SettingsView v-show="activeSection === 'settings'" class="flex-1 min-w-0" />
       </div>
 

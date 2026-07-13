@@ -442,6 +442,8 @@
   "settings": {
     "title": "Settings",
     "general": "General",
+    "appearance": "Appearance",
+    "system": "System",
     "channels": "Channels",
     "models": "Models",
     "lab": "Lab",
