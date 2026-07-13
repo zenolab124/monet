@@ -82,8 +82,6 @@
     "settings": "Paramètres",
     "toggleSidebar": "Afficher la barre latérale",
     "hideSidebar": "Masquer la barre latérale",
-    "searchSessions": "Rechercher des sessions… (⌘F)",
-    "searchAllSessions": "Rechercher toutes les sessions… (⌘F)",
     "recalculate": "Recalculer"
   },
   "archive": {

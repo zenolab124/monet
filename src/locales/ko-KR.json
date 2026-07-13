@@ -82,8 +82,6 @@
     "settings": "설정",
     "toggleSidebar": "사이드바 표시",
     "hideSidebar": "사이드바 숨기기",
-    "searchSessions": "세션 검색… (⌘F)",
-    "searchAllSessions": "전체 세션 검색… (⌘F)",
     "recalculate": "다시 집계"
   },
   "archive": {

@@ -82,8 +82,6 @@
     "settings": "Ajustes",
     "toggleSidebar": "Mostrar barra lateral",
     "hideSidebar": "Ocultar barra lateral",
-    "searchSessions": "Buscar sesiones… (⌘F)",
-    "searchAllSessions": "Buscar todas las sesiones… (⌘F)",
     "recalculate": "Recalcular"
   },
   "archive": {

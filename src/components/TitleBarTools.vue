@@ -1,33 +1,14 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useUiState } from '@/composables/useUiState'
-import { useSessions } from '@/composables/useSessions'
 import { useAutomation } from '@/composables/useAutomation'
 import { useWorkbench } from '@/composables/useWorkbench'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
 const { activeTab, resetColumnSizes } = useWorkbench()
-
-// --- 档案馆搜索 ---
-const { searchQuery } = useSessions()
-const searchRef = ref<HTMLInputElement>()
-const localQuery = ref(searchQuery.value)
-let debounceTimer: ReturnType<typeof setTimeout>
-watch(localQuery, (v) => {
-  clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => { searchQuery.value = v }, 300)
-})
-function onKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'f' && activeSection.value === 'sessions') {
-    e.preventDefault()
-    searchRef.value?.focus()
-  }
-}
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 // --- 自动化 ---
 const { config: autoConfig, refresh: autoRefresh, loadingConfig, loadingStats } = useAutomation()
@@ -58,22 +39,6 @@ async function openGlobalConfig() {
   >
     <span class="i-carbon-fit-to-width w-3.5 h-3.5" />
   </button>
-
-  <!-- 档案馆 -->
-  <template v-if="activeSection === 'sessions'">
-    <div class="relative">
-      <span class="absolute left-2 top-1/2 -translate-y-1/2 i-carbon-search w-3.5 h-3.5 text-muted-foreground" />
-      <input
-        ref="searchRef"
-        v-model="localQuery"
-        type="text"
-        :placeholder="$t('titlebar.searchSessions')"
-        class="w-48 pl-7 pr-2 py-1 text-xs rounded-md bg-popover border border-border
-               text-foreground placeholder-muted-foreground
-               focus:outline-none focus:border-ring transition-colors"
-      />
-    </div>
-  </template>
 
   <!-- 自动化 -->
   <template v-if="activeSection === 'automation'">

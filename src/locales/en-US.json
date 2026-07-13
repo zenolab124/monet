@@ -112,8 +112,6 @@
     "settings": "Settings",
     "toggleSidebar": "Show sidebar",
     "hideSidebar": "Hide sidebar",
-    "searchSessions": "Search sessions… (⌘F)",
-    "searchAllSessions": "Search all sessions… (⌘F)",
     "recalculate": "Recalculate",
     "netcheck": "Network Check",
     "netcheckRunning": "Checking…"

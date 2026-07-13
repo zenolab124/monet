@@ -82,8 +82,6 @@
     "settings": "Настройки",
     "toggleSidebar": "Показать боковую панель",
     "hideSidebar": "Скрыть боковую панель",
-    "searchSessions": "Поиск сессий… (⌘F)",
-    "searchAllSessions": "Поиск по всем сессиям… (⌘F)",
     "recalculate": "Пересчитать"
   },
   "archive": {

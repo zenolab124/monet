@@ -112,8 +112,6 @@
     "settings": "设置",
     "toggleSidebar": "显示侧栏",
     "hideSidebar": "隐藏侧栏",
-    "searchSessions": "搜索会话… (⌘F)",
-    "searchAllSessions": "搜索全部会话… (⌘F)",
     "recalculate": "重新统计",
     "netcheck": "网络诊断",
     "netcheckRunning": "检测中…"

@@ -9,28 +9,9 @@ const selectedSessionId = ref<string | null>(null)
 const sortOrder = ref<SortOrder>('lastModified')
 const selectedTimeRange = ref<TimeRange>('all')
 const selectedModel = ref<string | null>(null)
-const searchQuery = ref('')
-
 /** 对会话列表应用筛选和排序 */
 function filterAndSort(sessions: SessionSummary[]): SessionSummary[] {
   let result = sessions
-
-  // 搜索过滤
-  if (searchQuery.value) {
-    const words = searchQuery.value.toLowerCase().split(/\s+/).filter(Boolean)
-    result = result.filter(s => {
-      const haystack = [
-        s.title,
-        s.first_user_message,
-        s.git_branch,
-        s.cwd,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return words.every(w => haystack.includes(w))
-    })
-  }
 
   // 时间范围过滤
   if (selectedTimeRange.value !== 'all') {
@@ -85,7 +66,6 @@ export function useSessions() {
     sortOrder,
     selectedTimeRange,
     selectedModel,
-    searchQuery,
     filterAndSort,
     extractFilterOptions,
     selectSession,
