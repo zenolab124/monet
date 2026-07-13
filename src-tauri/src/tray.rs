@@ -5,7 +5,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{TrayIconBuilder, TrayIconId},
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager,
 };
 
 use crate::{agent, quota, streaming};
@@ -35,9 +35,8 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 std::thread::spawn(move || refresh_tray(&handle));
             }
             "quit" => {
-                streaming::close_all_sessions();
-                agent::shutdown();
-                app.exit(0);
+                show_main_window(app);
+                let _ = app.emit("menu:request-quit", ());
             }
             _ => {}
         })

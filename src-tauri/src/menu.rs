@@ -50,6 +50,10 @@ pub fn handle_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
             let _ = app.emit("menu:close-tab", ());
         }
         "quit" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
             let _ = app.emit("menu:request-quit", ());
         }
         _ => {}
