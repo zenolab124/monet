@@ -1,25 +1,36 @@
-# Monet
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Monet">
+</p>
 
-Mission Control for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — a desktop app to browse, search, and manage your sessions.
+<h1 align="center">Monet</h1>
 
-Built with [Tauri 2](https://tauri.app/) + [Vue 3](https://vuejs.org/).
+<p align="center">
+  Mission Control for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>
+</p>
 
-> **[中文说明](README.zh-CN.md)**
+<p align="center">
+  <a href="README.zh-CN.md">中文说明</a>
+</p>
 
-<!-- TODO: add screenshot here -->
-<!-- ![Monet screenshot](docs/screenshot.png) -->
+<!-- TODO: screenshot -->
+
+## What is Monet?
+
+A desktop app that turns your Claude Code session history into a browsable, searchable, and interactive workspace. Named after [Claude Monet](https://en.wikipedia.org/wiki/Claude_Monet) — yes, that Claude.
+
+Monet **never writes** to Claude Code's JSONL files. All metadata is stored separately in `~/.monet/`.
 
 ## Features
 
-- **Session browser** — Parses all JSONL records from `~/.claude/projects/`, with sorting, filtering, and full-text search
-- **Rich conversation view** — Markdown rendering, syntax highlighting (Shiki), tool call expansion, thinking block display
-- **Streaming** — Send follow-up messages with real-time streaming, press Esc to interrupt
-- **Workbench** — Tabbed multi-session workspace with draggable split panes
-- **Archive** — Three-panel read-only session explorer (projects → sessions → detail)
-- **Live refresh** — Background file watcher auto-updates when sessions change
-- **Session actions** — Resume in terminal (`claude --resume`), open in VS Code, delete
-- **i18n** — 12 built-in languages, plus AI-powered translation for any language
-- **Appearance** — Dark / light / system theme, macOS native title bar
+**Review** — Browse all sessions across projects, full-text search in milliseconds, rich Markdown/code/tool-call rendering, thinking block expansion.
+
+**Work** — Multi-tab workbench with draggable split columns. Send follow-up messages with real-time streaming. Switch models, channels, and effort levels on the fly.
+
+**Automate** — Schedule recurring Claude Code tasks with cron expressions. macOS wake-from-sleep support for overnight runs.
+
+**Integrate** — Built-in MCP server (`monet-mcp`) lets Claude Code search your session history and manage routines from the CLI. macOS widgets for at-a-glance stats.
+
+**Customize** — 12 built-in languages + AI translation for any language. Dark / light / system theme. macOS native title bar. System permission health check panel.
 
 ## Install
 
@@ -36,26 +47,40 @@ Download the latest `.dmg` from [Releases](../../releases).
 - [Rust](https://rustup.rs/) 1.77+
 - Xcode Command Line Tools — `xcode-select --install`
 
-### Build
+### Development
 
 ```bash
 git clone https://github.com/zenolab124/monet.git
 cd monet
 pnpm install
-pnpm tauri build
-```
-
-The `.dmg` and `.app` will be in `src-tauri/target/release/bundle/macos/`.
-
-For development:
-
-```bash
 pnpm tauri dev
 ```
 
-## How It Works
+### Release Build (with widget + signing)
 
-Monet reads Claude Code session data from `~/.claude/projects/`. It **never writes** to these JSONL files — all metadata (titles, tags, archive status) is stored separately in `~/.monet/`.
+```bash
+pnpm release
+```
+
+This runs `tauri build`, compiles the macOS widget extension, embeds it into the app bundle, signs everything, and creates a `.dmg`.
+
+To set up a local signing identity (recommended — keeps TCC permissions stable across rebuilds):
+
+```bash
+scripts/setup-signing.sh
+```
+
+Without it, the build falls back to ad-hoc signing — functional, but TCC permissions reset on each rebuild and widgets may not register.
+
+## Data & Privacy
+
+| What | Where | Access |
+|------|-------|--------|
+| Claude Code sessions | `~/.claude/projects/` | **Read-only** |
+| Monet metadata (titles, tags, routines) | `~/.monet/` | Read-write |
+| MCP registration | `~/.claude/settings.json` | Adds `monet` key |
+
+Monet is fully offline. No telemetry, no accounts, no network calls (except when you explicitly use streaming via Claude Code CLI).
 
 ## Tech Stack
 
@@ -64,8 +89,9 @@ Monet reads Claude Code session data from `~/.claude/projects/`. It **never writ
 - [UnoCSS](https://unocss.dev/) — Atomic CSS (preset-wind4 + preset-icons)
 - [Shiki](https://shiki.style/) — Syntax highlighting
 - [markdown-it](https://github.com/markdown-it/markdown-it) — Markdown rendering
-- [vue-i18n](https://vue-i18n.intlify.dev/) — Internationalization
+- [vue-i18n](https://vue-i18n.intlify.dev/) — i18n
 - [@dnd-kit/vue](https://dndkit.com/) — Drag and drop
+- [Swift WidgetKit](https://developer.apple.com/documentation/widgetkit) — macOS widgets
 
 ## License
 

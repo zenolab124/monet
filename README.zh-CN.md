@@ -1,25 +1,36 @@
-# Monet
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Monet">
+</p>
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 的任务控制中心 —— 浏览、搜索、管理会话的桌面应用。
+<h1 align="center">Monet</h1>
 
-基于 [Tauri 2](https://tauri.app/) + [Vue 3](https://vuejs.org/) 构建。
+<p align="center">
+  <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> 的任务控制中心
+</p>
 
-> **[English](README.md)**
+<p align="center">
+  <a href="README.md">English</a>
+</p>
 
-<!-- TODO: 添加截图 -->
-<!-- ![Monet 截图](docs/screenshot.png) -->
+<!-- TODO: 截图 -->
+
+## Monet 是什么？
+
+一个桌面应用，把 Claude Code 的会话历史变成可浏览、可搜索、可交互的工作空间。名字取自 [Claude Monet](https://zh.wikipedia.org/wiki/%E5%85%8B%E5%8A%B3%E5%BE%B7%C2%B7%E8%8E%AB%E5%A5%88)——对，就是那个 Claude。
+
+Monet **绝不写入** Claude Code 的 JSONL 文件，所有增值数据存储在独立目录 `~/.monet/`。
 
 ## 功能
 
-- **会话浏览** — 解析 `~/.claude/projects/` 下所有 JSONL 会话记录，支持排序、筛选、全文搜索
-- **丰富的对话视图** — Markdown 渲染、代码语法高亮 (Shiki)、工具调用展开、思考过程显示
-- **流式交互** — 发送跟进消息，实时流式渲染，Esc 中断
-- **工作台** — 多标签页会话工作区，支持拖拽分屏
-- **档案馆** — 三栏只读会话查阅（项目 → 会话列表 → 详情）
-- **实时刷新** — 后台文件监控，会话变化时自动更新
-- **会话操作** — 终端恢复 (`claude --resume`)、VS Code 打开、删除
-- **多语言** — 内置 12 种语言，支持 AI 翻译扩展任意语言
-- **外观** — 暗色 / 亮色 / 跟随系统，macOS 原生标题栏
+**回顾** — 跨项目浏览所有会话，毫秒级全文搜索，Markdown / 代码 / 工具调用渲染，思考块展开。
+
+**推进** — 多标签工作台，可拖拽分列。发送跟进消息实时流式渲染。随时切换模型、渠道、思考力度。
+
+**调度** — 用 cron 表达式定时运行 Claude Code 任务。支持 macOS 睡眠唤醒，适合过夜跑任务。
+
+**集成** — 内置 MCP server（`monet-mcp`），让 Claude Code 在 CLI 中搜索会话历史、管理定时任务。macOS 小组件随时查看统计。
+
+**个性化** — 内置 12 种语言 + AI 翻译扩展任意语言。暗色 / 亮色 / 跟随系统。macOS 原生标题栏。系统权限体检面板。
 
 ## 安装
 
@@ -36,26 +47,40 @@
 - [Rust](https://rustup.rs/) 1.77+
 - Xcode Command Line Tools — `xcode-select --install`
 
-### 构建
+### 开发模式
 
 ```bash
 git clone https://github.com/zenolab124/monet.git
 cd monet
 pnpm install
-pnpm tauri build
-```
-
-产物在 `src-tauri/target/release/bundle/macos/` 下。
-
-开发模式：
-
-```bash
 pnpm tauri dev
 ```
 
-## 工作原理
+### 发布构建（含小组件 + 签名）
 
-Monet 读取 `~/.claude/projects/` 下的 Claude Code 会话数据，**绝不写入** JSONL 文件 — 所有增值数据（标题、标签、归档状态）存储在独立目录 `~/.monet/`。
+```bash
+pnpm release
+```
+
+依次执行 `tauri build`、编译 macOS 小组件、嵌入 app bundle、签名、生成 `.dmg`。
+
+建立本机签名身份（推荐——TCC 权限跨构建保持稳定）：
+
+```bash
+scripts/setup-signing.sh
+```
+
+不跑也能构建，会降级为 ad-hoc 签名——功能正常，但每次重新构建后 TCC 权限需重新授予，小组件可能不注册。
+
+## 数据与隐私
+
+| 内容 | 位置 | 访问方式 |
+|------|------|---------|
+| Claude Code 会话 | `~/.claude/projects/` | **只读** |
+| Monet 增值数据（标题、标签、定时任务） | `~/.monet/` | 读写 |
+| MCP 注册 | `~/.claude/settings.json` | 添加 `monet` 条目 |
+
+Monet 完全离线运行。无遥测、无账号、无网络请求（除非你主动通过 Claude Code CLI 发送流式消息）。
 
 ## 技术栈
 
@@ -66,6 +91,7 @@ Monet 读取 `~/.claude/projects/` 下的 Claude Code 会话数据，**绝不写
 - [markdown-it](https://github.com/markdown-it/markdown-it) — Markdown 渲染
 - [vue-i18n](https://vue-i18n.intlify.dev/) — 国际化
 - [@dnd-kit/vue](https://dndkit.com/) — 拖拽
+- [Swift WidgetKit](https://developer.apple.com/documentation/widgetkit) — macOS 小组件
 
 ## 开源协议
 
