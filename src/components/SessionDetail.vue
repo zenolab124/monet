@@ -1966,7 +1966,7 @@ async function onReload() {
     >
     <!-- 内容包裹层:所有增高源(打字机/晚到turn/落账替换/图片/cv解冻/横幅)都反映为它的高度变化,
          contentRO 观察它实现水平触发的滚动跟随 -->
-    <div ref="scrollContentEl" class="space-y-4 pb-8 relative">
+    <div ref="scrollContentEl" class="space-y-4 pb-2 relative">
       <template v-if="!hideHistory">
         <!-- 渠道切换横线:会话起点的切换(本地记账,jsonl 无渠道信息) -->
         <div
@@ -2168,8 +2168,8 @@ async function onReload() {
       </div>
 
       <div
-        v-if="stream.streaming || externalRunning || hasLiveTurn"
-        class="absolute bottom-1 left-0 flex items-center gap-1 pl-5"
+        class="absolute bottom-1 left-0 flex items-center gap-1 pl-5 transition-opacity duration-200"
+        :class="stream.streaming || externalRunning || hasLiveTurn ? 'opacity-100' : 'opacity-0 pointer-events-none'"
       >
         <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
       </div>
