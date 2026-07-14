@@ -36,6 +36,12 @@
 
   --claude: oklch(0.75 0.115 42);
 
+  --hv-border: oklch(0.34 0.002 80);
+  --hv-warm: oklch(0.24 0.020 60);
+  --hv-cool: oklch(0.24 0.015 240);
+  --hv-red: oklch(0.23 0.025 25);
+  --hv-green: oklch(0.24 0.025 145);
+
   --shadow-paper:
     0 1px 0 rgba(255, 255, 255, 0.02) inset,
     0 1px 2px rgba(0, 0, 0, 0.40),

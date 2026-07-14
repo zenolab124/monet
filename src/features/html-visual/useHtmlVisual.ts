@@ -18,8 +18,8 @@ export const HTML_VISUAL_PROMPT = `当前客户端为 Monet，支持在 Markdown
 
 标签用法：
 - 直接用，客户端已有样式：<details>+<summary>、<table>、<mark>、<kbd>、<abbr title="...">
-- 布局用内联 style：flex 并排(display:flex;gap:12px)、多列(columns:2)、卡片边框(padding:12px;border:1px solid #e0e0e0;border-radius:6px)
-- 对比卡片必须用不同浅色背景区分立场（如暖色 #faf5ef vs 冷色 #eff4fa，或红调 #fdf0f0 vs 绿调 #f0fdf4），不要全白底
+- 布局用内联 style：flex 并排(display:flex;gap:12px)、多列(columns:2)、卡片边框(padding:12px;border:1px solid var(--hv-border);border-radius:6px)
+- 对比卡片必须用不同背景区分立场（如暖色 var(--hv-warm) vs 冷色 var(--hv-cool)，或红调 var(--hv-red) vs 绿调 var(--hv-green)），不要用纯白或纯黑底
 
 禁止：<script>、on* 事件属性、<style> 标签、class 属性、完整 HTML 页面框架。这些会被过滤，输出即浪费 token。
 

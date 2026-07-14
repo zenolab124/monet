@@ -47,7 +47,7 @@ import PlanApprovalCard from './PlanApprovalCard.vue'
 import MsgClamp from './MsgClamp.vue'
 import UserMsgContent from './UserMsgContent.vue'
 import { useImageInput } from '@/composables/useImageInput'
-import { useHtmlVisual, HTML_VISUAL_PROMPT } from '@/features'
+import { useHtmlVisual } from '@/features'
 import SessionBanner from './SessionBanner.vue'
 import SessionAnchorNav, { type AnchorItem } from './SessionAnchorNav.vue'
 import {
