@@ -35,6 +35,7 @@ const runnerRows: PermRow[] = [
   { key: 'fullDiskAccess', icon: 'i-carbon-data-base', panel: 'allFiles', requestable: false },
   { key: 'accessibility', icon: 'i-carbon-accessibility', panel: 'accessibility', requestable: false },
   { key: 'screenCapture', icon: 'i-carbon-screen', panel: 'screenRecording', requestable: false },
+  { key: 'localNetwork', icon: 'i-carbon-network-3', panel: 'localNetwork', requestable: true },
 ]
 
 const appPerms = ref<Record<string, Status>>({})

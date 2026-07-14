@@ -62,6 +62,9 @@ onMounted(refresh)
       <span v-else-if="state === 'broken'" class="ext-badge bad">{{ t('settings.turnSignal.statusBroken') }}</span>
       <span v-else class="ext-badge off">{{ t('settings.turnSignal.statusOff') }}</span>
     </div>
+    <div class="ext-tags">
+      <span class="ext-tag neutral">{{ t('settings.extTagAsNeeded') }}</span>
+    </div>
 
     <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
       {{ t('settings.turnSignal.desc') }}
@@ -173,5 +176,20 @@ onMounted(refresh)
 .ext-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.ext-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+.ext-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.5;
+}
+.ext-tag.neutral {
+  background: color-mix(in srgb, var(--muted-foreground) 10%, transparent);
+  color: var(--muted-foreground);
 }
 </style>

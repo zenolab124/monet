@@ -80,6 +80,7 @@ rm -f "$DMG_PATH"
 echo "=> Creating DMG..."
 DMG_STAGE=$(mktemp -d)
 cp -R "$APP_BUNDLE" "$DMG_STAGE/"
+ln -s /Applications "$DMG_STAGE/Applications"
 if diskutil image create from --help &>/dev/null; then
     diskutil image create from --format UDZO --volumeName "$APP_NAME" "$DMG_STAGE" "$DMG_PATH"
 else

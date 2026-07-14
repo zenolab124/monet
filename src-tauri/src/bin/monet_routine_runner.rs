@@ -186,6 +186,9 @@ fn run_health_check(prompt: Option<&str>) {
             Some("screenCapture") => {
                 let _ = tcc::request_screen_capture();
             }
+            Some("localNetwork") => {
+                let _ = tcc::check_local_network();
+            }
             _ => {}
         }
     }
@@ -198,6 +201,7 @@ fn run_health_check(prompt: Option<&str>) {
             "accessibility": tcc::check_accessibility(),
             "screenCapture": tcc::check_screen_capture(),
             "fullDiskAccess": tcc::check_full_disk_access(),
+            "localNetwork": tcc::check_local_network(),
         },
     });
     // 结果路径与主 App 读取侧硬编码一致（launchd 语境无 MONET_DATA_DIR）

@@ -62,6 +62,28 @@ pub fn prompt_accessibility() -> &'static str {
     status_name(unsafe { native::monet_ax_prompt() })
 }
 
+/// 本地网络权限：Apple 不提供查询 API，加入 mDNS 组播组间接探测。
+/// join_multicast 会触发系统授权弹窗（未授权时）
+#[cfg(target_os = "macos")]
+pub fn check_local_network() -> &'static str {
+    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    let sock = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(s) => s,
+        Err(_) => return "unknown",
+    };
+    let multicast = Ipv4Addr::new(224, 0, 0, 251);
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok();
+    if sock.join_multicast_v4(&multicast, &Ipv4Addr::UNSPECIFIED).is_err() {
+        return "denied";
+    }
+    let target = SocketAddrV4::new(multicast, 5353);
+    let query: [u8; 12] = [0; 12];
+    match sock.send_to(&query, target) {
+        Ok(_) => "granted",
+        Err(_) => "denied",
+    }
+}
+
 /// 完全磁盘访问没有查询 API，试读 FDA 保护路径推断：
 /// 明确的 PermissionDenied → denied；能读 → granted；路径不存在等 → 换下一个
 #[cfg(target_os = "macos")]
@@ -114,6 +136,11 @@ pub fn request_screen_capture() -> &'static str {
 
 #[cfg(not(target_os = "macos"))]
 pub fn prompt_accessibility() -> &'static str {
+    "unknown"
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn check_local_network() -> &'static str {
     "unknown"
 }
 

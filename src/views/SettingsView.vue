@@ -118,7 +118,7 @@ async function revealAgentSessionDir() {
 const viewingSession = ref<string | null>(null)
 
 function isAgentEnabled(key: string) {
-  return agentToggles.value[key] ?? true
+  return agentToggles.value[key] ?? false
 }
 
 async function toggleAgent(key: string) {
@@ -540,14 +540,14 @@ function onSaved() {
       <button :class="['side-item', { active: activeTab === 'agent' }]" @click="activeTab = 'agent'">
         <span class="i-carbon-machine-learning w-3.5 h-3.5" />{{ $t('settings.agent') }}
       </button>
+      <button :class="['side-item', { active: activeTab === 'extensions' }]" @click="activeTab = 'extensions'">
+        <span class="i-carbon-plug w-3.5 h-3.5" />{{ $t('settings.extensions') }}
+      </button>
       <button :class="['side-item', { active: activeTab === 'claude-code' }]" @click="activeTab = 'claude-code'">
         <span class="i-carbon-json w-3.5 h-3.5" />Claude Code
       </button>
       <button :class="['side-item', { active: activeTab === 'permissions' }]" @click="activeTab = 'permissions'">
         <span class="i-carbon-security w-3.5 h-3.5" />{{ $t('settings.permissionsNav') }}
-      </button>
-      <button :class="['side-item', { active: activeTab === 'extensions' }]" @click="activeTab = 'extensions'">
-        <span class="i-carbon-plug w-3.5 h-3.5" />{{ $t('settings.extensions') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
         <span class="i-carbon-chemistry w-3.5 h-3.5" />{{ $t('settings.lab') }}
@@ -1000,9 +1000,22 @@ function onSaved() {
                   <span class="form-toggle-knob" />
                 </button>
               </div>
+              <div class="ext-tags">
+                <span class="ext-tag recommended">{{ $t('settings.extTagRecommended') }}</span>
+              </div>
               <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
                 {{ $t('settings.mcp.description') }}
               </p>
+              <div class="mt-1.5 flex flex-col gap-1">
+                <div class="ext-example">
+                  <span class="i-carbon-search w-3 h-3 shrink-0 opacity-50" />
+                  <span>{{ $t('settings.mcp.exampleSearch') }}</span>
+                </div>
+                <div class="ext-example">
+                  <span class="i-carbon-time w-3 h-3 shrink-0 opacity-50" />
+                  <span>{{ $t('settings.mcp.exampleRoutine') }}</span>
+                </div>
+              </div>
             </div>
             <TurnSignalCard />
             <!-- HTML 增强渲染 -->
@@ -1016,6 +1029,10 @@ function onSaved() {
                 >
                   <span class="form-toggle-knob" />
                 </button>
+              </div>
+              <div class="ext-tags">
+                <span class="ext-tag recommended">{{ $t('settings.extTagRecommended') }}</span>
+                <span class="ext-tag warn">{{ $t('settings.extTagTokenCost') }}</span>
               </div>
               <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
                 {{ $t('settings.htmlVisualDesc') }}
@@ -1134,8 +1151,7 @@ function onSaved() {
                 class="form-select w-full"
                 @change="setWidgetDayStart(Number(($event.target as HTMLSelectElement).value))"
               >
-                <option :value="0">{{ $t('settings.widgetMidnight') }}</option>
-                <option :value="5">{{ $t('settings.widgetFiveAm') }}</option>
+                <option v-for="h in 24" :key="h - 1" :value="h - 1">{{ $t('settings.widgetHourOption', { h: h - 1 }) }}</option>
                 <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
               </select>
               <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
@@ -1511,5 +1527,37 @@ function onSaved() {
   color: var(--primary);
   border-color: var(--primary);
   background: hsl(var(--primary) / 0.08);
+}
+.ext-example {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.ext-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+.ext-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.5;
+}
+.ext-tag.recommended {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+.ext-tag.neutral {
+  background: color-mix(in srgb, var(--muted-foreground) 10%, transparent);
+  color: var(--muted-foreground);
+}
+.ext-tag.warn {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
 }
 </style>

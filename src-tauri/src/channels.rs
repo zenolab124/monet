@@ -764,7 +764,7 @@ pub fn set_agent_toggle(key: String, enabled: bool) -> Result<(), String> {
 }
 
 pub fn is_agent_enabled(key: &str) -> bool {
-    load_app_settings().agent_toggles.get(key).copied().unwrap_or(true)
+    load_app_settings().agent_toggles.get(key).copied().unwrap_or(false)
 }
 
 /// Agent 会话是否落盘（默认 true）。false 时 spawn CLI 附加 --no-session-persistence
