@@ -353,8 +353,7 @@ watch(effectiveSessionId, () => {
   bannerHookEvents.value = []
   lastScrollTop = 0
   lastSnapScrollTop = 0
-  finishTransition = false
-})
+  })
 
 // --- 权限请求(仅工作台列交互;档案馆只读不渲染) ---
 const permissionRequest = currentForSession(effectiveSessionId)
@@ -1330,19 +1329,23 @@ async function handleSend() {
   followStreaming.value = true
   featureBannerShown.value = false
   scrollToBottom(true)
-  // 发送前即时落账:上一轮流式 turns 还在(子 Agent 晚到 / 300ms 窗口未到)时,
-  // sendMessage 会清 streamingTurns 但 records 尚未 reload——内容从两源同时消失。
-  // 先 reload 把旧内容收进历史区,再清 turns 再发送,消除消失窗口
+  // 发送前即时落账:上一轮流式 turns 还在时,sendMessage 会清 streamingTurns
+  // 但 records 尚未 reload——内容从两源同时消失。先应用暂存/重新 reload 收进历史区
   if (stream.value.streamingTurns.length > 0) {
-    try {
-      const fresh = await invoke<SessionRecord[]>('get_session_records', {
-        projectId: cs.projectId,
-        sessionId: cs.summary.id,
-      })
-      if (effectiveSessionId.value === cs.summary.id && fresh.length >= records.value.length) {
-        records.value = fresh
-      }
-    } catch { /* next reload will pick it up */ }
+    if (deferredRecords?.sid === cs.summary.id) {
+      records.value = deferredRecords.recs
+      deferredRecords = null
+    } else {
+      try {
+        const fresh = await invoke<SessionRecord[]>('get_session_records', {
+          projectId: cs.projectId,
+          sessionId: cs.summary.id,
+        })
+        if (effectiveSessionId.value === cs.summary.id && fresh.length >= records.value.length) {
+          records.value = fresh
+        }
+      } catch { /* next reload will pick it up */ }
+    }
   }
   const advisor = settings.value.advisor
   const images = imageInput.images.value.length ? await imageInput.toImageBlocks() : undefined
@@ -1391,10 +1394,6 @@ let wheelUpIntentAt = 0
  *  凑够阈值同样视为有效上滚;下滚清零,方向交替的触控板噪声天然被挡 */
 let wheelUpAcc = 0
 let wheelAccAt = 0
-/** streaming→false 后到 records reload 完成之间的过渡期:
- *  此间一切 scrollTop 位移都是程序行为(shiki上色/dots消失/records替换),
- *  onScroll 不做脱离判定,contentRO 持续贴底 */
-let finishTransition = false
 
 function onScrollWheel(e: WheelEvent) {
   if (e.deltaY >= 0) {
@@ -1426,7 +1425,6 @@ function onScroll() {
     lastScrollTop = el.scrollTop
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (performance.now() - resumedAt < 300) return
-    if (finishTransition) return
     if (delta < 0 && lastSnapScrollTop - el.scrollTop > 10 && distFromBottom > 5) {
       followStreaming.value = false
     } else if (delta > 0 && !followStreaming.value) {
@@ -1527,47 +1525,24 @@ watch(scrollContentEl, (el) => {
 }, { immediate: true })
 onUnmounted(() => { contentRO?.disconnect(); contentRO = null })
 
-// ====== 排除法调试开关（定位闪烁根因后删除）======
-// 试法：先 SKIP_RECORDS_RELOAD=true 跑一次，看闪不闪；
-//       再换成 false，去 useStreaming 把 SKIP_STREAMING_FALSE 设 true 跑一次。
-//       哪个不闪了就是哪个的锅。
-const SKIP_RECORDS_RELOAD = false   // true = 跳过 records 更新
+// ====== 流式结束 → 延迟清理（零 DOM 重建方案）======
+// 核心思路：streaming→false 后 records 和 streamingTurns 都不动——DOM 零变化 = 零跳动。
+// records 后台预取暂存，在下一个天然安全时刻（sendMessage / 会话切换 / force reload）
+// 一并应用 + 清理 turns。shiki 上色虽有高度变化，但 contentRO 持续贴底足够覆盖。
+let deferredRecords: { sid: string; recs: SessionRecord[] } | null = null
 
 watch(() => stream.value.streaming, async (val, oldVal) => {
   if (!val && oldVal) {
     const cs = currentSession.value
     if (!cs) return
     const sid = cs.summary.id
-    // 档案馆只读实例不跑 reload 流程:v-show 保活下两个实例 watch 同一 stream,
-    // 重复 reload + clearStreamingTurns 的时差会让工作台实例弹跳。
-    // finishedDirty 标记留给档案馆下次加载时兜底刷新
     if (!interactive.value) return
-    console.log(`%c ========== [detail] streaming→false, wait 300ms sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
-    // 立即删除 finishedDirty，防止 meta generation 触发 currentSession watch 时误判为后台落账
+    console.log(`%c ========== [detail] streaming→false (deferred) sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     finishedDirty.delete(sid)
-    // 进入过渡期:typing dots 消失 + shiki 上色 + records reload 的密集布局变化，
-    // 此间 onScroll 不做脱离判定，contentRO 持续贴底
-    finishTransition = true
+    // shiki 上色过渡保护
     followStreaming.value = true
     resumedAt = performance.now()
-    // nextTick 等 DOM patch 完成(typing dots 移除),然后同步贴底——
-    // 不走 rAF,在 paint 前完成,用户看不到弹跳帧
-    await nextTick()
-    {
-      const scEl = scrollContainer.value
-      if (scEl) {
-        scEl.scrollTop = scEl.scrollHeight
-        lastScrollTop = scEl.scrollTop
-        lastSnapScrollTop = scEl.scrollTop
-      }
-    }
-    if (SKIP_RECORDS_RELOAD) {
-      console.log('%c ========== [detail] SKIP_RECORDS_RELOAD — 跳过 records 更新 ==========', 'color:#ef4444;font-weight:bold')
-      finishTransition = false
-      return
-    }
-    // pending 用户消息是否已在 recs 中落账(无 pending 视为已落账,不阻塞)。
-    // 用 sid 对应 state 而非 stream.value:守卫运行在异步窗口,用户可能已切会话
+    // 后台预取 records 暂存，不赋值给 records.value——零 DOM 变化
     const pendingLanded = (recs: SessionRecord[] | null) => {
       const s = getStream(sid)
       if (!s.pendingUserMessage && !s.pendingImages?.length) return true
@@ -1580,11 +1555,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         projectId: cs.projectId,
         sessionId: sid,
       })
-    } catch {
-      // ignore
-    }
-    // 重试条件加"用户消息尚未落账":旧守卫只看总数增长,assistant 侧落账也会
-    // 使总数增长,曾把"用户 record 还没写进 jsonl"误判为 reload 成功
+    } catch { /* ignore */ }
     if (!newRecords || newRecords.length === records.value.length || !pendingLanded(newRecords)) {
       await new Promise(r => setTimeout(r, 400))
       try {
@@ -1592,39 +1563,13 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
           projectId: cs.projectId,
           sessionId: sid,
         })
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     }
-    if (effectiveSessionId.value !== sid) { finishTransition = false; return }
-    console.log(`%c ========== [detail] records reload: old=${records.value.length} new=${newRecords?.length ?? 'null'} sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
-    if (newRecords) records.value = newRecords
-    // 新流式已启动(用户在 300ms 窗口内再次发送):只落账 records,不动新 turns——
-    // 否则会清掉新一轮刚到的 streamingTurns,造成新回复消失
-    if (getStream(sid).streaming) { finishTransition = false; return }
-    // keepPending:气泡退场由落账匹配驱动(pendingLandedUuid watch),重试尽头仍未
-    // 落账时保留气泡等下一轮 reload——宁可气泡多活一会,不可消息凭空消失。
-    // keepLive:豁免此刻可能已开播的下一个自发轮(清了会被快照重建从头重播);
-    // 随后按落账摘除其中已落盘的,只留真正在播的
-    clearStreamingTurns(sid, { keepPending: true, keepLive: true })
-    if (newRecords) removeLandedTurns(sid, newRecords)
-    // 落账切换完成:强制归底(nextTick 同步写,不走 rAF——
-    // rAF 会多一帧延迟,那一帧用户看到弹跳)
-    // finishTransition 在 nextTick 之后再关——DOM patch 期间浏览器可能钳位 scrollTop
-    // 触发 onScroll rAF,此时过渡期必须仍在位才能屏蔽误脱离
-    followStreaming.value = true
-    resumedAt = performance.now()
-    await nextTick()
-    const scEl = scrollContainer.value
-    if (scEl) {
-      programmaticScroll = true
-      clearTimeout(programmaticTimer)
-      programmaticTimer = window.setTimeout(() => { programmaticScroll = false }, 50)
-      scEl.scrollTop = scEl.scrollHeight
-      lastScrollTop = scEl.scrollTop
-      lastSnapScrollTop = scEl.scrollTop
+    if (effectiveSessionId.value !== sid) return
+    if (newRecords) {
+      deferredRecords = { sid, recs: newRecords }
+      console.log(`%c ========== [detail] records deferred: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
     }
-    finishTransition = false
     maybeConsumeQueue()
   }
 })
@@ -1872,6 +1817,7 @@ watch(
       // 只有切换会话或 force(后台流式落账)才刷新
       if (cs.summary.id !== loadedSessionId || force) {
         loadedSessionId = cs.summary.id
+        deferredRecords = null
         closeAllSubAgents()
         await loadRecords(cs.projectId, cs.summary.id, force)
         loadSubAgentList(cs.projectId, cs.summary.id)
