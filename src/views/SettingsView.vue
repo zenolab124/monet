@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { getVersion } from '@tauri-apps/api/app'
 import { useI18n } from 'vue-i18n'
 import {
   useChannels,
@@ -25,6 +26,7 @@ import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
 import { useTheme } from '@/composables/useTheme'
+import { useUpdater } from '@/composables/useUpdater'
 import { MODELS } from '@/utils/modelContext'
 
 const { t } = useI18n()
@@ -49,6 +51,7 @@ const { minColumnWidth, setMinColumnWidth } = useWorkbench()
 const { zoomLevel, setZoom, MIN_ZOOM, MAX_ZOOM, STEP } = useZoom()
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
 const { config: themeConfig, themes: themeList, setLightTheme, setDarkTheme } = useTheme()
+const { status: updateStatus, newVersion: updateVersion, errorMessage: updateError, downloadProgress, checkForUpdate, downloadAndInstall } = useUpdater()
 
 // MCP Server 注册
 const mcpRegistered = ref(false)
@@ -260,6 +263,8 @@ function toggleCcSwitchAll() {
   }
 }
 
+const appVersion = ref('')
+
 const wakePolicy = ref('passive')
 const widgetDayStart = ref(0)
 const widgetMonthMode = ref('natural')
@@ -415,7 +420,7 @@ async function removeWakeAuthorization() {
 
 
 
-onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig(); loadTrayTitleConfig(); loadMcpStatus() })
+onMounted(() => { refreshChannels(); loadAgentToggles(); loadAgentSessionPersist(); loadAgentPreferences(); loadWakePolicy(); loadWidgetConfig(); loadTrayTitleConfig(); loadMcpStatus(); getVersion().then(v => appVersion.value = v) })
 
 watch(activeSection, (s) => {
   if (s === 'settings') {
@@ -1000,14 +1005,21 @@ function onSaved() {
               </p>
             </div>
             <TurnSignalCard />
-            <div class="settings-grid">
-              <div class="setting-cell">
-                <label class="form-toggle">
-                  <input v-model="htmlVisualEnabled" type="checkbox">
-                  <span>{{ $t('settings.htmlVisual') }}</span>
-                </label>
-                <p class="form-hint">{{ $t('settings.htmlVisualDesc') }}</p>
+            <!-- HTML 增强渲染 -->
+            <div class="mcp-card">
+              <div class="flex items-center gap-2">
+                <span class="i-carbon-code w-3.5 h-3.5 text-muted-foreground" />
+                <span class="text-[11.5px] font-medium">{{ $t('settings.htmlVisual') }}</span>
+                <button
+                  :class="['form-toggle ml-auto', { on: htmlVisualEnabled }]"
+                  @click="htmlVisualEnabled = !htmlVisualEnabled"
+                >
+                  <span class="form-toggle-knob" />
+                </button>
               </div>
+              <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
+                {{ $t('settings.htmlVisualDesc') }}
+              </p>
             </div>
           </div>
         </section>
@@ -1027,6 +1039,40 @@ function onSaved() {
         <!-- ====== 系统 ====== -->
         <section v-show="activeTab === 'system'">
           <h2 class="section-title">{{ $t('settings.system') }}</h2>
+
+          <!-- 更新 -->
+          <div class="mcp-card mb-3">
+            <div class="flex items-center gap-2">
+              <span class="i-carbon-upgrade w-3.5 h-3.5 text-muted-foreground" />
+              <span class="text-[11.5px] font-medium">{{ $t('settings.updateCurrent') }}</span>
+              <span class="text-[11px] font-mono text-muted-foreground">v{{ appVersion }}</span>
+              <span v-if="updateStatus === 'up-to-date'" class="text-[10px] text-emerald-600 dark:text-emerald-400">{{ $t('settings.updateUpToDate') }}</span>
+              <span v-if="updateStatus === 'error'" class="text-[10px] text-destructive truncate max-w-48" :title="updateError">{{ $t('settings.updateError') }}</span>
+              <div class="ml-auto flex items-center gap-2">
+                <template v-if="updateStatus === 'available'">
+                  <span class="text-[11px] text-primary font-medium">{{ $t('settings.updateAvailable', { version: updateVersion }) }}</span>
+                  <button
+                    class="px-2 py-0.5 text-[11px] rounded bg-primary text-primary-foreground hover:shadow-paper transition-shadow"
+                    @click="downloadAndInstall"
+                  >{{ $t('settings.updateInstall') }}</button>
+                </template>
+                <template v-else-if="updateStatus === 'downloading'">
+                  <span class="text-[11px] text-muted-foreground font-mono">{{ $t('settings.updateDownloading', { progress: downloadProgress }) }}</span>
+                </template>
+                <template v-else>
+                  <button
+                    class="px-2 py-0.5 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    :disabled="updateStatus === 'checking'"
+                    @click="checkForUpdate"
+                  >
+                    <span v-if="updateStatus === 'checking'" class="i-carbon-renew w-3 h-3 animate-spin mr-1 inline-block align-[-2px]" />
+                    {{ updateStatus === 'checking' ? $t('settings.updateChecking') : $t('settings.updateCheck') }}
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+
           <div class="settings-grid">
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.routineWake') }}</div>

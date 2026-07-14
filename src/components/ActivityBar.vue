@@ -4,11 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { useUiState, type AppSection } from '@/composables/useUiState'
 import { useTheme } from '@/composables/useTheme'
 import { useNotifications } from '@/composables/useNotifications'
+import { useUpdater } from '@/composables/useUpdater'
 
 const { t } = useI18n()
 const { activeSection, switchSection } = useUiState()
 const { activeTheme, activeThemeLabel, cycleActiveTheme } = useTheme()
 const { badgeCount } = useNotifications()
+const { status: updateStatus } = useUpdater()
 
 /** 终态七域全摆；v2.1.0 点亮工作台,「会话」更名档案语义,其余灰置 */
 interface DomainItem {
@@ -76,6 +78,7 @@ const badgeText = computed(() => {
       @click="switchSection('settings')"
     >
       <span class="i-carbon-settings w-4.5 h-4.5 block" />
+      <span v-if="updateStatus === 'available'" class="ab-dot" />
     </button>
   </nav>
 </template>
@@ -130,5 +133,14 @@ const badgeText = computed(() => {
   line-height: 13px;
   text-align: center;
   padding: 0 2px;
+}
+.ab-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
 }
 </style>

@@ -25,6 +25,7 @@ import { initShortcuts } from '@/composables/useShortcuts'
 import { migrateLegacyAppDefaults } from '@/composables/useChannels'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
 import { applyZoom, useZoom } from '@/composables/useZoom'
+import { useUpdater } from '@/composables/useUpdater'
 import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 
 const { projects, loadProjects } = useProjects()
@@ -175,6 +176,7 @@ onMounted(async () => {
   if (stateWasReset) {
     useNotifications().notifyTransient(t('workbench.stateReset'))
   }
+  useUpdater().initAutoCheck()
 })
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>

@@ -12,7 +12,7 @@
     "mcp:build:release": "cargo build --release --bin monet-mcp --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri",
-    "release": "pnpm tauri build && src-widget/build.sh"
+    "release": "pnpm tauri build --bundles app && src-widget/build.sh"
   },
   "author": "",
   "license": "MIT",
@@ -39,6 +39,7 @@
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "markdown-it": "^14.1.1",
     "shiki": "^4.0.2",
     "vue-i18n": "^11.4.5"

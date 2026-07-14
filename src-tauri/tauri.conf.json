@@ -30,6 +30,14 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCOEVFNkYyMDkzNjI3QzIKUldUQ0p6WUo4dWFPZTN2dUtyMW9uUG55U0wyeFFwaWhlYllOa2RaR3lQYnNEZWtEYWI3S0l2UVQK",
+      "endpoints": [
+        "https://github.com/zenolab124/cc-space/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["dmg"],

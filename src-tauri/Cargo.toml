@@ -58,6 +58,7 @@ lru = "0.16"
 uuid = { version = "1", features = ["v4"] }
 fs2 = "0.4"
 tauri-plugin-dialog = "2.7.1"
+tauri-plugin-updater = "2"
 urlencoding = "2"
 
 # macOS: attributed-title tab alignment in tray menu (right-aligned reset times)
