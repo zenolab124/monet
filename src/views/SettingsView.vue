@@ -7,6 +7,7 @@ import {
   useChannels,
   refreshChannels,
   OFFICIAL_CHANNEL_ID,
+  APPLE_FM_CHANNEL_ID,
   type ChannelInfo,
   type CcSwitchProvider,
 } from '@/composables/useChannels'
@@ -16,7 +17,6 @@ import { useNotifications } from '@/composables/useNotifications'
 import { useLocale } from '@/composables/useLocale'
 import ChannelForm from '@/components/settings/ChannelForm.vue'
 import OfficialDefaultsForm from '@/components/settings/OfficialDefaultsForm.vue'
-import PaperSelect from '@/components/settings/PaperSelect.vue'
 import AgentIframeDemo from '@/components/settings/AgentIframeDemo.vue'
 import ClaudeCodeSettings from '@/components/settings/ClaudeCodeSettings.vue'
 import PermissionsPanel from '@/components/settings/PermissionsPanel.vue'
@@ -25,7 +25,6 @@ import SystemSessionViewer from '@/components/SystemSessionViewer.vue'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
-import { useTheme } from '@/composables/useTheme'
 import { useUpdater } from '@/composables/useUpdater'
 import { MODELS } from '@/utils/modelContext'
 
@@ -50,7 +49,6 @@ const {
 const { minColumnWidth, setMinColumnWidth } = useWorkbench()
 const { zoomLevel, setZoom, MIN_ZOOM, MAX_ZOOM, STEP } = useZoom()
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
-const { config: themeConfig, themes: themeList, setLightTheme, setDarkTheme } = useTheme()
 const { status: updateStatus, newVersion: updateVersion, errorMessage: updateError, downloadProgress, checkForUpdate, downloadAndInstall } = useUpdater()
 
 // MCP Server 注册
@@ -79,13 +77,13 @@ async function toggleMcp() {
 
 const agentToggles = ref<Record<string, boolean>>({})
 const agentKeys = [
-  { key: 'title', label: 'settings.agentTitle', desc: 'settings.agentTitleDesc' },
-  { key: 'permission_hint', label: 'settings.agentPermissionHint', desc: 'settings.agentPermissionHintDesc' },
-  { key: 'settings_explain', label: 'settings.agentSettingsExplain', desc: 'settings.agentSettingsExplainDesc' },
-  { key: 'cron_parse', label: 'settings.agentCronParse', desc: 'settings.agentCronParseDesc' },
-  { key: 'tags', label: 'settings.agentTags', desc: 'settings.agentTagsDesc' },
-  { key: 'summary', label: 'settings.agentSummary', desc: 'settings.agentSummaryDesc' },
-  { key: 'translate', label: 'settings.agentTranslate', desc: 'settings.agentTranslateDesc' },
+  { key: 'title', label: 'settings.agentTitle', desc: 'settings.agentTitleDesc', tag: 'recommended' as const },
+  { key: 'permission_hint', label: 'settings.agentPermissionHint', desc: 'settings.agentPermissionHintDesc', tag: 'beginner' as const },
+  { key: 'settings_explain', label: 'settings.agentSettingsExplain', desc: 'settings.agentSettingsExplainDesc', tag: 'asNeeded' as const },
+  { key: 'cron_parse', label: 'settings.agentCronParse', desc: 'settings.agentCronParseDesc', tag: 'asNeeded' as const },
+  { key: 'tags', label: 'settings.agentTags', desc: 'settings.agentTagsDesc', tag: 'recommended' as const },
+  { key: 'summary', label: 'settings.agentSummary', desc: 'settings.agentSummaryDesc', tag: 'recommended' as const },
+  { key: 'translate', label: 'settings.agentTranslate', desc: 'settings.agentTranslateDesc', tag: 'asNeeded' as const },
 ]
 
 async function loadAgentToggles() {
@@ -444,7 +442,7 @@ async function onDelete(ch: ChannelInfo) {
 }
 
 const sessionChannels = () => channels.value.filter(c => c.scope !== 'agent-only')
-const agentOnlyChannels = () => channels.value.filter(c => c.scope === 'agent-only')
+const agentOnlyChannels = () => channels.value.filter(c => c.scope === 'agent-only' && c.id !== APPLE_FM_CHANNEL_ID)
 
 // 官方渠道 Agent 可选模型:从 modelContext 的 MODELS 派生(单源,消灭第二份清单)。
 // 取具体版本 id 并剥 [1m] 后缀(Agent 用的是 API 模型名,1M 由 CLI/请求侧处理),去重。
@@ -455,42 +453,26 @@ const OFFICIAL_MODELS = [
 const agentChannelId = ref(defaultAgentChannel.value ?? OFFICIAL_CHANNEL_ID)
 watch(defaultAgentChannel, (v) => { agentChannelId.value = v ?? OFFICIAL_CHANNEL_ID })
 
-const agentModelsForChannel = computed(() => {
-  if (agentChannelId.value === OFFICIAL_CHANNEL_ID) return OFFICIAL_MODELS
-  const ch = channels.value.find(c => c.id === agentChannelId.value)
-  const probeModels = probeResults.value[agentChannelId.value]?.models ?? []
-  const saved = ch ? [...ch.availableModels, ...(ch.agentModel ? [ch.agentModel] : [])] : []
-  const all = [...new Set([...probeModels, ...saved])]
-  return all.length ? all.sort() : []
-})
-
-const agentChannelSelectOptions = computed(() => {
-  const opts = [{ value: OFFICIAL_CHANNEL_ID, label: 'Official' }]
-  for (const ch of channels.value) {
-    if (ch.id !== OFFICIAL_CHANNEL_ID && ch.enabled) {
-      opts.push({ value: ch.id, label: ch.name })
-    }
-  }
-  return opts
-})
-
-const agentModelSelectOptions = computed(() =>
-  agentModelsForChannel.value.map(m => ({ value: m, label: m }))
+const hasAppleFm = computed(() => channels.value.some(c => c.id === APPLE_FM_CHANNEL_ID))
+const agentChannelCards = computed(() =>
+  channels.value.filter(c => c.id !== OFFICIAL_CHANNEL_ID && c.id !== APPLE_FM_CHANNEL_ID && c.enabled)
 )
+const isAppleFmAgent = computed(() => agentChannelId.value === APPLE_FM_CHANNEL_ID)
+
+function toggleAppleFmAgent() {
+  if (isAppleFmAgent.value) {
+    onAgentChannelChange(OFFICIAL_CHANNEL_ID)
+  } else {
+    agentChannelId.value = APPLE_FM_CHANNEL_ID
+    setDefaultAgentModel(APPLE_FM_CHANNEL_ID, 'system')
+  }
+}
 
 function onAgentChannelChange(id: string) {
   agentChannelId.value = id
-  const models = id === OFFICIAL_CHANNEL_ID ? OFFICIAL_MODELS : agentModelsForChannel.value
   setDefaultAgentModel(
     id === OFFICIAL_CHANNEL_ID ? null : id,
-    models[0] ?? null,
-  )
-}
-
-function onAgentModelChange(model: string) {
-  setDefaultAgentModel(
-    agentChannelId.value === OFFICIAL_CHANNEL_ID ? null : agentChannelId.value,
-    model || null,
+    'haiku',
   )
 }
 
@@ -567,29 +549,15 @@ function onSaved() {
           <div class="settings-grid">
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.themeLight') }}</div>
-              <select
-                :value="themeConfig.lightTheme"
-                class="form-select w-full"
-                @change="setLightTheme(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="t in themeList" :key="t.id" :value="t.id">
-                  {{ $t(t.labelKey) }}
-                </option>
+              <select class="form-select w-full" disabled>
+                <option>Paper</option>
               </select>
-              <div class="setting-hint">{{ $t('settings.themeLightHint') }}</div>
             </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.themeDark') }}</div>
-              <select
-                :value="themeConfig.darkTheme"
-                class="form-select w-full"
-                @change="setDarkTheme(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="t in themeList" :key="t.id" :value="t.id">
-                  {{ $t(t.labelKey) }}
-                </option>
+              <select class="form-select w-full" disabled>
+                <option>Ink</option>
               </select>
-              <div class="setting-hint">{{ $t('settings.themeDarkHint') }}</div>
             </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.language') }}</div>
@@ -701,8 +669,7 @@ function onSaved() {
         <section v-show="activeTab === 'channels'">
           <h2 class="section-title">{{ $t('settings.channels') }}</h2>
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
-            {{ $t('settings.channelDesc1') }}
-            <span class="font-mono">--settings</span> {{ $t('settings.channelDesc2') }}
+            {{ $t('settings.channelDesc1') }}{{ $t('settings.channelDesc2') }}
           </p>
 
           <!-- 双列渠道 -->
@@ -735,9 +702,9 @@ function onSaved() {
                         <span v-if="ch.baseUrl" class="font-mono truncate">{{ ch.baseUrl }}</span>
                       </template>
                       <span v-else class="text-muted-foreground/60 italic">OAuth</span>
-                      <span v-if="ch.defaultModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0" v-tooltip="$t('settings.channelForm.defaultModelLabel')">{{ ch.defaultModel }}</span>
-                      <span v-if="ch.defaultEffort" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0" v-tooltip="$t('settings.channelForm.defaultEffortLabel')">{{ ch.defaultEffort }}</span>
-                      <span v-if="ch.agentModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0">{{ ch.agentModel }}</span>
+                      <span v-if="ch.defaultModel" class="chain-model-tag" v-tooltip="$t('settings.channelForm.defaultModelLabel')">{{ ch.defaultModel }}</span>
+                      <span v-if="ch.defaultEffort" class="chain-model-tag" v-tooltip="$t('settings.channelForm.defaultEffortLabel')">{{ ch.defaultEffort }}</span>
+                      <span v-if="ch.agentModel" class="chain-model-tag">{{ ch.agentModel }}</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">
                         <template v-if="probing[ch.id]"><span class="i-carbon-renew w-2.5 h-2.5 animate-spin" /></template>
                         <template v-else-if="probeResults[ch.id]">
@@ -756,52 +723,75 @@ function onSaved() {
 
             <!-- 右列：Agent 渠道 -->
             <div>
-              <div class="chain-title">{{ $t('settings.defaultAgentModel') }}</div>
-              <!-- 级联下拉 -->
-              <div class="flex gap-1.5 mb-2">
-                <PaperSelect
-                  :options="agentChannelSelectOptions"
-                  :model-value="agentChannelId"
-                  @update:model-value="onAgentChannelChange"
-                />
-                <PaperSelect
-                  :options="agentModelSelectOptions"
-                  :model-value="defaultAgentModel ?? ''"
-                  mono
-                  editable
-                  placeholder="model name"
-                  @update:model-value="onAgentModelChange"
-                />
-              </div>
-              <!-- Agent-only 渠道列表 -->
+              <div class="chain-title">{{ $t('settings.defaultAgentChannel') }}</div>
               <div class="chain-list">
-                <div v-for="ch in agentOnlyChannels()" :key="ch.id" class="chain-item">
+                <!-- Official -->
+                <div
+                  class="chain-item"
+                  :class="{ 'chain-item-active': agentChannelId === OFFICIAL_CHANNEL_ID }"
+                  @click="onAgentChannelChange(OFFICIAL_CHANNEL_ID)"
+                >
+                  <div class="chain-content">
+                    <div class="chain-row-1">
+                      <span class="truncate font-medium text-xs">Official</span>
+                    </div>
+                    <div class="chain-row-2">
+                      <span class="text-muted-foreground/60 italic">OAuth</span>
+                      <span class="chain-model-tag">haiku</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- 其他启用的渠道 -->
+                <div
+                  v-for="ch in agentChannelCards"
+                  :key="ch.id"
+                  class="chain-item"
+                  :class="{ 'chain-item-active': agentChannelId === ch.id }"
+                  @click="onAgentChannelChange(ch.id)"
+                >
                   <div class="chain-content">
                     <div class="chain-row-1">
                       <span class="truncate font-medium text-xs">{{ ch.name }}</span>
                       <div class="chain-actions">
-                        <button :class="['form-toggle-sm', { on: ch.enabled }]" @click="setChannelEnabled(ch.id, !ch.enabled)"><span class="form-toggle-knob" /></button>
-                        <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @click="editing = ch"><span class="i-carbon-edit w-3 h-3" /></button>
-                        <button class="icon-btn icon-btn-sm icon-btn-ghost icon-btn-danger" v-tooltip="$t('common.delete')" @click="onDelete(ch)"><span class="i-carbon-trash-can w-3 h-3" /></button>
+                        <button v-if="ch.scope === 'agent-only'" class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('common.edit')" @click.stop="editing = ch"><span class="i-carbon-edit w-3 h-3" /></button>
                       </div>
                     </div>
                     <div class="chain-row-2">
                       <span v-if="ch.baseUrl" class="font-mono truncate">{{ ch.baseUrl }}</span>
-                      <span v-if="ch.agentModel" class="text-[10px] font-mono text-accent-foreground/60 bg-accent/40 px-1 rounded shrink-0">{{ ch.agentModel }}</span>
+                      <span class="chain-model-tag">haiku</span>
                       <span class="ml-auto shrink-0 flex items-center gap-1.5">
                         <template v-if="probing[ch.id]"><span class="i-carbon-renew w-2.5 h-2.5 animate-spin" /></template>
                         <template v-else-if="probeResults[ch.id]">
                           <span class="inline-block w-1.5 h-1.5 rounded-full" :class="probeResults[ch.id].online ? 'bg-green-600' : 'bg-destructive'" />
-                          <span v-if="probeResults[ch.id].online && probeResults[ch.id].models.length" v-tooltip="probeResults[ch.id].models.join('\n')">{{ probeResults[ch.id].models.length }} models</span>
-                          <span v-else-if="!probeResults[ch.id].online">{{ probeResults[ch.id].status === 'auth_error' ? '401' : probeResults[ch.id].status }}</span>
                           <span v-if="probeResults[ch.id].latencyMs" class="text-muted-foreground/50">{{ probeResults[ch.id].latencyMs }}ms</span>
                         </template>
-                        <button class="icon-btn icon-btn-sm icon-btn-ghost" v-tooltip="$t('settings.probeChannel')" @click="probeChannel(ch.id)"><span class="i-carbon-activity w-3 h-3" /></button>
                       </span>
                     </div>
                   </div>
                 </div>
               </div>
+              <!-- Apple FM 分隔区 -->
+              <template v-if="hasAppleFm">
+                <div class="border-t border-border my-2" />
+                <div class="chain-list">
+                  <div
+                    class="chain-item"
+                    :class="{ 'chain-item-active': isAppleFmAgent }"
+                    @click="toggleAppleFmAgent"
+                  >
+                    <div class="chain-content">
+                      <div class="chain-row-1">
+                        <span class="truncate font-medium text-xs">Apple FM</span>
+                      </div>
+                      <div class="chain-row-2">
+                        <span class="text-muted-foreground/60 italic">{{ $t('settings.appleFmLocal') }}</span>
+                        <span class="chain-model-tag">system</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div class="text-[10.5px] text-muted-foreground mt-1.5">{{ $t('settings.defaultAgentChannelHint') }}</div>
             </div>
           </div>
 
@@ -896,6 +886,11 @@ function onSaved() {
             <div v-for="a in agentKeys" :key="a.key" class="agent-item">
               <div class="flex-1 min-w-0">
                 <div class="text-xs font-medium">{{ $t(a.label) }}</div>
+                <div class="ext-tags" style="margin-top:3px">
+                  <span v-if="a.tag === 'recommended'" class="ext-tag recommended">{{ $t('settings.extTagRecommended') }}</span>
+                  <span v-else-if="a.tag === 'beginner'" class="ext-tag recommended">{{ $t('settings.extTagBeginner') }}</span>
+                  <span v-else-if="a.tag === 'asNeeded'" class="ext-tag neutral">{{ $t('settings.extTagAsNeeded') }}</span>
+                </div>
                 <div class="text-[11px] text-muted-foreground mt-0.5">{{ $t(a.desc) }}</div>
                 <select
                   v-if="isAgentEnabled(a.key)"
@@ -1423,11 +1418,13 @@ function onSaved() {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   border-radius: var(--radius);
   border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.15s;
+  min-height: 46px;
+  box-sizing: border-box;
 }
 .chain-item:hover {
   background: var(--muted);
@@ -1447,6 +1444,7 @@ function onSaved() {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 22px;
 }
 .chain-row-2 {
   display: flex;
@@ -1461,6 +1459,12 @@ function onSaved() {
   gap: 4px;
   margin-left: auto;
   flex-shrink: 0;
+}
+.chain-model-tag {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted-foreground);
+  opacity: 0.7;
 }
 .agent-item {
   display: flex;
