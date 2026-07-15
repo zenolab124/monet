@@ -43,7 +43,7 @@ pub fn ensure_launch_agent() {
     );
 
     let need_install = std::fs::read_to_string(&plist_path)
-        .map(|existing| !existing.contains(&*bin_str))
+        .map(|existing| existing != plist)
         .unwrap_or(true);
 
     let uid = unsafe { libc::getuid() };
