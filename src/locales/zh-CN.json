@@ -948,7 +948,9 @@
     "hintResume": "恢复上一次会话",
     "errorModelRequired": "请提供模型名，可选 fable / opus / sonnet / haiku 或完整 ID",
     "errorModelUnknown": "未知模型，可选 fable / opus / sonnet / haiku 或完整 ID",
-    "errorCdRequired": "请提供目标项目路径"
+    "errorCdRequired": "请提供目标项目路径",
+    "badgeSkill": "skill",
+    "badgeCommand": "command"
   },
   "channel": {
     "official": "官方"

@@ -948,7 +948,9 @@
     "hintResume": "Resume last session",
     "errorModelRequired": "Please provide a model name: fable / opus / sonnet / haiku or full ID",
     "errorModelUnknown": "Unknown model, options: fable / opus / sonnet / haiku or full ID",
-    "errorCdRequired": "Please provide a target project path"
+    "errorCdRequired": "Please provide a target project path",
+    "badgeSkill": "skill",
+    "badgeCommand": "command"
   },
   "channel": {
     "official": "Official"

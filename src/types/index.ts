@@ -130,6 +130,7 @@ export interface SchemaDiagnosis {
 export interface WorkshopSkill {
   name: string
   description: string
+  argumentHint: string | null
   version: string | null
   source: string
   path: string

@@ -30,6 +30,7 @@ const MAX_COMMAND_DEPTH: usize = 10;
 pub struct SkillAsset {
     pub name: String,
     pub description: String,
+    pub argument_hint: Option<String>,
     pub version: Option<String>,
     pub source: String,
     pub path: String,
@@ -85,6 +86,8 @@ struct SkillFrontmatter {
     name: Option<String>,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default, rename = "argument-hint")]
+    argument_hint: Option<serde_yaml::Value>,
     #[serde(default)]
     metadata: Option<SkillMetadata>,
 }
@@ -363,18 +366,20 @@ fn scan_skills_dir(dir: &Path, source: &str) -> Vec<SkillAsset> {
             continue;
         }
         let dir_name = entry.file_name().to_string_lossy().into_owned();
-        let (name, description, version) = match read_frontmatter::<SkillFrontmatter>(&skill_md) {
+        let (name, description, argument_hint, version) = match read_frontmatter::<SkillFrontmatter>(&skill_md) {
             Frontmatter::Parsed(fm) => (
                 fm.name.unwrap_or_else(|| dir_name.clone()),
                 fm.description.unwrap_or_default(),
+                fm.argument_hint.as_ref().and_then(yaml_scalar_to_string),
                 fm.metadata
                     .and_then(|m| m.version.as_ref().and_then(yaml_scalar_to_string)),
             ),
-            Frontmatter::Failed => (dir_name.clone(), FRONTMATTER_FAILED.to_string(), None),
+            Frontmatter::Failed => (dir_name.clone(), FRONTMATTER_FAILED.to_string(), None, None),
         };
         out.push(SkillAsset {
             name,
             description,
+            argument_hint,
             version,
             source: source.to_string(),
             path: skill_md.display().to_string(),

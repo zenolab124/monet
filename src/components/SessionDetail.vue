@@ -26,11 +26,12 @@ import {
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
 import {
-  SLASH_COMMANDS,
   shouldTriggerPanel,
   parseCommand,
+  getAllCommands,
   type SlashCommand,
 } from '@/composables/useSlashCommands'
+import { useWorkshop } from '@/composables/useWorkshop'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 import { shortId, shortModel, formatTokens } from '@/types'
 import { inferModel } from '@/utils/modelContext'
@@ -304,7 +305,9 @@ watch(() => stream.value.streaming, (streaming, was) => {
 
 // --- 斜杠命令(FR-004)状态 ---
 
-/** 当前输入框光标位置(用于 shouldTriggerPanel 判定) */
+const { assets: workshopAssets, ensureLoaded: ensureWorkshopLoaded } = useWorkshop()
+ensureWorkshopLoaded()
+
 const cursorPos = ref(0)
 
 /** /model invalid 等校验失败提示 */
@@ -318,6 +321,10 @@ const hideHistory = ref(false)
 
 const slashPanelVisible = computed(() =>
   shouldTriggerPanel(inputText.value, cursorPos.value),
+)
+
+const allSlashCommands = computed(() =>
+  getAllCommands(workshopAssets.value?.skills, workshopAssets.value?.commands),
 )
 
 function autoResize() {
@@ -1216,17 +1223,23 @@ function isModelCommandRecord(record: Extract<SessionRecord, { type: 'user' }>):
 // --- 斜杠命令处理 ---
 
 function onSlashSelect(cmd: SlashCommand) {
-  const insert = cmd.hasArg ? `/${cmd.name} ` : `/${cmd.name}`
-  inputText.value = insert
-  nextTick(() => {
-    const el = textareaRef.value
-    if (!el) return
-    el.focus()
-    autoResize()
-    const pos = insert.length
-    el.setSelectionRange(pos, pos)
-    cursorPos.value = pos
-  })
+  if (cmd.hasArg) {
+    const insert = `/${cmd.name} `
+    inputText.value = insert
+    nextTick(() => {
+      const el = textareaRef.value
+      if (!el) return
+      el.focus()
+      autoResize()
+      const pos = insert.length
+      el.setSelectionRange(pos, pos)
+      cursorPos.value = pos
+    })
+  } else {
+    inputText.value = `/${cmd.name}`
+    cursorPos.value = 0
+    nextTick(() => handleSend())
+  }
 }
 
 function onSlashClose() {
@@ -1298,7 +1311,7 @@ async function handleSend() {
   const cs = currentSession.value
   if (!cs.summary.cwd) return
 
-  const parsed = parseCommand(text)
+  const parsed = parseCommand(text, workshopAssets.value?.skills, workshopAssets.value?.commands)
 
   // /model invalid 等:不清空输入,显示提示
   if (parsed.kind === 'invalid') {
@@ -2179,7 +2192,7 @@ async function onReload() {
       </div>
 
       <!-- /help 本地帮助卡片 -->
-      <SlashHelpCard v-if="showHelpCard" :commands="SLASH_COMMANDS" />
+      <SlashHelpCard v-if="showHelpCard" :commands="allSlashCommands" />
 
       <!-- 回到底部:用户上滚脱离底部时,贴滚动视口底部 -->
       <div
@@ -2232,6 +2245,8 @@ async function onReload() {
       <SlashCommandPanel
         :visible="slashPanelVisible"
         :query="inputText"
+        :skills="workshopAssets?.skills"
+        :commands="workshopAssets?.commands"
         class="absolute bottom-full left-4 mb-1"
         @select="onSlashSelect"
         @close="onSlashClose"

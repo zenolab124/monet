@@ -1,28 +1,19 @@
 <script setup lang="ts">
-/**
- * 斜杠命令补全面板（FR-004）
- *
- * 由父组件控制 visible / query / position：
- *  - visible=true 时挂载并监听全局键盘（↑↓ Enter Esc）
- *  - 选中后通过 emit('select') 把命令交还父组件插入输入框
- *  - 用户按 Esc / 失焦时 emit('close')
- *
- * 注意：此组件 visible=true 时会拦截 ↑↓ Enter Esc，
- *      避免父组件的 textarea Enter 误发消息。
- */
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import {
   filterCommands,
   type SlashCommand,
+  type SlashCommandCategory,
 } from '@/composables/useSlashCommands'
+import type { WorkshopSkill, WorkshopCommand } from '@/types'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
-  /** 是否显示 */
   visible: boolean
-  /** 当前输入（用于过滤），如 "/" 或 "/he" */
   query: string
-  /** 可选的绝对定位坐标（由父组件计算输入框位置后传入） */
   position?: { top: number; left: number }
+  skills?: WorkshopSkill[]
+  commands?: WorkshopCommand[]
 }>()
 
 const emit = defineEmits<{
@@ -30,39 +21,34 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-/** 当前过滤后的命令清单 */
-const filtered = computed<SlashCommand[]>(() => filterCommands(props.query))
+const { t } = useI18n()
 
-/** 当前高亮索引 */
-const activeIndex = ref(0)
-
-/** query 变化时重置选中位置 */
-watch(
-  () => [props.query, props.visible] as const,
-  () => {
-    activeIndex.value = 0
-  },
+const filtered = computed<SlashCommand[]>(() =>
+  filterCommands(props.query, props.skills, props.commands),
 )
 
-/** 选项总数变化时夹逼索引 */
+const activeIndex = ref(0)
+
+watch(
+  () => [props.query, props.visible] as const,
+  () => { activeIndex.value = 0 },
+)
+
 watch(filtered, (list) => {
   if (activeIndex.value >= list.length) {
     activeIndex.value = Math.max(0, list.length - 1)
   }
 })
 
-/** 选中某条命令 */
 function selectAt(index: number) {
   const list = filtered.value
   if (index < 0 || index >= list.length) return
   emit('select', list[index])
 }
 
-/** 全局 keydown 拦截 */
 function onKeydown(e: KeyboardEvent) {
   if (!props.visible) return
   const key = e.key
-  // 拦截 4 个按键，无论是否有匹配项
   if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter' || key === 'Escape') {
     if (key === 'Escape') {
       e.preventDefault()
@@ -71,9 +57,7 @@ function onKeydown(e: KeyboardEvent) {
       return
     }
 
-    // 无匹配时：只处理 Esc，其它键交回父组件（让 Enter 发原文）
     if (filtered.value.length === 0) {
-      // ArrowUp/Down 在空状态下无意义，吞掉避免光标乱跳
       if (key === 'ArrowUp' || key === 'ArrowDown') {
         e.preventDefault()
         e.stopPropagation()
@@ -96,12 +80,10 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/** 仅在 visible=true 时挂载全局监听，避免不必要的开销 */
 watch(
   () => props.visible,
   (v) => {
     if (v) {
-      // 用 capture 确保比 textarea 的 keydown 先到，方便 stopPropagation
       window.addEventListener('keydown', onKeydown, { capture: true })
     } else {
       window.removeEventListener('keydown', onKeydown, { capture: true } as any)
@@ -114,7 +96,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, { capture: true } as any)
 })
 
-/** 绝对定位 style */
 const positionStyle = computed(() => {
   if (!props.position) return undefined
   return {
@@ -122,6 +103,19 @@ const positionStyle = computed(() => {
     left: `${props.position.left}px`,
   }
 })
+
+const categoryLabel: Record<SlashCommandCategory, string> = {
+  native: 'builtin',
+  pass: 'builtin',
+  skill: 'skill',
+  command: 'command',
+}
+
+function badgeFor(cat: SlashCommandCategory): string | null {
+  if (cat === 'skill') return t('slash.badgeSkill')
+  if (cat === 'command') return t('slash.badgeCommand')
+  return null
+}
 </script>
 
 <template>
@@ -133,7 +127,6 @@ const positionStyle = computed(() => {
     role="listbox"
     :aria-label="$t('slash.panel')"
   >
-    <!-- 空状态 -->
     <div
       v-if="filtered.length === 0"
       class="px-3 py-2 text-xs text-muted-foreground"
@@ -141,7 +134,6 @@ const positionStyle = computed(() => {
       {{ $t('slash.noMatch') }}
     </div>
 
-    <!-- 命令列表 -->
     <ul v-else class="py-1 max-h-80 overflow-y-auto">
       <li
         v-for="(cmd, i) in filtered"
@@ -160,11 +152,14 @@ const positionStyle = computed(() => {
         >
           {{ cmd.argHint }}
         </span>
+        <span
+          v-if="badgeFor(cmd.category)"
+          class="slash-badge shrink-0"
+        >{{ badgeFor(cmd.category) }}</span>
         <span class="text-xs text-muted-foreground truncate">{{ cmd.hint }}</span>
       </li>
     </ul>
 
-    <!-- 底部提示 -->
     <div
       v-if="filtered.length > 0"
       class="px-3 py-1 border-t border-border text-2xs text-muted-foreground flex items-center gap-3"
@@ -195,5 +190,15 @@ const positionStyle = computed(() => {
   border-radius: 3px;
   background: transparent;
   color: var(--muted-foreground);
+}
+
+.slash-badge {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  line-height: 1.4;
+  white-space: nowrap;
 }
 </style>
