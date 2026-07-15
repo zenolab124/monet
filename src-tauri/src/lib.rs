@@ -15,7 +15,6 @@ mod permission;
 pub mod probe;
 mod streaming;
 mod menu;
-mod tray;
 pub mod usage_stats;
 mod perf;
 mod watcher;
@@ -36,7 +35,9 @@ mod tcc;
 mod workshop;
 mod cli_env;
 mod cli_settings;
-mod quota;
+/// pub：类型+获取逻辑同时被 monet-tray 独立二进制复用
+pub mod quota;
+mod tray_agent;
 mod translate;
 mod turn_signal;
 mod widget;
@@ -85,10 +86,6 @@ pub fn run() {
                 // 开发模式：窗口移到非主显示器（扩展屏）
                 move_to_secondary_monitor(app);
             }
-            // 系统托盘
-            if let Err(e) = tray::setup(app.handle()) {
-                log::error!("Tray setup failed: {}", e);
-            }
             // 启动文件监控
             watcher::start(app.handle());
             // 会话状态跟踪扩展：已安装则恢复信号监听
@@ -107,28 +104,21 @@ pub fn run() {
             cli_settings::startup_sync_mcp();
             // Widget LaunchAgent 自动安装
             widget::ensure_launch_agent();
+            // Tray LaunchAgent 自动安装（独立 menubar 进程）
+            tray_agent::ensure_launch_agent();
             // 搜索缓存预热：延迟避开启动高峰，后台建/对账文本缓存
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 search::warm();
             });
 
-            // 窗口事件拦截：红色关闭按钮→隐藏到托盘；Destroyed→清理
             let handle = app.handle().clone();
             if let Some(window) = handle.get_webview_window("main") {
-                let w = window.clone();
                 window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close();
-                            let _ = w.hide();
-                        }
-                        tauri::WindowEvent::Destroyed => {
-                            streaming::close_all_sessions();
-                            agent::shutdown();
-                            channels::shutdown_fm_serve();
-                        }
-                        _ => {}
+                    if let tauri::WindowEvent::Destroyed = event {
+                        streaming::close_all_sessions();
+                        agent::shutdown();
+                        channels::shutdown_fm_serve();
                     }
                 });
             }
@@ -247,31 +237,11 @@ pub fn run() {
             quota::quota_available,
             quota::get_tray_title_config,
             quota::set_tray_title_config,
-            menu::hide_main_window,
-            menu::hide_to_tray,
             menu::quit_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            match &event {
-                // code=None 是最后一个窗口关闭触发的自动退出请求，拦下保持托盘常驻；
-                // code=Some 来自显式 app.exit()（Cmd+Q 确认退出），必须放行，
-                // 否则 quit_app 已 SIGTERM 子进程而应用不退，探测会把自家濒死进程误报为外部运行
-                tauri::RunEvent::ExitRequested { api, code, .. } => {
-                    if code.is_none() {
-                        api.prevent_exit();
-                    }
-                }
-                tauri::RunEvent::Reopen { .. } => {
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
-                _ => {}
-            }
-        });
+        .run(|_app_handle, _event| {});
 }
 
 /// 开发时把窗口移到扩展显示器居中

@@ -199,6 +199,8 @@ pub fn get_quota() -> QuotaInfo {
     fetch_and_cache()
 }
 
+/// 强制刷新 quota（跳过内存缓存，仍用磁盘 TTL）。
+/// 同时被 monet-tray 独立进程调用。
 #[tauri::command]
 pub fn refresh_quota() -> QuotaInfo {
     fetch_and_cache()
@@ -610,20 +612,10 @@ pub fn get_tray_title_config() -> TrayTitleConfig {
 }
 
 #[tauri::command]
-pub fn set_tray_title_config(app: tauri::AppHandle, slots: Vec<TrayTitleSlot>) -> Result<(), String> {
+pub fn set_tray_title_config(slots: Vec<TrayTitleSlot>) -> Result<(), String> {
     let cfg = TrayTitleConfig { slots };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     std::fs::write(tray_title_config_path(), json).map_err(|e| e.to_string())?;
-
-    // Immediately update tray title from cached quota
-    use tauri::Manager;
-    if let Some(tray) = app.tray_by_id(&tauri::tray::TrayIconId::new("main-tray")) {
-        if let Ok(guard) = CACHE.lock() {
-            if let Some(cached) = guard.as_ref() {
-                let _ = tray.set_title(format_tray_title(&cached.info).as_deref());
-            }
-        }
-    }
     Ok(())
 }
 
