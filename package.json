@@ -12,7 +12,7 @@
     "mcp:build:release": "cargo build --release --bin monet-mcp --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri",
-    "release": "pnpm tauri build --bundles app && src-widget/build.sh",
+    "release": "bash scripts/release.sh",
     "version": "bash scripts/sync-version.sh"
   },
   "author": "",
