@@ -92,6 +92,7 @@ dependencies = [
  "dirs",
  "fs2",
  "image",
+ "libc",
  "log",
  "lru",
  "muda",

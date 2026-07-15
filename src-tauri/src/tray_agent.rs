@@ -32,7 +32,10 @@ pub fn ensure_launch_agent() {
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<true/>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
 	<key>StandardErrorPath</key>
 	<string>/tmp/monet-tray.log</string>
 </dict>

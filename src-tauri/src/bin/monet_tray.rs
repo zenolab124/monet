@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use app_lib::quota::{self, QuotaInfo};
@@ -12,6 +13,9 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(target_os = "macos")]
+const TAB_STOP_PT: f64 = 220.0;
 
 #[cfg(target_os = "macos")]
 fn macos_main() {
@@ -34,6 +38,8 @@ fn macos_main() {
         .expect("failed to create tray icon");
 
     let menu_channel = tray_icon::menu::MenuEvent::receiver();
+    let pending: Arc<Mutex<Option<QuotaInfo>>> = Arc::new(Mutex::new(None));
+    let fetching = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut last_refresh = Instant::now() - Duration::from_secs(120);
 
     loop {
@@ -43,19 +49,64 @@ fn macos_main() {
             match event.id.0.as_str() {
                 "show" => open_main_app(),
                 "refresh" => {
-                    refresh_tray(&tray);
+                    request_refresh(&pending, &fetching);
                     last_refresh = Instant::now();
                 }
-                "quit" => std::process::exit(0),
+                "quit" => {
+                    unregister_and_exit();
+                }
                 _ => {}
+            }
+        }
+
+        // 主线程消费后台线程的 quota 结果
+        if let Ok(mut guard) = pending.try_lock() {
+            if let Some(info) = guard.take() {
+                apply_to_tray(&tray, &info);
             }
         }
 
         if last_refresh.elapsed() >= Duration::from_secs(120) {
             if quota::quota_available() {
-                refresh_tray(&tray);
+                request_refresh(&pending, &fetching);
             }
             last_refresh = Instant::now();
+        }
+    }
+}
+
+/// 发起后台 quota 刷新（不阻塞主线程）
+fn request_refresh(
+    pending: &Arc<Mutex<Option<QuotaInfo>>>,
+    fetching: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    if fetching.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let pending = Arc::clone(pending);
+    let fetching = Arc::clone(fetching);
+    std::thread::spawn(move || {
+        let info = quota::refresh_quota();
+        if let Ok(mut guard) = pending.lock() {
+            *guard = Some(info);
+        }
+        fetching.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// 主线程上应用 quota 数据到 tray（set_menu + patch_menu_styles + set_tooltip + set_title）
+#[cfg(target_os = "macos")]
+fn apply_to_tray(tray: &tray_icon::TrayIcon, info: &QuotaInfo) {
+    let menu = build_menu(Some(info));
+    patch_menu_styles(&menu);
+    let _ = tray.set_menu(Some(Box::new(menu)));
+    let _ = tray.set_tooltip(Some(quota::format_tray_tooltip(info)));
+    match quota::format_tray_title(info) {
+        Some(t) => {
+            let _ = tray.set_title(Some(t));
+        }
+        None => {
+            let _ = tray.set_title(None::<String>);
         }
     }
 }
@@ -77,8 +128,8 @@ fn load_icon() -> tray_icon::Icon {
     tray_icon::Icon::from_rgba(rgba.into_raw(), w, h).expect("failed to create tray icon")
 }
 
-fn build_menu(info: Option<&QuotaInfo>) -> tray_icon::menu::Menu {
-    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
+    use muda::{Menu, MenuItem, PredefinedMenuItem};
 
     let menu = Menu::new();
     let zh = is_chinese();
@@ -115,7 +166,12 @@ fn build_menu(info: Option<&QuotaInfo>) -> tray_icon::menu::Menu {
             for (i, m) in qi.weekly_models.iter().enumerate() {
                 let name = m.display_name.as_deref().unwrap_or(&m.model);
                 let label = format!("{name}  {:.0}%", m.used_percent);
-                let _ = menu.append(&MenuItem::with_id(format!("m{i}"), label, false, None::<muda::accelerator::Accelerator>));
+                let _ = menu.append(&MenuItem::with_id(
+                    format!("m{i}"),
+                    label,
+                    false,
+                    None::<muda::accelerator::Accelerator>,
+                ));
             }
 
             let _ = menu.append(&PredefinedMenuItem::separator());
@@ -134,22 +190,22 @@ fn build_menu(info: Option<&QuotaInfo>) -> tray_icon::menu::Menu {
     menu
 }
 
-fn refresh_tray(tray: &tray_icon::TrayIcon) {
-    let info = quota::refresh_quota();
-    let menu = build_menu(Some(&info));
-    let _ = tray.set_menu(Some(Box::new(menu)));
-    let _ = tray.set_tooltip(Some(quota::format_tray_tooltip(&info)));
-    if let Some(title) = quota::format_tray_title(&info) {
-        let _ = tray.set_title(Some(title));
-    } else {
-        let _ = tray.set_title(None::<String>);
-    }
-}
-
 fn open_main_app() {
     let _ = std::process::Command::new("open")
         .args(["-b", "io.github.zenolab124.monet"])
         .spawn();
+}
+
+/// 先 bootout LaunchAgent 再退出，防止 launchd 重新拉起
+fn unregister_and_exit() {
+    let uid = unsafe { libc::getuid() };
+    let _ = std::process::Command::new("launchctl")
+        .args([
+            "bootout",
+            &format!("gui/{uid}/io.github.zenolab124.monet.tray"),
+        ])
+        .output();
+    std::process::exit(0);
 }
 
 fn is_chinese() -> bool {
@@ -181,7 +237,7 @@ fn format_quota_line(label: &str, used: f64, resets: Option<i64>, zh: bool) -> S
     if right.is_empty() {
         left
     } else {
-        format!("{left}  {right}")
+        format!("{left}\t{right}")
     }
 }
 
@@ -207,5 +263,137 @@ fn format_reset(secs: Option<i64>, zh: bool) -> String {
             }
         }
         _ => String::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// macOS: attributed string styling (bold title, tab-stop aligned reset times)
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+fn patch_menu_styles(menu: &muda::Menu) {
+    use muda::ContextMenu;
+    use objc2::runtime::AnyObject;
+    use objc2::AnyThread;
+    use objc2_app_kit::{
+        NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
+        NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSTextAlignment, NSTextTab,
+    };
+    use objc2_core_foundation::CGFloat;
+    use objc2_foundation::{
+        MainThreadMarker, NSArray, NSDictionary, NSMutableAttributedString, NSRange, NSString,
+    };
+
+    let Some(_mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let ns_menu_ptr = menu.ns_menu();
+    let ns_menu: &objc2_app_kit::NSMenu =
+        unsafe { &*(ns_menu_ptr as *const objc2_app_kit::NSMenu) };
+
+    let para = NSMutableParagraphStyle::new();
+    let empty_tabs = NSArray::<NSTextTab>::new();
+    para.setTabStops(Some(&empty_tabs));
+    let tab = unsafe {
+        NSTextTab::initWithTextAlignment_location_options(
+            NSTextTab::alloc(),
+            NSTextAlignment::Right,
+            TAB_STOP_PT as CGFloat,
+            &NSDictionary::<NSString, AnyObject>::new(),
+        )
+    };
+    para.addTabStop(&tab);
+
+    let menu_font = NSFont::menuFontOfSize(0.0);
+    let bold_font = NSFont::boldSystemFontOfSize(0.0);
+    let gray = NSColor::secondaryLabelColor();
+
+    let count = ns_menu.numberOfItems();
+    for i in 0..count {
+        let Some(item) = ns_menu.itemAtIndex(i) else {
+            continue;
+        };
+        if item.isSeparatorItem() {
+            continue;
+        }
+
+        let title_rs = item.title().to_string();
+
+        if title_rs.starts_with("Claude Code") {
+            let ns_str = NSString::from_str(&title_rs);
+            let attr = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &ns_str,
+            );
+            let full = NSRange {
+                location: 0,
+                length: ns_str.length(),
+            };
+            let bold_obj: &AnyObject = &*bold_font;
+            unsafe {
+                attr.addAttribute_value_range(NSFontAttributeName, bold_obj, full);
+            }
+            item.setAttributedTitle(Some(&attr));
+            continue;
+        }
+
+        if title_rs.contains('\t') {
+            let ns_str = NSString::from_str(&title_rs);
+            let attr = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &ns_str,
+            );
+            let full = NSRange {
+                location: 0,
+                length: ns_str.length(),
+            };
+
+            let font_obj: &AnyObject = &*menu_font;
+            let para_obj: &AnyObject = &*para;
+            unsafe {
+                attr.addAttribute_value_range(NSFontAttributeName, font_obj, full);
+                attr.addAttribute_value_range(NSParagraphStyleAttributeName, para_obj, full);
+            }
+
+            if let Some(tab_byte) = title_rs.find('\t') {
+                let tab_utf16 = title_rs[..tab_byte].encode_utf16().count() + 1;
+                let rest_len = ns_str.length() - tab_utf16;
+                if rest_len > 0 {
+                    let rest_range = NSRange {
+                        location: tab_utf16,
+                        length: rest_len,
+                    };
+                    let gray_obj: &AnyObject = &*gray;
+                    unsafe {
+                        attr.addAttribute_value_range(
+                            NSForegroundColorAttributeName,
+                            gray_obj,
+                            rest_range,
+                        );
+                    }
+                }
+            }
+
+            item.setAttributedTitle(Some(&attr));
+            continue;
+        }
+
+        if title_rs.contains('%') {
+            let ns_str = NSString::from_str(&title_rs);
+            let attr = NSMutableAttributedString::initWithString(
+                NSMutableAttributedString::alloc(),
+                &ns_str,
+            );
+            let full = NSRange {
+                location: 0,
+                length: ns_str.length(),
+            };
+            let font_obj: &AnyObject = &*menu_font;
+            unsafe {
+                attr.addAttribute_value_range(NSFontAttributeName, font_obj, full);
+            }
+            item.setAttributedTitle(Some(&attr));
+        }
     }
 }

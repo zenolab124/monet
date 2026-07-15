@@ -65,6 +65,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # monet-tray 独立二进制直接使用底层 tray/menu crate，无需 Tauri runtime
 tray-icon = "0.21"
 muda = "0.17"
+libc = "0.2"
 
 # macOS: attributed-title tab alignment in tray menu (right-aligned reset times)
 # These are already transitive deps via muda/tray-icon; we add them directly to
