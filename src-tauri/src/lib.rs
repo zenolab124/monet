@@ -237,6 +237,7 @@ pub fn run() {
             quota::quota_available,
             quota::get_tray_title_config,
             quota::set_tray_title_config,
+            tray_agent::launch_tray,
             menu::quit_app,
         ])
         .build(tauri::generate_context!())

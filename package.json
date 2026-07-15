@@ -1,6 +1,6 @@
 {
   "name": "monet-tauri",
-  "version": "2.4.0",
+  "version": "0.1.0",
   "description": "Monet — Claude Code session viewer",
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "mcp:build:release": "cargo build --release --bin monet-mcp --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri",
-    "release": "pnpm tauri build --bundles app && src-widget/build.sh"
+    "release": "pnpm tauri build --bundles app && src-widget/build.sh",
+    "version": "bash scripts/sync-version.sh"
   },
   "author": "",
   "license": "MIT",

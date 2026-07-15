@@ -343,6 +343,10 @@ async function toggleTraySlot(key: string) {
   await invoke('set_tray_title_config', { slots: traySlots.value }).catch(() => {})
 }
 
+async function launchTray() {
+  await invoke('launch_tray').catch(() => {})
+}
+
 interface QuotaInfo {
   session: unknown
   weekly: unknown
@@ -1138,6 +1142,7 @@ function onSaved() {
                 </label>
               </div>
               <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
+              <button class="btn btn-sm mt-2" @click="launchTray">{{ $t('settings.trayLaunch') }}</button>
             </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>

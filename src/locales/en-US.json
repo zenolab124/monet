@@ -574,6 +574,7 @@
     "widgetMonthBoundaryHint": "Affects monthly tokens, cost, model mix and other stats",
     "trayTitle": "Menu Bar Display",
     "trayTitleHint": "Quota metrics shown next to the tray icon",
+    "trayLaunch": "Launch Menu Bar",
     "updateCheck": "Check for Updates",
     "updateChecking": "Checking…",
     "updateAvailable": "New version v{version} available",

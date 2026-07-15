@@ -574,6 +574,7 @@
     "widgetMonthBoundaryHint": "影响月度 Token、费用、模型分布等统计口径",
     "trayTitle": "菜单栏显示",
     "trayTitleHint": "图标旁显示的额度指标，可多选",
+    "trayLaunch": "启动菜单栏",
     "updateCheck": "检查更新",
     "updateChecking": "正在检查…",
     "updateAvailable": "发现新版本 v{version}",

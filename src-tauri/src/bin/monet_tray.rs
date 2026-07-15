@@ -196,15 +196,9 @@ fn open_main_app() {
         .spawn();
 }
 
-/// 先 bootout LaunchAgent 再退出，防止 launchd 重新拉起
 fn unregister_and_exit() {
-    let uid = unsafe { libc::getuid() };
-    let _ = std::process::Command::new("launchctl")
-        .args([
-            "bootout",
-            &format!("gui/{uid}/io.github.zenolab124.monet.tray"),
-        ])
-        .output();
+    // KeepAlive > SuccessfulExit: false 保证 exit(0) 不触发重启
+    // 不 bootout——plist 留在位，下次登录或主应用启动时 kickstart 拉起
     std::process::exit(0);
 }
 
