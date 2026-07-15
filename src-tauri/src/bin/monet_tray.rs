@@ -191,15 +191,19 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
 }
 
 fn open_main_app() {
-    // 不用 -b bundle-id：tray 也在同一 bundle 内，macOS 会混淆。
-    // 直接用路径打开，确保启动的是主应用窗口进程。
+    // MonetTray.app 是独立 Helper App，位于 Monet.app/Contents/Library/LoginItems/ 下。
+    // 当前二进制: MonetTray.app/Contents/MacOS/monet-tray
+    // 主应用:     Monet.app（上 5 级）
     let app_path = std::env::current_exe()
         .ok()
         .and_then(|p| {
-            // 二进制在 Monet.app/Contents/MacOS/monet-tray，往上三级是 .app
-            p.parent()
-                .and_then(|macos| macos.parent())
-                .and_then(|contents| contents.parent())
+            p.parent() // MacOS/
+                .and_then(|d| d.parent()) // Contents/
+                .and_then(|d| d.parent()) // MonetTray.app/
+                .and_then(|d| d.parent()) // LoginItems/
+                .and_then(|d| d.parent()) // Library/
+                .and_then(|d| d.parent()) // Contents/
+                .and_then(|d| d.parent()) // Monet.app
                 .map(|app| app.to_path_buf())
         });
     if let Some(path) = app_path {

@@ -9,9 +9,18 @@ pub fn ensure_launch_agent() {
         .join("Library/LaunchAgents")
         .join(format!("{LAUNCH_AGENT_LABEL}.plist"));
 
+    // Helper App: Monet.app/Contents/Library/LoginItems/MonetTray.app/Contents/MacOS/monet-tray
+    // 主应用二进制在: Monet.app/Contents/MacOS/app
     let tray_bin = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("monet-tray")));
+        .and_then(|p| {
+            p.parent() // MacOS/
+                .and_then(|d| d.parent()) // Contents/
+                .map(|contents| {
+                    contents
+                        .join("Library/LoginItems/MonetTray.app/Contents/MacOS/monet-tray")
+                })
+        });
     let Some(tray_bin) = tray_bin else { return };
     if !tray_bin.exists() {
         return;

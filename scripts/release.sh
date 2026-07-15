@@ -16,4 +16,6 @@ if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --o
 fi
 
 pnpm version "$BUMP"
-pnpm tauri build --bundles app && src-widget/build.sh
+pnpm tauri build --bundles app
+bash scripts/bundle-tray.sh
+src-widget/build.sh
