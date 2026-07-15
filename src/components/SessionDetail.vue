@@ -1328,7 +1328,6 @@ async function handleSend() {
   if (textareaRef.value) textareaRef.value.style.height = 'auto'
   followStreaming.value = true
   featureBannerShown.value = false
-  scrollToBottom(true)
   // 发送前即时落账:上一轮流式 turns 还在时,sendMessage 会清 streamingTurns
   // 但 records 尚未 reload——内容从两源同时消失。先应用暂存/重新 reload 收进历史区
   if (stream.value.streamingTurns.length > 0) {
@@ -1366,6 +1365,7 @@ async function handleSend() {
     return
   }
   await sendMessage(cs.summary.id, cs.summary.cwd, text, opts)
+  scrollToBottom(true)
 }
 
 function onInputKeydown(e: KeyboardEvent) {
