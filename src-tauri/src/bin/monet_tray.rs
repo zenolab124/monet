@@ -142,7 +142,7 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
             } else {
                 format!("Claude Code · {plan}")
             };
-            let _ = menu.append(&MenuItem::with_id("title", title, false, None::<muda::accelerator::Accelerator>));
+            let _ = menu.append(&MenuItem::with_id("title", title, true, None::<muda::accelerator::Accelerator>));
             let _ = menu.append(&PredefinedMenuItem::separator());
 
             if let Some(s) = &qi.session {
@@ -152,7 +152,7 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
                     s.resets_in_secs,
                     zh,
                 );
-                let _ = menu.append(&MenuItem::with_id("s", label, false, None::<muda::accelerator::Accelerator>));
+                let _ = menu.append(&MenuItem::with_id("s", label, true, None::<muda::accelerator::Accelerator>));
             }
             if let Some(w) = &qi.weekly {
                 let label = format_quota_line(
@@ -161,7 +161,7 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
                     w.resets_in_secs,
                     zh,
                 );
-                let _ = menu.append(&MenuItem::with_id("w", label, false, None::<muda::accelerator::Accelerator>));
+                let _ = menu.append(&MenuItem::with_id("w", label, true, None::<muda::accelerator::Accelerator>));
             }
             for (i, m) in qi.weekly_models.iter().enumerate() {
                 let name = m.display_name.as_deref().unwrap_or(&m.model);
@@ -169,7 +169,7 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
                 let _ = menu.append(&MenuItem::with_id(
                     format!("m{i}"),
                     label,
-                    false,
+                    true,
                     None::<muda::accelerator::Accelerator>,
                 ));
             }
