@@ -1,9 +1,9 @@
 use tauri::{
     menu::{Menu, MenuItemBuilder, SubmenuBuilder},
-    AppHandle, Emitter, Wry,
+    AppHandle, Emitter, Manager, Wry,
 };
 
-use crate::{agent, streaming};
+use crate::{agent, channels, streaming};
 
 pub fn create(app: &AppHandle) -> Result<Menu<Wry>, tauri::Error> {
     let app_menu = SubmenuBuilder::new(app, "Monet")
@@ -50,11 +50,22 @@ pub fn handle_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
             let _ = app.emit("menu:close-tab", ());
         }
         "quit" => {
-            streaming::close_all_sessions();
-            agent::shutdown();
-            app.exit(0);
+            // 交给前端判断：有活跃流式会话 → 确认弹窗；无 → 直接 quit_app
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            let _ = app.emit("menu:request-quit", ());
         }
         _ => {}
+    }
+}
+
+/// Cmd+W 最后一个 tab / 非工作台域：收起窗口（不退出）
+#[tauri::command]
+pub fn hide_main_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
     }
 }
 
@@ -62,5 +73,7 @@ pub fn handle_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
 pub fn quit_app(app: AppHandle) {
     streaming::close_all_sessions();
     agent::shutdown();
+    // exit(0) 不保证触发窗口 Destroyed 清理，fm serve 需显式关停防孤儿
+    channels::shutdown_fm_serve();
     app.exit(0);
 }

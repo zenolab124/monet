@@ -106,21 +106,32 @@ pub fn run() {
             cli_settings::startup_sync_mcp();
             // Widget LaunchAgent 自动安装
             widget::ensure_launch_agent();
-            // Tray LaunchAgent 自动安装（独立 menubar 进程）
-            tray_agent::ensure_launch_agent();
+            // Tray LaunchAgent 自动安装（独立 menubar 进程）。
+            // launchctl bootout/bootstrap 有 IO 开销，不阻塞主线程
+            tauri::async_runtime::spawn_blocking(tray_agent::ensure_launch_agent);
             // 搜索缓存预热：延迟避开启动高峰，后台建/对账文本缓存
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 search::warm();
             });
 
+            // 关窗=收起（macOS 标准文档型行为）：进程与 Dock 图标保留，
+            // 点 Dock/Reopen 恢复；真退出走 Cmd+Q（quit_app）
             let handle = app.handle().clone();
             if let Some(window) = handle.get_webview_window("main") {
+                let w = window.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Destroyed = event {
-                        streaming::close_all_sessions();
-                        agent::shutdown();
-                        channels::shutdown_fm_serve();
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            api.prevent_close();
+                            let _ = w.hide();
+                        }
+                        tauri::WindowEvent::Destroyed => {
+                            streaming::close_all_sessions();
+                            agent::shutdown();
+                            channels::shutdown_fm_serve();
+                        }
+                        _ => {}
                     }
                 });
             }
@@ -241,11 +252,21 @@ pub fn run() {
             quota::get_tray_title_config,
             quota::set_tray_title_config,
             tray_agent::launch_tray,
+            menu::hide_main_window,
             menu::quit_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, _event| {});
+        .run(|app_handle, event| {
+            // 点 Dock 图标恢复被隐藏/最小化的窗口
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
 
 /// 开发时把窗口移到扩展显示器居中
