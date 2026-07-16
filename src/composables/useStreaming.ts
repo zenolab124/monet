@@ -223,6 +223,33 @@ const turnIndex = new Map<string, { turn: StreamingTurn; sessionId: string }>()
 // thinking 块计时：block_start 记时刻，block_stop 算差值
 const thinkingStartTimes = new Map<string, number>()
 
+/**
+ * 已落账 message 的墓碑:settle 摘除 turn 后,同 mid 的迟到事件不得重建 turn。
+ * 实测根因(2026-07-16,AVIF 会话取证):--thinking-display summarized 会对同一段
+ * 思考产生多个摘要版本,CLI 落盘其一,但把另一版本也透传进事件流,且到达时机晚于
+ * settle——前端为它重建 turn 就呈现为「回答完毕后底下突然多出一个思考块,发下一条
+ * 消息即消失(清场)」。落账 = 内容已完整在历史区,同 mid 重建必为重复,误杀面为零。
+ * FIFO 容量 50,跨轮自然淘汰。
+ */
+const landedTombstones = new Set<string>()
+function tombstone(messageId: string) {
+  landedTombstones.add(messageId)
+  if (landedTombstones.size > 50) {
+    const oldest = landedTombstones.values().next().value!
+    landedTombstones.delete(oldest)
+  }
+}
+
+/** 非流式期新建 turn 的取证快照(自发轮正常路径,也是未知幽灵的唯一入口)——
+ *  留最近 20 条到 localStorage,幽灵再现时直接锁死事件来源 */
+function ghostAudit(kind: string, mid: string | undefined, block: string | null, sid: string) {
+  try {
+    const prev: unknown[] = JSON.parse(localStorage.getItem('monet-ghost-audit') ?? '[]')
+    prev.push({ at: new Date().toISOString(), kind, mid, block, sid: sid.slice(0, 8) })
+    localStorage.setItem('monet-ghost-audit', JSON.stringify(prev.slice(-20)))
+  } catch { /* 满/禁用则放弃 */ }
+}
+
 /** 丢弃某 turn 的全部传输态(索引 + 残余 pending):防死 key 让节奏档位虚高 */
 function dropTurnTransients(messageId: string) {
   turnIndex.delete(messageId)
@@ -610,8 +637,11 @@ export async function initStreamListeners(): Promise<void> {
         // partial messages 模式下,content_block_start 首次出现某 index 的块——
         // 找不到 turn 就新建,然后在 index 位置放置初始块(text:""/tool_use:input{} 等)
         if (payload.message_id && payload.index !== undefined && payload.content_block) {
+          // 已落账 message 的迟到事件(重复思考摘要等):内容已在历史区,忽略
+          if (landedTombstones.has(payload.message_id)) break
           let entry = turnIndex.get(payload.message_id)
           if (!entry) {
+            if (!state.streaming) ghostAudit('block_start', payload.message_id, payload.content_block.type, sid)
             const turn: StreamingTurn = { messageId: payload.message_id, content: [], model: payload.model, live: true }
             state.streamingTurns.push(turn)
             // reactive 数组里取回代理对象,保证后续 mutate 走响应式
@@ -721,6 +751,8 @@ export async function initStreamListeners(): Promise<void> {
         // 兼容旧 CLI:若 block_delta 已喂过相同字符,增量为 0,不重复。
         if (payload.message_id && payload.content) {
           const mid = payload.message_id
+          // 已落账 message 的迟到快照(重复思考摘要等):内容已在历史区,忽略
+          if (landedTombstones.has(mid)) break
           const entry = turnIndex.get(mid)
           if (entry) {
             const existing = entry.turn
@@ -763,6 +795,7 @@ export async function initStreamListeners(): Promise<void> {
               if (b.type === 'thinking') s.thinking = ''
               return s as ContentBlock
             })
+            if (!state.streaming) ghostAudit('assistant_message', mid, null, sid)
             state.streamingTurns.push({
               messageId: mid,
               content: strippedContent,
@@ -928,7 +961,10 @@ function removeLandedTurns(sessionId: string, recs: ReadonlyArray<{ type: string
   const keep = state.streamingTurns.filter(t => !landed.has(t.messageId))
   if (keep.length === state.streamingTurns.length) return
   for (const t of state.streamingTurns) {
-    if (landed.has(t.messageId)) dropTurnTransients(t.messageId)
+    if (landed.has(t.messageId)) {
+      dropTurnTransients(t.messageId)
+      tombstone(t.messageId)
+    }
   }
   state.streamingTurns = keep
   markTailDirty(sessionId)
