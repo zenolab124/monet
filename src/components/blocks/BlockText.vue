@@ -4,8 +4,7 @@ import type { ContentBlock } from '@/types'
 import { renderMarkdownPlain, renderMarkdownCached, renderMarkdownDeferred } from '@/composables/useMarkdown'
 import { useStreamSegments } from '@/composables/useStreamSegments'
 import MdSegment from './MdSegment.vue'
-
-const TEXT_TRUNCATE_LEN = 8192
+import { TEXT_TRUNCATE_LEN, persistKeyOf } from '@/lib/stream-markdown/constants'
 
 // FR-008 渲染路径开关(开发/救急,非用户功能):blocks(默认)|legacy。
 // setup 读一次,切换需刷新;legacy 分支保留一个发版周期后连同本常量删除
@@ -36,10 +35,7 @@ const segApi = bornStreaming
       streaming: () => props.streaming === true,
       // 预热 key 必须与历史出生路径 renderMarkdownCached(displayText) 的初始入参逐字节一致:
       // 历史区初始 expanded=false,大文本渲染的是截断串
-      persistText: () =>
-        props.block.text.length > TEXT_TRUNCATE_LEN
-          ? props.block.text.slice(0, TEXT_TRUNCATE_LEN)
-          : props.block.text,
+      persistText: () => persistKeyOf(props.block.text),
     })
   : null
 const segments = segApi?.segments ?? []

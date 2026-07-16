@@ -61,6 +61,8 @@ import { buildAsyncLedger, isActive, type AsyncTaskItem } from '@/composables/us
 import type { SubAgentMeta } from '@/types'
 import AsyncTaskPanel from './AsyncTaskPanel.vue'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
+import { renderMarkdownDeferred } from '@/composables/useMarkdown'
+import { persistKeyOf } from '@/lib/stream-markdown/constants'
 
 /**
  * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
@@ -1620,6 +1622,20 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
       const landedNow = newRecords.some(r =>
         r.type === 'assistant' && turnIds.has((r.message as { id?: string } | null | undefined)?.id ?? ''))
       if (landedNow && pendingLanded(newRecords)) {
+        // 换树前等本轮文本的完成态 HTML 预热落缓存:预热任务排在逐段上色队列末尾,
+        // await 它 = 同时等到「上色完成 + 缓存命中」两个条件——否则换树时历史区
+        // cached miss 触发全文 shiki 同步渲染(卡帧),且流式区半彩半素与历史区
+        // 全彩之间有颜色跳变,叠加 DOM 换树呈现为整屏闪烁
+        const texts: string[] = []
+        for (const t of getStream(sid).streamingTurns) {
+          for (const b of t.content) {
+            const txt = b.type === 'text' ? (b as { text?: string }).text : undefined
+            if (txt) texts.push(persistKeyOf(txt))
+          }
+        }
+        await Promise.all(texts.map(t => renderMarkdownDeferred(t)))
+        // 等待期间可能切会话/新消息已发出,复查后再换树
+        if (effectiveSessionId.value !== sid) return
         devObserveSwap('settle-swap')
         records.value = newRecords
         removeLandedTurns(sid, newRecords)
