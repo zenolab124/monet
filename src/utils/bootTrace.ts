@@ -22,15 +22,11 @@ export function markBoot(name: string) {
  * 帧内 setTimeout(0) → boot:first-frame，宏任务紧随本帧 style/layout/paint 之后执行。
  * 不用 double-rAF（第二帧开头）：宏任务优先级高于 idle callback，第二帧则会被空闲期
  * 任务推迟——实测 Shiki 空闲预热 583ms 被整段计入白屏，量出伪影。
- * onFirstFrame：首帧上屏后的回调（窗口延迟显示在此 show，保证用户永远看不到白底）。
  */
-export function finishBootTrace(onFirstFrame?: () => void) {
+export function finishBootTrace() {
   requestAnimationFrame(() => {
     performance.mark('boot:raf1')
-    setTimeout(() => {
-      performance.mark('boot:first-frame')
-      onFirstFrame?.()
-    }, 0)
+    setTimeout(() => performance.mark('boot:first-frame'), 0)
   })
 }
 

@@ -67,11 +67,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin({
-            use tauri_plugin_window_state::StateFlags;
-            let mut ws = tauri_plugin_window_state::Builder::new()
-                // 排除 VISIBLE:窗口以隐藏启动(tauri.conf visible:false),前端首帧上屏后
-                // 才 show(消灭 WebView 白底闪);插件恢复可见性会抢先把白窗口亮出来
-                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE);
+            let mut ws = tauri_plugin_window_state::Builder::new();
             if cfg!(debug_assertions) {
                 ws = ws.skip_initial_state("main");
             }
@@ -119,18 +115,17 @@ pub fn run() {
                 search::warm();
             });
 
-            // 窗口延迟显示兜底:正常路径由前端首帧后 show(main.ts finishBootTrace 回调);
-            // 前端脚本崩溃/资产加载失败时 4s 后强制亮窗,避免应用"启动了但看不见"
-            {
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(4));
-                    if let Some(w) = handle.get_webview_window("main") {
-                        if !w.is_visible().unwrap_or(true) {
-                            let _ = w.show();
-                        }
-                    }
-                });
+            // WebView 原生底色钉成主题色:窗口出现到 HTML 内联底色接管之间(~130ms)
+            // 的空窗期不再是 WKWebView 默认白底,而是与主题同色系——消灭启动白闪的
+            // 最后一层(HTML 后由 index.html 内联脚本按 localStorage 精确接管)
+            if let Some(w) = app.get_webview_window("main") {
+                let dark = matches!(w.theme(), Ok(tauri::Theme::Dark));
+                let color = if dark {
+                    tauri::webview::Color(30, 30, 30, 255) // ink #1e1e1e
+                } else {
+                    tauri::webview::Color(242, 235, 220, 255) // paper #F2EBDC
+                };
+                let _ = w.set_background_color(Some(color));
             }
 
             // 关窗=收起（macOS 标准文档型行为）：进程与 Dock 图标保留，

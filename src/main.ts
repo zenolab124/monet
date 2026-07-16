@@ -2,7 +2,6 @@
 import { markBoot, finishBootTrace } from './utils/bootTrace'
 import { createApp } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import 'virtual:uno.css'
 import './styles/themes/_base.css'
 import './styles/themes/paper.css'
@@ -43,10 +42,4 @@ window.addEventListener('drop', (e) => {
 
 createApp(App).use(i18n).directive('tooltip', vTooltip).mount('#app')
 markBoot('boot:mounted')
-// 窗口延迟显示:conf visible:false 起步,首帧真实上屏后才亮窗——WebView 白底闪在物理上不可见。
-// Rust 侧另有 4s 强制 show 兜底(前端脚本崩溃时窗口不至于永不出现)
-finishBootTrace(() => {
-  const win = getCurrentWindow()
-  win.show().catch(() => {})
-  win.setFocus().catch(() => {})
-})
+finishBootTrace()
