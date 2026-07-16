@@ -1366,9 +1366,12 @@ function onSaved() {
   box-shadow: var(--shadow-paper);
 }
 
-/* 内容体 */
+/* 内容体：限最大宽度居中，超宽窗口下不再无限拉伸 */
 .settings-body {
   padding: 20px;
+  max-width: 1040px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .cli-section {
@@ -1385,10 +1388,10 @@ function onSaved() {
   margin-bottom: 14px;
 }
 
-/* 双列网格 */
+/* 响应式网格：宽够双列，窄则自动落单列 */
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 12px;
   align-items: start;
 }
@@ -1401,7 +1404,8 @@ function onSaved() {
   overflow: hidden;
 }
 .setting-group-wide {
-  grid-column: span 2;
+  /* 跨满整行：双列时占两列，单列时自然落一列（span 2 在单列会溢出） */
+  grid-column: 1 / -1;
 }
 .setting-group-header {
   display: flex;
