@@ -114,6 +114,9 @@ struct CredentialsFile {
 #[serde(rename_all = "camelCase")]
 struct OAuthCredential {
     access_token: Option<String>,
+    /// 存在于凭据文件中但 Monet 故意不用：refresh 是 CLI 的专属权力，
+    /// 我方 refresh 会在 token rotation 下作废 CLI 的登录态
+    #[allow(dead_code)]
     refresh_token: Option<String>,
     expires_at: Option<u64>,
     scopes: Option<Vec<String>>,
@@ -121,12 +124,6 @@ struct OAuthCredential {
     subscription_type: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RefreshResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: Option<u64>,
-}
 
 // ---------------------------------------------------------------------------
 // Cache (memory + disk)
@@ -138,17 +135,8 @@ struct CachedQuota {
 }
 
 static CACHE: Mutex<Option<CachedQuota>> = Mutex::new(None);
-static TOKEN_CACHE: Mutex<Option<TokenState>> = Mutex::new(None);
-
-struct TokenState {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_at: Option<u64>,
-    credential: OAuthCredential,
-}
 
 const CACHE_TTL: Duration = Duration::from_secs(120);
-const OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -172,7 +160,8 @@ fn write_disk_cache(info: &QuotaInfo) {
         fetched_at_ms: Utc::now().timestamp_millis(),
     };
     if let Ok(json) = serde_json::to_string(&dc) {
-        let _ = std::fs::write(disk_cache_path(), json);
+        // tray 与主应用双进程并发读写，必须原子写，防半截 JSON
+        let _ = crate::config::atomic_write(&disk_cache_path(), &json);
     }
 }
 
@@ -196,14 +185,25 @@ pub fn get_quota() -> QuotaInfo {
             }
         }
     }
-    fetch_and_cache()
+    fetch_and_cache(false)
 }
 
-/// 强制刷新 quota（跳过内存缓存，仍用磁盘 TTL）。
+/// 手动刷新：跳过内存缓存与磁盘 TTL，强制打 API。
 /// 同时被 monet-tray 独立进程调用。
 #[tauri::command]
 pub fn refresh_quota() -> QuotaInfo {
-    fetch_and_cache()
+    fetch_and_cache(true)
+}
+
+/// 只读取现有缓存（内存 → 磁盘），绝不发起网络请求。
+/// 供 monet-tray 主线程即时重渲染（如 tray-title 配置变更）使用。
+pub fn peek_cached_quota() -> Option<QuotaInfo> {
+    if let Ok(guard) = CACHE.lock() {
+        if let Some(cached) = guard.as_ref() {
+            return Some(cached.info.clone());
+        }
+    }
+    read_disk_cache().map(|(info, _)| info)
 }
 
 #[tauri::command]
@@ -215,18 +215,22 @@ pub fn quota_available() -> bool {
 // Core logic
 // ---------------------------------------------------------------------------
 
-fn fetch_and_cache() -> QuotaInfo {
-    if let Some(age) = disk_cache_age_secs() {
-        if age < CACHE_TTL.as_secs() as i64 {
-            if let Some((info, _)) = read_disk_cache() {
-                if info.error.is_none() {
-                    if let Ok(mut guard) = CACHE.lock() {
-                        *guard = Some(CachedQuota {
-                            info: info.clone(),
-                            fetched_at: Instant::now(),
-                        });
+fn fetch_and_cache(force: bool) -> QuotaInfo {
+    // 磁盘缓存 TTL 内直接采用（另一进程可能刚刷过，双进程共享省 API 调用）；
+    // force（用户手动刷新）跳过，保证「点了刷新就真的刷新」
+    if !force {
+        if let Some(age) = disk_cache_age_secs() {
+            if age < CACHE_TTL.as_secs() as i64 {
+                if let Some((info, _)) = read_disk_cache() {
+                    if info.error.is_none() {
+                        if let Ok(mut guard) = CACHE.lock() {
+                            *guard = Some(CachedQuota {
+                                info: info.clone(),
+                                fetched_at: Instant::now(),
+                            });
+                        }
+                        return info;
                     }
-                    return info;
                 }
             }
         }
@@ -265,8 +269,7 @@ fn fetch_and_cache() -> QuotaInfo {
 }
 
 fn fetch_quota_inner() -> Result<QuotaInfo, String> {
-    let token = get_valid_token()?;
-    let credential = token.credential.clone();
+    let (access_token, credential) = get_valid_token()?;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
@@ -275,7 +278,7 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
 
     let resp = client
         .get("https://api.anthropic.com/api/oauth/usage")
-        .header("Authorization", format!("Bearer {}", token.access_token))
+        .header("Authorization", format!("Bearer {access_token}"))
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
@@ -286,11 +289,6 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            if let Ok(mut guard) = TOKEN_CACHE.lock() {
-                *guard = None;
-            }
-        }
         return Err(format!("API error {status}: {body}"));
     }
 
@@ -423,44 +421,12 @@ fn infer_plan(cred: &OAuthCredential) -> Option<String> {
 // Token management
 // ---------------------------------------------------------------------------
 
-fn get_valid_token() -> Result<TokenState, String> {
-    if let Ok(guard) = TOKEN_CACHE.lock() {
-        if let Some(state) = guard.as_ref() {
-            let now_ms = Utc::now().timestamp_millis() as u64;
-            if state.expires_at.map_or(true, |exp| now_ms < exp.saturating_sub(60_000)) {
-                return Ok(TokenState {
-                    access_token: state.access_token.clone(),
-                    refresh_token: state.refresh_token.clone(),
-                    expires_at: state.expires_at,
-                    credential: state.credential.clone(),
-                });
-            }
-            if let Some(rt) = &state.refresh_token {
-                if let Ok(refreshed) = refresh_token(rt) {
-                    let new_state = TokenState {
-                        access_token: refreshed.access_token.clone(),
-                        refresh_token: refreshed.refresh_token.clone().or_else(|| state.refresh_token.clone()),
-                        expires_at: refreshed.expires_in.map(|ei| {
-                            Utc::now().timestamp_millis() as u64 + ei * 1000
-                        }),
-                        credential: state.credential.clone(),
-                    };
-                    drop(guard);
-                    if let Ok(mut g) = TOKEN_CACHE.lock() {
-                        let ret = TokenState {
-                            access_token: new_state.access_token.clone(),
-                            refresh_token: new_state.refresh_token.clone(),
-                            expires_at: new_state.expires_at,
-                            credential: new_state.credential.clone(),
-                        };
-                        *g = Some(new_state);
-                        return Ok(ret);
-                    }
-                }
-            }
-        }
-    }
-
+/// 获取可用的 access token。
+/// 铁律：Monet 绝不主动 refresh OAuth token——refresh token rotation 场景下，
+/// 我方刷新会作废 Claude Code CLI 持有的 refresh_token，烧毁用户 CLI 登录态。
+/// （tray + 主应用 + CLI 三方共用同一凭据，只有 CLI 拥有写权。）
+/// token 过期时重读凭据源（CLI 日常使用会保持 keychain 新鲜），仍过期则报错等待。
+fn get_valid_token() -> Result<(String, OAuthCredential), String> {
     let cred = read_credential().ok_or("No Claude credentials found")?;
 
     let has_profile = cred.scopes.as_ref()
@@ -470,65 +436,11 @@ fn get_valid_token() -> Result<TokenState, String> {
     }
 
     let now_ms = Utc::now().timestamp_millis() as u64;
-    let (access_token, refresh_token, expires_at) =
-        if cred.expires_at.map_or(false, |exp| now_ms >= exp.saturating_sub(60_000)) {
-            if let Some(rt) = &cred.refresh_token {
-                let refreshed = refresh_token(rt)?;
-                (
-                    refreshed.access_token,
-                    refreshed.refresh_token.or_else(|| cred.refresh_token.clone()),
-                    refreshed.expires_in.map(|ei| now_ms + ei * 1000),
-                )
-            } else {
-                return Err("Token expired and no refresh token available".into());
-            }
-        } else {
-            (
-                cred.access_token.clone().ok_or("No access token")?,
-                cred.refresh_token.clone(),
-                cred.expires_at,
-            )
-        };
-
-    let state = TokenState {
-        access_token: access_token.clone(),
-        refresh_token: refresh_token.clone(),
-        expires_at,
-        credential: cred,
-    };
-    if let Ok(mut guard) = TOKEN_CACHE.lock() {
-        *guard = Some(TokenState {
-            access_token: state.access_token.clone(),
-            refresh_token: state.refresh_token.clone(),
-            expires_at: state.expires_at,
-            credential: state.credential.clone(),
-        });
+    if cred.expires_at.map_or(false, |exp| now_ms >= exp.saturating_sub(60_000)) {
+        return Err("Token expired; waiting for Claude Code CLI to refresh it".into());
     }
-    Ok(state)
-}
-
-fn refresh_token(refresh_token: &str) -> Result<RefreshResponse, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
-
-    let resp = client
-        .post("https://platform.claude.com/v1/oauth/token")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Accept", "application/json")
-        .body(format!(
-            "grant_type=refresh_token&refresh_token={}&client_id={}",
-            urlencoding::encode(refresh_token),
-            OAUTH_CLIENT_ID,
-        ))
-        .send()
-        .map_err(|e| format!("Refresh error: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Refresh failed: {}", resp.status()));
-    }
-    resp.json::<RefreshResponse>().map_err(|e| format!("Refresh parse error: {e}"))
+    let token = cred.access_token.clone().ok_or("No access token")?;
+    Ok((token, cred))
 }
 
 // ---------------------------------------------------------------------------
@@ -615,7 +527,8 @@ pub fn get_tray_title_config() -> TrayTitleConfig {
 pub fn set_tray_title_config(slots: Vec<TrayTitleSlot>) -> Result<(), String> {
     let cfg = TrayTitleConfig { slots };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    std::fs::write(tray_title_config_path(), json).map_err(|e| e.to_string())?;
+    // 原子写：tray 进程靠 mtime 侦测变更并即时重渲染，半截 JSON 会导致一次错误渲染
+    crate::config::atomic_write(&tray_title_config_path(), &json).map_err(|e| e.to_string())?;
     Ok(())
 }
 
