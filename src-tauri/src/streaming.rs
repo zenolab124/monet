@@ -68,6 +68,10 @@ pub enum StreamEvent {
         content: Vec<ContentBlock>,
         /// 本轮实际运行的模型(message.model 真值)
         model: Option<String>,
+        /// 该 API message 的 token 用量(快照自带,message 完成即有)——
+        /// 前端借此在每段回复结束时即时显示块级 usage,不必等整轮落账
+        #[serde(skip_serializing_if = "Option::is_none")]
+        usage: Option<serde_json::Value>,
     },
     /// 字符级增量到达——content_block_start：某个 index 上出现新块
     BlockStart {
@@ -1109,11 +1113,13 @@ fn decode_stream_event(
                 .and_then(|c| serde_json::from_value(c.clone()).ok())
                 .unwrap_or_default();
             let model = msg.get("model").and_then(|v| v.as_str()).map(String::from);
+            let usage = msg.get("usage").cloned();
             Some(StreamEvent::AssistantMessage {
                 session_id: sid,
                 message_id,
                 content,
                 model,
+                usage,
             })
         }
         // "progress"（老版 CLI 的子任务进度转发容器）不再混入主流：

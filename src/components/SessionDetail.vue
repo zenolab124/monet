@@ -1033,37 +1033,11 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
 }
 
 /**
- * 该轮(组)回复是否足够长(组末尾补一行模型/token 标注)。
- * 判定单位必须是整轮而非单条记录:CLI 落盘按 content block 拆行,
- * 一轮长回复 = 多条 assistant 记录、每条常只有 1 个块——按单条判永不触发。
- * 直接读原始 message.content 粗估,不走 contentBlocks 解析(渲染热路径零开销):
- * 全轮块数 ≥ 5(多工具轮必长)或文本/思考字符总量超阈值(约 30+ 行)。
- */
-function groupIsLong(group: { responses: unknown[] }): boolean {
-  let blocks = 0
-  let chars = 0
-  for (const r of group.responses) {
-    const rec = r as { type?: string; message?: { content?: unknown } }
-    if (rec.type !== 'assistant') continue
-    const content = rec.message?.content
-    if (!Array.isArray(content)) continue
-    blocks += content.length
-    for (const b of content) {
-      if (b?.type === 'text') chars += b.text?.length ?? 0
-      else if (b?.type === 'thinking') chars += b.thinking?.length ?? 0
-      else chars += 200
-    }
-    if (blocks >= 5 || chars > 1800) return true
-  }
-  return false
-}
-
-/**
- * 组末尾标注整行文案(长轮次才有):数据取该轮最后一条有效 assistant 记录,
- * 模型/token 与顶部标注同源。返回 null = 不渲染。
+ * 组末尾标注整行文案(全轮次显示,长度门槛已按用户决策移除——每轮成本可见的
+ * 信息价值大于视觉噪声,标注本身是 muted 小字):数据取该轮最后一条有效
+ * assistant 记录,模型/token 与顶部标注同源。返回 null = 不渲染(无有效 model)。
  */
 function groupFooterOf(group: { responses: unknown[] }): { text: string; doneFull: string } | null {
-  if (!groupIsLong(group)) return null
   // usage 全轮求和:单块 usage 只是单次 API 调用(每次工具往返一次),求和才是"这一轮总消耗",
   // 与计费口径一致(块级明细仍在各块头部)。模型/完成时间取最后一条有效 assistant。
   let model: string | null = null
@@ -2238,13 +2212,17 @@ async function onReload() {
                 <!-- 本轮实际运行模型的真值(message_start 回显),从首字起与落账后标注同源 -->
                 <span v-if="turn.model" class="text-muted-foreground font-normal">({{ shortModel(turn.model) }})</span>
               </span>
+              <!-- 块级 usage:该 turn 的 assistant 快照到达(message 完成)即显示真值,
+                   不等整轮结束;四段格式与历史区块头同款,换树前后像素等价 -->
               <span
                 class="text-muted-foreground/70 font-normal tabular-nums"
-                :style="{ visibility: !stream.streaming && !turn.live && stream.realUsedTokens ? 'visible' : 'hidden' }"
+                :style="{ visibility: turn.usage ? 'visible' : 'hidden' }"
               >
-                <template v-if="stream.realUsedTokens">
-                  {{ formatTokens(stream.realUsedTokens) }} in
-                  <template v-if="stream.realOutputTokens"> · {{ formatTokens(stream.realOutputTokens) }} out</template>
+                <template v-if="turn.usage">
+                  {{ formatTokens(turn.usage.input_tokens ?? 0) }} in
+                  · {{ formatTokens(turn.usage.cache_read_input_tokens ?? 0) }} cache
+                  · {{ formatTokens(turn.usage.cache_creation_input_tokens ?? 0) }} new
+                  · {{ formatTokens(turn.usage.output_tokens ?? 0) }} out
                 </template>
                 <template v-else>&nbsp;</template>
               </span>

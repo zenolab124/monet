@@ -40,6 +40,9 @@ export interface StreamingTurn {
    * 重解析)且在用户直发时豁免清场。completeFinish / 落账摘除时结束。
    */
   live?: boolean
+  /** 该 API message 的 token 用量(assistant 快照自带,message 完成即到)——
+   *  块级 usage 即时显示的数据源,与落账后 record 的 message.usage 同源同值 */
+  usage?: Record<string, number>
 }
 
 /** 监控卡尾部行：普通文本 / 等宽工具行 / 错误行 */
@@ -110,6 +113,8 @@ interface StreamEventPayload {
   content?: ContentBlock[]
   /** 本轮实际运行的模型真值(message_start / assistant 快照的 message.model) */
   model?: string
+  /** assistant 快照携带的该 message token 用量 */
+  usage?: Record<string, number>
   // block_start / block_delta / block_stop
   index?: number
   content_block?: ContentBlock
@@ -727,6 +732,8 @@ export async function initStreamListeners(): Promise<void> {
           if (entry) {
             const existing = entry.turn
             if (!existing.model && payload.model) existing.model = payload.model
+            // usage 覆盖式更新:快照多次到达(空→部分→完整),最后一次为完整值
+            if (payload.usage) existing.usage = payload.usage
             let cursor = 0
             for (const incoming of payload.content) {
               let matched = -1
@@ -767,6 +774,7 @@ export async function initStreamListeners(): Promise<void> {
               messageId: mid,
               content: strippedContent,
               model: payload.model,
+              usage: payload.usage,
               live: true,
             })
             const reactiveTurn = state.streamingTurns[state.streamingTurns.length - 1]
