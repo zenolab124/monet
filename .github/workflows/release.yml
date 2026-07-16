@@ -59,8 +59,10 @@ jobs:
           echo "$CERT_P12" | base64 -d > /tmp/cert.p12
           security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S 'apple-tool:,apple:,codesign:' -s -k "$KEYCHAIN_PASS" build.keychain
-          # 自签证书必须进系统信任链,否则 codesign 拒绝用它签名
-          openssl pkcs12 -in /tmp/cert.p12 -clcerts -nokeys -passin pass:"$CERT_PASSWORD" -out /tmp/cert.pem
+          # 自签证书必须进系统信任链,否则 codesign 拒绝用它签名。
+          # PEM 从已导入的 keychain 用 security 原生导出——security export 产的 p12
+          # 是 RC2-40 老式加密,OpenSSL 3 默认拒解(首跑实败教训),绕开 openssl
+          security find-certificate -c "Monet Signing" -p build.keychain > /tmp/cert.pem
           sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain /tmp/cert.pem
           rm -f /tmp/cert.p12 /tmp/cert.pem
 
