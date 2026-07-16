@@ -152,9 +152,18 @@ fn install_and_start() {
                 .output();
         }
     } else {
-        // plist 未变（同版本）：tray 可能被 kill/崩溃后未重启，kickstart 兜底
-        let _ = Command::new("launchctl")
+        // plist 未变（同版本）：tray 可能被 kill/崩溃后未重启，kickstart 兜底。
+        // kickstart 只能踢「已注册」的服务——服务被 bootout 注销过（手动运维等场景,
+        // 实测事故）时它找不到目标静默死路,失败即回退 bootstrap 重新注册
+        let kicked = Command::new("launchctl")
             .args(["kickstart", &service])
-            .output();
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !kicked {
+            let _ = Command::new("launchctl")
+                .args(["bootstrap", &domain, &plist_path.to_string_lossy()])
+                .output();
+        }
     }
 }
