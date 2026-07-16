@@ -13,6 +13,7 @@ import AutomationView from '@/views/AutomationView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import PerfHud from '@/components/PerfHud.vue'
+import { markBoot } from '@/utils/bootTrace'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { useUiState } from '@/composables/useUiState'
@@ -177,6 +178,7 @@ onMounted(async () => {
     useNotifications().notifyTransient(t('workbench.stateReset'))
   }
   useUpdater().initAutoCheck()
+  markBoot('boot:app-ready')
 })
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>

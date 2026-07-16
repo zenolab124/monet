@@ -1088,6 +1088,14 @@
     "projEvents": "项目事件",
     "incremental": "增量",
     "full": "全量",
-    "longFrames": "长帧归因"
+    "longFrames": "长帧归因",
+    "boot": "启动分解",
+    "boot_nav": "导航→HTML",
+    "boot_load": "JS 加载+解析",
+    "boot_exec": "模块执行",
+    "boot_render": "首帧渲染",
+    "boot_paint": "布局绘制",
+    "boot_data": "数据初始化",
+    "boot_total": "白屏合计"
   }
 }

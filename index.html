@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Monet</title>
+    <!-- 启动打点基准:内联脚本在 module 图 fetch/parse/执行前同步跑,见 utils/bootTrace.ts -->
+    <script>performance.mark('boot:html')</script>
   </head>
   <body>
     <div id="app"></div>

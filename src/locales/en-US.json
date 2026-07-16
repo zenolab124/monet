@@ -1088,6 +1088,14 @@
     "projEvents": "Project events",
     "incremental": "incr",
     "full": "full",
-    "longFrames": "Long frames"
+    "longFrames": "Long frames",
+    "boot": "Startup breakdown",
+    "boot_nav": "Nav→HTML",
+    "boot_load": "JS load+parse",
+    "boot_exec": "Module exec",
+    "boot_render": "First render",
+    "boot_paint": "Layout+paint",
+    "boot_data": "Data init",
+    "boot_total": "Blank total"
   }
 }

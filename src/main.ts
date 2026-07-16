@@ -1,3 +1,5 @@
+// bootTrace 必须是首个 import(零依赖):其 body 的 boot:js-start 标记模块图执行起点
+import { markBoot, finishBootTrace } from './utils/bootTrace'
 import { createApp } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import 'virtual:uno.css'
@@ -9,6 +11,8 @@ import './prose.css'
 import i18n from './locales'
 import { vTooltip } from './directives/tooltip'
 import App from './App.vue'
+
+markBoot('boot:modules')
 
 // 全局拦截链接点击：外部 URL 用系统浏览器打开，阻止 webview 内导航
 document.addEventListener('click', (e) => {
@@ -37,3 +41,5 @@ window.addEventListener('drop', (e) => {
 })
 
 createApp(App).use(i18n).directive('tooltip', vTooltip).mount('#app')
+markBoot('boot:mounted')
+finishBootTrace()

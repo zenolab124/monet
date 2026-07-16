@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePerfMonitor, startPerfMonitor, stopPerfMonitor } from '@/composables/usePerfMonitor'
 import { anyStreaming } from '@/composables/useStreaming'
+import { getBootBreakdown } from '@/utils/bootTrace'
 
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
@@ -48,6 +49,9 @@ const sparkPoints = computed(() => {
 function grade(v: number, warn: number, bad: number): string {
   return v >= bad ? 'text-destructive' : v >= warn ? 'text-amber-600 dark:text-amber-400' : ''
 }
+
+// 启动分解:marks 在启动期一次性写入,HUD 打开时读快照即可,无需响应式
+const bootSegs = getBootBreakdown()
 </script>
 
 <template>
@@ -133,6 +137,19 @@ function grade(v: number, warn: number, bad: number): string {
         <div class="flex items-center justify-between">
           <span class="font-sans text-muted-foreground">{{ t('perf.memTotal') }}</span>
           <span class="font-medium">{{ mb(memStats.total_mb) }}</span>
+        </div>
+      </template>
+
+      <!-- 启动分解:白屏段五切分,total = 导航→首帧上屏 -->
+      <template v-if="bootSegs.length">
+        <div class="font-sans text-muted-foreground border-t border-border pt-1">{{ t('perf.boot') }}</div>
+        <div
+          v-for="s in bootSegs"
+          :key="s.label"
+          class="flex items-center justify-between text-[10px]"
+        >
+          <span class="font-sans text-muted-foreground">{{ t('perf.boot_' + s.label) }}</span>
+          <span :class="s.label === 'total' ? 'font-medium ' + grade(s.ms, 1000, 2500) : ''">{{ Math.round(s.ms) }} ms</span>
         </div>
       </template>
 
