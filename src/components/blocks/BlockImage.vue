@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject } from 'vue'
 import type { ContentBlock } from '@/types'
-import { IMAGE_LOCATOR, buildCcimgUrl } from '@/utils/ccimg'
+import { IMAGE_LOCATOR, buildCcimgUrl, withFullParam } from '@/utils/ccimg'
 
 const props = defineProps<{
   block: Extract<ContentBlock, { type: 'image' }>
@@ -25,6 +25,9 @@ const imgUrl = computed(() => {
   if (!locator?.value || !props.recordUuid) return null
   return buildCcimgUrl(locator.value, props.recordUuid, img_index ?? 0)
 })
+
+// 放大 overlay 用原图（缩略图 800px 放大会糊）；data: 路径两者同源
+const fullUrl = computed(() => (imgUrl.value ? withFullParam(imgUrl.value) : null))
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') expanded.value = false
@@ -52,7 +55,7 @@ function onKeydown(e: KeyboardEvent) {
         @keydown="onKeydown"
         tabindex="0"
       >
-        <img :src="imgUrl" class="block-image-full" />
+        <img :src="fullUrl ?? imgUrl" class="block-image-full" />
       </div>
     </Teleport>
   </div>

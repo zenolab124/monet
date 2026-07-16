@@ -47,3 +47,13 @@ export function buildCcimgUrl(
   const base = convertFileSrc(path, 'ccimg')
   return agentId ? `${base}?agent=${agentId}` : base
 }
+
+/**
+ * ccimg URL 加 ?full=1 → 原图直出（点击放大场景）。
+ * 默认 ccimg URL 返回服务端缩略图（长边 800），原图只在放大时按需取。
+ * data: URL（流式区内存路径）原样返回。
+ */
+export function withFullParam(url: string): string {
+  if (!url.startsWith('ccimg:') && !url.includes('.localhost')) return url
+  return url.includes('?') ? `${url}&full=1` : `${url}?full=1`
+}

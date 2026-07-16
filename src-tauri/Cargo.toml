@@ -61,7 +61,7 @@ tauri-plugin-dialog = "2.7.1"
 tauri-plugin-updater = "2"
 urlencoding = "2"
 # monet-tray 独立二进制解码 PNG icon 为 RGBA（tray-icon crate 需要原始像素）
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 # monet-tray 独立二进制直接使用底层 tray/menu crate，无需 Tauri runtime
 tray-icon = "0.21"
 muda = "0.17"

@@ -119,6 +119,10 @@ struct ParsedRequest {
     img_index: usize,
     /// 缓存 key 用的稳定字符串前缀（路径 + agent）
     cache_scope: String,
+    /// ?full=1 → 原图直出（点击放大）；默认返回服务端缩略图。
+    /// 缩略图是图形内存治理的核心：前端 <img> 显示 300×200 但 WebKit 按原始像素
+    /// 解码持有 IOSurface 纹理，2K 截图一张 14MB——服务端降采样后只剩 ~1/10
+    full: bool,
 }
 
 /// 从请求 URI 解析出定位信息，含全部安全校验。失败返回 None。
@@ -156,16 +160,19 @@ fn parse_request(req: &Request<Vec<u8>>) -> Option<ParsedRequest> {
     }
     let img_index: usize = img_index_str.parse().ok()?;
 
-    // 可选 ?agent=<id> → 子会话路径
-    let agent_id = uri.query().and_then(|q| {
-        q.split('&').find_map(|pair| {
+    // 可选 ?agent=<id> → 子会话路径；?full=1 → 原图直出
+    let mut agent_id: Option<String> = None;
+    let mut full = false;
+    if let Some(q) = uri.query() {
+        for pair in q.split('&') {
             let mut it = pair.splitn(2, '=');
             match (it.next(), it.next()) {
-                (Some("agent"), Some(v)) => Some(percent_decode(v)),
-                _ => None,
+                (Some("agent"), Some(v)) => agent_id = Some(percent_decode(v)),
+                (Some("full"), Some("1")) => full = true,
+                _ => {}
             }
-        })
-    });
+        }
+    }
 
     let (jsonl_path, cache_scope) = match agent_id {
         Some(agent) => {
@@ -194,6 +201,7 @@ fn parse_request(req: &Request<Vec<u8>>) -> Option<ParsedRequest> {
         record_uuid: record_uuid.clone(),
         img_index,
         cache_scope,
+        full,
     })
 }
 
@@ -321,11 +329,79 @@ fn load_record(jsonl_path: &PathBuf, record_uuid: &str) -> Option<Value> {
     None
 }
 
+/// 缩略图长边上限：缩略图 CSS 显示 max 300×200，@2x Retina 需 600 物理 px，取 1.3x 余量。
+const THUMB_LONG_EDGE: u32 = 800;
+
+/// 服务端缩略图。返回 None 表示应原图直出（保守回退，宁可不省内存也不出错图）：
+/// - GIF：重编码会丢动画帧
+/// - 带 EXIF APP1 段的 JPEG：image crate 不解析 EXIF orientation，重编码会丢方向信息
+///   导致照片旋转 90°/180°（截图无 APP1，主要内存来源不受影响）
+/// - 长边已 ≤ 阈值 / 解码或编码失败
+fn make_thumbnail(media_type: &str, bytes: &[u8]) -> Option<CachedImage> {
+    if media_type.contains("gif") {
+        return None;
+    }
+    if media_type.contains("jpeg") && has_exif_app1(bytes) {
+        return None;
+    }
+    let img = image::load_from_memory(bytes).ok()?;
+    if img.width().max(img.height()) <= THUMB_LONG_EDGE {
+        return None;
+    }
+    let thumb = img.thumbnail(THUMB_LONG_EDGE, THUMB_LONG_EDGE);
+    let mut buf = Vec::new();
+    if thumb.color().has_alpha() {
+        thumb
+            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .ok()?;
+        Some(CachedImage {
+            media_type: "image/png".to_string(),
+            bytes: buf,
+        })
+    } else {
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 82);
+        enc.encode_image(&thumb.to_rgb8()).ok()?;
+        drop(enc);
+        drop(cursor);
+        Some(CachedImage {
+            media_type: "image/jpeg".to_string(),
+            bytes: buf,
+        })
+    }
+}
+
+/// JPEG 是否含 EXIF APP1 段（marker 0xFFE1 + "Exif\0\0"）。只扫头部 marker 链。
+fn has_exif_app1(bytes: &[u8]) -> bool {
+    if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
+        return false;
+    }
+    let mut i = 2;
+    // JPEG marker 链：APP 段都在图像数据（SOS 0xFFDA）之前
+    while i + 4 <= bytes.len() {
+        if bytes[i] != 0xFF {
+            return false;
+        }
+        let marker = bytes[i + 1];
+        if marker == 0xDA {
+            return false;
+        }
+        let seg_len = ((bytes[i + 2] as usize) << 8) | bytes[i + 3] as usize;
+        if marker == 0xE1 {
+            return bytes.get(i + 4..i + 10).map(|m| m == b"Exif\0\0").unwrap_or(false);
+        }
+        i += 2 + seg_len;
+    }
+    false
+}
+
 /// 核心解析（同步、阻塞 I/O）：返回解码后的图片或 None（404）。
+/// 缓存条目按「URL 语义」存：thumb/full 各自独立 key，一个 key 对应该 URL 的最终响应字节。
 fn resolve_image(parsed: &ParsedRequest) -> Option<CachedImage> {
+    let variant = if parsed.full { "full" } else { "thumb" };
     let cache_key = format!(
-        "{}|{}|{}",
-        parsed.cache_scope, parsed.record_uuid, parsed.img_index
+        "{}|{}|{}|{}",
+        parsed.cache_scope, parsed.record_uuid, parsed.img_index, variant
     );
     // 缓存命中
     if let Ok(mut c) = cache().lock() {
@@ -337,7 +413,13 @@ fn resolve_image(parsed: &ParsedRequest) -> Option<CachedImage> {
     let record = load_record(&parsed.jsonl_path, &parsed.record_uuid)?;
     let (b64, media_type) = find_nth_image(&record, parsed.img_index)?;
     let bytes = STANDARD.decode(b64.as_bytes()).ok()?;
-    let img = CachedImage { media_type, bytes };
+    let original = CachedImage { media_type, bytes };
+    // thumb 变体：降采样成功用缩略图，回退场景（GIF/EXIF/小图/解码失败）原图顶替
+    let img = if parsed.full {
+        original
+    } else {
+        make_thumbnail(&original.media_type, &original.bytes).unwrap_or(original)
+    };
     if let Ok(mut c) = cache().lock() {
         c.put(cache_key, img.clone());
     }
@@ -404,6 +486,54 @@ mod tests {
         }
         drop(f);
         path
+    }
+
+    fn encode_png(img: image::DynamicImage) -> Vec<u8> {
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
+    /// 大不透明图 → 缩到长边 800、输出 JPEG
+    #[test]
+    fn thumbnail_downscales_opaque_to_jpeg() {
+        let src = image::DynamicImage::ImageRgb8(image::RgbImage::new(1600, 1200));
+        let out = make_thumbnail("image/png", &encode_png(src)).expect("应生成缩略图");
+        assert_eq!(out.media_type, "image/jpeg");
+        let decoded = image::load_from_memory(&out.bytes).unwrap();
+        assert!(decoded.width().max(decoded.height()) <= THUMB_LONG_EDGE);
+        // 等比：1600×1200 → 800×600
+        assert_eq!((decoded.width(), decoded.height()), (800, 600));
+    }
+
+    /// 带 alpha 的图 → 保 PNG（JPEG 会丢透明）
+    #[test]
+    fn thumbnail_preserves_alpha_as_png() {
+        let src = image::DynamicImage::ImageRgba8(image::RgbaImage::new(2000, 1000));
+        let out = make_thumbnail("image/png", &encode_png(src)).expect("应生成缩略图");
+        assert_eq!(out.media_type, "image/png");
+    }
+
+    /// 小图 / GIF / 坏字节 → None（原图直出）
+    #[test]
+    fn thumbnail_falls_back_to_original() {
+        let small = image::DynamicImage::ImageRgb8(image::RgbImage::new(400, 300));
+        assert!(make_thumbnail("image/png", &encode_png(small)).is_none());
+        assert!(make_thumbnail("image/gif", &[0u8; 10]).is_none());
+        assert!(make_thumbnail("image/png", &[0u8; 10]).is_none());
+    }
+
+    /// EXIF APP1 探测：APP1+Exif 命中；APP0(JFIF)/非 JPEG 不命中
+    #[test]
+    fn exif_app1_detection() {
+        let mut with_exif = vec![0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x08];
+        with_exif.extend_from_slice(b"Exif\0\0");
+        assert!(has_exif_app1(&with_exif));
+
+        let jfif = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46];
+        assert!(!has_exif_app1(&jfif));
+        assert!(!has_exif_app1(b"not a jpeg"));
     }
 
     /// F1 交叉验证（契约核心）：同一批 blocks，typed 注入（parser::walk_blocks_assign）
