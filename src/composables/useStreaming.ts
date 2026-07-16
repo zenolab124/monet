@@ -630,6 +630,11 @@ export async function initStreamListeners(): Promise<void> {
           } else if (!entry.turn.model && payload.model) {
             entry.turn.model = payload.model
           }
+          // 新块开始 → 冲掉前面块的打字机积压:显示顺序必须与因果一致——
+          // 工具卡走即时通道,若前面文本还在回放,会出现"工具卡先完整出现、
+          // 上方文本还在爬"的时序倒挂(真流式暴露的缺口:assistant 快照路径
+          // 已有此冲刷,block_start 路径此前没有)
+          flushPendingBefore(payload.message_id, payload.index)
           ;(entry.turn.content as ContentBlock[])[payload.index] = payload.content_block
           // thinking 块计时起点
           if (payload.content_block.type === 'thinking') {
