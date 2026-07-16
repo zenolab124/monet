@@ -1105,99 +1105,122 @@ function onSaved() {
           </div>
 
           <div class="settings-grid">
-            <!-- 菜单栏：常驻开关 + 显示槽位（同主题合并一格） -->
-            <div class="setting-cell">
-              <div class="flex items-center justify-between">
-                <div class="setting-label">{{ $t('settings.trayAutostart') }}</div>
+            <!-- 菜单栏 -->
+            <div class="setting-group">
+              <div class="setting-group-header">
+                <span class="i-carbon-menu w-3.5 h-3.5" />
+                {{ $t('settings.groupTray') }}
+              </div>
+              <div class="setting-row">
+                <div class="setting-row-main">
+                  <div class="setting-label">{{ $t('settings.trayAutostart') }}</div>
+                  <div class="setting-hint" :class="{ 'text-red-500': trayToggleFailed }">
+                    {{ trayToggleFailed ? $t('settings.trayLaunchFail') : $t('settings.trayAutostartHint') }}
+                  </div>
+                </div>
                 <button :class="['form-toggle', { on: trayEnabled }]" @click="toggleTrayEnabled">
                   <span class="form-toggle-knob" />
                 </button>
               </div>
-              <div class="setting-hint" :class="{ 'text-red-500': trayToggleFailed }">
-                {{ trayToggleFailed ? $t('settings.trayLaunchFail') : $t('settings.trayAutostartHint') }}
-              </div>
-              <div
-                class="mt-3 transition-opacity"
-                :class="{ 'opacity-40 pointer-events-none': !trayEnabled }"
-              >
-                <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
-                <div class="flex flex-col gap-1.5">
-                  <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
-                    <input
-                      type="checkbox"
-                      :checked="isTraySlotActive(slot.key)"
-                      class="accent-primary"
-                      @change="toggleTraySlot(slot.key)"
-                    />
-                    {{ slot.label }}
-                  </label>
+              <div class="setting-row" :class="{ 'opacity-40 pointer-events-none': !trayEnabled }">
+                <div class="setting-row-main">
+                  <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
+                  <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
                 </div>
-                <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
-              </div>
-            </div>
-            <!-- 定时唤醒 -->
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.routineWake') }}</div>
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
-                  <input
-                    type="radio"
-                    name="wake-policy"
-                    value="passive"
-                    :checked="wakePolicy === 'passive'"
-                    class="accent-primary"
-                    @change="setWakePolicy('passive')"
-                  />
-                  {{ $t('settings.routineWakePassive') }}
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer text-[12px]">
-                  <input
-                    type="radio"
-                    name="wake-policy"
-                    value="active"
-                    :checked="wakePolicy === 'active'"
-                    class="accent-primary"
-                    @change="setWakePolicy('active')"
-                  />
-                  {{ $t('settings.routineWakeActive') }}
-                </label>
-                <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground ml-5">{{ $t('settings.routineWakeActiveSub') }}</span>
-                <div v-if="wakeAuthorized" class="flex items-center gap-2 ml-5 text-[11px] text-muted-foreground">
-                  <span>{{ $t('settings.routineWakeAuthorized') }}</span>
+                <div class="flex items-center gap-1.5 flex-wrap justify-end">
                   <button
-                    class="underline underline-offset-2 hover:text-foreground transition-colors"
-                    @click="removeWakeAuthorization"
-                  >
-                    {{ $t('settings.routineWakeRemoveAuth') }}
-                  </button>
+                    v-for="slot in traySlotOptions"
+                    :key="slot.key"
+                    :class="['setting-chip', { on: isTraySlotActive(slot.key) }]"
+                    @click="toggleTraySlot(slot.key)"
+                  >{{ slot.label }}</button>
                 </div>
               </div>
-              <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
-            <!-- 小组件：今日起算 + 本月范围（同主题同行） -->
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
-              <select
-                :value="widgetDayStart"
-                class="form-select w-full"
-                @change="setWidgetDayStart(Number(($event.target as HTMLSelectElement).value))"
-              >
-                <option v-for="h in 24" :key="h - 1" :value="h - 1">{{ $t('settings.widgetHourOption', { h: h - 1 }) }}</option>
-                <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
-              </select>
-              <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
+            <!-- 桌面小组件 -->
+            <div class="setting-group">
+              <div class="setting-group-header">
+                <span class="i-carbon-apps w-3.5 h-3.5" />
+                {{ $t('settings.groupWidget') }}
+              </div>
+              <div class="setting-row">
+                <div class="setting-row-main">
+                  <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
+                  <div class="setting-hint">{{ $t('settings.widgetDayBoundaryHint') }}</div>
+                </div>
+                <select
+                  :value="widgetDayStart"
+                  class="form-select w-44 shrink-0"
+                  @change="setWidgetDayStart(Number(($event.target as HTMLSelectElement).value))"
+                >
+                  <option v-for="h in 24" :key="h - 1" :value="h - 1">{{ $t('settings.widgetHourOption', { h: h - 1 }) }}</option>
+                  <option :value="-1">{{ $t('settings.widgetRolling24h') }}</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <div class="setting-row-main">
+                  <div class="setting-label">{{ $t('settings.widgetMonthBoundary') }}</div>
+                  <div class="setting-hint">{{ $t('settings.widgetMonthBoundaryHint') }}</div>
+                </div>
+                <select
+                  :value="widgetMonthMode"
+                  class="form-select w-44 shrink-0"
+                  @change="setWidgetMonthMode(($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="natural">{{ $t('settings.widgetNaturalMonth') }}</option>
+                  <option value="rolling">{{ $t('settings.widgetRolling30') }}</option>
+                </select>
+              </div>
             </div>
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.widgetMonthBoundary') }}</div>
-              <select
-                :value="widgetMonthMode"
-                class="form-select w-full"
-                @change="setWidgetMonthMode(($event.target as HTMLSelectElement).value)"
-              >
-                <option value="natural">{{ $t('settings.widgetNaturalMonth') }}</option>
-                <option value="rolling">{{ $t('settings.widgetRolling30') }}</option>
-              </select>
-              <div class="setting-hint">{{ $t('settings.widgetMonthBoundaryHint') }}</div>
+            <!-- 定时任务（全宽收底） -->
+            <div class="setting-group setting-group-wide">
+              <div class="setting-group-header">
+                <span class="i-carbon-alarm w-3.5 h-3.5" />
+                {{ $t('settings.groupRoutine') }}
+              </div>
+              <div class="setting-row">
+                <div class="setting-row-main">
+                  <div class="setting-label">{{ $t('settings.routineWake') }}</div>
+                  <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
+                </div>
+                <div class="flex flex-col items-end gap-1.5 shrink-0">
+                  <label class="flex items-center gap-2 cursor-pointer text-[12px]">
+                    <input
+                      type="radio"
+                      name="wake-policy"
+                      value="passive"
+                      :checked="wakePolicy === 'passive'"
+                      class="accent-primary"
+                      @change="setWakePolicy('passive')"
+                    />
+                    {{ $t('settings.routineWakePassive') }}
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer text-[12px]">
+                    <input
+                      type="radio"
+                      name="wake-policy"
+                      value="active"
+                      :checked="wakePolicy === 'active'"
+                      class="accent-primary"
+                      @change="setWakePolicy('active')"
+                    />
+                    {{ $t('settings.routineWakeActive') }}
+                  </label>
+                  <span v-if="wakePolicy === 'active'" class="text-[11px] text-muted-foreground">{{ $t('settings.routineWakeActiveSub') }}</span>
+                </div>
+              </div>
+              <div v-if="wakeAuthorized" class="setting-row">
+                <div class="setting-row-main">
+                  <div class="setting-label">{{ $t('settings.routineWakeAuthTitle') }}</div>
+                  <div class="setting-hint">{{ $t('settings.routineWakeAuthorized') }}</div>
+                </div>
+                <button
+                  class="text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors shrink-0"
+                  @click="removeWakeAuthorization"
+                >
+                  {{ $t('settings.routineWakeRemoveAuth') }}
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -1367,6 +1390,65 @@ function onSaved() {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+  align-items: start;
+}
+
+/* 设置分组卡片 */
+.setting-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  overflow: hidden;
+}
+.setting-group-wide {
+  grid-column: span 2;
+}
+.setting-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  letter-spacing: 0.4px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 10px 12px;
+  transition: opacity 0.15s;
+}
+.setting-row + .setting-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.setting-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 多选胶囊 */
+.setting-chip {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  background: transparent;
+  transition: all 0.15s;
+}
+.setting-chip:hover {
+  color: var(--foreground);
+}
+.setting-chip.on {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 500;
 }
 
 /* 设置单元：label 在上，控件在下 */
