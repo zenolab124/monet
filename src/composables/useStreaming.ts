@@ -253,27 +253,39 @@ export const streamingTick = ref(0)
 let rafId: number | null = null
 
 /**
- * 每帧全量落地(打字机排量已退役,2026-07-16 用户决策):数据层已是真流式
- * (--include-partial-messages,平均十几字符一个 delta),屏幕节奏 = API 真实
- * 生成节奏,人造回放调速不再需要。批处理层保留——delta 仍先累进 pending、
- * 每帧合并落地一次,防每秒百次 mutate 压垮渲染。
- * 打字机自适应排量(typingInterval/charsPerTick/instantKeys)见 git 史。
- *
- * @param onlySession  仅 flush 指定会话的 pending(收尾时不影响其他在播会话)
- * @returns 是否还有未消化字符(仅 onlySession 过滤时可能为 true)
+ * 平滑窗口:任意时刻缓冲里的字符会在约该时长内播完。稳态下显示速率 = API
+ * 到达速率,延迟上界 ≈ 本值——区别于已退役的打字机(固定人造速率、积压无界):
+ * 这是到达率自适应整形,只把真流式 delta「几字一蹦」的脉冲摊成连续流,
+ * API 快则播快、API 停则 ~300ms 放干,不改变任何时序语义。
  */
-function flushTextDeltas(onlySession?: string): boolean {
+const SMOOTH_WINDOW_MS = 300
+/** 泄洪阈值:超大缓冲(快照兜底对账等)扫屏无意义,直接瞬吐 */
+const FLOOD_CHARS = 20000
+
+/**
+ * 帧级批 flush。
+ * @param onlySession  仅 flush 指定会话的 pending(收尾时不影响其他在播会话)
+ * @param instant      true:全量瞬吐(窗口隐藏 / 落账前收尾);false:平滑排量
+ * @returns 是否还有未消化字符
+ */
+function flushTextDeltas(onlySession?: string, instant = false): boolean {
   if (pendingTextDeltas.size === 0) return false
   // HUD 长帧归因埋点:流式期主线程的最大嫌疑段
   const perfT0 = performance.now()
   try {
-    return flushTextDeltasInner(onlySession)
+    return flushTextDeltasInner(onlySession, instant)
   } finally {
     performance.measure('stream-flush', { start: perfT0, duration: performance.now() - perfT0 })
   }
 }
 
-function flushTextDeltasInner(onlySession?: string): boolean {
+/** 比例排量:每帧吐「缓冲 × 帧时长 ÷ 平滑窗口」,大块指数衰减追平,尾部至少 1 字防拖尾 */
+function smoothTake(bufferLen: number): number {
+  if (bufferLen > FLOOD_CHARS) return Infinity
+  return Math.max(1, Math.ceil((bufferLen * 16) / SMOOTH_WINDOW_MS))
+}
+
+function flushTextDeltasInner(onlySession?: string, instant = false): boolean {
   let hasRemaining = false
   pendingTextDeltas.forEach((p, key) => {
     const hashIdx = key.indexOf('#')
@@ -290,18 +302,34 @@ function flushTextDeltasInner(onlySession?: string): boolean {
     if (!block) return
 
     if (p.thinking !== undefined && block.type === 'thinking') {
-      ;(block as { thinking: string }).thinking += p.thinking
-      p.thinking = undefined
+      const take = instant ? Infinity : smoothTake(p.thinking.length)
+      ;(block as { thinking: string }).thinking += p.thinking.slice(0, take)
+      const rem = p.thinking.slice(take)
+      if (rem) {
+        p.thinking = rem
+        hasRemaining = true
+      } else {
+        p.thinking = undefined
+      }
     }
     if (p.signature !== undefined && block.type === 'thinking') {
       ;(block as Record<string, unknown>).signature = p.signature
       p.signature = undefined
     }
     if (p.text !== undefined && block.type === 'text') {
-      ;(block as { text: string }).text += p.text
-      p.text = undefined
+      const take = instant ? Infinity : smoothTake(p.text.length)
+      ;(block as { text: string }).text += p.text.slice(0, take)
+      const rem = p.text.slice(take)
+      if (rem) {
+        p.text = rem
+        hasRemaining = true
+      } else {
+        p.text = undefined
+      }
     }
-    pendingTextDeltas.delete(key)
+    if (p.text === undefined && p.thinking === undefined && p.signature === undefined) {
+      pendingTextDeltas.delete(key)
+    }
   })
   return hasRemaining
 }
@@ -321,10 +349,12 @@ function hasSessionPending(sessionId: string): boolean {
 function bump() {
   if (rafId !== null) return
   // 可见 16ms(≈一帧,setTimeout 实现无 RAF 遮挡饿死问题);窗口隐藏 160ms 降频省电
-  const delay = document.visibilityState === 'visible' ? 16 : 160
+  const visible = document.visibilityState === 'visible'
+  const delay = visible ? 16 : 160
   rafId = window.setTimeout(() => {
     rafId = null
-    const hasRemaining = flushTextDeltas()
+    // 隐藏时无人观看,平滑无意义,全量落地省 CPU
+    const hasRemaining = flushTextDeltas(undefined, !visible)
     streamingTick.value++
     // 检查排空中的会话:pending 落净 → 完成收尾
     if (drainingStreams.size > 0) {
@@ -814,8 +844,8 @@ function landAutoTurn(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state) return
   console.log(`%c ========== [stream] landAutoTurn(自发轮收尾) sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
-  // 该轮已结束,残字直接落地(自发轮不做排空等待,马上要与历史区做原子切换)
-  flushTextDeltas(sessionId)
+  // 该轮已结束,残字瞬吐落地(自发轮不做排空等待,马上要与历史区做原子切换)
+  flushTextDeltas(sessionId, true)
   state.activeTool = null
   markTailDirty(sessionId)
   streamingTick.value++
