@@ -71,6 +71,11 @@ pub fn hide_main_window(app: AppHandle) {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
+    // 先藏窗口再清理:close_all_sessions 同步等待会话进程退出(常态 100-300ms,上限 400ms),
+    // 窗口留着会呈现「按了 Q 没反应」的假死
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
     streaming::close_all_sessions();
     agent::shutdown();
     // exit(0) 不保证触发窗口 Destroyed 清理，fm serve 需显式关停防孤儿

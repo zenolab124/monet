@@ -707,7 +707,9 @@ pub fn close_session(session_id: &str) {
 
 /// 关闭所有活跃会话进程（应用退出时调用）。
 /// 必须同步等待：主进程退出后无人兜底，close_session 那种 detached 线程在此场景随进程消亡。
-/// SIGTERM 全体 → 轮询最多 2s → 对未退者 SIGKILL 整组。CLI 正常几百 ms 内退出，2s 是异常上限。
+/// SIGTERM 全体 → 轮询最多 400ms → 对未退者 SIGKILL 整组。窗口收窄的依据：进程组 SIGKILL
+/// 本身就保证不留孤儿，JSONL 逐行落盘强杀不丢会话数据——优雅窗口只是让 CLI 少打错误日志，
+/// 不值得让退出卡秒级（quit_app 同步调用本函数，等待时长 = 用户按 Cmd+Q 的延迟）。
 pub fn close_all_sessions() {
     let processes: Vec<(String, Arc<Mutex<SessionProcess>>)> = ACTIVE_PROCESSES
         .lock()
@@ -727,7 +729,7 @@ pub fn close_all_sessions() {
         PermissionService::stop_for(sid);
     }
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
     loop {
         let all_exited = processes.iter().all(|(_, arc)| {
             arc.lock()
@@ -737,7 +739,7 @@ pub fn close_all_sessions() {
         if all_exited || std::time::Instant::now() >= deadline {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
     for (i, (_, arc)) in processes.iter().enumerate() {
