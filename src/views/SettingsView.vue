@@ -343,8 +343,15 @@ async function toggleTraySlot(key: string) {
   await invoke('set_tray_title_config', { slots: traySlots.value }).catch(() => {})
 }
 
+const trayLaunchState = ref<'idle' | 'ok' | 'fail'>('idle')
 async function launchTray() {
-  await invoke('launch_tray').catch(() => {})
+  try {
+    await invoke('launch_tray')
+    trayLaunchState.value = 'ok'
+  } catch {
+    trayLaunchState.value = 'fail'
+  }
+  setTimeout(() => { trayLaunchState.value = 'idle' }, 2500)
 }
 
 interface QuotaInfo {
@@ -1142,7 +1149,14 @@ function onSaved() {
                 </label>
               </div>
               <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
-              <button class="btn btn-sm mt-2" @click="launchTray">{{ $t('settings.trayLaunch') }}</button>
+              <button
+                class="mt-2 px-2 py-0.5 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                @click="launchTray"
+              >{{
+                trayLaunchState === 'ok' ? $t('settings.trayLaunchOk')
+                : trayLaunchState === 'fail' ? $t('settings.trayLaunchFail')
+                : $t('settings.trayLaunch')
+              }}</button>
             </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>

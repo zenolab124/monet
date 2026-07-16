@@ -577,6 +577,8 @@
     "trayTitle": "菜单栏显示",
     "trayTitleHint": "图标旁显示的额度指标，可多选",
     "trayLaunch": "启动菜单栏",
+    "trayLaunchOk": "已启动 ✓",
+    "trayLaunchFail": "启动失败",
     "updateCheck": "检查更新",
     "updateChecking": "正在检查…",
     "updateAvailable": "发现新版本 v{version}",

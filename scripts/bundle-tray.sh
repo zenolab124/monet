@@ -18,14 +18,21 @@ if [ ! -f "$TRAY_BIN" ]; then
   exit 1
 fi
 
-# 构建 Helper App bundle
+# 重建 Helper App bundle（清掉旧签名/旧结构残留）
 HELPER="$APP/Contents/Library/LoginItems/MonetTray.app"
+rm -rf "$HELPER"
 mkdir -p "$HELPER/Contents/MacOS"
 
-# 移动二进制（不再留在主 MacOS 目录里）
+# 移动二进制（不留在主 MacOS 目录里，避免 bundle 归属混淆）
 mv "$TRAY_BIN" "$HELPER/Contents/MacOS/monet-tray"
 
-# 复制 Info.plist
+# Info.plist：版本号跟随主应用
+VERSION=$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist" 2>/dev/null || echo "0.0.0")
 cp "$DIR/src-tray/Info.plist" "$HELPER/Contents/Info.plist"
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$HELPER/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$VERSION" "$HELPER/Contents/Info.plist"
 
-echo "✓ MonetTray.app bundled at $HELPER"
+# dev 工具不出厂
+rm -f "$APP/Contents/MacOS/schema-probe"
+
+echo "✓ MonetTray.app v$VERSION bundled at $HELPER"

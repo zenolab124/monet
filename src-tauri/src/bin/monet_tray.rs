@@ -25,6 +25,8 @@ fn macos_main() {
     let mtm = MainThreadMarker::new().expect("must run on main thread");
     let ns_app = NSApplication::sharedApplication(mtm);
     ns_app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    // 完成应用注册握手：裸 NSRunLoop 轮询（无 NSApp.run）场景下的稳态加固
+    ns_app.finishLaunching();
 
     let icon = load_icon();
     let menu = build_menu(None);
@@ -41,6 +43,7 @@ fn macos_main() {
     let pending: Arc<Mutex<Option<QuotaInfo>>> = Arc::new(Mutex::new(None));
     let fetching = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut last_refresh = Instant::now() - Duration::from_secs(120);
+    let mut title_config_mtime = tray_title_mtime();
 
     loop {
         run_loop_once(1.0);
@@ -49,7 +52,8 @@ fn macos_main() {
             match event.id.0.as_str() {
                 "show" => open_main_app(),
                 "refresh" => {
-                    request_refresh(&pending, &fetching);
+                    // 手动刷新：强制打 API（跳过磁盘 TTL）
+                    request_refresh(&pending, &fetching, true);
                     last_refresh = Instant::now();
                 }
                 "quit" => {
@@ -66,19 +70,36 @@ fn macos_main() {
             }
         }
 
+        // 设置页改了菜单栏标题配置 → mtime 变化 → 用现有缓存即时重渲染（不打 API）
+        let mtime = tray_title_mtime();
+        if mtime != title_config_mtime {
+            title_config_mtime = mtime;
+            if let Some(info) = quota::peek_cached_quota() {
+                apply_to_tray(&tray, &info);
+            }
+        }
+
         if last_refresh.elapsed() >= Duration::from_secs(120) {
             if quota::quota_available() {
-                request_refresh(&pending, &fetching);
+                // 周期刷新：共享磁盘缓存 TTL（主应用可能刚刷过，省 API 调用）
+                request_refresh(&pending, &fetching, false);
             }
             last_refresh = Instant::now();
         }
     }
 }
 
-/// 发起后台 quota 刷新（不阻塞主线程）
+fn tray_title_mtime() -> Option<std::time::SystemTime> {
+    std::fs::metadata(app_lib::config::data_dir().join("tray-title.json"))
+        .ok()
+        .and_then(|m| m.modified().ok())
+}
+
+/// 发起后台 quota 刷新（不阻塞主线程）。force=true 跳过磁盘缓存 TTL。
 fn request_refresh(
     pending: &Arc<Mutex<Option<QuotaInfo>>>,
     fetching: &Arc<std::sync::atomic::AtomicBool>,
+    force: bool,
 ) {
     if fetching.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -86,7 +107,7 @@ fn request_refresh(
     let pending = Arc::clone(pending);
     let fetching = Arc::clone(fetching);
     std::thread::spawn(move || {
-        let info = quota::refresh_quota();
+        let info = if force { quota::refresh_quota() } else { quota::get_quota() };
         if let Ok(mut guard) = pending.lock() {
             *guard = Some(info);
         }
@@ -193,7 +214,7 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
 fn open_main_app() {
     // MonetTray.app 是独立 Helper App，位于 Monet.app/Contents/Library/LoginItems/ 下。
     // 当前二进制: MonetTray.app/Contents/MacOS/monet-tray
-    // 主应用:     Monet.app（上 5 级）
+    // 主应用:     Monet.app（上 7 级）
     let app_path = std::env::current_exe()
         .ok()
         .and_then(|p| {
@@ -205,21 +226,35 @@ fn open_main_app() {
                 .and_then(|d| d.parent()) // Contents/
                 .and_then(|d| d.parent()) // Monet.app
                 .map(|app| app.to_path_buf())
-        });
+        })
+        // 防御：dev 直跑/旧布局下回溯结果不是 .app，避免 open 打开错误目录
+        .filter(|p| p.extension().is_some_and(|e| e == "app"));
     if let Some(path) = app_path {
+        let _ = std::process::Command::new("open").arg(path).spawn();
+    } else {
+        // 非标准布局回退 bundle id（Helper 与主应用 id 不同，无歧义）
         let _ = std::process::Command::new("open")
-            .arg(path)
+            .args(["-b", "io.github.zenolab124.monet"])
             .spawn();
     }
 }
 
 fn unregister_and_exit() {
-    // KeepAlive > SuccessfulExit: false 保证 exit(0) 不触发重启
-    // 不 bootout——plist 留在位，下次登录或主应用启动时 kickstart 拉起
+    // 持久化「用户主动退出」意图：主应用下次启动看到标记就不再自动拉起。
+    // 路径约定与 tray_agent::disabled_marker_path 一致。
+    let marker = app_lib::config::data_dir().join("tray-disabled");
+    let _ = std::fs::write(&marker, "");
+    // KeepAlive > SuccessfulExit: false 保证 exit(0) 不触发 launchd 重启
     std::process::exit(0);
 }
 
+/// 系统语言进程生命周期内不变，缓存避免每次建菜单都 spawn `defaults` 子进程
 fn is_chinese() -> bool {
+    static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHED.get_or_init(detect_chinese)
+}
+
+fn detect_chinese() -> bool {
     #[cfg(target_os = "macos")]
     {
         if let Ok(output) = std::process::Command::new("defaults")

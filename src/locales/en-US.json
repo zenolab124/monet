@@ -577,6 +577,8 @@
     "trayTitle": "Menu Bar Display",
     "trayTitleHint": "Quota metrics shown next to the tray icon",
     "trayLaunch": "Launch Menu Bar",
+    "trayLaunchOk": "Launched ✓",
+    "trayLaunchFail": "Launch failed",
     "updateCheck": "Check for Updates",
     "updateChecking": "Checking…",
     "updateAvailable": "New version v{version} available",
