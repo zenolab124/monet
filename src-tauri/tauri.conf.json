@@ -33,7 +33,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCOEVFNkYyMDkzNjI3QzIKUldUQ0p6WUo4dWFPZTN2dUtyMW9uUG55U0wyeFFwaWhlYllOa2RaR3lQYnNEZWtEYWI3S0l2UVQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4NUM0MkU1MkZFNTg5QjUKUldTMWllVXY1VUpjcUQxRjU3YXVGRU4yZDlPS0tBc0pWNG1UTzE3VVBnL3BIczN3d3FzeGhXMUgK",
       "endpoints": [
         "https://github.com/zenolab124/monet/releases/latest/download/latest.json"
       ]
@@ -41,7 +41,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg"],
+    "targets": [
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -53,9 +55,18 @@
       "minimumSystemVersion": "11.0",
       "infoPlist": "Info.plist",
       "dmg": {
-        "appPosition": { "x": 180, "y": 170 },
-        "applicationFolderPosition": { "x": 480, "y": 170 },
-        "windowSize": { "width": 660, "height": 400 }
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        },
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        }
       }
     }
   }
