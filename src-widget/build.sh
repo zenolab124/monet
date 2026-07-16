@@ -65,6 +65,12 @@ for BIN in "$APP_BUNDLE/Contents/MacOS/"*; do
     codesign "${CODESIGN_ARGS[@]}" \
         --identifier "io.github.zenolab124.monet.$NAME" "$BIN"
 done
+# Helper App（独立 menubar 进程）：嵌套 bundle 必须先签内层再签外层
+TRAY_APP="$APP_BUNDLE/Contents/Library/LoginItems/MonetTray.app"
+if [ -d "$TRAY_APP" ]; then
+    codesign "${CODESIGN_ARGS[@]}" \
+        --identifier "io.github.zenolab124.monet.tray" "$TRAY_APP"
+fi
 codesign "${CODESIGN_ARGS[@]}" \
     --entitlements ../src-tauri/Monet.entitlements "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
