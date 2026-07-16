@@ -1,0 +1,45 @@
+name: Windows Build (verification)
+
+# Windows 适配进行中的 CI 验证入口:手动触发,构建 NSIS 安装包挂 artifact。
+# 用途:适配线随时验证「CI 环境能否构建通」,失败日志即适配反馈。
+# 适配完成验证通过后,此构建将并入 release.yml(补 latest.json windows 条目
+# 与 updater 签名),本工作流届时移除。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build NSIS installer
+        run: pnpm tauri build --bundles nsis
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monet-windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
