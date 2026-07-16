@@ -92,6 +92,8 @@ pub fn run() {
             turn_signal::start_listener_if_installed(app.handle().clone());
             // 渠道 runtime 残留清理(上次异常退出可能留下含 token 的合成文件)
             channels::cleanup_runtime_dir();
+            // 会话进程残留清扫(上次崩溃/强杀遗留的 CLI+MCP 孤儿树,须在任何会话 spawn 前)
+            streaming::cleanup_orphans();
             // AgentService 常驻进程
             agent::init();
             // Apple FM 自动检测

@@ -172,11 +172,18 @@ fn write_stdin(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
         .map_err(|e| format!("stdin 写入失败: {}", e))
 }
 
-/// SIGTERM 指定 PID（macOS/Linux）
-fn sigterm_pid(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .output();
+/// 向会话进程组发信号（macOS/Linux）。spawn 时已 process_group(0)，组 ID = CLI PID，
+/// 组信号可连带回收 MCP 子进程树（monet-mcp/playwright/adb 等）。
+/// 组信号失败时回退单 PID：兼容升级前 spawn 的存量进程（未自立进程组）。
+fn signal_session(pid: u32, sig: &str) {
+    let group_ok = Command::new("kill")
+        .args([sig, "--", &format!("-{}", pid)])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !group_ok {
+        let _ = Command::new("kill").args([sig, &pid.to_string()]).output();
+    }
 }
 
 /// 断链探测：同 id 的 jsonl 是否存在于其他 cwd 编码目录（如 EnterWorktree 迁走的）。
@@ -324,6 +331,12 @@ fn open_session(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // CLI 自立进程组（组 ID = CLI PID）：MCP 子进程随组，signal_session 组信号可整树回收
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     if let Some(inj) = &channel_injection {
         for key in &inj.clear_env {
             command.env_remove(key);
@@ -667,13 +680,14 @@ pub fn close_session(session_id: &str) {
             graceful_shutdown(&mut sp);
             sp.child.id()
         };
-        sigterm_pid(pid);
+        signal_session(pid, "-TERM");
 
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(5));
             if let Ok(mut sp) = process_arc.lock() {
                 if sp.child.try_wait().ok().flatten().is_none() {
-                    let _ = sp.child.kill();
+                    signal_session(pid, "-KILL");
+                    let _ = sp.child.wait();
                 }
             }
         });
@@ -682,7 +696,9 @@ pub fn close_session(session_id: &str) {
     PermissionService::stop_for(session_id);
 }
 
-/// 关闭所有活跃会话进程（应用退出时调用）
+/// 关闭所有活跃会话进程（应用退出时调用）。
+/// 必须同步等待：主进程退出后无人兜底，close_session 那种 detached 线程在此场景随进程消亡。
+/// SIGTERM 全体 → 轮询最多 2s → 对未退者 SIGKILL 整组。CLI 正常几百 ms 内退出，2s 是异常上限。
 pub fn close_all_sessions() {
     let processes: Vec<(String, Arc<Mutex<SessionProcess>>)> = ACTIVE_PROCESSES
         .lock()
@@ -691,12 +707,112 @@ pub fn close_all_sessions() {
         .map(|m| m.drain().collect())
         .unwrap_or_default();
 
-    for (sid, process_arc) in processes {
+    let mut pids: Vec<u32> = Vec::with_capacity(processes.len());
+    for (sid, process_arc) in &processes {
         if let Ok(mut sp) = process_arc.lock() {
             graceful_shutdown(&mut sp);
-            sigterm_pid(sp.child.id());
+            let pid = sp.child.id();
+            signal_session(pid, "-TERM");
+            pids.push(pid);
         }
-        PermissionService::stop_for(&sid);
+        PermissionService::stop_for(sid);
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let all_exited = processes.iter().all(|(_, arc)| {
+            arc.lock()
+                .map(|mut sp| sp.child.try_wait().ok().flatten().is_some())
+                .unwrap_or(true)
+        });
+        if all_exited || std::time::Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    for (i, (_, arc)) in processes.iter().enumerate() {
+        if let Ok(mut sp) = arc.lock() {
+            if sp.child.try_wait().ok().flatten().is_none() {
+                signal_session(pids[i], "-KILL");
+                let _ = sp.child.wait();
+            }
+        }
+    }
+}
+
+/// 定向发信号：group=true 发整组（pgid = pid），否则单 PID。清扫场景不做回退——
+/// 老残留进程的 pgid 可能是终端 shell 组，组信号会误伤，必须按 pgid==pid 判定后精确选择。
+#[cfg(unix)]
+fn send_sig(pid: u32, sig: &str, group: bool) {
+    if group {
+        let _ = Command::new("kill")
+            .args([sig, "--", &format!("-{}", pid)])
+            .output();
+    } else {
+        let _ = Command::new("kill").args([sig, &pid.to_string()]).output();
+    }
+}
+
+/// 启动残留清扫：上次崩溃/强杀/dev Ctrl+C 遗留的会话进程树。
+/// 指纹：命令行含 `.monet/runtime/`（Monet 注入的 --settings 路径）或 `/monet-mcp`。
+/// ppid==1 是必要条件（父进程已死被 launchd 收养）——其他 Monet 实例的活会话 ppid 是该实例，不会命中。
+/// 须在本实例 spawn 任何会话之前调用（setup 阶段）。
+pub fn cleanup_orphans() {
+    #[cfg(unix)]
+    {
+        let output = match Command::new("ps")
+            .args(["-axo", "pid=,ppid=,pgid=,command="])
+            .output()
+        {
+            Ok(o) if o.status.success() => o,
+            _ => return,
+        };
+        let text = String::from_utf8_lossy(&output.stdout);
+        // (pid, 可整组杀)。--append-system-prompt 含真实换行会把命令行拆成多行，
+        // 但指纹字段（--settings/--mcp-config）位于参数前段与 pid 同行，续行解析 pid 失败自然跳过
+        let mut targets: Vec<(u32, bool)> = Vec::new();
+        for line in text.lines() {
+            let mut parts = line.split_whitespace();
+            let (Some(pid), Some(ppid), Some(pgid)) = (
+                parts.next().and_then(|s| s.parse::<u32>().ok()),
+                parts.next().and_then(|s| s.parse::<u32>().ok()),
+                parts.next().and_then(|s| s.parse::<u32>().ok()),
+            ) else {
+                continue;
+            };
+            if ppid != 1 {
+                continue;
+            }
+            if !(line.contains(".monet/runtime/") || line.contains("/monet-mcp")) {
+                continue;
+            }
+            targets.push((pid, pgid == pid));
+        }
+        if targets.is_empty() {
+            return;
+        }
+        eprintln!(
+            "[cleanup_orphans] 清理 {} 个残留会话进程: {:?}",
+            targets.len(),
+            targets.iter().map(|t| t.0).collect::<Vec<_>>()
+        );
+        for (pid, grouped) in &targets {
+            send_sig(*pid, "-TERM", *grouped);
+        }
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            for (pid, grouped) in &targets {
+                let alive = Command::new("kill")
+                    .args(["-0", &pid.to_string()])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if alive {
+                    send_sig(*pid, "-KILL", *grouped);
+                }
+            }
+        });
     }
 }
 
