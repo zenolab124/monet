@@ -1593,32 +1593,37 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
       if (!s.pendingUserMessage && !s.pendingImages?.length) return true
       return !!recs && !!findLandedUserUuid(recs, s.pendingUserMessage, !!s.pendingImages?.length, s.pendingSentAt ?? 0)
     }
-    await new Promise(r => setTimeout(r, 300))
+    // 全落判据:一轮多 API message 时 JSONL 按块拆行渐进落盘,尾段 message 可能
+    // 晚于 result 数百 ms。「任一落账即换树」会把未落的 turn 孤零零留在流式区——
+    // 呈现为"回答结束后底下突然多出一个思考/工具块,发下一条消息才消失"(实测复现)。
+    // 必须全部 streamingTurns 的 messageId 都出现在 records 才换,否则暂存 fallback
+    const allLanded = (recs: SessionRecord[] | null): boolean => {
+      if (!recs) return false
+      const landed = new Set(
+        recs
+          .filter(r => r.type === 'assistant')
+          .map(r => (r.message as { id?: string } | null | undefined)?.id ?? ''),
+      )
+      const turns = getStream(sid).streamingTurns
+      return turns.length > 0 && turns.every(t => landed.has(t.messageId))
+    }
     let newRecords: SessionRecord[] | null = null
-    try {
-      newRecords = await invoke<SessionRecord[]>('get_session_records', {
-        projectId: cs.projectId,
-        sessionId: sid,
-      })
-    } catch { /* ignore */ }
-    if (!newRecords || newRecords.length === records.value.length || !pendingLanded(newRecords)) {
-      await new Promise(r => setTimeout(r, 400))
+    for (const delay of [300, 400, 800]) {
+      await new Promise(r => setTimeout(r, delay))
       try {
         newRecords = await invoke<SessionRecord[]>('get_session_records', {
           projectId: cs.projectId,
           sessionId: sid,
         })
-      } catch { /* ignore */ }
+      } catch { /* 下一轮重试 */ }
+      if (allLanded(newRecords) && pendingLanded(newRecords)) break
     }
     if (effectiveSessionId.value !== sid) return
     if (newRecords) {
-      // 产物单向(v2.5.0)已保证换树像素等价:本轮 assistant 已落账时不再等
+      // 产物单向(v2.5.0)已保证换树像素等价:本轮 assistant 全部落账时不再等
       // 「下一个天然安全时刻」,立即原子换树+摘 turn(与自发轮落账同款模式)——
       // usage/token 标注随历史区即刻出现,不必等下一条消息
-      const turnIds = new Set(getStream(sid).streamingTurns.map(t => t.messageId))
-      const landedNow = newRecords.some(r =>
-        r.type === 'assistant' && turnIds.has((r.message as { id?: string } | null | undefined)?.id ?? ''))
-      if (landedNow && pendingLanded(newRecords)) {
+      if (allLanded(newRecords) && pendingLanded(newRecords)) {
         // 换树前等本轮文本的完成态 HTML 预热落缓存:预热任务排在逐段上色队列末尾,
         // await 它 = 同时等到「上色完成 + 缓存命中」两个条件——否则换树时历史区
         // cached miss 触发全文 shiki 同步渲染(卡帧),且流式区半彩半素与历史区
