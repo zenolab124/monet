@@ -247,8 +247,20 @@ interface PendingTextDelta {
   text?: string
   thinking?: string
   signature?: string
+  /** 该 key 本轮缓冲的首数据时刻:预热期(SMOOTH_WARMUP_MS)内攒着不吐 */
+  bornAt?: number
 }
 const pendingTextDeltas = new Map<string, PendingTextDelta>()
+
+/** 取(或建)pending 条目,新建时盖 bornAt 预热时间戳 */
+function pendingEntryOf(key: string): PendingTextDelta {
+  let e = pendingTextDeltas.get(key)
+  if (!e) {
+    e = { bornAt: performance.now() }
+    pendingTextDeltas.set(key, e)
+  }
+  return e
+}
 export const streamingTick = ref(0)
 let rafId: number | null = null
 
@@ -261,6 +273,15 @@ let rafId: number | null = null
 const SMOOTH_WINDOW_MS = 300
 /** 泄洪阈值:超大缓冲(快照兜底对账等)扫屏无意义,直接瞬吐 */
 const FLOOD_CHARS = 20000
+/**
+ * 冷启动预热(jitter buffer):块的首批数据攒够该时长再开始吐。
+ * API 首 delta 常单独早到且只有一两个字,无预热时它瞬间播完、缓冲放干,
+ * 屏幕停顿等主流到达——"首字弹出→顿→再平滑"的突刺。预热让首字与主流
+ * 连成一条流起步,代价是块首延迟 +200ms(秒级 TTFT 面前无感)。
+ * 缓冲中途放干后重来会再次预热:此时已在真实生成停顿(>300ms)之后,
+ * 多 200ms 无感,且让恢复段同样平滑起步。
+ */
+const SMOOTH_WARMUP_MS = 200
 
 /**
  * 帧级批 flush。
@@ -300,6 +321,13 @@ function flushTextDeltasInner(onlySession?: string, instant = false): boolean {
     }
     const block = entry.turn.content[index] as ContentBlock | undefined
     if (!block) return
+
+    // 预热期:攒着不吐(instant 路径豁免)。signature 只在 thinking 尾部到达,
+    // 彼时 bornAt 早已超期,实际不受影响
+    if (!instant && p.bornAt !== undefined && performance.now() - p.bornAt < SMOOTH_WARMUP_MS) {
+      hasRemaining = true
+      return
+    }
 
     if (p.thinking !== undefined && block.type === 'thinking') {
       const take = instant ? Infinity : smoothTake(p.thinking.length)
@@ -476,9 +504,8 @@ function feedSnapshotText(
     const alreadyKnown = curText.length + pendingLen
     if (incText.length > alreadyKnown) {
       const delta = incText.slice(alreadyKnown)
-      const e = pendingTextDeltas.get(key) ?? {}
+      const e = pendingEntryOf(key)
       e.text = (e.text ?? '') + delta
-      pendingTextDeltas.set(key, e)
       accumulateTailText(sessionId, delta)
     }
     stripped.text = curText
@@ -493,9 +520,8 @@ function feedSnapshotText(
     const alreadyKnown = curThink.length + pendingLen
     if (incThink.length > alreadyKnown) {
       const delta = incThink.slice(alreadyKnown)
-      const e = pendingTextDeltas.get(key) ?? {}
+      const e = pendingEntryOf(key)
       e.thinking = (e.thinking ?? '') + delta
-      pendingTextDeltas.set(key, e)
     }
     stripped.thinking = curThink
   }
@@ -625,24 +651,21 @@ export async function initStreamListeners(): Promise<void> {
           switch (d.type) {
             case 'text_delta':
               if (d.text) {
-                const e = pendingTextDeltas.get(key) ?? {}
+                const e = pendingEntryOf(key)
                 e.text = (e.text ?? '') + d.text
-                pendingTextDeltas.set(key, e)
                 accumulateTailText(sid, d.text)
               }
               break
             case 'thinking_delta':
               if (d.thinking) {
-                const e = pendingTextDeltas.get(key) ?? {}
+                const e = pendingEntryOf(key)
                 e.thinking = (e.thinking ?? '') + d.thinking
-                pendingTextDeltas.set(key, e)
               }
               break
             case 'signature_delta':
               if (d.signature) {
-                const e = pendingTextDeltas.get(key) ?? {}
+                const e = pendingEntryOf(key)
                 e.signature = d.signature
-                pendingTextDeltas.set(key, e)
               }
               break
             case 'input_json_delta':
