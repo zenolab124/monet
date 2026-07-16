@@ -68,9 +68,31 @@ export function renderMarkdownPlain(text: string): string {
   return html
 }
 
-// 完成态渲染缓存:key 为原文,LRU。shiki 输出用 CSS 变量双主题,HTML 不随亮暗切换变,可安全缓存
-const CACHE_MAX = 500
+// 完成态渲染缓存:key 为原文,LRU。shiki 输出用 CSS 变量双主题,HTML 不随亮暗切换变,可安全缓存。
+// 上限为字节预算而非条数(PRD v2.5.0 FR-005):段组件化后条目粒度变小、数量变多,
+// 且换树预热的全文条目不能被小条目挤出;估算口径 UTF-16 每字符 2 字节,key+value 都计
+const CACHE_BYTE_BUDGET = 32 * 1024 * 1024
+let cacheBytes = 0
 const htmlCache = new Map<string, string>()
+
+function cacheEntryBytes(text: string, html: string): number {
+  return (text.length + html.length) * 2
+}
+
+function cacheSet(text: string, html: string): void {
+  const existing = htmlCache.get(text)
+  if (existing !== undefined) {
+    cacheBytes -= cacheEntryBytes(text, existing)
+    htmlCache.delete(text)
+  }
+  htmlCache.set(text, html)
+  cacheBytes += cacheEntryBytes(text, html)
+  while (cacheBytes > CACHE_BYTE_BUDGET && htmlCache.size > 1) {
+    const oldest = htmlCache.keys().next().value!
+    cacheBytes -= cacheEntryBytes(oldest, htmlCache.get(oldest)!)
+    htmlCache.delete(oldest)
+  }
+}
 
 /** 带缓存的完整渲染:用于内容不再变化的块(历史消息、流式结束后的块) */
 export function renderMarkdownCached(text: string): string {
@@ -89,10 +111,7 @@ export function renderMarkdownCached(text: string): string {
   performance.measure('md-shiki', { start: t0, duration: dt })
   // shiki 就绪前的结果是无高亮版,不入缓存,避免固化素色 HTML
   if (shikiReady) {
-    htmlCache.set(text, html)
-    if (htmlCache.size > CACHE_MAX) {
-      htmlCache.delete(htmlCache.keys().next().value!)
-    }
+    cacheSet(text, html)
   }
   return html
 }

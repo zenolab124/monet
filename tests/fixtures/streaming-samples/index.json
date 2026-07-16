@@ -1,0 +1,278 @@
+[
+  {
+    "file": "sample-01.md",
+    "chars": 32838,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "inline_html"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-02.md",
+    "chars": 15137,
+    "features": [
+      "fence",
+      "multi_fence",
+      "nested_backtick",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-03.md",
+    "chars": 12468,
+    "features": [
+      "fence",
+      "multi_fence",
+      "nested_backtick",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-04.md",
+    "chars": 11103,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table",
+      "inline_html"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-05.md",
+    "chars": 6076,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-06.md",
+    "chars": 6039,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-07.md",
+    "chars": 6036,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-08.md",
+    "chars": 6032,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-09.md",
+    "chars": 5951,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-10.md",
+    "chars": 5927,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-11.md",
+    "chars": 5884,
+    "features": [
+      "fence",
+      "multi_fence",
+      "nested_backtick",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-12.md",
+    "chars": 5762,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-13.md",
+    "chars": 5524,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-14.md",
+    "chars": 3404,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "table",
+      "inline_html"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-15.md",
+    "chars": 2691,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "table",
+      "inline_html"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-16.md",
+    "chars": 2554,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-17.md",
+    "chars": 2520,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-18.md",
+    "chars": 2195,
+    "features": [
+      "fence",
+      "multi_fence",
+      "ulist",
+      "olist",
+      "nested_list",
+      "table"
+    ],
+    "synthetic": false
+  },
+  {
+    "file": "sample-19.md",
+    "chars": 2453,
+    "features": [
+      "math",
+      "olist",
+      "ulist",
+      "fence"
+    ],
+    "synthetic": true
+  },
+  {
+    "file": "sample-20.md",
+    "chars": 2257,
+    "features": [
+      "math",
+      "ulist",
+      "fence"
+    ],
+    "synthetic": true
+  },
+  {
+    "file": "sample-21.md",
+    "chars": 2715,
+    "features": [
+      "footnote",
+      "olist",
+      "fence"
+    ],
+    "synthetic": true
+  },
+  {
+    "file": "sample-22.md",
+    "chars": 2542,
+    "features": [
+      "reflink",
+      "olist",
+      "ulist"
+    ],
+    "synthetic": true
+  }
+]

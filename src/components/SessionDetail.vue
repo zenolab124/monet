@@ -1366,6 +1366,14 @@ async function handleSend() {
   // 发送前即时落账:上一轮流式 turns 还在时,sendMessage 会清 streamingTurns
   // 但 records 尚未 reload——内容从两源同时消失。先应用暂存/重新 reload 收进历史区
   if (stream.value.streamingTurns.length > 0) {
+    // FR-006 开发期换树位移观测:高度 diff >1px 即落档(生产 tree-shake)
+    if (import.meta.env.DEV) {
+      const before = scrollContainer.value?.scrollHeight ?? 0
+      void nextTick(() => {
+        import('@/lib/stream-markdown/devConsistencyCheck').then(({ devCheckSwapHeight }) =>
+          devCheckSwapHeight('send-swap', before, scrollContainer.value?.scrollHeight ?? 0))
+      })
+    }
     if (deferredRecords?.sid === cs.summary.id) {
       records.value = deferredRecords.recs
       deferredRecords = null
