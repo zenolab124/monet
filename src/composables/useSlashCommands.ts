@@ -13,8 +13,8 @@ import { MODELS, MODEL_ALIASES } from '@/utils/modelContext'
 import type { WorkshopSkill, WorkshopCommand } from '@/types'
 import i18n from '../locales'
 
-/** 命令分类 */
-export type SlashCommandCategory = 'native' | 'pass' | 'skill' | 'command'
+/** 命令分类；terminal = GUI 内无法运行，引导到终端执行 */
+export type SlashCommandCategory = 'native' | 'pass' | 'skill' | 'command' | 'terminal'
 
 /** 单条命令的元数据 */
 export interface SlashCommand {
@@ -53,6 +53,13 @@ export function getBuiltinCommands(): SlashCommand[] {
     { name: 'undo',      hint: t('slash.hintUndo'),      hasArg: false, category: 'pass' },
     { name: 'add-dir',   hint: t('slash.hintAddDir'),    hasArg: true, argHint: '<path>', category: 'pass' },
     { name: 'resume',    hint: t('slash.hintResume'),    hasArg: false, category: 'pass' },
+    // 交互式命令：GUI 内无法运行，选中后在终端打开 claude 执行
+    { name: 'login',     hint: t('slash.hintLogin'),     hasArg: false, category: 'terminal' },
+    { name: 'logout',    hint: t('slash.hintLogout'),    hasArg: false, category: 'terminal' },
+    { name: 'terminal-setup', hint: t('slash.hintTerminalSetup'), hasArg: false, category: 'terminal' },
+    { name: 'vim',       hint: t('slash.hintVim'),       hasArg: false, category: 'terminal' },
+    { name: 'bug',       hint: t('slash.hintBug'),       hasArg: false, category: 'terminal' },
+    { name: 'ide',       hint: t('slash.hintIde'),       hasArg: false, category: 'terminal' },
   ]
 }
 
@@ -150,6 +157,7 @@ export type ParsedCommand =
   | { kind: 'unknown'; raw: string }
   | { kind: 'native'; cmd: SlashCommand; arg: string }
   | { kind: 'pass'; cmd: SlashCommand; arg: string }
+  | { kind: 'terminal'; cmd: SlashCommand; arg: string }
   | { kind: 'invalid'; cmd: SlashCommand; reason: string }
 
 export function parseCommand(
@@ -195,6 +203,11 @@ export function parseCommand(
   // skill/command 一律透传
   if (cmd.category === 'skill' || cmd.category === 'command') {
     return { kind: 'pass', cmd, arg }
+  }
+
+  // 交互式命令：引导到终端执行
+  if (cmd.category === 'terminal') {
+    return { kind: 'terminal', cmd, arg }
   }
 
   return { kind: cmd.category, cmd, arg }

@@ -43,7 +43,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
       slashError.value = parsed.reason
       return
     }
-    if (parsed.kind === 'native') return
+    if (parsed.kind === 'native' || parsed.kind === 'terminal') return
     slashError.value = null
 
     inputText.value = ''

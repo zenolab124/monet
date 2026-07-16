@@ -198,6 +198,8 @@
     "slashOpenInWorkbench": "Workbench column is bound to a session, open other sessions from Archive",
     "slashPathNotFound": "Path not found",
     "slashNoSessions": "No sessions for this project",
+    "slashOpenedInTerminal": "{cmd} opened in Terminal — come back here when done",
+    "slashTerminalDenied": "Automation permission denied: allow Monet to control Terminal in System Settings → Privacy & Security → Automation",
     "externalRunning": "Session running in background, following in real-time (you can type after the process ends)",
     "externalRunningBy": "Session running in background via {owner}, following in real-time (you can type after the process ends)",
     "externalRunningPlaceholder": "Session running in background…",
@@ -950,7 +952,9 @@
     "errorModelUnknown": "Unknown model, options: fable / opus / sonnet / haiku or full ID",
     "errorCdRequired": "Please provide a target project path",
     "badgeSkill": "skill",
-    "badgeCommand": "command"
+    "badgeCommand": "command",
+    "badgeTerminal": "terminal",
+    "terminalTitle": "Requires an interactive terminal; opens in Terminal when selected"
   },
   "channel": {
     "official": "Official"

@@ -98,8 +98,31 @@ pub async fn resume_in_terminal(
         end tell"#,
         escaped_cwd, settings_part, session_id
     );
-    // osascript 会阻塞在系统自动化授权弹窗上：放 blocking 线程等待结果，
-    // 授权被拒（-1743）时返回前端可识别的错误标记
+    run_terminal_script(script).await
+}
+
+/// 在终端中执行 GUI 内无法运行的交互式斜杠命令（/login /logout /vim 等）：
+/// 打开 Terminal 于会话 cwd，把命令作为 claude 的首条输入
+#[tauri::command]
+pub async fn run_slash_in_terminal(cwd: String, command: String) -> Result<(), String> {
+    // 命令名只允许小写字母与连字符，防 AppleScript/shell 注入
+    if command.is_empty() || !command.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+        return Err(format!("非法命令名: {}", command));
+    }
+    let escaped_cwd = cwd.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        r#"tell application "Terminal"
+            activate
+            do script "cd \"{}\" && claude \"/{}\""
+        end tell"#,
+        escaped_cwd, command
+    );
+    run_terminal_script(script).await
+}
+
+/// osascript 会阻塞在系统自动化授权弹窗上：放 blocking 线程等待结果，
+/// 授权被拒（-1743）时返回前端可识别的错误标记
+async fn run_terminal_script(script: String) -> Result<(), String> {
     let output = tauri::async_runtime::spawn_blocking(move || {
         std::process::Command::new("osascript")
             .arg("-e")

@@ -313,6 +313,9 @@ const cursorPos = ref(0)
 /** /model invalid 等校验失败提示 */
 const slashError = ref<string | null>(null)
 
+/** 非错误提示（如「已在终端打开」），muted 样式 */
+const slashNotice = ref<string | null>(null)
+
 /** /help 帮助卡片显示标志(前端层面,不写 jsonl) */
 const showHelpCard = ref(false)
 
@@ -343,6 +346,7 @@ function onInputChange() {
   autoResize()
   syncCursor()
   if (slashError.value) slashError.value = null
+  if (slashNotice.value) slashNotice.value = null
   // textarea 增高缩小了 scrollContainer 的 clientHeight,但 contentRO 不触发(内容高度没变),
   // 原来的 scrollTop 不够贴底——看起来内容被输入框顶上去了。跟随模式下补偿一次贴底
   if (followStreaming.value) scrollToBottom()
@@ -353,6 +357,7 @@ function onInputChange() {
 watch(effectiveSessionId, () => {
   hideHistory.value = false
   showHelpCard.value = false
+  slashNotice.value = null
   followStreaming.value = true
   featureBannerShown.value = false
   bannerResumed.value = false
@@ -1328,6 +1333,23 @@ async function handleSend() {
     return
   }
 
+  // terminal 命令(/login /logout 等):GUI 内无法运行,在终端打开 claude 执行
+  if (parsed.kind === 'terminal') {
+    const cmdName = parsed.cmd.name
+    inputText.value = ''
+    if (textareaRef.value) textareaRef.value.style.height = 'auto'
+    try {
+      await invoke('run_slash_in_terminal', { cwd: cs.summary.cwd, command: cmdName })
+      slashNotice.value = t('session.slashOpenedInTerminal', { cmd: `/${cmdName}` })
+    } catch (e) {
+      const msg = String(e)
+      slashError.value = msg.startsWith('AUTOMATION_DENIED')
+        ? t('session.slashTerminalDenied')
+        : msg
+    }
+    return
+  }
+
   // pass 命令(目前仅 /model):持久化设置,不发消息
   if (parsed.kind === 'pass' && parsed.cmd.name === 'model') {
     handleModelSwitch(parsed.arg)
@@ -2234,6 +2256,11 @@ async function onReload() {
     >
       <div v-if="slashError" class="mb-1 text-xs text-destructive">
         {{ slashError }}
+      </div>
+
+      <div v-if="slashNotice" class="mb-1 text-xs text-muted-foreground flex items-center gap-1.5">
+        <span class="i-carbon-terminal w-3 h-3 shrink-0" />
+        {{ slashNotice }}
       </div>
 
       <!-- 外部运行跟随提示（能解析出归属方时点名是谁在跑） -->

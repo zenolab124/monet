@@ -11,12 +11,14 @@ const { t } = useI18n()
 function badgeText(cat: string): string {
   if (cat === 'skill') return t('slash.badgeSkill')
   if (cat === 'command') return t('slash.badgeCommand')
+  if (cat === 'terminal') return t('slash.badgeTerminal')
   if (cat === 'pass') return t('slash.passThrough')
   return t('slash.native')
 }
 
 function badgeTitle(cat: string): string {
   if (cat === 'skill' || cat === 'command') return ''
+  if (cat === 'terminal') return t('slash.terminalTitle')
   if (cat === 'pass') return t('slash.passThroughTitle')
   return t('slash.nativeTitle')
 }

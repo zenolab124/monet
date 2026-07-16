@@ -104,16 +104,10 @@ const positionStyle = computed(() => {
   }
 })
 
-const categoryLabel: Record<SlashCommandCategory, string> = {
-  native: 'builtin',
-  pass: 'builtin',
-  skill: 'skill',
-  command: 'command',
-}
-
 function badgeFor(cat: SlashCommandCategory): string | null {
   if (cat === 'skill') return t('slash.badgeSkill')
   if (cat === 'command') return t('slash.badgeCommand')
+  if (cat === 'terminal') return t('slash.badgeTerminal')
   return null
 }
 </script>

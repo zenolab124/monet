@@ -198,6 +198,8 @@
     "slashOpenInWorkbench": "工作台列已绑定会话，请从档案馆打开其他会话",
     "slashPathNotFound": "路径未发现",
     "slashNoSessions": "该项目暂无会话",
+    "slashOpenedInTerminal": "{cmd} 已在终端中打开，完成后回到这里继续",
+    "slashTerminalDenied": "自动化权限被拒：请在 系统设置 → 隐私与安全性 → 自动化 中允许 Monet 控制 Terminal",
     "externalRunning": "会话正在后台运行，实时跟随中（进程结束后可继续输入）",
     "externalRunningBy": "会话正在后台运行（{owner}），实时跟随中（进程结束后可继续输入）",
     "externalRunningPlaceholder": "会话在后台运行中…",
@@ -950,7 +952,9 @@
     "errorModelUnknown": "未知模型，可选 fable / opus / sonnet / haiku 或完整 ID",
     "errorCdRequired": "请提供目标项目路径",
     "badgeSkill": "skill",
-    "badgeCommand": "command"
+    "badgeCommand": "command",
+    "badgeTerminal": "终端",
+    "terminalTitle": "需要交互式终端，选中后在 Terminal 中打开执行"
   },
   "channel": {
     "official": "官方"

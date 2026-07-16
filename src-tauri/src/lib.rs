@@ -132,6 +132,7 @@ pub fn run() {
             commands::get_perf_stats,
             commands::delete_session,
             commands::resume_in_terminal,
+            commands::run_slash_in_terminal,
             commands::check_system_permissions,
             commands::request_system_permission,
             commands::open_privacy_settings,
