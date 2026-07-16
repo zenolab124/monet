@@ -182,6 +182,7 @@ pub fn run() {
             commands::get_subagent_records,
             commands::read_task_output,
             commands::fork_session,
+            commands::git_worktree_snapshot,
             commands::get_usage_stats,
             commands::get_schema_diagnosis,
             commands::search_query,

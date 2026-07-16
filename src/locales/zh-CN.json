@@ -1105,5 +1105,26 @@
     "boot_total": "白屏合计",
     "boot_shiki": "Shiki 初始化",
     "boot_projects": "项目树加载"
+  },
+  "fileLedger": {
+    "title": "文件账本",
+    "summary": "{total} 个文件 · {modified} 改 {read} 读",
+    "empty": "本会话尚未触碰任何文件",
+    "modifiedGroup": "已修改 ({n})",
+    "readGroup": "仅读取 ({n})",
+    "newFile": "新建",
+    "edits": "{n} 次编辑",
+    "worktree": "工作区",
+    "clean": "无未提交变更",
+    "andMore": "已截断,仅显示前 200 条",
+    "footnote": "仅覆盖结构化编辑工具（Edit / Write / NotebookEdit），Bash 中的文件操作不入账",
+    "jump": "跳转到消息",
+    "expandAll": "展开全部（共 {n} 行）",
+    "writeSummary": "写入 {lines} 行 · {chars} 字符",
+    "preview": "展开预览",
+    "collapse": "收起",
+    "previewTruncated": "预览截断（全文 {total} 行）",
+    "readOp": "读取文件",
+    "notebookOp": "编辑 Notebook 单元格"
   }
 }

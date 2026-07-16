@@ -63,6 +63,8 @@ import AsyncTaskPanel from './AsyncTaskPanel.vue'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
 import { renderMarkdownDeferred } from '@/composables/useMarkdown'
 import { persistKeyOf } from '@/lib/stream-markdown/constants'
+import { useFileLedger } from '@/composables/useFileLedger'
+import FileLedgerPanel from './FileLedgerPanel.vue'
 
 /**
  * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
@@ -234,6 +236,19 @@ const ownProcessBusy = computed(() =>
 )
 const asyncPanelVisible = computed(() => asyncSidebarOpen.value && asyncTasks.value.length > 0)
 const asyncPanelRef = ref<InstanceType<typeof AsyncTaskPanel> | null>(null)
+
+// ---- 文件账本(v2.6.0):纯前端推导,与异步面板互斥占用右侧手风琴 ----
+const { entries: ledgerEntries, modifiedEntries: ledgerModified, readOnlyEntries: ledgerReadOnly } =
+  useFileLedger(records, computed(() => stream.value.streamingTurns))
+const ledgerPanelOpen = ref(false)
+function toggleLedgerPanel() {
+  ledgerPanelOpen.value = !ledgerPanelOpen.value
+  if (ledgerPanelOpen.value && asyncSidebarOpen.value) closeAsyncPanel()
+}
+// 反向互斥:异步面板打开时收起账本
+watch(asyncSidebarOpen, open => {
+  if (open) ledgerPanelOpen.value = false
+})
 
 provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
 provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
@@ -2020,6 +2035,16 @@ async function onReload() {
         <span class="i-carbon-lightning w-3.5 h-3.5" :class="asyncActiveCount > 0 && 'animate-pulse'" />
         <span class="text-[10px] font-semibold tabular-nums leading-none">{{ asyncActiveCount > 0 ? asyncActiveCount : asyncTasks.length }}</span>
       </button>
+      <button
+        v-if="ledgerEntries.length > 0"
+        class="p-1 rounded transition-colors flex items-center gap-1"
+        :class="ledgerPanelOpen ? 'text-claude bg-claude/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+        :title="$t('fileLedger.title')"
+        @click="toggleLedgerPanel"
+      >
+        <span class="i-carbon-catalog w-3.5 h-3.5" />
+        <span class="text-[10px] font-semibold tabular-nums leading-none">{{ ledgerEntries.length }}</span>
+      </button>
     </SessionTopBar>
 
     <!-- 加载态 -->
@@ -2487,6 +2512,20 @@ async function onReload() {
         @select-agent="toggleSubAgent($event)"
         @close-tab="closeSubAgentTab($event)"
         @close="closeAsyncPanel"
+        @locate="locateToolUse"
+      />
+    </div>
+    <!-- 文件账本面板:与异步面板互斥,同款手风琴 -->
+    <div
+      class="shrink-0 border-l border-border overflow-hidden"
+      :style="{ width: ledgerPanelOpen ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
+    >
+      <FileLedgerPanel
+        v-if="ledgerPanelOpen"
+        :modified="ledgerModified"
+        :read-only="ledgerReadOnly"
+        :cwd="currentSession?.summary.cwd ?? null"
+        @close="ledgerPanelOpen = false"
         @locate="locateToolUse"
       />
     </div>

@@ -1105,5 +1105,26 @@
     "boot_total": "Blank total",
     "boot_shiki": "Shiki init",
     "boot_projects": "Projects load"
+  },
+  "fileLedger": {
+    "title": "File Ledger",
+    "summary": "{total} files · {modified} modified, {read} read",
+    "empty": "No files touched in this session yet",
+    "modifiedGroup": "Modified ({n})",
+    "readGroup": "Read only ({n})",
+    "newFile": "new",
+    "edits": "{n} edits",
+    "worktree": "Worktree",
+    "clean": "No uncommitted changes",
+    "andMore": "Truncated to first 200 entries",
+    "footnote": "Covers structured editing tools only (Edit / Write / NotebookEdit); file operations inside Bash are not tracked",
+    "jump": "Jump to message",
+    "expandAll": "Expand all ({n} lines)",
+    "writeSummary": "Wrote {lines} lines · {chars} chars",
+    "preview": "Preview",
+    "collapse": "Collapse",
+    "previewTruncated": "Preview truncated ({total} lines total)",
+    "readOp": "Read file",
+    "notebookOp": "Edited notebook cell"
   }
 }

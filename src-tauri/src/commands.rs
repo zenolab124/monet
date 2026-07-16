@@ -1120,3 +1120,90 @@ pub fn fork_session(
         .map_err(|e| format!("Fork failed: {}", e))?;
     Ok(())
 }
+
+// ---- 工作区 git 只读快照(PRD v2.6.0 FR-004) ----
+
+#[derive(serde::Serialize)]
+pub struct GitSnapshotEntry {
+    /// porcelain XY 两字符状态码(" M"/"??"/"A "等)
+    pub status: String,
+    pub path: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct GitWorktreeSnapshot {
+    pub is_repo: bool,
+    pub entries: Vec<GitSnapshotEntry>,
+    pub truncated: bool,
+}
+
+const GIT_SNAPSHOT_MAX_ENTRIES: usize = 200;
+
+fn run_git_readonly_blocking(cwd: &str, args: &[&str]) -> Result<std::process::Output, String> {
+    use std::process::{Command, Stdio};
+    // git 位于 /usr/bin,系统命令允许裸调(spawn 铁律豁免清单);
+    // 3s 超时防网络挂载盘等场景挂起(项目无 tokio 直依赖,try_wait 轮询实现)
+    let mut child = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(_) => return child.wait_with_output().map_err(|e| e.to_string()),
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                return Err("git timeout".to_string());
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(30)),
+        }
+    }
+}
+
+/// 工作区 git 只读快照:是否仓库 + 未提交条目(porcelain v1 -z 解析)。
+/// 白名单仅 rev-parse 与 status 两条只读子命令——本 command 永不扩展写操作
+/// (NFR-002 代码审查口径:实现中不得出现任何修改工作区/暂存区的 git 子命令)。
+#[tauri::command]
+pub async fn git_worktree_snapshot(cwd: String) -> Result<GitWorktreeSnapshot, String> {
+    let (probe, out) = tauri::async_runtime::spawn_blocking(move || {
+        let probe = run_git_readonly_blocking(&cwd, &["rev-parse", "--is-inside-work-tree"])?;
+        if !probe.status.success() || String::from_utf8_lossy(&probe.stdout).trim() != "true" {
+            return Ok::<_, String>((probe, None));
+        }
+        let out = run_git_readonly_blocking(&cwd, &["status", "--porcelain=v1", "-z"])?;
+        Ok((probe, Some(out)))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let Some(out) = out else {
+        let _ = probe;
+        return Ok(GitWorktreeSnapshot { is_repo: false, entries: vec![], truncated: false });
+    };
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    // -z 输出:NUL 分隔,每条 "XY path";R/C 状态后额外跟一个源路径 token,须吞掉
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    let mut tokens = raw.split('\0').filter(|s| !s.is_empty());
+    while let Some(tok) = tokens.next() {
+        if tok.len() < 4 {
+            continue;
+        }
+        let (xy, path) = tok.split_at(2);
+        let path = path.trim_start_matches(' ');
+        if xy.starts_with('R') || xy.starts_with('C') {
+            let _ = tokens.next(); // 吞 rename/copy 的源路径
+        }
+        if entries.len() >= GIT_SNAPSHOT_MAX_ENTRIES {
+            truncated = true;
+            break;
+        }
+        entries.push(GitSnapshotEntry { status: xy.to_string(), path: path.to_string() });
+    }
+    Ok(GitWorktreeSnapshot { is_repo: true, entries, truncated })
+}
