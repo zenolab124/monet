@@ -1368,6 +1368,7 @@ async function handleSend() {
   // 发送前即时落账:上一轮流式 turns 还在时,sendMessage 会清 streamingTurns
   // 但 records 尚未 reload——内容从两源同时消失。先应用暂存/重新 reload 收进历史区
   if (stream.value.streamingTurns.length > 0) {
+    pinLastGroupBeforeSwap()
     devObserveSwap('send-swap')
     if (deferredRecords?.sid === cs.summary.id) {
       records.value = deferredRecords.recs
@@ -1569,6 +1570,28 @@ onUnmounted(() => { contentRO?.disconnect(); contentRO = null })
 // 一并应用 + 清理 turns。shiki 上色虽有高度变化，但 contentRO 持续贴底足够覆盖。
 let deferredRecords: { sid: string; recs: SessionRecord[] } | null = null
 
+/**
+ * 换树防坍缩:新组入列使原末组失去 cv 豁免(gi < length-1 条件)。首次进入
+ * content-visibility 管理的元素没有 auto 尺寸记忆,视口外直接按兜底 300px 估高——
+ * 上一轮长回复瞬间坍缩几千 px:贴底的 scrollTop 先被浏览器 clamp 一重,anchorRO
+ * 观察到减高又补偿一重,双重上移让视口"掉"进新回答中间。
+ * 换树前测原末组实高,DOM 更新后(paint 前)钉成 inline contain-intrinsic-size,
+ * 坍缩从源头消失。低频路径,一次 offsetHeight 强制布局可接受。
+ */
+function pinLastGroupBeforeSwap(): void {
+  const sc = scrollContainer.value
+  if (!sc) return
+  const groups = sc.querySelectorAll('[data-anchor-index]')
+  const last = groups[groups.length - 1] as HTMLElement | undefined
+  if (!last) return
+  const h = last.offsetHeight
+  if (h > 0) {
+    void nextTick(() => {
+      if (last.isConnected) last.style.containIntrinsicSize = `auto ${h}px`
+    })
+  }
+}
+
 // FR-006 开发期换树位移观测:前后 scrollHeight diff >1px 落档(生产构建 tree-shake)
 function devObserveSwap(label: string) {
   if (!import.meta.env.DEV) return
@@ -1636,6 +1659,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         await Promise.all(texts.map(t => renderMarkdownDeferred(t)))
         // 等待期间可能切会话/新消息已发出,复查后再换树
         if (effectiveSessionId.value !== sid) return
+        pinLastGroupBeforeSwap()
         devObserveSwap('settle-swap')
         records.value = newRecords
         removeLandedTurns(sid, newRecords)
@@ -1698,6 +1722,7 @@ watch(autoTurnLanded, async () => {
   }
   if (effectiveSessionId.value !== sid || !fresh) return
   if (fresh.length >= records.value.length) {
+    pinLastGroupBeforeSwap()
     records.value = fresh
     // 同一同步段摘除已落账 turn:历史区解除 streamingMessageIds 过滤,原子切换;
     // 快照内未落盘的孤儿 turn 降级 live(记录不会再来,防永久卡「进行中」)
