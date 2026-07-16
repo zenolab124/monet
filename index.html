@@ -6,6 +6,20 @@
     <title>Monet</title>
     <!-- 启动打点基准:内联脚本在 module 图 fetch/parse/执行前同步跑,见 utils/bootTrace.ts -->
     <script>performance.mark('boot:html')</script>
+    <!-- 主题底色先行:CSS/JS 到位前把 html 底色钉到主题色,防 WebView 默认白底闪。
+         暗色判定与 useTheme 同口径(跟随系统亮暗选 lightTheme/darkTheme,ink 为内置暗主题);
+         自定义主题不精确重现,底色差异会在首帧被真主题覆盖。窗口延迟显示是主防线,这里是慢路径兜底 -->
+    <script>
+      try {
+        var d = matchMedia('(prefers-color-scheme: dark)').matches
+        var raw = localStorage.getItem('monet-theme')
+        if (raw) {
+          var cfg = JSON.parse(raw)
+          if (cfg && cfg.version === 2) d = (d ? cfg.darkTheme : cfg.lightTheme) === 'ink'
+        }
+        document.documentElement.style.backgroundColor = d ? '#1e1e1e' : '#F2EBDC'
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -67,7 +67,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin({
-            let mut ws = tauri_plugin_window_state::Builder::new();
+            use tauri_plugin_window_state::StateFlags;
+            let mut ws = tauri_plugin_window_state::Builder::new()
+                // 排除 VISIBLE:窗口以隐藏启动(tauri.conf visible:false),前端首帧上屏后
+                // 才 show(消灭 WebView 白底闪);插件恢复可见性会抢先把白窗口亮出来
+                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE);
             if cfg!(debug_assertions) {
                 ws = ws.skip_initial_state("main");
             }
@@ -114,6 +118,20 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 search::warm();
             });
+
+            // 窗口延迟显示兜底:正常路径由前端首帧后 show(main.ts finishBootTrace 回调);
+            // 前端脚本崩溃/资产加载失败时 4s 后强制亮窗,避免应用"启动了但看不见"
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    if let Some(w) = handle.get_webview_window("main") {
+                        if !w.is_visible().unwrap_or(true) {
+                            let _ = w.show();
+                        }
+                    }
+                });
+            }
 
             // 关窗=收起（macOS 标准文档型行为）：进程与 Dock 图标保留，
             // 点 Dock/Reopen 恢复；真退出走 Cmd+Q（quit_app）
