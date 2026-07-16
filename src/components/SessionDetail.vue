@@ -1576,6 +1576,14 @@ function devObserveSwap(label: string) {
   })
 }
 
+/**
+ * settle 在途的会话:期间禁止队列消费。回合结束有两个消费沿(settle watcher 尾部
+ * 与 ownProcessBusy 翻空闲),后者会抢在换树前发出队列消息——sendMessage 清场把
+ * 尚未落入历史区的上一轮 turns 扔掉,呈现为"队列消息发出后上一轮回复部分消失"。
+ * 门闸期间的队列消息由 settle 完成后的尾部 maybeConsumeQueue 补发,不滞留。
+ */
+const settlingSessions = new Set<string>()
+
 watch(() => stream.value.streaming, async (val, oldVal) => {
   if (!val && oldVal) {
     const cs = currentSession.value
@@ -1583,6 +1591,8 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     const sid = cs.summary.id
     if (!interactive.value) return
     console.log(`%c ========== [detail] streaming→false (deferred) sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
+    settlingSessions.add(sid)
+    try {
     finishedDirty.delete(sid)
     // shiki 上色过渡保护
     followStreaming.value = true
@@ -1607,6 +1617,11 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
       const turns = getStream(sid).streamingTurns
       return turns.length > 0 && turns.every(t => landed.has(t.messageId))
     }
+    // 空场兜底(防御纵深):settle 窗口内 turns 被清场(理论上已被 settling 门闸拦住,
+    // 但保留防未知清场路径)时无换树 diff,records 直接追加应用,不得打入暂存——
+    // 否则上一轮回复会从两个源同时消失
+    const emptyButGrown = (recs: SessionRecord[] | null): boolean =>
+      !!recs && getStream(sid).streamingTurns.length === 0 && recs.length > records.value.length
     let newRecords: SessionRecord[] | null = null
     for (const delay of [300, 400, 800]) {
       await new Promise(r => setTimeout(r, delay))
@@ -1617,13 +1632,18 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         })
       } catch { /* 下一轮重试 */ }
       if (allLanded(newRecords) && pendingLanded(newRecords)) break
+      if (emptyButGrown(newRecords)) break
     }
     if (effectiveSessionId.value !== sid) return
     if (newRecords) {
       // 产物单向(v2.5.0)已保证换树像素等价:本轮 assistant 全部落账时不再等
       // 「下一个天然安全时刻」,立即原子换树+摘 turn(与自发轮落账同款模式)——
       // usage/token 标注随历史区即刻出现,不必等下一条消息
-      if (allLanded(newRecords) && pendingLanded(newRecords)) {
+      if (emptyButGrown(newRecords)) {
+        // 空场:无 turn 可摘、无换树 diff,直接追加应用
+        records.value = newRecords
+        deferredRecords = null
+      } else if (allLanded(newRecords) && pendingLanded(newRecords)) {
         // 换树前等本轮文本的完成态 HTML 预热落缓存:预热任务排在逐段上色队列末尾,
         // await 它 = 同时等到「上色完成 + 缓存命中」两个条件——否则换树时历史区
         // cached miss 触发全文 shiki 同步渲染(卡帧),且流式区半彩半素与历史区
@@ -1650,6 +1670,9 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         console.log(`%c ========== [detail] records deferred: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
       }
     }
+    } finally {
+      settlingSessions.delete(sid)
+    }
     maybeConsumeQueue()
   }
 })
@@ -1662,7 +1685,11 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
 function maybeConsumeQueue() {
   if (stream.value.streaming || externalRunning.value || ownProcessBusy.value) return
   const cs = currentSession.value
-  if (cs?.summary.cwd) consumePendingQueue(cs.summary.id, cs.summary.cwd)
+  if (!cs?.summary.cwd) return
+  // settle 在途:换树完成前发送会清掉未落账的上一轮 turns(丢内容),
+  // 由 settle watcher 尾部的 maybeConsumeQueue 补发
+  if (settlingSessions.has(cs.summary.id)) return
+  consumePendingQueue(cs.summary.id, cs.summary.cwd)
 }
 
 // 忙态翻空闲即消费:自发轮落账摘除(live 清空)、进程退出清 live 等一切翻 false
