@@ -34,9 +34,16 @@ Monet **never writes** to Claude Code's JSONL files. All metadata is stored sepa
 
 ## Install
 
-Download the latest `.dmg` from [Releases](../../releases).
+**Homebrew**:
 
-> macOS only for now. Requires macOS 11+.
+```bash
+brew tap zenolab124/tap
+brew install --cask monet
+```
+
+Or download the latest `.dmg` from [Releases](../../releases).
+
+> macOS only for now. Requires macOS 11+ (Apple Silicon).
 
 **First launch**: Monet is signed with a stable identity but not yet notarized by Apple, so Gatekeeper will warn on first open. Right-click the app → **Open** (once), or run:
 
