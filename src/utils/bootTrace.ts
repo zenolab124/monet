@@ -6,8 +6,8 @@
  *                    与 boot:html 的差 = 主 chunk fetch + parse
  *   boot:modules     全部依赖模块 body 执行完（vue / markdown-it / shiki 发起等）
  *   boot:mounted     createApp().mount() 返回 —— 首帧 vdom→DOM（含六视图常驻挂载）
- *   boot:raf1        第一层 rAF —— 跑在下一渲染帧开头；mounted→raf1 = 主线程被 JS 长任务占住、渲染排不上队的等待
- *   boot:first-frame 第二层 rAF —— 首帧真实上屏；raf1→first-frame = 首帧真实 style/layout/paint/合成
+ *   boot:raf1        rAF —— 跑在下一渲染帧开头；mounted→raf1 = 主线程被 JS 长任务占住、渲染排不上队的等待
+ *   boot:first-frame rAF 内 setTimeout(0) —— 首帧渲染完成后的首个宏任务；raf1→first-frame = 首帧真实 style/layout/paint
  *   boot:app-ready   App.vue onMounted 初始化链完成（已不白屏，量数据段用）
  */
 performance.mark('boot:js-start')
@@ -17,14 +17,16 @@ export function markBoot(name: string) {
 }
 
 /**
- * mount 后调用：double-rAF 捕获首帧上屏时刻。
- * 第一层 rAF 回调跑在下一渲染帧开头 → boot:raf1，量「主线程被 JS 占住、渲染排不上队」的等待；
- * 第二层 rAF 回调 → boot:first-frame，此时首帧真实 style/layout/paint/合成已完成。
+ * mount 后调用：捕获首帧上屏时刻。
+ * rAF 回调跑在下一渲染帧开头 → boot:raf1，量「主线程被 JS 占住、渲染排不上队」的等待；
+ * 帧内 setTimeout(0) → boot:first-frame，宏任务紧随本帧 style/layout/paint 之后执行。
+ * 不用 double-rAF（第二帧开头）：宏任务优先级高于 idle callback，第二帧则会被空闲期
+ * 任务推迟——实测 Shiki 空闲预热 583ms 被整段计入白屏，量出伪影。
  */
 export function finishBootTrace() {
   requestAnimationFrame(() => {
     performance.mark('boot:raf1')
-    requestAnimationFrame(() => performance.mark('boot:first-frame'))
+    setTimeout(() => performance.mark('boot:first-frame'), 0)
   })
 }
 
