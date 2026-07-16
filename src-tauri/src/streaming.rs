@@ -275,6 +275,11 @@ fn open_session(
         "--input-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        // 真流式:CLI 2.1.177+ 默认只发 assistant 快照(整块,可能多次),该 flag 恢复
+        // content_block_delta 字符级增量(实测 thinking/text 平均十几字符一个事件)。
+        // 首字延迟从"整条消息生成完"缩到 API 首 token;快照仍会兜底到达,
+        // 前端 feedSnapshotText 按已知长度差量对账,双路径幂等不双写
+        "--include-partial-messages".to_string(),
         "--thinking-display".to_string(),
         "summarized".to_string(),
         "--mcp-config".to_string(),
