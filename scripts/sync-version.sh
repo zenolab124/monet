@@ -28,7 +28,18 @@ grep -q "^version = \"${VERSION}\"" "$DIR/src-tauri/Cargo.toml" \
 grep -q "\"version\": \"${VERSION}\"" "$DIR/src-tauri/tauri.conf.json" \
   || { echo "✗ tauri.conf.json 版本同步失败（期望 ${VERSION}）" >&2; exit 1; }
 
-# Cargo.lock 的 app 版本随 Cargo.toml 联动，避免下次构建产生漂移的未提交改动
-(cd "$DIR/src-tauri" && cargo update --workspace --quiet 2>/dev/null) || true
+# Cargo.lock 的 app 版本随 Cargo.toml 联动——否则 CI 的 --locked 检查必炸。
+# 不调 cargo（pnpm hook 环境 PATH 无 ~/.cargo/bin,首版曾静默失败),python 直改 lock
+python3 - "$DIR/src-tauri/Cargo.lock" "$VERSION" <<'PYEOF'
+import re, sys
+path, version = sys.argv[1], sys.argv[2]
+s = open(path).read()
+s2 = re.sub(r'(name = "app"\nversion = )"[^"]*"', rf'\1"{version}"', s, count=1)
+if s == s2:
+    sys.exit('Cargo.lock 中未找到 app 包条目')
+open(path, 'w').write(s2)
+PYEOF
+grep -A1 '^name = "app"$' "$DIR/src-tauri/Cargo.lock" | grep -q "version = \"${VERSION}\"" \
+  || { echo "✗ Cargo.lock 版本同步失败（期望 ${VERSION}）" >&2; exit 1; }
 
 git add "$DIR/src-tauri/tauri.conf.json" "$DIR/src-tauri/Cargo.toml" "$DIR/src-tauri/Cargo.lock"
