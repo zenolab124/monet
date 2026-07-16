@@ -251,7 +251,8 @@ pub fn run() {
             quota::quota_available,
             quota::get_tray_title_config,
             quota::set_tray_title_config,
-            tray_agent::launch_tray,
+            tray_agent::get_tray_enabled,
+            tray_agent::set_tray_enabled,
             menu::hide_main_window,
             menu::quit_app,
         ])

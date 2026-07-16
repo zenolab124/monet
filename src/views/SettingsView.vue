@@ -343,15 +343,20 @@ async function toggleTraySlot(key: string) {
   await invoke('set_tray_title_config', { slots: traySlots.value }).catch(() => {})
 }
 
-const trayLaunchState = ref<'idle' | 'ok' | 'fail'>('idle')
-async function launchTray() {
+const trayEnabled = ref(true)
+const trayToggleFailed = ref(false)
+async function toggleTrayEnabled() {
+  const next = !trayEnabled.value
+  trayEnabled.value = next
   try {
-    await invoke('launch_tray')
-    trayLaunchState.value = 'ok'
+    await invoke('set_tray_enabled', { enabled: next })
+    trayToggleFailed.value = false
   } catch {
-    trayLaunchState.value = 'fail'
+    // 失败回弹并短暂提示
+    trayEnabled.value = !next
+    trayToggleFailed.value = true
+    setTimeout(() => { trayToggleFailed.value = false }, 2500)
   }
-  setTimeout(() => { trayLaunchState.value = 'idle' }, 2500)
 }
 
 interface QuotaInfo {
@@ -362,6 +367,9 @@ interface QuotaInfo {
 }
 
 async function loadTrayTitleConfig() {
+  try {
+    trayEnabled.value = await invoke<boolean>('get_tray_enabled')
+  } catch {}
   try {
     const cfg = await invoke<TrayTitleConfig>('get_tray_title_config')
     traySlots.value = cfg.slots
@@ -1136,6 +1144,17 @@ function onSaved() {
               <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
             <div class="setting-cell">
+              <div class="flex items-center justify-between">
+                <div class="setting-label">{{ $t('settings.trayAutostart') }}</div>
+                <button :class="['form-toggle', { on: trayEnabled }]" @click="toggleTrayEnabled">
+                  <span class="form-toggle-knob" />
+                </button>
+              </div>
+              <div class="setting-hint" :class="{ 'text-red-500': trayToggleFailed }">
+                {{ trayToggleFailed ? $t('settings.trayLaunchFail') : $t('settings.trayAutostartHint') }}
+              </div>
+            </div>
+            <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
               <div class="flex flex-col gap-1.5">
                 <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
@@ -1149,14 +1168,6 @@ function onSaved() {
                 </label>
               </div>
               <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
-              <button
-                class="mt-2 px-2 py-0.5 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                @click="launchTray"
-              >{{
-                trayLaunchState === 'ok' ? $t('settings.trayLaunchOk')
-                : trayLaunchState === 'fail' ? $t('settings.trayLaunchFail')
-                : $t('settings.trayLaunch')
-              }}</button>
             </div>
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>

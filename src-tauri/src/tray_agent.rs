@@ -84,23 +84,40 @@ pub fn ensure_launch_agent() {
     install_and_start();
 }
 
-/// 设置页「启动菜单栏」：清除退出标记后强制安装并拉起
+/// 菜单栏常驻是否开启（= 用户未主动关闭）。
+/// plist 的 RunAtLoad 决定开机自启，此标记决定要不要装/拉起 plist。
 #[tauri::command]
-pub fn launch_tray() -> Result<(), String> {
-    let _ = std::fs::remove_file(disabled_marker_path());
-    install_and_start();
+pub fn get_tray_enabled() -> bool {
+    !disabled_marker_path().exists()
+}
 
-    // 校验确实起来了，给前端可感知的失败
-    let (_, service) = launchctl_targets();
-    let ok = Command::new("launchctl")
-        .args(["print", &service])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if ok {
-        Ok(())
+/// 设置页开关：开 = 清标记 + 安装 + 拉起；关 = 写标记 + bootout（终止进程）
+#[tauri::command]
+pub fn set_tray_enabled(enabled: bool) -> Result<(), String> {
+    if enabled {
+        let _ = std::fs::remove_file(disabled_marker_path());
+        install_and_start();
+
+        // 校验确实起来了，给前端可感知的失败
+        let (_, service) = launchctl_targets();
+        let ok = Command::new("launchctl")
+            .args(["print", &service])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            Ok(())
+        } else {
+            Err("tray launch failed: service not registered".into())
+        }
     } else {
-        Err("tray launch failed: service not registered".into())
+        std::fs::write(disabled_marker_path(), "")
+            .map_err(|e| format!("write disabled marker: {e}"))?;
+        let (_, service) = launchctl_targets();
+        let _ = Command::new("launchctl")
+            .args(["bootout", &service])
+            .output();
+        Ok(())
     }
 }
 
