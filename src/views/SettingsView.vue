@@ -376,7 +376,9 @@ async function loadTrayTitleConfig() {
   } catch {}
   try {
     const qi = await invoke<QuotaInfo>('get_quota')
-    if (qi && !qi.error) {
+    // 刷新失败时后端返回「旧缓存数据 + error 标注」，数据仍可用——
+    // 按数据本身判断，error 只代表本次没刷新成功
+    if (qi?.weeklyModels?.length) {
       trayAvailableModels.value = qi.weeklyModels.map(m => m.displayName || m.model)
     }
   } catch {}

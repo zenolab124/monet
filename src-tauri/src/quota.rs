@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -129,14 +129,19 @@ struct OAuthCredential {
 // Cache (memory + disk)
 // ---------------------------------------------------------------------------
 
+// 内存缓存时间戳用墙钟毫秒而非 Instant：一与磁盘缓存的 fetched_at_ms 同源可比
+// （peek 取两者新者），二 Instant 在 macOS 睡眠期间暂停，合盖过夜后会把
+// 隔夜数据误判为「仍在 TTL 内」
 struct CachedQuota {
     info: QuotaInfo,
-    fetched_at: Instant,
+    fetched_at_ms: i64,
 }
 
 static CACHE: Mutex<Option<CachedQuota>> = Mutex::new(None);
 
-const CACHE_TTL: Duration = Duration::from_secs(120);
+// usage API 限流预算有限（曾被 120s 节奏叠加 CLI 打爆，429 窗口 ~15 分钟），
+// 菜单栏额度分钟级新鲜度足够，放宽到 5 分钟
+const CACHE_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Serialize, Deserialize)]
 struct DiskCache {
@@ -173,14 +178,58 @@ fn disk_cache_age_secs() -> Option<i64> {
 }
 
 // ---------------------------------------------------------------------------
+// 429 退避：usage API 的限流窗口约 15 分钟（Retry-After），冷却期内任何请求都会
+// 续期惩罚窗口。曾因 tray 固定 120s 盲目重试导致限流永不恢复，故退避状态必须
+// 落盘、tray 与主应用双进程共享，冷却期内一律不打 API（含手动刷新）。
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize)]
+struct BackoffState {
+    until_ms: i64,
+}
+
+fn backoff_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("quota-backoff.json")
+}
+
+fn write_backoff(secs: i64) {
+    let state = BackoffState {
+        until_ms: Utc::now().timestamp_millis() + secs * 1000,
+    };
+    if let Ok(json) = serde_json::to_string(&state) {
+        let _ = crate::config::atomic_write(&backoff_path(), &json);
+    }
+}
+
+fn clear_backoff() {
+    let _ = std::fs::remove_file(backoff_path());
+}
+
+/// 限流冷却剩余秒数；不在冷却期返回 None。tray 用它渲染「限流中」提示行。
+pub fn backoff_remaining_secs() -> Option<i64> {
+    let content = std::fs::read_to_string(backoff_path()).ok()?;
+    let state: BackoffState = serde_json::from_str(&content).ok()?;
+    let remain = (state.until_ms - Utc::now().timestamp_millis()) / 1000;
+    (remain > 0).then_some(remain)
+}
+
+/// 从 RFC3339 重置时刻现算剩余秒数。菜单每次重建时调用，
+/// 替代缓存里 fetch 时刻算死的 resets_in_secs（会随缓存年龄漂移）。
+pub fn secs_until(resets_at: Option<&str>) -> Option<i64> {
+    let dt = DateTime::parse_from_rfc3339(resets_at?).ok()?;
+    Some((dt.with_timezone(&Utc) - Utc::now()).num_seconds().max(0))
+}
+
+// ---------------------------------------------------------------------------
 // IPC commands
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn get_quota() -> QuotaInfo {
+    let now_ms = Utc::now().timestamp_millis();
     if let Ok(guard) = CACHE.lock() {
         if let Some(cached) = guard.as_ref() {
-            if cached.fetched_at.elapsed() < CACHE_TTL {
+            if now_ms - cached.fetched_at_ms < CACHE_TTL.as_millis() as i64 {
                 return cached.info.clone();
             }
         }
@@ -195,15 +244,22 @@ pub fn refresh_quota() -> QuotaInfo {
     fetch_and_cache(true)
 }
 
-/// 只读取现有缓存（内存 → 磁盘），绝不发起网络请求。
-/// 供 monet-tray 主线程即时重渲染（如 tray-title 配置变更）使用。
+/// 只读取现有缓存，绝不发起网络请求。内存与磁盘按时间戳取新者——
+/// 双进程各持独立内存缓存，磁盘可能被另一进程刚刷新过，
+/// 无条件内存优先会让 tray 的磁盘 mtime 侦测永远采不到主应用的新数据。
+/// 供 monet-tray 主线程即时重渲染（tray-title / quota-cache 变更）使用。
 pub fn peek_cached_quota() -> Option<QuotaInfo> {
-    if let Ok(guard) = CACHE.lock() {
-        if let Some(cached) = guard.as_ref() {
-            return Some(cached.info.clone());
-        }
+    let mem = CACHE
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|c| (c.info.clone(), c.fetched_at_ms)));
+    let disk = read_disk_cache();
+    match (mem, disk) {
+        (Some((mi, mt)), Some((di, dt))) => Some(if dt > mt { di } else { mi }),
+        (Some((mi, _)), None) => Some(mi),
+        (None, Some((di, _))) => Some(di),
+        (None, None) => None,
     }
-    read_disk_cache().map(|(info, _)| info)
 }
 
 #[tauri::command]
@@ -216,17 +272,24 @@ pub fn quota_available() -> bool {
 // ---------------------------------------------------------------------------
 
 fn fetch_and_cache(force: bool) -> QuotaInfo {
+    // 限流冷却期内一律不打 API——手动刷新也不例外：打了必 429 且会续期惩罚窗口。
+    // 诚实返回旧数据 + 错误标注，让 UI 告知用户「限流中，X 分钟后自动恢复」。
+    if let Some(remain) = backoff_remaining_secs() {
+        let mins = (remain + 59) / 60;
+        return stale_with_error(format!("Rate limited, retry in {mins}m"));
+    }
+
     // 磁盘缓存 TTL 内直接采用（另一进程可能刚刷过，双进程共享省 API 调用）；
     // force（用户手动刷新）跳过，保证「点了刷新就真的刷新」
     if !force {
         if let Some(age) = disk_cache_age_secs() {
             if age < CACHE_TTL.as_secs() as i64 {
-                if let Some((info, _)) = read_disk_cache() {
+                if let Some((info, fetched_at_ms)) = read_disk_cache() {
                     if info.error.is_none() {
                         if let Ok(mut guard) = CACHE.lock() {
                             *guard = Some(CachedQuota {
                                 info: info.clone(),
-                                fetched_at: Instant::now(),
+                                fetched_at_ms,
                             });
                         }
                         return info;
@@ -238,23 +301,7 @@ fn fetch_and_cache(force: bool) -> QuotaInfo {
 
     let info = match fetch_quota_inner() {
         Ok(info) => info,
-        Err(e) => {
-            if let Some((cached, _)) = read_disk_cache() {
-                if cached.error.is_none() {
-                    return cached;
-                }
-            }
-            QuotaInfo {
-                session: None,
-                weekly: None,
-                weekly_models: vec![],
-                extra_usage: None,
-                plan: None,
-                account_email: None,
-                updated_at: Utc::now().to_rfc3339(),
-                error: Some(e),
-            }
-        },
+        Err(e) => return stale_with_error(e),
     };
     if info.error.is_none() {
         write_disk_cache(&info);
@@ -262,10 +309,32 @@ fn fetch_and_cache(force: bool) -> QuotaInfo {
     if let Ok(mut guard) = CACHE.lock() {
         *guard = Some(CachedQuota {
             info: info.clone(),
-            fetched_at: Instant::now(),
+            fetched_at_ms: Utc::now().timestamp_millis(),
         });
     }
     info
+}
+
+/// 刷新失败时的诚实回退：返回旧缓存数据（updated_at 保持旧值）+ error 标注，
+/// 让 UI 能同时展示「上次成功的数据」和「本次为什么失败」。不写盘、不进内存缓存
+/// （error 结果缓存后会在 TTL 内遮蔽恢复）。
+fn stale_with_error(err: String) -> QuotaInfo {
+    if let Some((mut cached, _)) = read_disk_cache() {
+        if cached.error.is_none() {
+            cached.error = Some(err);
+            return cached;
+        }
+    }
+    QuotaInfo {
+        session: None,
+        weekly: None,
+        weekly_models: vec![],
+        extra_usage: None,
+        plan: None,
+        account_email: None,
+        updated_at: Utc::now().to_rfc3339(),
+        error: Some(err),
+    }
 }
 
 fn fetch_quota_inner() -> Result<QuotaInfo, String> {
@@ -288,11 +357,25 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
 
     if !resp.status().is_success() {
         let status = resp.status();
+        if status.as_u16() == 429 {
+            // 无 Retry-After 时按实测窗口 ~15 分钟兜底；钳位防服务端异常值
+            let retry_secs = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse::<i64>().ok())
+                .unwrap_or(900)
+                .clamp(60, 3600);
+            write_backoff(retry_secs);
+            let mins = (retry_secs + 59) / 60;
+            return Err(format!("Rate limited, retry in {mins}m"));
+        }
         let body = resp.text().unwrap_or_default();
         return Err(format!("API error {status}: {body}"));
     }
 
     let api: ApiUsageResponse = resp.json().map_err(|e| format!("Parse error: {e}"))?;
+    clear_backoff();
     let now = Utc::now();
 
     let session = api.five_hour.as_ref().and_then(|w| w.utilization.map(|u| {
