@@ -1,5 +1,5 @@
 #!/bin/bash
-# 发版：提交未暂存改动 → 升版本号 → 打包 + Widget
+# 发版：升版本号 → 打包 → Helper App → Widget
 # 用法：
 #   pnpm release            → patch (0.1.0 → 0.1.1)
 #   pnpm release -- minor   → minor (0.1.0 → 0.2.0)
@@ -9,10 +9,11 @@ set -euo pipefail
 
 BUMP=${1:-patch}
 
-# 有未提交改动则先提交
+# 工作区必须干净：不代替用户决定提交内容（并行开发时盲提交会混入无关改动）
 if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-  git add -A
-  git commit -m "chore: pre-release changes"
+  echo "✗ 工作区有未提交改动，请先自行提交（按主题切分）后再发版：" >&2
+  git status --short >&2
+  exit 1
 fi
 
 pnpm version "$BUMP"
