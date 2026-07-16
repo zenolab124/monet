@@ -94,6 +94,23 @@ else
 fi
 rm -rf "$DMG_STAGE"
 
+# --- Updater 产物（.app.tar.gz + minisign 签名 + latest.json） ---
+# 仅在提供 TAURI_SIGNING_PRIVATE_KEY 时生成（发版链路:CI 经 secrets 注入;
+# 日常本地打包无密钥自动跳过,不阻塞）。私钥对应 tauri.conf plugins.updater.pubkey
+UPDATER_DIR="$(dirname "$APP_BUNDLE")/../updater"
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+    echo "=> Creating updater artifacts..."
+    mkdir -p "$UPDATER_DIR"
+    TARBALL="$UPDATER_DIR/${APP_NAME}_${VERSION}_aarch64.app.tar.gz"
+    rm -f "$TARBALL" "$TARBALL.sig"
+    tar czf "$TARBALL" -C "$(dirname "$APP_BUNDLE")" "$(basename "$APP_BUNDLE")"
+    (cd .. && pnpm tauri signer sign "$TARBALL")
+    node "$SCRIPT_DIR/../scripts/create-latest-json.mjs" "$VERSION" "$TARBALL" "$UPDATER_DIR/latest.json"
+    echo "   Updater: $TARBALL (+.sig, latest.json)"
+else
+    echo "=> Skipping updater artifacts (TAURI_SIGNING_PRIVATE_KEY not set)"
+fi
+
 echo "=> Done!"
 echo "   App: $APP_BUNDLE"
 echo "   DMG: $DMG_PATH"

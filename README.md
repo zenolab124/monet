@@ -38,6 +38,14 @@ Download the latest `.dmg` from [Releases](../../releases).
 
 > macOS only for now. Requires macOS 11+.
 
+**First launch**: Monet is signed with a stable identity but not yet notarized by Apple, so Gatekeeper will warn on first open. Right-click the app → **Open** (once), or run:
+
+```bash
+xattr -cr /Applications/Monet.app
+```
+
+After that, updates install silently in-app — no warnings again.
+
 ## Build from Source
 
 ### Prerequisites

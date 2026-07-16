@@ -1,5 +1,16 @@
 name: Release
 
+# 推 v* tag 触发:完整复刻本地发版产物(app + Tray helper + Widget + 稳定身份签名
+# + DMG + updater 三件套),发 draft release——人工检查后 publish 才对 updater 生效。
+#
+# 所需 secrets:
+#   SIGNING_CERT_P12          自签证书 "Monet Signing" 导出的 .p12,base64 编码
+#   SIGNING_CERT_PASSWORD     .p12 导出密码
+#   TAURI_SIGNING_PRIVATE_KEY updater minisign 私钥(对应 tauri.conf 的 pubkey)
+#
+# 签名用与本地相同的稳定自签身份:updater 静默升级后签名不变,TCC 授权不丢。
+# 公证(Developer ID)按触发式策略暂缓,届时仅需替换证书 secrets 与 SIGN_ID。
+
 on:
   push:
     tags:
@@ -31,19 +42,59 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PASS="ci-$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security set-keychain-settings -lut 3600 build.keychain
+          echo "$CERT_P12" | base64 -d > /tmp/cert.p12
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S 'apple-tool:,apple:,codesign:' -s -k "$KEYCHAIN_PASS" build.keychain
+          # 自签证书必须进系统信任链,否则 codesign 拒绝用它签名
+          openssl pkcs12 -in /tmp/cert.p12 -clcerts -nokeys -passin pass:"$CERT_PASSWORD" -out /tmp/cert.pem
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain /tmp/cert.pem
+          rm -f /tmp/cert.p12 /tmp/cert.pem
+
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build app
+        run: pnpm tauri build --bundles app
+
+      - name: Bundle tray helper
+        run: bash scripts/bundle-tray.sh
+
+      - name: Build widget, sign, package
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+          SIGN_ID: Monet Signing
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
-        with:
-          tagName: v__VERSION__
-          releaseName: 'Monet v__VERSION__'
-          releaseBody: 'See the assets to download and install.'
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
+        run: src-widget/build.sh
+
+      - name: Verify signature
+        run: |
+          codesign --verify --deep --strict src-tauri/target/release/bundle/macos/Monet.app
+          codesign -dv src-tauri/target/release/bundle/macos/Monet.app 2>&1 | grep 'Authority\|Signature'
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "Monet ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            src-tauri/target/release/bundle/dmg/*.dmg \
+            src-tauri/target/release/bundle/updater/*.app.tar.gz \
+            src-tauri/target/release/bundle/updater/*.sig \
+            src-tauri/target/release/bundle/updater/latest.json
