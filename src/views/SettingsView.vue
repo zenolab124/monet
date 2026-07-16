@@ -1105,6 +1105,37 @@ function onSaved() {
           </div>
 
           <div class="settings-grid">
+            <!-- 菜单栏：常驻开关 + 显示槽位（同主题合并一格） -->
+            <div class="setting-cell">
+              <div class="flex items-center justify-between">
+                <div class="setting-label">{{ $t('settings.trayAutostart') }}</div>
+                <button :class="['form-toggle', { on: trayEnabled }]" @click="toggleTrayEnabled">
+                  <span class="form-toggle-knob" />
+                </button>
+              </div>
+              <div class="setting-hint" :class="{ 'text-red-500': trayToggleFailed }">
+                {{ trayToggleFailed ? $t('settings.trayLaunchFail') : $t('settings.trayAutostartHint') }}
+              </div>
+              <div
+                class="mt-3 transition-opacity"
+                :class="{ 'opacity-40 pointer-events-none': !trayEnabled }"
+              >
+                <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
+                <div class="flex flex-col gap-1.5">
+                  <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
+                    <input
+                      type="checkbox"
+                      :checked="isTraySlotActive(slot.key)"
+                      class="accent-primary"
+                      @change="toggleTraySlot(slot.key)"
+                    />
+                    {{ slot.label }}
+                  </label>
+                </div>
+                <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
+              </div>
+            </div>
+            <!-- 定时唤醒 -->
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.routineWake') }}</div>
               <div class="flex flex-col gap-1.5">
@@ -1143,32 +1174,7 @@ function onSaved() {
               </div>
               <div class="setting-hint">{{ $t('settings.routineWakeHint') }}</div>
             </div>
-            <div class="setting-cell">
-              <div class="flex items-center justify-between">
-                <div class="setting-label">{{ $t('settings.trayAutostart') }}</div>
-                <button :class="['form-toggle', { on: trayEnabled }]" @click="toggleTrayEnabled">
-                  <span class="form-toggle-knob" />
-                </button>
-              </div>
-              <div class="setting-hint" :class="{ 'text-red-500': trayToggleFailed }">
-                {{ trayToggleFailed ? $t('settings.trayLaunchFail') : $t('settings.trayAutostartHint') }}
-              </div>
-            </div>
-            <div class="setting-cell">
-              <div class="setting-label">{{ $t('settings.trayTitle') }}</div>
-              <div class="flex flex-col gap-1.5">
-                <label v-for="slot in traySlotOptions" :key="slot.key" class="flex items-center gap-2 cursor-pointer text-[12px]">
-                  <input
-                    type="checkbox"
-                    :checked="isTraySlotActive(slot.key)"
-                    class="accent-primary"
-                    @change="toggleTraySlot(slot.key)"
-                  />
-                  {{ slot.label }}
-                </label>
-              </div>
-              <div class="setting-hint">{{ $t('settings.trayTitleHint') }}</div>
-            </div>
+            <!-- 小组件：今日起算 + 本月范围（同主题同行） -->
             <div class="setting-cell">
               <div class="setting-label">{{ $t('settings.widgetDayBoundary') }}</div>
               <select
