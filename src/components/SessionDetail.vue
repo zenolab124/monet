@@ -1366,14 +1366,7 @@ async function handleSend() {
   // 发送前即时落账:上一轮流式 turns 还在时,sendMessage 会清 streamingTurns
   // 但 records 尚未 reload——内容从两源同时消失。先应用暂存/重新 reload 收进历史区
   if (stream.value.streamingTurns.length > 0) {
-    // FR-006 开发期换树位移观测:高度 diff >1px 即落档(生产 tree-shake)
-    if (import.meta.env.DEV) {
-      const before = scrollContainer.value?.scrollHeight ?? 0
-      void nextTick(() => {
-        import('@/lib/stream-markdown/devConsistencyCheck').then(({ devCheckSwapHeight }) =>
-          devCheckSwapHeight('send-swap', before, scrollContainer.value?.scrollHeight ?? 0))
-      })
-    }
+    devObserveSwap('send-swap')
     if (deferredRecords?.sid === cs.summary.id) {
       records.value = deferredRecords.recs
       deferredRecords = null
@@ -1574,6 +1567,16 @@ onUnmounted(() => { contentRO?.disconnect(); contentRO = null })
 // 一并应用 + 清理 turns。shiki 上色虽有高度变化，但 contentRO 持续贴底足够覆盖。
 let deferredRecords: { sid: string; recs: SessionRecord[] } | null = null
 
+// FR-006 开发期换树位移观测:前后 scrollHeight diff >1px 落档(生产构建 tree-shake)
+function devObserveSwap(label: string) {
+  if (!import.meta.env.DEV) return
+  const before = scrollContainer.value?.scrollHeight ?? 0
+  void nextTick(() => {
+    import('@/lib/stream-markdown/devConsistencyCheck').then(({ devCheckSwapHeight }) =>
+      devCheckSwapHeight(label, before, scrollContainer.value?.scrollHeight ?? 0))
+  })
+}
+
 watch(() => stream.value.streaming, async (val, oldVal) => {
   if (!val && oldVal) {
     const cs = currentSession.value
@@ -1610,8 +1613,23 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     }
     if (effectiveSessionId.value !== sid) return
     if (newRecords) {
-      deferredRecords = { sid, recs: newRecords }
-      console.log(`%c ========== [detail] records deferred: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
+      // 产物单向(v2.5.0)已保证换树像素等价:本轮 assistant 已落账时不再等
+      // 「下一个天然安全时刻」,立即原子换树+摘 turn(与自发轮落账同款模式)——
+      // usage/token 标注随历史区即刻出现,不必等下一条消息
+      const turnIds = new Set(getStream(sid).streamingTurns.map(t => t.messageId))
+      const landedNow = newRecords.some(r =>
+        r.type === 'assistant' && turnIds.has((r.message as { id?: string } | null | undefined)?.id ?? ''))
+      if (landedNow && pendingLanded(newRecords)) {
+        devObserveSwap('settle-swap')
+        records.value = newRecords
+        removeLandedTurns(sid, newRecords)
+        deferredRecords = null
+        console.log(`%c ========== [detail] records settled immediately: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
+      } else {
+        // 落账未确认(JSONL flush 晚/reload 空手):退回暂存,下一个安全时刻应用
+        deferredRecords = { sid, recs: newRecords }
+        console.log(`%c ========== [detail] records deferred: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
+      }
     }
     maybeConsumeQueue()
   }

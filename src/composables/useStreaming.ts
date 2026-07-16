@@ -268,14 +268,15 @@ function charsPerTick(queueLen: number): number {
 function totalPendingChars(): number {
   let total = 0
   pendingTextDeltas.forEach(p => {
-    total += p.text?.length ?? 0
+    total += (p.text?.length ?? 0) + (p.thinking?.length ?? 0)
   })
   return total
 }
 
 /**
  * @param allAtOnce    true:一次性 flush 全部(流结束 / 中断收尾用,确保不丢字符)
- *                     false:打字机节奏;thinking/signature 到帧即全量落地
+ *                     false:打字机节奏;text 与 thinking 都按排量渐现(CLI 的 thinking
+ *                     delta 颗粒大,全量落地会整块蹦出),signature 非文本到帧即落
  * @param onlySession  仅 flush 指定会话的 pending(某一路流结束时不影响其他在播会话)
  * @returns 是否还有未消化字符
  */
@@ -296,11 +297,12 @@ function flushTextDeltasInner(allAtOnce = false, onlySession?: string): boolean 
   let hasRemaining = false
   const take = allAtOnce ? Infinity : charsPerTick(pending)
 
-  // 统计每个会话有几个待播 text 块,有后续块时前面的瞬间吐完
+  // 统计每个会话有几个待播文本块(text/thinking),有后续块时前面的瞬间吐完——
+  // thinking 后面出了正文时思考回放没有意义,不能挡正文的打字机
   const sessionTextKeys = new Map<string, string[]>()
   if (!allAtOnce) {
     pendingTextDeltas.forEach((p, key) => {
-      if (p.text === undefined) return
+      if (p.text === undefined && p.thinking === undefined) return
       const mid = key.slice(0, key.indexOf('#'))
       const entry = turnIndex.get(mid)
       if (!entry) return
@@ -330,8 +332,15 @@ function flushTextDeltasInner(allAtOnce = false, onlySession?: string): boolean 
     if (!block) return
 
     if (p.thinking !== undefined && block.type === 'thinking') {
-      ;(block as { thinking: string }).thinking += p.thinking
-      p.thinking = undefined
+      const actualTake = instantKeys.has(key) ? Infinity : take
+      ;(block as { thinking: string }).thinking += p.thinking.slice(0, actualTake)
+      const rem = p.thinking.slice(actualTake)
+      if (rem) {
+        p.thinking = rem
+        hasRemaining = true
+      } else {
+        p.thinking = undefined
+      }
     }
     if (p.signature !== undefined && block.type === 'thinking') {
       ;(block as Record<string, unknown>).signature = p.signature
@@ -466,6 +475,10 @@ function flushPendingBefore(messageId: string, beforeIndex: number) {
       ;(block as { text: string }).text += p.text
       p.text = undefined
     }
+    if (p.thinking !== undefined && block.type === 'thinking') {
+      ;(block as { thinking: string }).thinking += p.thinking
+      p.thinking = undefined
+    }
     if (p.text === undefined && p.thinking === undefined && p.signature === undefined) {
       pendingTextDeltas.delete(key)
     }
@@ -473,9 +486,9 @@ function flushPendingBefore(messageId: string, beforeIndex: number) {
 }
 
 /**
- * 从 assistant 快照提取增量。
- * text → 喂入打字机队列(逐字播放)。
- * thinking → 直接设值(不走打字机,折叠态逐字无意义)。
+ * 从 assistant 快照提取增量(快照可能多次到达:空→部分→完整,按已知长度差量对账)。
+ * text / thinking → 喂入打字机队列(逐字播放)。thinking 曾直接设值,导致多次快照
+ * 之间整块跳变(CLI 2.1.177+ 无 delta,快照就是唯一颗粒),现与 text 同款对账渐现。
  */
 function feedSnapshotText(
   messageId: string,
@@ -500,8 +513,21 @@ function feedSnapshotText(
     }
     stripped.text = curText
   } else if (incoming.type === 'thinking') {
-    // thinking 直接设值——折叠态逐字无意义,且会阻塞后续 text 块
-    stripped.thinking = (incoming as { thinking?: string }).thinking ?? ''
+    // 与 text 同款差量对账:阻塞后续块的问题由 flushPendingBefore(跨帧新块冲刷)
+    // 与 instantKeys(同帧多块瞬吐)兜住,思考残量不会挡正文
+    const key = partialJsonKey(messageId, index)
+    const incThink = (incoming as { thinking?: string }).thinking ?? ''
+    if (!incThink) return
+    const curThink = typeof stripped.thinking === 'string' ? stripped.thinking : ''
+    const pendingLen = pendingTextDeltas.get(key)?.thinking?.length ?? 0
+    const alreadyKnown = curThink.length + pendingLen
+    if (incThink.length > alreadyKnown) {
+      const delta = incThink.slice(alreadyKnown)
+      const e = pendingTextDeltas.get(key) ?? {}
+      e.thinking = (e.thinking ?? '') + delta
+      pendingTextDeltas.set(key, e)
+    }
+    stripped.thinking = curThink
   }
 }
 
@@ -717,6 +743,7 @@ export async function initStreamListeners(): Promise<void> {
                 flushPendingBefore(mid, idx)
                 const stripped: Record<string, unknown> = { ...incoming }
                 if (incoming.type === 'text') stripped.text = ''
+                if (incoming.type === 'thinking') stripped.thinking = ''
                 feedSnapshotText(mid, idx, incoming, stripped, sid)
                 ;(existing.content as ContentBlock[]).push(stripped as ContentBlock)
                 cursor = existing.content.length
@@ -733,7 +760,7 @@ export async function initStreamListeners(): Promise<void> {
             const strippedContent: ContentBlock[] = payload.content.map(b => {
               const s: Record<string, unknown> = { ...b }
               if (b.type === 'text') s.text = ''
-              // thinking 保留全量(直接显示,不走打字机)
+              if (b.type === 'thinking') s.thinking = ''
               return s as ContentBlock
             })
             state.streamingTurns.push({
