@@ -211,7 +211,7 @@ export async function syncProcessAlive(sessionId: string): Promise<void> {
   }
 }
 
-// ---- 打字机批 flush（全局单队列，key=messageId#index 天然多流安全） ----
+// ---- 帧级批 flush（全局单队列，key=messageId#index 天然多流安全） ----
 
 // 累积每个 (messageId, index) 上 tool_use 的 partial_json 字符串,
 // block_stop 时 JSON.parse 一次性写入 block.input
@@ -253,75 +253,28 @@ export const streamingTick = ref(0)
 let rafId: number | null = null
 
 /**
- * 自适应打字间隔(ms)。积压浅时保留打字机质感,深时快速追赶。
+ * 每帧全量落地(打字机排量已退役,2026-07-16 用户决策):数据层已是真流式
+ * (--include-partial-messages,平均十几字符一个 delta),屏幕节奏 = API 真实
+ * 生成节奏,人造回放调速不再需要。批处理层保留——delta 仍先累进 pending、
+ * 每帧合并落地一次,防每秒百次 mutate 压垮渲染。
+ * 打字机自适应排量(typingInterval/charsPerTick/instantKeys)见 git 史。
+ *
+ * @param onlySession  仅 flush 指定会话的 pending(收尾时不影响其他在播会话)
+ * @returns 是否还有未消化字符(仅 onlySession 过滤时可能为 true)
  */
-function typingInterval(queueLen: number): number {
-  if (queueLen <= 5) return 55     // ~18 字/秒,舒适打字节奏
-  if (queueLen <= 40) return 30    // ~33 字/秒,略快
-  if (queueLen <= 200) return 20   // 配合 charsPerTick 加速
-  return 16                        // 深积压:贴合 rAF 节奏全速追赶
-}
-
-/** 每帧吐字数:积压越深每帧多吐,2s 内消化大块快照 */
-function charsPerTick(queueLen: number): number {
-  if (queueLen <= 100) return 1
-  if (queueLen <= 500) return 3
-  if (queueLen <= 2000) return 10
-  return 30
-}
-
-function totalPendingChars(): number {
-  let total = 0
-  pendingTextDeltas.forEach(p => {
-    total += (p.text?.length ?? 0) + (p.thinking?.length ?? 0)
-  })
-  return total
-}
-
-/**
- * @param allAtOnce    true:一次性 flush 全部(流结束 / 中断收尾用,确保不丢字符)
- *                     false:打字机节奏;text 与 thinking 都按排量渐现(CLI 的 thinking
- *                     delta 颗粒大,全量落地会整块蹦出),signature 非文本到帧即落
- * @param onlySession  仅 flush 指定会话的 pending(某一路流结束时不影响其他在播会话)
- * @returns 是否还有未消化字符
- */
-function flushTextDeltas(allAtOnce = false, onlySession?: string): boolean {
+function flushTextDeltas(onlySession?: string): boolean {
   if (pendingTextDeltas.size === 0) return false
-  // HUD 长帧归因埋点:打字机 flush 是流式期主线程的最大嫌疑段
+  // HUD 长帧归因埋点:流式期主线程的最大嫌疑段
   const perfT0 = performance.now()
   try {
-    return flushTextDeltasInner(allAtOnce, onlySession)
+    return flushTextDeltasInner(onlySession)
   } finally {
     performance.measure('stream-flush', { start: perfT0, duration: performance.now() - perfT0 })
   }
 }
 
-function flushTextDeltasInner(allAtOnce = false, onlySession?: string): boolean {
-  const pending = totalPendingChars()
-  if (pending > 5000) allAtOnce = true
+function flushTextDeltasInner(onlySession?: string): boolean {
   let hasRemaining = false
-  const take = allAtOnce ? Infinity : charsPerTick(pending)
-
-  // 统计每个会话有几个待播文本块(text/thinking),有后续块时前面的瞬间吐完——
-  // thinking 后面出了正文时思考回放没有意义,不能挡正文的打字机
-  const sessionTextKeys = new Map<string, string[]>()
-  if (!allAtOnce) {
-    pendingTextDeltas.forEach((p, key) => {
-      if (p.text === undefined && p.thinking === undefined) return
-      const mid = key.slice(0, key.indexOf('#'))
-      const entry = turnIndex.get(mid)
-      if (!entry) return
-      if (onlySession && entry.sessionId !== onlySession) return
-      const arr = sessionTextKeys.get(entry.sessionId)
-      if (arr) arr.push(key)
-      else sessionTextKeys.set(entry.sessionId, [key])
-    })
-  }
-  const instantKeys = new Set<string>()
-  sessionTextKeys.forEach(keys => {
-    for (let i = 0; i < keys.length - 1; i++) instantKeys.add(keys[i])
-  })
-
   pendingTextDeltas.forEach((p, key) => {
     const hashIdx = key.indexOf('#')
     if (hashIdx < 0) return
@@ -337,42 +290,23 @@ function flushTextDeltasInner(allAtOnce = false, onlySession?: string): boolean 
     if (!block) return
 
     if (p.thinking !== undefined && block.type === 'thinking') {
-      const actualTake = instantKeys.has(key) ? Infinity : take
-      ;(block as { thinking: string }).thinking += p.thinking.slice(0, actualTake)
-      const rem = p.thinking.slice(actualTake)
-      if (rem) {
-        p.thinking = rem
-        hasRemaining = true
-      } else {
-        p.thinking = undefined
-      }
+      ;(block as { thinking: string }).thinking += p.thinking
+      p.thinking = undefined
     }
     if (p.signature !== undefined && block.type === 'thinking') {
       ;(block as Record<string, unknown>).signature = p.signature
       p.signature = undefined
     }
-
     if (p.text !== undefined && block.type === 'text') {
-      const instant = instantKeys.has(key)
-      const actualTake = instant ? Infinity : take
-      ;(block as { text: string }).text += p.text.slice(0, actualTake)
-      const rem = p.text.slice(actualTake)
-      if (rem) {
-        p.text = rem
-        hasRemaining = true
-      } else {
-        p.text = undefined
-      }
+      ;(block as { text: string }).text += p.text
+      p.text = undefined
     }
-
-    if (p.text === undefined && p.thinking === undefined && p.signature === undefined) {
-      pendingTextDeltas.delete(key)
-    }
+    pendingTextDeltas.delete(key)
   })
   return hasRemaining
 }
 
-/** 正在排空打字机的会话(CLI 已 done,等打字机播完再翻 streaming=false) */
+/** 正在排空批处理残余的会话(CLI 已 done,等 pending 落净再翻 streaming=false,最多一帧) */
 const drainingStreams = new Set<string>()
 
 function hasSessionPending(sessionId: string): boolean {
@@ -386,12 +320,13 @@ function hasSessionPending(sessionId: string): boolean {
 
 function bump() {
   if (rafId !== null) return
-  const delay = typingInterval(totalPendingChars())
+  // 可见 16ms(≈一帧,setTimeout 实现无 RAF 遮挡饿死问题);窗口隐藏 160ms 降频省电
+  const delay = document.visibilityState === 'visible' ? 16 : 160
   rafId = window.setTimeout(() => {
     rafId = null
-    const hasRemaining = flushTextDeltas(false)
+    const hasRemaining = flushTextDeltas()
     streamingTick.value++
-    // 检查排空中的会话:打字机播完 → 完成收尾
+    // 检查排空中的会话:pending 落净 → 完成收尾
     if (drainingStreams.size > 0) {
       for (const sid of [...drainingStreams]) {
         if (!hasSessionPending(sid)) {
@@ -406,7 +341,7 @@ function bump() {
 
 // ---- 尾部状态聚合（监控卡消费,150ms 合并;FR-003） ----
 
-/** 各会话的原始文本尾巴累积（不走打字机,收到即累,150ms 刷成 tail 行） */
+/** 各会话的原始文本尾巴累积（不走帧级批处理,收到即累,150ms 刷成 tail 行） */
 const tailTextAcc = new Map<string, string>()
 const tailDirty = new Set<string>()
 let tailTimer: number | null = null
@@ -492,7 +427,7 @@ function flushPendingBefore(messageId: string, beforeIndex: number) {
 
 /**
  * 从 assistant 快照提取增量(快照可能多次到达:空→部分→完整,按已知长度差量对账)。
- * text / thinking → 喂入打字机队列(逐字播放)。thinking 曾直接设值,导致多次快照
+ * text / thinking → 喂入帧级批处理队列。thinking 曾直接设值,导致多次快照
  * 之间整块跳变(CLI 2.1.177+ 无 delta,快照就是唯一颗粒),现与 text 同款对账渐现。
  */
 function feedSnapshotText(
@@ -567,7 +502,7 @@ function snapshotMatches(current: ContentBlock, incoming: ContentBlock): boolean
 
 /**
  * 快照块合并进流式块:text/thinking 一律跳过——字符级 delta 累积是这两个字段的
- * 权威来源(快照会在打字机播完前到达,直接覆盖会瞬间跳满;redacted 模式下快照
+ * 权威来源(快照可能先于 pending 落地到达,直接覆盖会丢增量;redacted 模式下快照
  * thinking 还是空串,覆盖会擦掉已积累的明文)。其余字段(signature/input/name/id)
  * 取快照值校正——快照里 tool_use.input 是 CLI 已 parse 的完整对象,比 partial_json
  * 拼接更可靠。
@@ -630,7 +565,7 @@ export async function initStreamListeners(): Promise<void> {
           } else if (!entry.turn.model && payload.model) {
             entry.turn.model = payload.model
           }
-          // 新块开始 → 冲掉前面块的打字机积压:显示顺序必须与因果一致——
+          // 新块开始 → 冲掉前面块的批处理积压:显示顺序必须与因果一致——
           // 工具卡走即时通道,若前面文本还在回放,会出现"工具卡先完整出现、
           // 上方文本还在爬"的时序倒挂(真流式暴露的缺口:assistant 快照路径
           // 已有此冲刷,block_start 路径此前没有)
@@ -690,7 +625,7 @@ export async function initStreamListeners(): Promise<void> {
         }
         break
       case 'block_stop':
-        // 该 block 不再有 delta。text 残余不在此落地——交给打字机按节奏播完
+        // 该 block 不再有 delta。text 残余不在此落地——下一帧批 flush 落净
         // (流结束的 finishStream 有 flush(true) 兜底防丢);立即落地会让块尾瞬间跳满。
         // tool_use 的 partial_json 在 stop 时 parse 写入 block.input
         if (payload.message_id && payload.index !== undefined) {
@@ -727,9 +662,9 @@ export async function initStreamListeners(): Promise<void> {
         bump()
         break
       case 'assistant_message':
-        // 快照校正 + 打字机喂料。CLI 2.1.177+ 不再发 content_block_delta,
+        // 快照校正 + 批处理喂料。CLI 2.1.177+ 纯快照模式下不发 content_block_delta,
         // 只发 assistant 快照(可能多次:空→部分→完整)。检测文本增量,
-        // 扣除已播+已排队部分,喂入 pendingTextDeltas 复用打字机管线。
+        // 扣除已落地+已排队部分,喂入 pendingTextDeltas 复用批处理管线。
         // 兼容旧 CLI:若 block_delta 已喂过相同字符,增量为 0,不重复。
         if (payload.message_id && payload.content) {
           const mid = payload.message_id
@@ -879,8 +814,8 @@ function landAutoTurn(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state) return
   console.log(`%c ========== [stream] landAutoTurn(自发轮收尾) sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
-  // 该轮已结束,残字直接全量落地(自发轮不做排空等待,马上要与历史区做原子切换)
-  flushTextDeltas(true, sessionId)
+  // 该轮已结束,残字直接落地(自发轮不做排空等待,马上要与历史区做原子切换)
+  flushTextDeltas(sessionId)
   state.activeTool = null
   markTailDirty(sessionId)
   streamingTick.value++
@@ -947,13 +882,13 @@ function removeLandedTurns(sessionId: string, recs: ReadonlyArray<{ type: string
 }
 
 /**
- * 某一路流结束(CLI done)——如果打字机还有未播内容,进入排空模式,
- * 等打字机自然播完再翻 streaming=false,避免:
+ * 某一路流结束(CLI done)——如果批处理还有未落地残余,进入排空模式,
+ * 等 pending 落净(最多一帧)再翻 streaming=false,避免:
  *   1. flushTextDeltas(true) 一次性倾倒剩余文字(文字跳变)
  *   2. streaming=false 触发 BlockText plain→shiki 切换(布局抖动)
  *   3. 300ms 后 records reload(DOM 重建)
  * 三次突变叠在一帧 → 可见闪烁。
- * 通知回调(toast/系统通知)立即触发,不等打字机。
+ * 通知回调(toast/系统通知)立即触发,不等排空。
  */
 function finishStream(sessionId: string) {
   const state = streams.get(sessionId)
