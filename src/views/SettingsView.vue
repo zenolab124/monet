@@ -1092,6 +1092,9 @@ function onSaved() {
                 <template v-else-if="updateStatus === 'downloading'">
                   <span class="text-[11px] text-muted-foreground font-mono">{{ $t('settings.updateDownloading', { progress: downloadProgress }) }}</span>
                 </template>
+                <template v-else-if="updateStatus === 'restarting'">
+                  <span class="text-[11px] text-primary font-medium">{{ $t('settings.updateRestarting') }}</span>
+                </template>
                 <template v-else>
                   <button
                     class="px-2 py-0.5 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

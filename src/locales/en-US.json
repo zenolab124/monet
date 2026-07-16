@@ -795,7 +795,8 @@
     },
     "agentFeature_search_terms": "Search Terms",
     "agentFeature_search_summarize": "Search Summary",
-    "agentSessionDirMissing": "No persisted sessions yet (directory not created)"
+    "agentSessionDirMissing": "No persisted sessions yet (directory not created)",
+    "updateRestarting": "Installed, restarting…"
   },
   "notification": {
     "claudeAsking": "Claude is asking",

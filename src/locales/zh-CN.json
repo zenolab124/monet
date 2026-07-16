@@ -795,7 +795,8 @@
     },
     "agentFeature_search_terms": "搜索关键词",
     "agentFeature_search_summarize": "搜索综述",
-    "agentSessionDirMissing": "暂无落盘会话（目录尚未创建）"
+    "agentSessionDirMissing": "暂无落盘会话（目录尚未创建）",
+    "updateRestarting": "安装完成，正在重启…"
   },
   "notification": {
     "claudeAsking": "Claude 在提问",

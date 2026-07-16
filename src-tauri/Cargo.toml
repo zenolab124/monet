@@ -66,6 +66,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tray-icon = "0.21"
 muda = "0.17"
 libc = "0.2"
+tauri-plugin-process = "2.3.1"
 
 # macOS: attributed-title tab alignment in tray menu (right-aligned reset times)
 # These are already transitive deps via muda/tray-icon; we add them directly to

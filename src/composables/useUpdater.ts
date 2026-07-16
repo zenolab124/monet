@@ -1,7 +1,8 @@
 import { ref } from 'vue'
 import { check, type Update } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 
-export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'up-to-date' | 'error'
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'restarting' | 'up-to-date' | 'error'
 
 const status = ref<UpdateStatus>('idle')
 const newVersion = ref('')
@@ -47,6 +48,10 @@ async function downloadAndInstall() {
         downloadProgress.value = 100
       }
     })
+    // downloadAndInstall resolve = 新版已替换就位,但 Tauri 不会自动重启——
+    // 必须显式 relaunch 才生效(缺此调用曾致 UI 永卡"下载 100%")
+    status.value = 'restarting'
+    await relaunch()
   } catch (e) {
     errorMessage.value = String(e)
     status.value = 'error'
