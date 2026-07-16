@@ -1098,8 +1098,11 @@
     "boot_load": "JS load+parse",
     "boot_exec": "Module exec",
     "boot_render": "First render",
-    "boot_paint": "Layout+paint",
+    "boot_block": "Main-thread block",
+    "boot_paint": "Actual paint",
     "boot_data": "Data init",
-    "boot_total": "Blank total"
+    "boot_total": "Blank total",
+    "boot_shiki": "Shiki init",
+    "boot_projects": "Projects load"
   }
 }

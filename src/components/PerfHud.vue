@@ -52,6 +52,9 @@ function grade(v: number, warn: number, bad: number): string {
 
 // 启动分解:marks 在启动期一次性写入,HUD 打开时读快照即可,无需响应式
 const bootSegs = getBootBreakdown()
+// 瀑布段(参与合计)与独立计时(overlay,与瀑布段重叠、不计入合计)分列展示
+const bootWaterfall = bootSegs.filter(s => !s.overlay)
+const bootOverlay = bootSegs.filter(s => s.overlay)
 </script>
 
 <template>
@@ -140,16 +143,25 @@ const bootSegs = getBootBreakdown()
         </div>
       </template>
 
-      <!-- 启动分解:白屏段五切分,total = 导航→首帧上屏 -->
+      <!-- 启动分解:瀑布段(block=主线程阻塞等待, paint=首帧真实绘制)按序加和, total = 导航→首帧上屏 -->
       <template v-if="bootSegs.length">
         <div class="font-sans text-muted-foreground border-t border-border pt-1">{{ t('perf.boot') }}</div>
         <div
-          v-for="s in bootSegs"
+          v-for="s in bootWaterfall"
           :key="s.label"
           class="flex items-center justify-between text-[10px]"
         >
           <span class="font-sans text-muted-foreground">{{ t('perf.boot_' + s.label) }}</span>
           <span :class="s.label === 'total' ? 'font-medium ' + grade(s.ms, 1000, 2500) : ''">{{ Math.round(s.ms) }} ms</span>
+        </div>
+        <!-- 独立计时:与瀑布段时间重叠、不计入合计,更淡色 + └ 前缀区分 -->
+        <div
+          v-for="s in bootOverlay"
+          :key="s.label"
+          class="flex items-center justify-between text-[10px] opacity-55"
+        >
+          <span class="font-sans text-muted-foreground">└ {{ t('perf.boot_' + s.label) }}</span>
+          <span class="text-muted-foreground">{{ Math.round(s.ms) }} ms</span>
         </div>
       </template>
 

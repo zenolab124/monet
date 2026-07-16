@@ -42,20 +42,44 @@ const plainMd = new MarkdownIt(mdOpts)
 let activeMd: MarkdownIt = plainMd
 let shikiReady = false
 
-// 异步初始化 shiki，完成后替换活跃渲染器
-markdownItShiki({
-  themes: { light: 'github-light', dark: 'github-dark' },
-  langs: LANGS,
-  defaultColor: false,
-  // 白名单外语言(nginx/ini/...)回退纯文本,否则 codeToHtml 抛 ShikiError 炸掉整个块渲染。
-  // 'text' 是 shiki 运行时放行的 special language,不在 BundledLanguage 类型里,需断言
-  fallbackLanguage: 'text' as BundledLanguage,
-}).then(plugin => {
-  const md = new MarkdownIt(mdOpts)
-  md.use(plugin)
-  activeMd = md
-  shikiReady = true
-})
+// shiki 延迟初始化:原先在 module 加载时立即发起,启动期就同步拉 26 个语言文件 + 608KB WASM
+// 并编译语法,抢占 mount 后的主线程(白屏打点里 1.1s 阻塞段的头号嫌疑)。改为首次真正需要高亮
+// 渲染时才发起,给启动主线程让路;plainMd 兜底不变,shiki 就绪前照旧走素色渲染。
+let shikiStarted = false
+
+// 幂等:已发起(或已完成)直接返回,只有首次调用才真正拉起 shiki
+function ensureShiki(): void {
+  if (shikiStarted) return
+  shikiStarted = true
+  // boot:shiki-start / boot:shiki-ready 两个 mark 名是与 HUD 展示任务的契约,必须一字不差;
+  // performance 在 node(render-bench.mjs 直接 import)也有 globalThis.performance,?. 兜个底
+  performance?.mark?.('boot:shiki-start')
+  markdownItShiki({
+    themes: { light: 'github-light', dark: 'github-dark' },
+    langs: LANGS,
+    defaultColor: false,
+    // 白名单外语言(nginx/ini/...)回退纯文本,否则 codeToHtml 抛 ShikiError 炸掉整个块渲染。
+    // 'text' 是 shiki 运行时放行的 special language,不在 BundledLanguage 类型里,需断言
+    fallbackLanguage: 'text' as BundledLanguage,
+  }).then(plugin => {
+    const md = new MarkdownIt(mdOpts)
+    md.use(plugin)
+    activeMd = md
+    shikiReady = true
+    performance?.mark?.('boot:shiki-ready')
+  })
+}
+
+// 空闲预热:启动主线程让路后,借浏览器空闲档期提前把 shiki 备好,免得首次高亮渲染现拉现编。
+// 仅浏览器执行——render-bench.mjs 用 node 直接 import 本模块(见文件头注释),node 无 window 故跳过;
+// 老版 WebKit 有 window 但无 requestIdleCallback,typeof 检查后回退 setTimeout
+if (typeof window !== 'undefined') {
+  if (typeof requestIdleCallback !== 'undefined') {
+    requestIdleCallback(() => ensureShiki(), { timeout: 5000 })
+  } else {
+    setTimeout(() => ensureShiki(), 3000)
+  }
+}
 
 /** 流式降级渲染:跳过 shiki 高亮。流式中文本每帧变化,全量高亮是逐帧主线程大头 */
 export function renderMarkdownPlain(text: string): string {
@@ -96,6 +120,8 @@ function cacheSet(text: string, html: string): void {
 
 /** 带缓存的完整渲染:用于内容不再变化的块(历史消息、流式结束后的块) */
 export function renderMarkdownCached(text: string): string {
+  // 完成态渲染是唯一需要高亮的入口,借它兜住空闲预热的漏网(首帧就要高亮时立即拉起 shiki)
+  ensureShiki()
   const hit = htmlCache.get(text)
   if (hit !== undefined) {
     // 命中移到队尾,维持 LRU 序(Map 迭代序 = 插入序)

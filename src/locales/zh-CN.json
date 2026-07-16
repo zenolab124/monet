@@ -1098,8 +1098,11 @@
     "boot_load": "JS 加载+解析",
     "boot_exec": "模块执行",
     "boot_render": "首帧渲染",
-    "boot_paint": "布局绘制",
+    "boot_block": "阻塞等待",
+    "boot_paint": "真实绘制",
     "boot_data": "数据初始化",
-    "boot_total": "白屏合计"
+    "boot_total": "白屏合计",
+    "boot_shiki": "Shiki 初始化",
+    "boot_projects": "项目树加载"
   }
 }

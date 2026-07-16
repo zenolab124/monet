@@ -172,7 +172,10 @@ onMounted(async () => {
   // 旧「应用默认思考强度」一次性迁移进 official 渠道默认(不阻塞启动)
   migrateLegacyAppDefaults()
   // 档案馆预加载:v-show 保活但数据要提前拉，首次切换零等待
-  loadProjects()
+  // 计时（overlay，不改变 fire-and-forget 不阻塞 onMounted 的行为）：
+  // 调用前打 boot:projects-start，promise settle 后打 boot:projects-done。
+  markBoot('boot:projects-start')
+  loadProjects().finally(() => markBoot('boot:projects-done'))
   // 工作台持久化损坏回退提示(NFR-002)
   if (stateWasReset) {
     useNotifications().notifyTransient(t('workbench.stateReset'))
