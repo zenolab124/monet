@@ -276,7 +276,22 @@ fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {
             };
             let _ = menu.append(&MenuItem::with_id("status", label, false, None::<muda::accelerator::Accelerator>));
         } else if qi.error.is_some() {
-            let label = if zh { "刷新失败" } else { "Refresh failed" };
+            // 按错误分类给行动引导：过期点刷新即触发委托续期（quota.rs 手动路径），
+            // 笼统的「刷新失败」只留给无法归类的残余
+            let label = match qi.error_kind.as_deref() {
+                Some("token_expired") => {
+                    if zh { "凭据已过期 · 点击下方刷新恢复" } else { "Credentials expired · click Refresh below" }
+                }
+                Some("no_credentials") => {
+                    if zh { "未检测到 Claude 登录凭据" } else { "No Claude credentials found" }
+                }
+                Some("network") => {
+                    if zh { "网络错误 · 将自动重试" } else { "Network error · will retry" }
+                }
+                _ => {
+                    if zh { "刷新失败" } else { "Refresh failed" }
+                }
+            };
             let _ = menu.append(&MenuItem::with_id("status", label, false, None::<muda::accelerator::Accelerator>));
         }
         if has_data {

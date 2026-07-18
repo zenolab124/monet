@@ -1,5 +1,7 @@
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -20,6 +22,10 @@ pub struct QuotaInfo {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// 错误分类，供 UI 细分文案与行动引导（tray 状态行按此路由）：
+    /// token_expired | no_credentials | rate_limited | network | api
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,14 +240,69 @@ pub fn get_quota() -> QuotaInfo {
             }
         }
     }
-    fetch_and_cache(false)
+    fetch_and_cache(false, false)
 }
 
-/// 手动刷新：跳过内存缓存与磁盘 TTL，强制打 API。
+/// 手动刷新：跳过内存缓存与磁盘 TTL，强制打 API；凭据过期时委托 CLI 续期。
 /// 同时被 monet-tray 独立进程调用。
 #[tauri::command]
 pub fn refresh_quota() -> QuotaInfo {
-    fetch_and_cache(true)
+    fetch_and_cache(true, true)
+}
+
+// ---------------------------------------------------------------------------
+// 活跃节流刷新（会话事件驱动）
+// ---------------------------------------------------------------------------
+
+/// 活跃刷新的最小间隔：低于周期刷新的 300s，把活跃期数据延迟从「最多 5 分钟」
+/// 压到 turn 落盘后 ~90s 内；高于 60s 保住 usage API 的限流预算
+const ACTIVITY_MIN_INTERVAL_SECS: i64 = 90;
+
+static ACTIVITY_INFLIGHT: AtomicBool = AtomicBool::new(false);
+static LAST_ACTIVITY_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// 会话活跃信号（watcher 发射 projects-changed 时调用）：缓存年龄超过最小间隔
+/// 才真正打 API，后台线程执行不阻塞调用方。活跃期 token 必然新鲜，不委托 CLI。
+pub fn notify_session_activity() {
+    // 进程内粗闸：watcher 发射至多每秒一次，90s 内直接返回免得反复起线程；
+    // 精确判断（含磁盘缓存年龄，防主应用/tray 双进程重复打 API）在线程内做
+    let now_ms = Utc::now().timestamp_millis();
+    if now_ms - LAST_ACTIVITY_MS.load(Ordering::Relaxed) < ACTIVITY_MIN_INTERVAL_SECS * 1000 {
+        return;
+    }
+    if ACTIVITY_INFLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let latest = latest_fetched_at_ms().unwrap_or(0);
+        if now_ms - latest >= ACTIVITY_MIN_INTERVAL_SECS * 1000
+            && backoff_remaining_secs().is_none()
+            && quota_available()
+        {
+            // force=true 绕过磁盘 TTL（年龄闸门已由上方 90s 判断承担）。
+            // 失败也推进粗闸：90s 内不重试，避免失败风暴
+            let _ = fetch_and_cache(true, false);
+            LAST_ACTIVITY_MS.store(Utc::now().timestamp_millis(), Ordering::Relaxed);
+        } else {
+            // 数据已新鲜（周期刷新或另一进程刚刷过）：粗闸对齐到该时间戳，
+            // 下次需要检查的时刻自然顺延
+            LAST_ACTIVITY_MS.store(latest, Ordering::Relaxed);
+        }
+        ACTIVITY_INFLIGHT.store(false, Ordering::SeqCst);
+    });
+}
+
+/// 内存与磁盘缓存中较新者的抓取时间戳
+fn latest_fetched_at_ms() -> Option<i64> {
+    let mem = CACHE
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|c| c.fetched_at_ms));
+    let disk = read_disk_cache().map(|(_, t)| t);
+    match (mem, disk) {
+        (Some(m), Some(d)) => Some(m.max(d)),
+        (m, d) => m.or(d),
+    }
 }
 
 /// 只读取现有缓存，绝不发起网络请求。内存与磁盘按时间戳取新者——
@@ -271,12 +332,14 @@ pub fn quota_available() -> bool {
 // Core logic
 // ---------------------------------------------------------------------------
 
-fn fetch_and_cache(force: bool) -> QuotaInfo {
+/// delegate_on_expired：token 过期时是否委托 CLI 续期后重试（仅用户手动刷新开启，
+/// 见 delegated_cli_refresh 的铁律说明；活跃节流刷新与周期刷新不委托）
+fn fetch_and_cache(force: bool, delegate_on_expired: bool) -> QuotaInfo {
     // 限流冷却期内一律不打 API——手动刷新也不例外：打了必 429 且会续期惩罚窗口。
     // 诚实返回旧数据 + 错误标注，让 UI 告知用户「限流中，X 分钟后自动恢复」。
     if let Some(remain) = backoff_remaining_secs() {
         let mins = (remain + 59) / 60;
-        return stale_with_error(format!("Rate limited, retry in {mins}m"));
+        return stale_with_error(format!("Rate limited, retry in {mins}m"), "rate_limited");
     }
 
     // 磁盘缓存 TTL 内直接采用（另一进程可能刚刷过，双进程共享省 API 调用）；
@@ -301,7 +364,18 @@ fn fetch_and_cache(force: bool) -> QuotaInfo {
 
     let info = match fetch_quota_inner() {
         Ok(info) => info,
-        Err(e) => return stale_with_error(e),
+        // 手动刷新撞上凭据过期：委托 CLI 自刷 Keychain 后重试一次。
+        // 委托失败或重试仍败则照旧回退过期文案，行为与降级前一致
+        Err((msg, kind)) => {
+            if delegate_on_expired && kind == "token_expired" && delegated_cli_refresh() {
+                match fetch_quota_inner() {
+                    Ok(info) => info,
+                    Err((msg, kind)) => return stale_with_error(msg, kind),
+                }
+            } else {
+                return stale_with_error(msg, kind);
+            }
+        }
     };
     if info.error.is_none() {
         write_disk_cache(&info);
@@ -318,10 +392,11 @@ fn fetch_and_cache(force: bool) -> QuotaInfo {
 /// 刷新失败时的诚实回退：返回旧缓存数据（updated_at 保持旧值）+ error 标注，
 /// 让 UI 能同时展示「上次成功的数据」和「本次为什么失败」。不写盘、不进内存缓存
 /// （error 结果缓存后会在 TTL 内遮蔽恢复）。
-fn stale_with_error(err: String) -> QuotaInfo {
+fn stale_with_error(err: String, kind: &str) -> QuotaInfo {
     if let Some((mut cached, _)) = read_disk_cache() {
         if cached.error.is_none() {
             cached.error = Some(err);
+            cached.error_kind = Some(kind.to_string());
             return cached;
         }
     }
@@ -334,16 +409,17 @@ fn stale_with_error(err: String) -> QuotaInfo {
         account_email: None,
         updated_at: Utc::now().to_rfc3339(),
         error: Some(err),
+        error_kind: Some(kind.to_string()),
     }
 }
 
-fn fetch_quota_inner() -> Result<QuotaInfo, String> {
+fn fetch_quota_inner() -> Result<QuotaInfo, (String, &'static str)> {
     let (access_token, credential) = get_valid_token()?;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
+        .map_err(|e| (format!("HTTP client error: {e}"), "network"))?;
 
     let resp = client
         .get("https://api.anthropic.com/api/oauth/usage")
@@ -353,7 +429,7 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
         .header("Content-Type", "application/json")
         .header("User-Agent", "monet/1.0")
         .send()
-        .map_err(|e| format!("Network error: {e}"))?;
+        .map_err(|e| (format!("Network error: {e}"), "network"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -368,13 +444,15 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
                 .clamp(60, 3600);
             write_backoff(retry_secs);
             let mins = (retry_secs + 59) / 60;
-            return Err(format!("Rate limited, retry in {mins}m"));
+            return Err((format!("Rate limited, retry in {mins}m"), "rate_limited"));
         }
         let body = resp.text().unwrap_or_default();
-        return Err(format!("API error {status}: {body}"));
+        return Err((format!("API error {status}: {body}"), "api"));
     }
 
-    let api: ApiUsageResponse = resp.json().map_err(|e| format!("Parse error: {e}"))?;
+    let api: ApiUsageResponse = resp
+        .json()
+        .map_err(|e| (format!("Parse error: {e}"), "api"))?;
     clear_backoff();
     let now = Utc::now();
 
@@ -409,6 +487,7 @@ fn fetch_quota_inner() -> Result<QuotaInfo, String> {
         account_email: None,
         updated_at: Utc::now().to_rfc3339(),
         error: None,
+        error_kind: None,
     })
 }
 
@@ -509,20 +588,27 @@ fn infer_plan(cred: &OAuthCredential) -> Option<String> {
 /// 我方刷新会作废 Claude Code CLI 持有的 refresh_token，烧毁用户 CLI 登录态。
 /// （tray + 主应用 + CLI 三方共用同一凭据，只有 CLI 拥有写权。）
 /// token 过期时重读凭据源（CLI 日常使用会保持 keychain 新鲜），仍过期则报错等待。
-fn get_valid_token() -> Result<(String, OAuthCredential), String> {
-    let cred = read_credential().ok_or("No Claude credentials found")?;
+fn get_valid_token() -> Result<(String, OAuthCredential), (String, &'static str)> {
+    let cred = read_credential()
+        .ok_or(("No Claude credentials found".to_string(), "no_credentials"))?;
 
     let has_profile = cred.scopes.as_ref()
         .map_or(false, |s| s.iter().any(|sc| sc == "user:profile"));
     if !has_profile {
-        return Err("Credentials lack user:profile scope".into());
+        return Err(("Credentials lack user:profile scope".into(), "no_credentials"));
     }
 
     let now_ms = Utc::now().timestamp_millis() as u64;
     if cred.expires_at.map_or(false, |exp| now_ms >= exp.saturating_sub(60_000)) {
-        return Err("Token expired; waiting for Claude Code CLI to refresh it".into());
+        return Err((
+            "Token expired; waiting for Claude Code CLI to refresh it".into(),
+            "token_expired",
+        ));
     }
-    let token = cred.access_token.clone().ok_or("No access token")?;
+    let token = cred
+        .access_token
+        .clone()
+        .ok_or(("No access token".to_string(), "no_credentials"))?;
     Ok((token, cred))
 }
 
@@ -540,16 +626,63 @@ fn read_credential() -> Option<OAuthCredential> {
 
 #[cfg(target_os = "macos")]
 fn read_keychain_credential() -> Option<OAuthCredential> {
-    let output = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
-        .output()
-        .ok()?;
+    // 3s 超时：macOS 26 有 security 挂起的社区报告；hang 会让 tray 的
+    // fetching 标志永久卡死、周期刷新静默停摆，比读取失败更隐蔽
+    let mut cmd = Command::new("security");
+    cmd.args(["find-generic-password", "-s", "Claude Code-credentials", "-w"]);
+    let output = output_with_timeout(cmd, Duration::from_secs(3))?;
     if !output.status.success() {
         return None;
     }
     let json_str = String::from_utf8(output.stdout).ok()?;
     let creds: CredentialsFile = serde_json::from_str(json_str.trim()).ok()?;
     creds.claude_ai_oauth
+}
+
+/// spawn 子进程并限时收集输出；超时 kill 并返回 None。
+/// 轮询 try_wait 而非阻塞 wait：std 无内置超时，且输出量（凭据 JSON /
+/// auth status JSON，几 KB）远小于管道缓冲，子进程不会因无人读而卡写
+fn output_with_timeout(mut cmd: Command, timeout: Duration) -> Option<std::process::Output> {
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+/// 委托刷新：spawn `claude auth status --json` 促 CLI 自刷 Keychain 后重读。
+/// 铁律不破——refresh token 的消费权始终在 CLI 手里，我方只触发 + 重读；
+/// 仅手动刷新路径调用（自动路径不做：空闲期失真方向保守，且「回来干活」
+/// 场景 CLI 自然续期）。用 lightweight 探测：tray 是 launchd 贫瘠环境，
+/// login shell 不可靠，主 App 的完整探测结果经 L1 缓存共享。
+fn delegated_cli_refresh() -> bool {
+    let Ok(located) = crate::claude_locator::locate_lightweight() else {
+        return false;
+    };
+    let mut cmd = Command::new(&located.path);
+    cmd.args(["auth", "status", "--json"]);
+    cmd.env("PATH", crate::streaming::enhanced_path());
+    output_with_timeout(cmd, Duration::from_secs(12)).is_some_and(|o| o.status.success())
 }
 
 fn read_file_credential() -> Option<OAuthCredential> {
@@ -656,5 +789,30 @@ pub fn format_tray_tooltip(info: &QuotaInfo) -> String {
         "Monet".into()
     } else {
         parts.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 挂起的子进程必须在超时后被 kill 返回，而非无限阻塞——
+    /// 这是 security hang 导致 tray 刷新静默停摆的防线
+    #[test]
+    fn output_with_timeout_kills_hung_process() {
+        let mut cmd = Command::new("/bin/sleep");
+        cmd.arg("10");
+        let start = Instant::now();
+        assert!(output_with_timeout(cmd, Duration::from_millis(200)).is_none());
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn output_with_timeout_collects_stdout() {
+        let mut cmd = Command::new("/bin/echo");
+        cmd.arg("hello");
+        let out = output_with_timeout(cmd, Duration::from_secs(3)).expect("echo should succeed");
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hello");
     }
 }

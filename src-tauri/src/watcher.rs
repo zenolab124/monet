@@ -164,6 +164,9 @@ fn emit_pending_changes(
     let payload = json!({ "full": *full, "changes": changes });
     *full = false;
     let _ = app.emit("projects-changed", payload);
+    // 会话有真实变更 = 额度正在被消耗：节流触发一次后台额度刷新（内部 90s
+    // 闸门 + in-flight 防重），tray 经 quota-cache.json 的 mtime 侦测自动跟进
+    crate::quota::notify_session_activity();
 }
 
 /// 启动时记录所有项目目录直接子级 .jsonl 的当前大小
