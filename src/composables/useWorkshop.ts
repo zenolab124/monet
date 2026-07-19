@@ -9,7 +9,7 @@ import type { WorkshopAssets } from '../types'
  */
 
 /** 工坊子页类别（同时是 open_workshop_dir 的 category 入参口径） */
-export type WorkshopCategory = 'skills' | 'commands' | 'agents' | 'mcp'
+export type WorkshopCategory = 'skills' | 'commands' | 'agents' | 'mcp' | 'hooks' | 'memory'
 
 /** MCP 探活状态（stdio 不参与，恒显「stdio · 未探活」） */
 export type McpProbeState = 'probing' | 'online' | 'offline'

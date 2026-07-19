@@ -164,11 +164,19 @@ export interface SubAgentMeta {
 /** 常见三值（PRD 口径）；Rust 端对配置显式 type 原样透传，运行时可能出现其他字符串 */
 export type McpTransport = 'stdio' | 'http' | 'sse' | (string & {})
 
+/** MCP 服务器三态（v2.9.0 FR-003）：启用 / 已禁用 / 待批准 */
+export type McpServerStatus = 'enabled' | 'disabled' | 'pending'
+
 export interface WorkshopMcpServer {
   name: string
   transport: McpTransport
   endpoint: string
+  /** @deprecated 使用 status 三态代替（v2.9.0 FR-003） */
   enabled: boolean
+  status: McpServerStatus
+  args: string[]
+  envKeys: string[]
+  headerKeys: string[]
   source: string
   path: string
 }
@@ -178,6 +186,77 @@ export interface WorkshopAssets {
   commands: WorkshopCommand[]
   agents: WorkshopAgent[]
   mcpServers: WorkshopMcpServer[]
+}
+
+// --- 资产详情（v2.9.0 FR-001）---
+
+export interface AssetDetail {
+  frontmatter: Record<string, unknown> | null
+  body: string
+  mtime: number
+  sizeBytes: number
+  truncated?: boolean
+}
+
+// --- Hooks 聚合陈列（v2.9.0 FR-005）---
+
+export type HookType = 'command' | 'prompt' | 'agent' | 'http' | 'mcp_tool'
+
+export interface HookEntry {
+  matcher: string | null
+  hookType: HookType
+  summary: string
+  sourceLayer: string
+  sourceFile: string
+  config: Record<string, unknown>
+}
+
+export interface HookEventGroup {
+  event: string
+  entries: HookEntry[]
+}
+
+export interface HooksOverview {
+  events: HookEventGroup[]
+  parseFailures: string[]
+}
+
+// --- 记忆数据层（v2.9.0 FR-006）---
+
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference' | 'unknown'
+
+export interface MemoryEntry {
+  file: string
+  name: string
+  description: string
+  type: MemoryType
+  mtime: number
+  sizeBytes: number
+  wikiLinks: string[]
+  indexed: boolean
+}
+
+export interface MemoryProject {
+  projectDir: string
+  displayName: string
+  count: number
+  totalBytes: number
+  lastModified: number
+  entries: MemoryEntry[]
+  legacyIndex?: boolean
+  /** 悬空引用：MEMORY.md 索引了但磁盘不存在的文件名（体检数据源） */
+  danglingRefs: string[]
+}
+
+export interface MemoryOverview {
+  projects: MemoryProject[]
+}
+
+export interface MemoryDetail {
+  frontmatter: Record<string, unknown> | null
+  body: string
+  mtime: number
+  sizeBytes: number
 }
 
 // --- 工具函数 ---
