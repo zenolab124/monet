@@ -35,7 +35,7 @@ const sizeKb = computed(() => Math.round(content.value.length / 1024))
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
+  <div :data-tool-use-id="toolUseId" class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
     <button
       class="flex items-center gap-1.5 w-full text-left"
       @click="expanded = !expanded"

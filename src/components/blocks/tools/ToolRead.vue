@@ -44,7 +44,7 @@ async function openFile() {
 </script>
 
 <template>
-  <div class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
+  <div :data-tool-use-id="toolUseId" class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
     <div class="flex items-center gap-1.5">
       <span class="i-carbon-document w-3.5 h-3.5 shrink-0" />
       <span class="text-foreground font-medium">Read</span>
