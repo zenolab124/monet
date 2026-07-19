@@ -261,41 +261,43 @@ provide('openAsyncTask', (toolUseId: string) => {
   return true
 })
 
-// --- 异步面板手风琴展开：列宽 + 侧边栏 width 同步 transition ---
+// --- 侧栏面板（异步/账本互斥共用）手风琴展开：列宽 + 侧边栏 width 同步 transition ---
+// 互斥切换时 sidePanelVisible 保持 true 不触发 watch,列宽维持翻倍,无竞态
 const columnIndex = inject<ComputedRef<number>>('columnIndex', undefined as any)
 const columnTabId = inject<ComputedRef<string>>('tabId', undefined as any)
 const { activeTab: wbActiveTab } = useWorkbench()
-const asyncPanelDom = ref(false)
-const asyncPanelExpanded = ref(false)
+const sidePanelVisible = computed(() => asyncPanelVisible.value || ledgerPanelOpen.value)
+const sidePanelDom = ref(false)
+const sidePanelExpanded = ref(false)
 const sidebarTargetWidth = ref(0)
 
-watch(asyncPanelVisible, async (open) => {
+watch(sidePanelVisible, async (open) => {
   const tab = wbActiveTab.value
   const idx = columnIndex?.value
   const hasCol = tab && idx != null && idx >= 0 && idx < tab.columnSizes.length
   if (open) {
     const colW = hasCol ? tab!.columnSizes[idx!] : 400
     sidebarTargetWidth.value = colW
-    asyncPanelDom.value = true
+    sidePanelDom.value = true
     await nextTick()
     requestAnimationFrame(() => {
-      asyncPanelExpanded.value = true
+      sidePanelExpanded.value = true
       if (hasCol) tab!.columnSizes[idx!] = colW * 2
       setTimeout(() => {
         const root = detailRootRef.value
         if (!root) return
-        root.querySelector('.async-panel-root')
+        root.querySelector('.side-panel-accordion')
           ?.scrollIntoView({ inline: 'nearest', behavior: 'smooth' })
       }, 260)
     })
   } else {
-    asyncPanelExpanded.value = false
+    sidePanelExpanded.value = false
     const doubled = sidebarTargetWidth.value * 2
     if (hasCol && Math.abs(tab!.columnSizes[idx!] - doubled) < 20) {
       tab!.columnSizes[idx!] = sidebarTargetWidth.value
     }
     setTimeout(() => {
-      asyncPanelDom.value = false
+      sidePanelDom.value = false
     }, 260)
   }
 })
@@ -307,8 +309,11 @@ watch(() => {
   if (!tab || idx == null || idx < 0 || idx >= tab.columnSizes.length) return undefined
   return tab.columnSizes[idx]
 }, (colW) => {
-  if (!asyncPanelExpanded.value || colW == null) return
-  if (colW < sidebarTargetWidth.value * 2 - 20) closeAsyncPanel()
+  if (!sidePanelExpanded.value || colW == null) return
+  if (colW < sidebarTargetWidth.value * 2 - 20) {
+    closeAsyncPanel()
+    ledgerPanelOpen.value = false
+  }
 })
 
 // 流式结束补扫转录清单：晚落盘的 agent meta / workflow children 兜底
@@ -2498,11 +2503,12 @@ async function onReload() {
     </div>
     <!-- 异步任务面板：width transition 手风琴展开,列宽同步翻倍,主栏宽度恒定 -->
     <div
-      v-if="asyncPanelDom"
-      class="shrink-0 border-l border-border overflow-hidden"
-      :style="{ width: asyncPanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
+      v-if="sidePanelDom"
+      class="side-panel-accordion shrink-0 border-l border-border overflow-hidden"
+      :style="{ width: asyncPanelVisible && sidePanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
     >
       <AsyncTaskPanel
+        v-if="asyncPanelVisible || !ledgerPanelOpen"
         ref="asyncPanelRef"
         :tasks="asyncTasks"
         :open-tabs="subAgentTabs"
@@ -2517,8 +2523,8 @@ async function onReload() {
     </div>
     <!-- 文件账本面板:与异步面板互斥,同款手风琴 -->
     <div
-      class="shrink-0 border-l border-border overflow-hidden"
-      :style="{ width: ledgerPanelOpen ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
+      class="side-panel-accordion shrink-0 border-l border-border overflow-hidden"
+      :style="{ width: ledgerPanelOpen && sidePanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
     >
       <FileLedgerPanel
         v-if="ledgerPanelOpen"
