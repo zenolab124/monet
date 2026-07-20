@@ -118,10 +118,12 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
   <aside class="w-64 shrink-0 border-r border-border p-2.5 flex flex-col gap-2 min-h-0">
     <div v-if="hint" class="px-0.5 text-[10.5px] text-muted-foreground shrink-0">{{ hint }}</div>
 
+    <!-- px/py + 等量负 margin:overflow-y-auto 会连带裁掉 X 轴溢出,
+         给卡片阴影留画布,视觉布局不变 -->
     <TransitionGroup
       tag="div"
       name="card"
-      class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2"
+      class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 px-2 -mx-2 py-2 -my-2"
     >
       <MonitorCard
         v-for="sid in activeTab.sessionIds"
