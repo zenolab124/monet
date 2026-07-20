@@ -10,7 +10,7 @@ import McpDetailPane from '@/components/workshop/McpDetailPane.vue'
 import McpAddDialog from '@/components/workshop/McpAddDialog.vue'
 import HooksPane from '@/components/workshop/HooksPane.vue'
 import MemoryPane from '@/components/workshop/MemoryPane.vue'
-import { useWorkshop, type WorkshopCategory } from '@/composables/useWorkshop'
+import { useWorkshop, mcpKey, type WorkshopCategory } from '@/composables/useWorkshop'
 import { useHooks } from '@/composables/useHooks'
 import { useMemory } from '@/composables/useMemory'
 import { useUiState } from '@/composables/useUiState'
@@ -143,7 +143,7 @@ watch(assets, (a) => {
 /** 当前选中的 MCP 服务器对象（详情面板用） */
 const selectedMcpServer = computed<WorkshopMcpServer | null>(() => {
   if (category.value !== 'mcp' || !selectedPath.value || !assets.value) return null
-  return assets.value.mcpServers.find(s => s.path === selectedPath.value) ?? null
+  return assets.value.mcpServers.find(s => mcpKey(s) === selectedPath.value) ?? null
 })
 
 /** 添加 MCP 服务器弹窗 */

@@ -46,10 +46,10 @@ function stateOf(s: WorkshopMcpServer): McpProbeState {
       :key="itemKey(s)"
       class="fitem"
       :class="{
-        selected: selectedPath === s.path,
+        selected: selectedPath === mcpKey(s),
         'disabled-row': s.status === 'disabled'
       }"
-      @click="emit('select', s.path)"
+      @click="emit('select', mcpKey(s))"
     >
       <span class="i-carbon-plug fi-icon" />
       <div class="fi-body">
