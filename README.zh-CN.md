@@ -12,7 +12,30 @@
   <a href="README.md">English</a>
 </p>
 
-<!-- TODO: 截图 -->
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zenolab124/monet" alt="License"></a>
+  <a href="https://github.com/zenolab124/monet/releases/latest"><img src="https://img.shields.io/github/v/release/zenolab124/monet" alt="Latest Release"></a>
+  <a href="https://github.com/zenolab124/monet/actions/workflows/ci.yml"><img src="https://github.com/zenolab124/monet/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS-purple" alt="platform">
+  <img src="https://img.shields.io/badge/built_with-Tauri_2-24c8db" alt="Tauri">
+  <img src="https://img.shields.io/badge/Vue-3.5-42b883" alt="Vue">
+  <img src="https://img.shields.io/badge/Rust-stable-e57324" alt="Rust">
+  <img src="https://img.shields.io/badge/TypeScript-6-3178c6" alt="TypeScript">
+</p>
+
+<p align="center">
+  <a href="#功能">功能</a> •
+  <a href="#安装">安装</a> •
+  <a href="#从源码构建">构建</a> •
+  <a href="#数据与隐私">隐私</a>
+</p>
+
+<p align="center">
+  <img src=".github/assets/workbench-hero.webp" alt="Monet 工作台——多列会话、会话监控、内嵌 HTML 渲染与实时后台任务" width="920">
+</p>
 
 ## Monet 是什么？
 
@@ -93,7 +116,7 @@ scripts/setup-signing.sh
 |------|------|---------|
 | Claude Code 会话 | `~/.claude/projects/` | **只读** |
 | Monet 增值数据（标题、标签、定时任务） | `~/.monet/` | 读写 |
-| MCP 注册 | `~/.claude/settings.json` | 添加 `monet` 条目 |
+| MCP 注册 | `~/.claude/settings.json` | 在 `mcpServers` 下添加 `monet` 条目 |
 
 Monet 完全离线运行。无遥测、无账号、无网络请求（除非你主动通过 Claude Code CLI 发送流式消息）。
 
