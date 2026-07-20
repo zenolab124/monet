@@ -939,6 +939,7 @@
     "effortUnsupportedTip": "该模型不支持此档位，CLI 会静默降为 High（能力名单可能随 CLI 更新变化，坚持选择不受限）",
     "resetInherit": "重置",
     "advisorFoot": "主 Sonnet + Fable 顾问 · 仅官方渠道",
+    "advancedLabel": "高级",
     "chromeMode": "Chrome 集成",
     "chromeFoot": "控制你的 Chrome · 共享登录态 · 常驻吃上下文",
     "extraArgsPlaceholder": "--flag value 附加 CLI 参数",

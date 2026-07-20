@@ -45,13 +45,15 @@ const { cliDefaults } = useCliDefaults()
 // ---- 面板开合(渐进层级) ----
 
 type Layer = 'effort' | 'model' | 'channel'
+/** 面板列:三段各自的列 + 仅全景显示的「高级」列(顾问/Chrome/自定义参数,无对应胶囊段) */
+type Col = Layer | 'advanced'
 const openLayer = ref<Layer | null>(null)
 const containerRef = ref<HTMLElement>()
 
-/** 面板显示哪些列(自左向右) */
-const visibleCols = computed<Layer[]>(() => {
+/** 面板显示哪些列(自左向右);高级列只随全景出现 */
+const visibleCols = computed<Col[]>(() => {
   switch (openLayer.value) {
-    case 'channel': return ['channel', 'model', 'effort']
+    case 'channel': return ['channel', 'model', 'effort', 'advanced']
     case 'model': return ['model', 'effort']
     case 'effort': return ['effort']
     default: return []
@@ -331,41 +333,6 @@ function openSettings() {
           <span class="i-carbon-settings w-3 h-3 shrink-0" />
           <span>{{ $t('topbar.manageChannels') }}</span>
         </button>
-        <div class="rc-advisor" :class="{ 'opacity-45': advisorDisabled }">
-          <button
-            type="button"
-            :class="['form-toggle-sm', { on: settings.advisor && !advisorDisabled }]"
-            :disabled="advisorDisabled"
-            :title="advisorDisabled ? $t('topbar.advisorDisabled') : ''"
-            @click="onAdvisorToggle"
-          ><span class="form-toggle-knob" /></button>
-          <span>{{ $t('topbar.advisorMode') }}</span>
-        </div>
-        <div class="rc-foot">{{ $t('topbar.advisorFoot') }}</div>
-        <div class="rc-advisor">
-          <button
-            type="button"
-            :class="['form-toggle-sm', { on: settings.chrome }]"
-            @click="emit('chromeChange', !settings.chrome)"
-          ><span class="form-toggle-knob" /></button>
-          <span>{{ $t('topbar.chromeMode') }}</span>
-        </div>
-        <div class="rc-foot">{{ $t('topbar.chromeFoot') }}</div>
-        <div class="rc-extra-args">
-          <input
-            v-model="extraArgsDraft"
-            type="text"
-            class="rc-args-input"
-            :class="{ 'rc-args-warn': extraArgsWarn }"
-            :placeholder="$t('topbar.extraArgsPlaceholder')"
-            spellcheck="false"
-            @blur="commitExtraArgs"
-            @keydown.enter.prevent="commitExtraArgs"
-          />
-        </div>
-        <div class="rc-foot" :class="{ 'rc-foot-warn': extraArgsWarn }">
-          {{ extraArgsWarn ? $t('topbar.extraArgsDenied') : $t('topbar.extraArgsFoot') }}
-        </div>
       </div>
 
       <!-- 模型列 -->
@@ -411,6 +378,48 @@ function openSettings() {
             <span v-if="o.value === defaultEffort" class="rc-hint">{{ $t('topbar.hintDefault') }}</span>
             <span v-if="effortUnsupported(o.value)" class="rc-hint rc-warn">{{ $t('topbar.hintUnsupported') }}</span>
           </button>
+        </div>
+      </div>
+
+      <!-- 高级列(仅全景):顾问/Chrome/自定义参数——跨领域运行配置,不属于任何单一段 -->
+      <div v-if="visibleCols.includes('advanced')" class="rc-col">
+        <div class="rc-head">
+          <span class="rc-label">{{ $t('topbar.advancedLabel') }}</span>
+        </div>
+        <div class="rc-adv-item" :class="{ 'opacity-45': advisorDisabled }">
+          <button
+            type="button"
+            :class="['form-toggle-sm', { on: settings.advisor && !advisorDisabled }]"
+            :disabled="advisorDisabled"
+            :title="advisorDisabled ? $t('topbar.advisorDisabled') : ''"
+            @click="onAdvisorToggle"
+          ><span class="form-toggle-knob" /></button>
+          <span>{{ $t('topbar.advisorMode') }}</span>
+        </div>
+        <div class="rc-foot">{{ $t('topbar.advisorFoot') }}</div>
+        <div class="rc-adv-item rc-adv-sep">
+          <button
+            type="button"
+            :class="['form-toggle-sm', { on: settings.chrome }]"
+            @click="emit('chromeChange', !settings.chrome)"
+          ><span class="form-toggle-knob" /></button>
+          <span>{{ $t('topbar.chromeMode') }}</span>
+        </div>
+        <div class="rc-foot">{{ $t('topbar.chromeFoot') }}</div>
+        <div class="rc-extra-args">
+          <input
+            v-model="extraArgsDraft"
+            type="text"
+            class="rc-args-input"
+            :class="{ 'rc-args-warn': extraArgsWarn }"
+            :placeholder="$t('topbar.extraArgsPlaceholder')"
+            spellcheck="false"
+            @blur="commitExtraArgs"
+            @keydown.enter.prevent="commitExtraArgs"
+          />
+        </div>
+        <div class="rc-foot" :class="{ 'rc-foot-warn': extraArgsWarn }">
+          {{ extraArgsWarn ? $t('topbar.extraArgsDenied') : $t('topbar.extraArgsFoot') }}
         </div>
       </div>
     </div>
@@ -463,14 +472,14 @@ function openSettings() {
 .rc-opt.sel .rc-warn { color: var(--primary-foreground); }
 .rc-divider { height: 1px; background: var(--border); margin: 4px 2px; opacity: .7; }
 .rc-manage { margin-top: 3px; font-size: 11px; opacity: .85; }
-.rc-advisor {
+.rc-adv-item {
   display: flex; align-items: center; gap: 6px; font-size: 11px;
   color: var(--muted-foreground); padding: 5px 2px 1px;
-  border-top: 1px solid var(--border); margin-top: 5px;
 }
+.rc-adv-sep { border-top: 1px solid var(--border); margin-top: 5px; }
 .rc-foot { font-size: 9px; color: var(--muted-foreground); opacity: .75; padding: 4px 2px 0; line-height: 1.4; }
 .rc-foot-warn { color: var(--destructive); opacity: .9; }
-.rc-extra-args { padding: 5px 2px 0; border-top: 1px solid var(--border); margin-top: 5px; }
+.rc-extra-args { padding: 8px 2px 0; border-top: 1px solid var(--border); margin-top: 5px; }
 .rc-args-input {
   width: 100%; font-size: 11px; font-family: ui-monospace, monospace;
   padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border);

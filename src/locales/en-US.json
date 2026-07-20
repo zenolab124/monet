@@ -939,6 +939,7 @@
     "effortUnsupportedTip": "This model does not support this level; the CLI silently downgrades to High (capability list may change with CLI updates — you can still pick it)",
     "resetInherit": "Reset",
     "advisorFoot": "Sonnet primary + Fable advisor · official channel only",
+    "advancedLabel": "Advanced",
     "chromeMode": "Chrome Integration",
     "chromeFoot": "Controls your Chrome · shares login state · uses context",
     "extraArgsPlaceholder": "--flag value extra CLI args",
