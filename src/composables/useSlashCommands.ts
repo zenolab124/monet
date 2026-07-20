@@ -34,6 +34,7 @@ export function getBuiltinCommands(): SlashCommand[] {
     { name: 'cd',        hint: t('slash.hintCd'),        hasArg: true, argHint: '<path>', category: 'native' },
     { name: 'help',      hint: t('slash.hintHelp'),      hasArg: false, category: 'native' },
     { name: 'model',     hint: t('slash.hintModel'),     hasArg: true, argHint: '<name>', category: 'pass' },
+    { name: 'chrome',    hint: t('slash.hintChrome'),    hasArg: true, argHint: '[on|off]', category: 'pass' },
     { name: 'compact',   hint: t('slash.hintCompact'),   hasArg: false, category: 'pass' },
     { name: 'config',    hint: t('slash.hintConfig'),    hasArg: false, category: 'pass' },
     { name: 'cost',      hint: t('slash.hintCost'),      hasArg: false, category: 'pass' },
@@ -191,6 +192,15 @@ export function parseCommand(
       return { kind: 'invalid', cmd, reason: i18n.global.t('slash.errorModelUnknown') }
     }
     return { kind: 'pass', cmd, arg: resolveModelArg(arg.toLowerCase()) }
+  }
+
+  // /chrome:本地拦截(Monet 自己切会话级开关,不透传 CLI)。无参 = toggle,on/off = 定向设置
+  if (cmd.name === 'chrome') {
+    const normalized = arg.toLowerCase()
+    if (normalized !== '' && normalized !== 'on' && normalized !== 'off') {
+      return { kind: 'invalid', cmd, reason: i18n.global.t('slash.errorChromeArg') }
+    }
+    return { kind: 'pass', cmd, arg: normalized }
   }
 
   if (cmd.name === 'cd') {

@@ -20,6 +20,8 @@ export interface SendOptions {
   channel?: string | null
   /** 顾问模式:true 时经 --settings 注入 advisorModel + env flag(主模型由调用方强制为 sonnet) */
   advisor?: boolean
+  /** Chrome 集成:true 时 spawn 带 --chrome(启动参数,开关变更触发进程重启) */
+  chrome?: boolean
   /** Anthropic image content blocks(base64 编码) */
   images?: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>
   permissionMode?: string
@@ -1071,6 +1073,7 @@ async function sendMessage(
       effort: opts.effort ?? null,
       channel: opts.channel ?? null,
       advisor: opts.advisor ?? false,
+      chrome: opts.chrome ?? false,
       images: opts.images?.length ? opts.images : null,
       permissionMode: opts.permissionMode ?? null,
       appendSystemPrompt: opts.appendSystemPrompt ?? (htmlVisualEnabled.value ? HTML_VISUAL_PROMPT : null),

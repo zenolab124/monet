@@ -59,6 +59,7 @@ async function onToggleRC() {
       effort: rc.effort ?? null,
       channel: rc.channelId,
       advisor: settings.value.advisor,
+      chrome: settings.value.chrome,
       enabled: enabling,
       permissionMode: settings.value.permissionMode ?? null,
     })

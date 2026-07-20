@@ -457,7 +457,7 @@ async function onStop() {
 }
 
 // --- 会话级设置(模型 / 努力等级 / 渠道) ---
-const { settings, setModel, setEffort, setChannel, setAdvisor, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
+const { settings, setModel, setEffort, setChannel, setAdvisor, setChrome, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
 
 // 运行配置同源解析:顶栏展示与发送参数共用同一解析结果(会话覆盖 > 渠道默认 > CLI 默认)
 const { runConfig } = useRunConfig(settings)
@@ -486,6 +486,12 @@ function onChannelChange(channelId: string | null) {
 
 function onAdvisorChange(advisor: boolean) {
   setAdvisor(advisor)
+}
+
+function onChromeChange(chrome: boolean) {
+  setChrome(chrome)
+  // --chrome 是启动参数,进程重启在下一条消息由 needs_restart 自动触发
+  slashNotice.value = t(chrome ? 'session.chromeEnabled' : 'session.chromeDisabled')
 }
 
 function onPermissionModeChange(mode: import('@/composables/useSessionSettings').PermissionMode) {
@@ -1364,9 +1370,18 @@ async function handleSend() {
     return
   }
 
-  // pass 命令(目前仅 /model):持久化设置,不发消息
+  // pass 命令(/model /chrome):持久化设置,不发消息
   if (parsed.kind === 'pass' && parsed.cmd.name === 'model') {
     handleModelSwitch(parsed.arg)
+    inputText.value = ''
+    if (textareaRef.value) textareaRef.value.style.height = 'auto'
+    return
+  }
+
+  // /chrome 本地拦截:切会话级开关,下一条消息经 needs_restart 重启进程生效
+  if (parsed.kind === 'pass' && parsed.cmd.name === 'chrome') {
+    const next = parsed.arg === '' ? !settings.value.chrome : parsed.arg === 'on'
+    onChromeChange(next)
     inputText.value = ''
     if (textareaRef.value) textareaRef.value.style.height = 'auto'
     return
@@ -1408,6 +1423,7 @@ async function handleSend() {
     effort: rc.effort ?? null,
     channel: rc.channelId,
     advisor,
+    chrome: settings.value.chrome,
     images,
     permissionMode: settings.value.permissionMode,
   }
@@ -2035,11 +2051,13 @@ async function onReload() {
       :resolved-channel-id="resolvedChannelId"
       :run-config="runConfig"
       :selected-advisor="settings.advisor"
+      :selected-chrome="settings.chrome"
       :selected-permission-mode="settings.permissionMode"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @channel-change="onChannelChange"
       @advisor-change="onAdvisorChange"
+      @chrome-change="onChromeChange"
       @permission-mode-change="onPermissionModeChange"
       @reload="onReload"
       @deleted="onDeleted"

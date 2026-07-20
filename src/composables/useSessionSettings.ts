@@ -40,6 +40,8 @@ export interface SessionSettings {
   channelMarks: ChannelMark[]
   /** 顾问模式:开启后主模型强制 sonnet + 经 --settings 注入 fable 顾问(见 settings-backlog 第 3 条) */
   advisor: boolean
+  /** Chrome 集成(--chrome 启动参数):浏览器工具常驻吃上下文,默认关、按需开 */
+  chrome: boolean
   /** 权限模式:运行时热切换,通过 control_request 发给 CLI */
   permissionMode: PermissionMode
 }
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: SessionSettings = {
   channelId: null,
   channelMarks: [],
   advisor: false,
+  chrome: false,
   permissionMode: 'default',
 }
 
@@ -127,6 +130,7 @@ function loadFromStorage(sid: string): SessionSettings {
       channelId,
       channelMarks: sanitizeMarks(parsed.channelMarks),
       advisor: parsed.advisor === true,
+      chrome: parsed.chrome === true,
       permissionMode,
     }
   } catch (_) {
@@ -176,6 +180,8 @@ export interface UseSessionSettingsReturn {
   setChannel: (channelId: string | null, afterUuid: string | null) => void
   /** 开关顾问模式 */
   setAdvisor: (advisor: boolean) => void
+  /** 开关 Chrome 集成 */
+  setChrome: (chrome: boolean) => void
   /** 切换权限模式 */
   setPermissionMode: (mode: PermissionMode) => void
   /** 重置为默认并清除 localStorage */
@@ -241,6 +247,10 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
     internal.value = { ...internal.value, advisor }
   }
 
+  function setChrome(chrome: boolean) {
+    internal.value = { ...internal.value, chrome }
+  }
+
   function setPermissionMode(mode: PermissionMode) {
     internal.value = { ...internal.value, permissionMode: mode }
   }
@@ -253,5 +263,5 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
 
   const settings = computed<SessionSettings>(() => internal.value)
 
-  return { settings, setModel, setEffort, setChannel, setAdvisor, setPermissionMode, reset }
+  return { settings, setModel, setEffort, setChannel, setAdvisor, setChrome, setPermissionMode, reset }
 }

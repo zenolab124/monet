@@ -41,6 +41,8 @@ struct SessionProcess {
     model: Option<String>,
     /// spawn 时的顾问开关(advisor 经 --settings 注入,变更只能重启生效)
     advisor: bool,
+    /// spawn 时的 Chrome 集成开关(--chrome 是启动参数,变更只能重启生效)
+    chrome: bool,
 }
 
 /// 活跃的长活进程表（sessionId → SessionProcess）
@@ -214,6 +216,7 @@ fn open_session(
     effort: Option<&str>,
     channel: Option<&str>,
     advisor: bool,
+    chrome: bool,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
     force_new: bool,
@@ -291,6 +294,12 @@ fn open_session(
         "--permission-prompt-tool".to_string(),
         "mcp__monet__approve_tool_use".to_string(),
     ]);
+
+    // Chrome 集成(Claude in Chrome 扩展 + Native Messaging):按需开启,
+    // 浏览器工具常驻吃上下文,默认不传;<2.1.211 的 CLI 在 Chrome 未运行时可能挂起
+    if chrome {
+        args.push("--chrome".to_string());
+    }
 
     let ultracode = effort == Some("ultracode");
 
@@ -463,6 +472,7 @@ fn open_session(
         effort: effort.map(|s| s.to_string()),
         model: model.filter(|s| !s.is_empty()).map(|s| s.to_string()),
         advisor,
+        chrome,
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -496,6 +506,7 @@ pub fn send_message(
     effort: Option<&str>,
     channel: Option<&str>,
     advisor: bool,
+    chrome: bool,
     images: Option<&[serde_json::Value]>,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
@@ -522,16 +533,18 @@ pub fn send_message(
                     // 模型意图回落默认(None)而进程钉着上次 set_model 的具体值:
                     // set_model 无法"切回默认",不重启就是旧模型粘滞(界面默认、实跑旧值)
                     || (model.is_none() && sp.model.is_some())
+                    // --chrome 是启动参数,开关变更(含关闭卸载浏览器工具省上下文)只能重启生效
+                    || sp.chrome != chrome
             });
         if needs_restart {
-            eprintln!("[long-lived] 渠道/effort/advisor/模型回落变更，重启进程 会话={}", &session_id[..session_id.len().min(8)]);
+            eprintln!("[long-lived] 渠道/effort/advisor/chrome/模型回落变更，重启进程 会话={}", &session_id[..session_id.len().min(8)]);
             close_session(session_id);
             exists = false;
         }
     }
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, append_system_prompt, force_new)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, permission_mode, append_system_prompt, force_new)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -593,6 +606,7 @@ pub fn toggle_remote_control(
     effort: Option<&str>,
     channel: Option<&str>,
     advisor: bool,
+    chrome: bool,
     enabled: bool,
     permission_mode: Option<&str>,
 ) -> Result<(), String> {
@@ -603,7 +617,7 @@ pub fn toggle_remote_control(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, permission_mode, None, false)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, permission_mode, None, false)?;
     }
 
     let process = ACTIVE_PROCESSES

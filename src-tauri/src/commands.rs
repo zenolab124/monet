@@ -406,6 +406,7 @@ pub async fn start_streaming(
     effort: Option<String>,
     channel: Option<String>,
     advisor: bool,
+    chrome: Option<bool>,
     images: Option<Vec<serde_json::Value>>,
     permission_mode: Option<String>,
     append_system_prompt: Option<String>,
@@ -421,6 +422,7 @@ pub async fn start_streaming(
             effort.as_deref(),
             channel.as_deref(),
             advisor,
+            chrome.unwrap_or(false),
             images.as_deref(),
             permission_mode.as_deref(),
             append_system_prompt.as_deref(),
@@ -453,6 +455,7 @@ pub async fn toggle_remote_control(
     effort: Option<String>,
     channel: Option<String>,
     advisor: bool,
+    chrome: Option<bool>,
     enabled: bool,
     permission_mode: Option<String>,
 ) -> Result<(), String> {
@@ -465,6 +468,7 @@ pub async fn toggle_remote_control(
             effort.as_deref(),
             channel.as_deref(),
             advisor,
+            chrome.unwrap_or(false),
             enabled,
             permission_mode.as_deref(),
         )

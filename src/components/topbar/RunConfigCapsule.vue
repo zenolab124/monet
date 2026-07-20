@@ -23,7 +23,7 @@ import { inferModel, effortCapabilities } from '@/utils/modelContext'
  */
 const props = defineProps<{
   /** 会话覆盖原值(重置钮显隐/顾问开关状态判定) */
-  settings: Pick<SessionSettings, 'modelId' | 'effort' | 'channelId' | 'advisor'>
+  settings: Pick<SessionSettings, 'modelId' | 'effort' | 'channelId' | 'advisor' | 'chrome'>
   runConfig: ResolvedRunConfig
   /** 窄列:胶囊收起渠道段,点任意段开全景 */
   narrow?: boolean
@@ -34,6 +34,7 @@ const emit = defineEmits<{
   (e: 'effortChange', effort: EffortSetting): void
   (e: 'channelChange', channelId: string | null): void
   (e: 'advisorChange', advisor: boolean): void
+  (e: 'chromeChange', chrome: boolean): void
 }>()
 
 const { t } = useI18n()
@@ -319,6 +320,15 @@ function openSettings() {
           <span>{{ $t('topbar.advisorMode') }}</span>
         </div>
         <div class="rc-foot">{{ $t('topbar.advisorFoot') }}</div>
+        <div class="rc-advisor">
+          <button
+            type="button"
+            :class="['form-toggle-sm', { on: settings.chrome }]"
+            @click="emit('chromeChange', !settings.chrome)"
+          ><span class="form-toggle-knob" /></button>
+          <span>{{ $t('topbar.chromeMode') }}</span>
+        </div>
+        <div class="rc-foot">{{ $t('topbar.chromeFoot') }}</div>
       </div>
 
       <!-- 模型列 -->
