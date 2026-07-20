@@ -183,7 +183,7 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
         @pointerdown.stop
         @click.stop="onToggleChrome"
       >
-        <span class="i-carbon-application-web w-3 h-3" />
+        <span class="i-app-chrome w-3 h-3" />
       </button>
       <!-- 普通模式:赛马 + 分叉 + 新建 + 收起 + 关闭 -->
       <template v-if="!isRace">

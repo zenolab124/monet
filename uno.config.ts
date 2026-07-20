@@ -22,6 +22,7 @@ export default defineConfig({
         carbon: () => carbonIcons,
         app: {
           horse: appIcon('horse'),
+          chrome: appIcon('chrome'),
         },
       },
     }),
