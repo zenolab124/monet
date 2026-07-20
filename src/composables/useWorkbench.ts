@@ -58,6 +58,13 @@ interface WorkbenchState {
    * 落盘前各视图据此合成「新会话」占位显示。
    */
   drafts: Record<string, string>
+  /**
+   * 分叉意图(分叉出的 sessionId → 源 sessionId)。分叉不再预复制 JSONL,
+   * 首条消息由 Rust 端以 --resume 源 --fork-session --session-id 新 spawn,
+   * 落盘由 CLI 完成(历史行 sessionId 重写);落盘前垫底渲染源会话历史,
+   * 落盘后随 pruneDrafts 一并收割
+   */
+  forkIntents: Record<string, string>
 }
 
 const STORAGE_KEY = 'monet-workbench'
@@ -127,7 +134,7 @@ function createTabObject(seq: number): WorkbenchTab {
 
 function createInitialState(): WorkbenchState {
   const tab = createTabObject(1)
-  return { tabs: [tab], activeTabId: tab.id, tabSeq: 1, openSeq: 0, drafts: {} }
+  return { tabs: [tab], activeTabId: tab.id, tabSeq: 1, openSeq: 0, drafts: {}, forkIntents: {} }
 }
 
 // ---- 持久化(NFR-002):任一变更后同步落盘;损坏时回退默认并提示 ----
@@ -181,12 +188,20 @@ function loadState(): WorkbenchState | null {
         if (typeof v === 'string' && v) drafts[k] = v
       }
     }
+    // forkIntents 同为增量字段,同款宽松解析
+    const forkIntents: Record<string, string> = {}
+    if (parsed.forkIntents && typeof parsed.forkIntents === 'object' && !Array.isArray(parsed.forkIntents)) {
+      for (const [k, v] of Object.entries(parsed.forkIntents)) {
+        if (typeof v === 'string' && v) forkIntents[k] = v
+      }
+    }
     return {
       tabs: parsed.tabs as WorkbenchTab[],
       activeTabId: parsed.activeTabId,
       tabSeq: typeof parsed.tabSeq === 'number' ? parsed.tabSeq : parsed.tabs.length,
       openSeq: typeof parsed.openSeq === 'number' ? parsed.openSeq : 0,
       drafts,
+      forkIntents,
     }
   } catch (_) {
     return null
@@ -313,7 +328,8 @@ function reorderSessions(tabId: string, fromIndex: number, toIndex: number) {
 
 /**
  * 从已有会话发起赛马:原会话迁入新赛马 Tab 为 lane 1,
- * 再分叉一份为 lane 2。调用方负责先调 Rust fork_session 完成文件复制。
+ * 再分叉一份为 lane 2。调用方负责先登记分叉意图(registerFork),
+ * 落盘由首条消息时 CLI 原生 --fork-session 完成。
  */
 function createRaceTab(sourceSessionId: string, cwd: string, forkedSessionId: string): WorkbenchTab {
   removeSession(sourceSessionId)
@@ -485,13 +501,32 @@ function draftCwd(sessionId: string): string | null {
 }
 
 /**
+ * 登记分叉:草稿(cwd 占位) + 意图(源 sessionId)。不复制文件,
+ * 落盘由首条消息时 CLI 原生 --fork-session 完成
+ */
+function registerFork(forkedId: string, sourceId: string, cwd: string) {
+  state.value.drafts[forkedId] = cwd
+  state.value.forkIntents[forkedId] = sourceId
+}
+
+/** 分叉意图的源会话 id(非分叉草稿返回 null)。发送链路与垫底渲染据此取源 */
+function forkSourceOf(sessionId: string): string | null {
+  return state.value.forkIntents[sessionId] ?? null
+}
+
+/**
  * 草稿收割:已落盘(isPersisted)或已不在任何工作台(被关闭弃用)的草稿删除。
- * 由 App 层在 projects 刷新后调用。
+ * 由 App 层在 projects 刷新后调用。分叉意图同生命周期一并收割
  */
 function pruneDrafts(isPersisted: (sessionId: string) => boolean) {
   for (const sid of Object.keys(state.value.drafts)) {
     if (isPersisted(sid) || !findSession(sid)) {
       delete state.value.drafts[sid]
+    }
+  }
+  for (const sid of Object.keys(state.value.forkIntents)) {
+    if (isPersisted(sid) || !findSession(sid)) {
+      delete state.value.forkIntents[sid]
     }
   }
 }
@@ -679,6 +714,8 @@ export function useWorkbench() {
     openSession,
     createDraftSession,
     draftCwd,
+    registerFork,
+    forkSourceOf,
     pruneDrafts,
     expandSession,
     collapseColumn,

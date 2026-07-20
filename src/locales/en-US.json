@@ -199,6 +199,7 @@
     "slashPathNotFound": "Path not found",
     "slashNoSessions": "No sessions for this project",
     "slashOpenedInTerminal": "{cmd} opened in Terminal — come back here when done",
+    "forkedFrom": "Forked from {id} · becomes independent after your first message",
     "chromeEnabled": "Chrome integration enabled — takes effect with your next message (requires the Claude in Chrome extension)",
     "chromeDisabled": "Chrome integration disabled — takes effect with your next message",
     "slashTerminalDenied": "Automation permission denied: allow Monet to control Terminal in System Settings → Privacy & Security → Automation",
@@ -285,8 +286,7 @@
       "rcFailed": "Remote Control operation failed",
       "fork": "Fork session",
       "newSession": "New session in this project",
-      "forkCreated": "Session forked",
-      "forkFailed": "Fork failed"
+      "forkCreated": "Session forked"
     },
     "race": {
       "startRace": "Race",
@@ -299,8 +299,7 @@
       "laneLabel": "Lane {n}",
       "stopAll": "Stop All",
       "sharedInput": "Type a message to send to all lanes…",
-      "noCwd": "Session has no working directory, cannot start race",
-      "forkFailed": "Fork failed"
+      "noCwd": "Session has no working directory, cannot start race"
     }
   },
   "workshop": {

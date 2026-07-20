@@ -30,7 +30,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state, openSession, createDraftSession } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, draftCwd, findLane, state, openSession, createDraftSession, registerFork, forkSourceOf } = useWorkbench()
 
 provide('columnIndex', computed(() => props.index))
 provide('tabId', computed(() => props.tabId))
@@ -60,6 +60,7 @@ async function onToggleRC() {
       channel: rc.channelId,
       advisor: settings.value.advisor,
       chrome: settings.value.chrome,
+      forkSource: forkSourceOf(props.column.sessionId) ?? null,
       enabled: enabling,
       permissionMode: settings.value.permissionMode ?? null,
     })
@@ -97,21 +98,14 @@ const title = computed(() => {
   return props.column.sessionId.slice(0, 8)
 })
 
-async function onFork() {
+function onFork() {
   const session = projects.value.flatMap(p => p.sessions).find(s => s.id === props.column.sessionId)
   if (!session?.cwd) return
+  // 懒分叉:只登记意图,落盘由首条消息时 CLI 原生 --fork-session 完成
   const newSessionId = crypto.randomUUID()
-  try {
-    await invoke('fork_session', {
-      sourceSessionId: props.column.sessionId,
-      newSessionId,
-      cwd: session.cwd,
-    })
-    openSession(newSessionId)
-    notifyTransient(t('workbench.column.forkCreated'))
-  } catch (e) {
-    notifyTransient(t('workbench.column.forkFailed'), String(e))
-  }
+  registerFork(newSessionId, props.column.sessionId, session.cwd)
+  openSession(newSessionId)
+  notifyTransient(t('workbench.column.forkCreated'))
 }
 
 function onNewSession() {

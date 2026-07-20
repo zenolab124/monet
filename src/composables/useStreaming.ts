@@ -22,6 +22,12 @@ export interface SendOptions {
   advisor?: boolean
   /** Chrome 集成:true 时 spawn 带 --chrome(启动参数,开关变更触发进程重启) */
   chrome?: boolean
+  /**
+   * 分叉意图的源会话 id:自有 jsonl 未落盘时 Rust 端以
+   * --resume 源 --fork-session --session-id 本会话 spawn(CLI 原生分叉);
+   * 文件已存在则被忽略,残留无害
+   */
+  forkSource?: string
   /** Anthropic image content blocks(base64 编码) */
   images?: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>
   permissionMode?: string
@@ -1074,6 +1080,7 @@ async function sendMessage(
       channel: opts.channel ?? null,
       advisor: opts.advisor ?? false,
       chrome: opts.chrome ?? false,
+      forkSource: opts.forkSource ?? null,
       images: opts.images?.length ? opts.images : null,
       permissionMode: opts.permissionMode ?? null,
       appendSystemPrompt: opts.appendSystemPrompt ?? (htmlVisualEnabled.value ? HTML_VISUAL_PROMPT : null),

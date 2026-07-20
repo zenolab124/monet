@@ -199,6 +199,7 @@
     "slashPathNotFound": "路径未发现",
     "slashNoSessions": "该项目暂无会话",
     "slashOpenedInTerminal": "{cmd} 已在终端中打开，完成后回到这里继续",
+    "forkedFrom": "分叉自 {id} · 发送首条消息后成为独立会话",
     "chromeEnabled": "Chrome 集成已开启，下一条消息生效（需已安装 Claude in Chrome 扩展）",
     "chromeDisabled": "Chrome 集成已关闭，下一条消息生效",
     "slashTerminalDenied": "自动化权限被拒：请在 系统设置 → 隐私与安全性 → 自动化 中允许 Monet 控制 Terminal",
@@ -285,8 +286,7 @@
       "rcFailed": "Remote Control 操作失败",
       "fork": "分叉会话",
       "newSession": "在当前项目新建会话",
-      "forkCreated": "会话已分叉",
-      "forkFailed": "分叉失败"
+      "forkCreated": "会话已分叉"
     },
     "race": {
       "startRace": "赛马",
@@ -299,8 +299,7 @@
       "laneLabel": "赛道 {n}",
       "stopAll": "全部停止",
       "sharedInput": "输入消息，同时发送到所有赛道…",
-      "noCwd": "此会话无工作目录，无法发起赛马",
-      "forkFailed": "分叉失败"
+      "noCwd": "此会话无工作目录，无法发起赛马"
     }
   },
   "workshop": {

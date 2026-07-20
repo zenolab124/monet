@@ -88,7 +88,7 @@ const interactive = computed(() => props.mode === 'workbench')
 const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
 const { pendingScrollTarget } = useSearch()
-const { findSession, removeSession, draftCwd } = useWorkbench()
+const { findSession, removeSession, draftCwd, forkSourceOf } = useWorkbench()
 const { goToSession } = useNotifications()
 
 // 每个实例独立的 detail 数据
@@ -584,6 +584,14 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
   const cwd = draftCwd(sid)
   if (cwd) return { summary: draftSummary(sid, cwd), projectId: cwd.replace(/\//g, '-') }
   return null
+})
+
+/** 分叉垫底激活:草稿未落盘且有分叉意图(此时历史区显示的是源会话垫底数据);
+ *  落盘后 drafts/forkIntents 随 pruneDrafts 收割,标注自动消失 */
+const forkBadgeSource = computed(() => {
+  const sid = effectiveSessionId.value
+  if (!sid || !draftCwd(sid)) return null
+  return forkSourceOf(sid)
 })
 
 // 图片输入:粘贴绑 textarea;拖拽收图区放大到整个详情面板(多列并排时拖到哪列进哪列),仅可输入时生效
@@ -1424,6 +1432,7 @@ async function handleSend() {
     channel: rc.channelId,
     advisor,
     chrome: settings.value.chrome,
+    forkSource: forkSourceOf(cs.summary.id) ?? undefined,
     images,
     permissionMode: settings.value.permissionMode,
   }
@@ -1981,7 +1990,7 @@ watch(
         loadedSessionId = cs.summary.id
         deferredRecords = null
         closeAllSubAgents()
-        await loadRecords(cs.projectId, cs.summary.id, force)
+        await loadRecords(cs.projectId, cs.summary.id, force, forkSourceOf(cs.summary.id) ?? undefined)
         loadSubAgentList(cs.projectId, cs.summary.id)
         if (force && !stream.value.streaming && effectiveSessionId.value === cs.summary.id) {
           // keepPending:后台落账的 force reload 可能早于用户消息落盘(CLI 还在
@@ -2142,6 +2151,13 @@ async function onReload() {
          contentRO 观察它实现水平触发的滚动跟随 -->
     <div ref="scrollContentEl" class="space-y-4 pb-2 relative">
       <template v-if="!hideHistory">
+        <!-- 分叉垫底标注:自有 jsonl 未落盘,下方为源会话历史(首条消息后由 CLI 原生分叉落盘) -->
+        <div v-if="forkBadgeSource" class="channel-mark">
+          <div class="flex-1 h-px bg-border" />
+          <span class="i-carbon-branch w-3 h-3" />
+          <span>{{ $t('session.forkedFrom', { id: forkBadgeSource.slice(0, 8) }) }}</span>
+          <div class="flex-1 h-px bg-border" />
+        </div>
         <!-- 渠道切换横线:会话起点的切换(本地记账,jsonl 无渠道信息) -->
         <div
           v-for="(m, j) in channelMarksByUuid.get(null) ?? []"

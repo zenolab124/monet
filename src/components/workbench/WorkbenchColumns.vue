@@ -2,7 +2,6 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDroppable } from '@dnd-kit/vue'
-import { invoke } from '@tauri-apps/api/core'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
 import { useNotifications } from '@/composables/useNotifications'
@@ -20,6 +19,7 @@ const {
   setMinColumnWidth,
   minColumnWidth,
   draftCwd,
+  registerFork,
   state,
   suppressColumnTransition,
 } = useWorkbench()
@@ -35,7 +35,7 @@ function resolveSessionCwd(sessionId: string): string | undefined {
   return draftCwd(sessionId) ?? undefined
 }
 
-async function onStartRace(sessionId: string) {
+function onStartRace(sessionId: string) {
   const cwd = resolveSessionCwd(sessionId)
   if (!cwd) {
     notifyTransient(t('workbench.race.noCwd'))
@@ -43,20 +43,13 @@ async function onStartRace(sessionId: string) {
   }
   const isDraft = !!state.value.drafts[sessionId]
   const newSessionId = crypto.randomUUID()
-  try {
-    if (!isDraft) {
-      await invoke('fork_session', {
-        sourceSessionId: sessionId,
-        newSessionId,
-        cwd,
-      })
-    } else {
-      state.value.drafts[newSessionId] = cwd
-    }
-    createRaceTab(sessionId, cwd, newSessionId)
-  } catch (e) {
-    notifyTransient(t('workbench.race.forkFailed'), String(e))
+  // 懒分叉:非草稿源登记分叉意图(落盘由 CLI --fork-session 完成);草稿源无历史,仅登记草稿
+  if (!isDraft) {
+    registerFork(newSessionId, sessionId, cwd)
+  } else {
+    state.value.drafts[newSessionId] = cwd
   }
+  createRaceTab(sessionId, cwd, newSessionId)
 }
 
 const containerRef = ref<HTMLElement>()

@@ -407,6 +407,7 @@ pub async fn start_streaming(
     channel: Option<String>,
     advisor: bool,
     chrome: Option<bool>,
+    fork_source: Option<String>,
     images: Option<Vec<serde_json::Value>>,
     permission_mode: Option<String>,
     append_system_prompt: Option<String>,
@@ -423,6 +424,7 @@ pub async fn start_streaming(
             channel.as_deref(),
             advisor,
             chrome.unwrap_or(false),
+            fork_source.as_deref(),
             images.as_deref(),
             permission_mode.as_deref(),
             append_system_prompt.as_deref(),
@@ -456,6 +458,7 @@ pub async fn toggle_remote_control(
     channel: Option<String>,
     advisor: bool,
     chrome: Option<bool>,
+    fork_source: Option<String>,
     enabled: bool,
     permission_mode: Option<String>,
 ) -> Result<(), String> {
@@ -469,6 +472,7 @@ pub async fn toggle_remote_control(
             channel.as_deref(),
             advisor,
             chrome.unwrap_or(false),
+            fork_source.as_deref(),
             enabled,
             permission_mode.as_deref(),
         )
@@ -1106,23 +1110,6 @@ pub fn get_subagent_records(
     }
 
     vec![]
-}
-
-#[tauri::command]
-pub fn fork_session(
-    source_session_id: String,
-    new_session_id: String,
-    cwd: String,
-) -> Result<(), String> {
-    let project_dir = projects_dir().join(cwd.replace('/', "-"));
-    let source = project_dir.join(format!("{}.jsonl", source_session_id));
-    let dest = project_dir.join(format!("{}.jsonl", new_session_id));
-    if !source.exists() {
-        return Err(format!("Source session not found: {}", source_session_id));
-    }
-    std::fs::copy(&source, &dest)
-        .map_err(|e| format!("Fork failed: {}", e))?;
-    Ok(())
 }
 
 // ---- 工作区 git 只读快照(PRD v2.6.0 FR-004) ----

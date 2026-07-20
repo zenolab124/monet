@@ -11,7 +11,7 @@ export function createSessionDetail() {
   const currentProjectId = ref<string | null>(null)
   const currentSessionId = ref<string | null>(null)
 
-  async function loadRecords(projectId: string, sessionId: string, force = false) {
+  async function loadRecords(projectId: string, sessionId: string, force = false, fallbackSessionId?: string) {
     if (!force && currentProjectId.value === projectId && currentSessionId.value === sessionId) {
       return
     }
@@ -27,6 +27,16 @@ export function createSessionDetail() {
         projectId,
         sessionId,
       })
+      // 分叉垫底:自有 jsonl 未落盘(CLI 首条消息才写)时以源会话历史垫底显示,
+      // 落盘后 records 非空自然走自有数据
+      if (!records.value.length && fallbackSessionId) {
+        try {
+          records.value = await invoke<SessionRecord[]>('get_session_records', {
+            projectId,
+            sessionId: fallbackSessionId,
+          })
+        } catch (_) { /* 源会话读取失败保持空态,不算错误 */ }
+      }
       probe?.afterInvoke(records.value.length)
       probe?.afterAssign()
     } catch (e) {

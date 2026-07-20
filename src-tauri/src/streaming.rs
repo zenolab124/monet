@@ -217,6 +217,7 @@ fn open_session(
     channel: Option<&str>,
     advisor: bool,
     chrome: bool,
+    fork_source: Option<&str>,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
     force_new: bool,
@@ -260,23 +261,37 @@ fn open_session(
     let session_file = crate::commands::projects_dir()
         .join(cwd.replace('/', "-"))
         .join(format!("{}.jsonl", session_id));
-    let session_flag = if session_file.is_file() {
-        "--resume"
-    } else if !force_new {
-        // jsonl 不在预期位置——全局探测：是迁走了还是真的新会话？
-        if let Some(actual) = find_session_elsewhere(session_id, &session_file) {
-            return Err(format!(
-                "SESSION_ELSEWHERE:{}",
-                actual.to_string_lossy()
-            ));
-        }
-        "--session-id"
+    // 会话身份参数三态:已落盘 → resume 自己;分叉意图 → CLI 原生 fork(resume 源 +
+    // --fork-session + 指定新 ID,历史行 sessionId 由 CLI 重写,替代旧 fs::copy 仿造);
+    // 否则全新会话。文件已存在时分叉意图残留无害,走正常 resume 忽略之
+    let fork_src = fork_source.filter(|s| !s.is_empty());
+    let (session_args, resumed) = if session_file.is_file() {
+        (vec!["--resume".to_string(), session_id.to_string()], true)
+    } else if let Some(src) = fork_src {
+        (
+            vec![
+                "--resume".to_string(),
+                src.to_string(),
+                "--fork-session".to_string(),
+                "--session-id".to_string(),
+                session_id.to_string(),
+            ],
+            true,
+        )
     } else {
-        "--session-id"
+        if !force_new {
+            // jsonl 不在预期位置——全局探测：是迁走了还是真的新会话？
+            if let Some(actual) = find_session_elsewhere(session_id, &session_file) {
+                return Err(format!(
+                    "SESSION_ELSEWHERE:{}",
+                    actual.to_string_lossy()
+                ));
+            }
+        }
+        (vec!["--session-id".to_string(), session_id.to_string()], false)
     };
+    args.extend(session_args);
     args.extend([
-        session_flag.to_string(),
-        session_id.to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--input-format".to_string(),
@@ -458,7 +473,6 @@ fn open_session(
     // 10. 存入 ACTIVE_PROCESSES
     let pid = child.id();
     eprintln!("[long-lived] 新建进程 PID={} 会话={}", pid, &session_id[..session_id.len().min(8)]);
-    let resumed = session_flag == "--resume";
     let _ = app.emit("session-connected", json!({
         "session_id": session_id,
         "resumed": resumed,
@@ -507,6 +521,7 @@ pub fn send_message(
     channel: Option<&str>,
     advisor: bool,
     chrome: bool,
+    fork_source: Option<&str>,
     images: Option<&[serde_json::Value]>,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
@@ -544,7 +559,7 @@ pub fn send_message(
     }
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, permission_mode, append_system_prompt, force_new)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, permission_mode, append_system_prompt, force_new)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -607,6 +622,7 @@ pub fn toggle_remote_control(
     channel: Option<&str>,
     advisor: bool,
     chrome: bool,
+    fork_source: Option<&str>,
     enabled: bool,
     permission_mode: Option<&str>,
 ) -> Result<(), String> {
@@ -617,7 +633,7 @@ pub fn toggle_remote_control(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, permission_mode, None, false)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, permission_mode, None, false)?;
     }
 
     let process = ACTIVE_PROCESSES

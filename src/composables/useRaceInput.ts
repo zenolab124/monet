@@ -1,5 +1,4 @@
 import { ref, computed, type Ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import type { WorkbenchTab } from './useWorkbench'
 import { useWorkbench } from './useWorkbench'
 import { useStreaming, getStream } from './useStreaming'
@@ -18,7 +17,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
   const slashError = ref<string | null>(null)
 
   const { sendMessage, stopStreaming } = useStreaming()
-  const { addRaceLane } = useWorkbench()
+  const { addRaceLane, forkSourceOf } = useWorkbench()
 
   const anyStreaming = computed(() => {
     const race = tab.value.race
@@ -61,6 +60,8 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
         effort: rc.effort ?? null,
         channel: rc.channelId,
         advisor: settings.advisor,
+        chrome: settings.chrome,
+        forkSource: forkSourceOf(lane.sessionId) ?? undefined,
         images,
         permissionMode: settings.permissionMode,
       })
@@ -78,27 +79,20 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
     }
   }
 
-  async function forkNewLane() {
+  function forkNewLane() {
     const race = tab.value.race
     if (!race || race.lanes.length === 0) return
-    const { draftCwd, state } = useWorkbench()
+    const { registerFork, state } = useWorkbench()
     const sourceLane = race.lanes[0]
     const isDraft = !!state.value.drafts[sourceLane.sessionId]
     const newSessionId = crypto.randomUUID()
-    try {
-      if (!isDraft) {
-        await invoke('fork_session', {
-          sourceSessionId: sourceLane.sessionId,
-          newSessionId,
-          cwd: race.cwd,
-        })
-      } else {
-        state.value.drafts[newSessionId] = race.cwd
-      }
-      addRaceLane(tab.value.id, newSessionId)
-    } catch (e) {
-      console.error('Fork failed:', e)
+    // 懒分叉:非草稿源登记意图(落盘由 CLI --fork-session 完成);草稿源无历史,仅登记草稿
+    if (!isDraft) {
+      registerFork(newSessionId, sourceLane.sessionId, race.cwd)
+    } else {
+      state.value.drafts[newSessionId] = race.cwd
     }
+    addRaceLane(tab.value.id, newSessionId)
   }
 
   return { inputText, textareaRef, dropAreaRef, imageInput, slashError, anyStreaming, streamingCount, broadcastSend, stopAll, forkNewLane }
