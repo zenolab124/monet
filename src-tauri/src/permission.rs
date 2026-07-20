@@ -34,9 +34,9 @@ struct PendingRequest {
 /// 用户决策
 #[derive(Debug, Clone)]
 enum Decision {
-    /// 携带可选 updatedInput：交互工具（AskUserQuestion 等）经此回传用户答案，
-    /// None 时 monet-mcp 回填原始 input
-    Allow(Option<Value>),
+    /// 携带可选 updatedInput（交互工具经此回传用户答案，None 时 monet-mcp 回填原始 input）
+    /// 与可选 updatedPermissions（「始终允许」时让 CLI 自行把规则写进 settings 并即刻生效）
+    Allow(Option<Value>, Option<Value>),
     Deny(String),
 }
 
@@ -123,6 +123,7 @@ impl PermissionService {
         allow: bool,
         message: Option<String>,
         updated_input: Option<Value>,
+        updated_permissions: Option<Value>,
     ) -> bool {
         let services: Vec<Arc<PermissionService>> = SERVICES
             .lock()
@@ -136,7 +137,7 @@ impl PermissionService {
                 let mut slot = req.decision.lock().unwrap();
                 if slot.is_none() {
                     *slot = Some(if allow {
-                        Decision::Allow(updated_input)
+                        Decision::Allow(updated_input, updated_permissions)
                     } else {
                         Decision::Deny(message.unwrap_or_else(|| "用户拒绝".to_string()))
                     });
@@ -307,10 +308,16 @@ fn handle_connection(
 
     // 写回响应
     let resp = match final_decision {
-        Decision::Allow(Some(updated)) => {
-            json!({ "behavior": "allow", "updatedInput": updated })
+        Decision::Allow(updated_input, updated_permissions) => {
+            let mut o = json!({ "behavior": "allow" });
+            if let Some(u) = updated_input {
+                o["updatedInput"] = u;
+            }
+            if let Some(p) = updated_permissions {
+                o["updatedPermissions"] = p;
+            }
+            o
         }
-        Decision::Allow(None) => json!({ "behavior": "allow" }),
         Decision::Deny(msg) => json!({ "behavior": "deny", "message": msg }),
     };
     let mut out = stream;

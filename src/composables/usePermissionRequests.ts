@@ -45,8 +45,16 @@ interface PermissionRequestEventPayload {
   timestamp: number
 }
 
-/** 用户决策类型 */
-export type PermissionDecision = 'allow_once' | 'allow_session' | 'deny'
+/** 用户决策类型;allow_server 仅 MCP 工具可用:经 updatedPermissions 让 CLI
+ *  把 mcp__<server> 规则写进全局 settings,该 server 全部工具(含未来新增)永久放行 */
+export type PermissionDecision = 'allow_once' | 'allow_session' | 'allow_server' | 'deny'
+
+/** MCP 工具名解析出 server 名(非 MCP 工具返回 null)。mcp__<server>__<tool> 取 server 段 */
+export function mcpServerOf(toolName: string): string | null {
+  if (!toolName.startsWith('mcp__')) return null
+  const server = toolName.slice(5).split('__')[0]
+  return server || null
+}
 
 /** 响应时的附加载荷（交互工具专用） */
 export interface RespondExtra {
@@ -209,12 +217,29 @@ export async function respondRequest(
     if (key) sessionAllowList.set(key, true)
   }
 
+  // allow_server(仅 MCP 工具):经 updatedPermissions 让 CLI 把 mcp__<server> 规则
+  // 写进全局 settings(~/.claude/settings.json)——CLI 落盘格式自理、进程内即刻生效,
+  // 该 server 全部工具(含未来新增)跨项目不再询问
+  let updatedPermissions: unknown = null
+  if (decision === 'allow_server' && !isInteractiveTool(req.toolName)) {
+    const server = mcpServerOf(req.toolName)
+    if (server) {
+      updatedPermissions = [{
+        type: 'addRules',
+        rules: [{ toolName: `mcp__${server}` }],
+        behavior: 'allow',
+        destination: 'userSettings',
+      }]
+    }
+  }
+
   try {
     await invoke('respond_permission', {
       requestId: req.requestId,
       allow: decision !== 'deny',
       message: decision === 'deny' ? (extra?.message ?? i18n.global.t('common.userDenied')) : null,
       updatedInput: decision !== 'deny' ? (extra?.updatedInput ?? null) : null,
+      updatedPermissions,
     })
   } catch (_) {
     // 响应失败:不再补救,Rust 端会按超时处理

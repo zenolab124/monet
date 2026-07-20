@@ -22,6 +22,7 @@ import { useI18n } from 'vue-i18n'
 import { resolveTool } from './blocks/tools'
 import {
   isInteractiveTool,
+  mcpServerOf,
   type PermissionRequest,
   type PermissionDecision,
 } from '@/composables/usePermissionRequests'
@@ -56,6 +57,11 @@ const isDanger = computed(() => props.request.danger !== null)
 
 /** 交互工具(如 EnterPlanMode)不提供「允许此会话」——静默放行没有意义且危险 */
 const showAllowSession = computed(() => !isInteractiveTool(props.request.toolName))
+
+/** MCP 工具解析出的 server 名:非空时提供「始终允许该 Server」(写入全局 settings 永久放行) */
+const mcpServer = computed(() =>
+  isInteractiveTool(props.request.toolName) ? null : mcpServerOf(props.request.toolName),
+)
 
 const hint = computed(() => getHint(props.request.requestId))
 
@@ -180,6 +186,17 @@ function onKeydown(e: KeyboardEvent) {
       >
         <span class="i-carbon-time w-3.5 h-3.5" aria-hidden="true" />
         {{ $t('permission.allowSession') }}
+      </button>
+
+      <button
+        v-if="mcpServer"
+        type="button"
+        class="btn btn-warn"
+        :title="$t('permission.allowServerHint', { server: mcpServer })"
+        @click="decide('allow_server')"
+      >
+        <span class="i-carbon-plug w-3.5 h-3.5" aria-hidden="true" />
+        {{ $t('permission.allowServer', { server: mcpServer }) }}
       </button>
 
       <div class="flex-1" />

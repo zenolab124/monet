@@ -421,7 +421,7 @@ const requestCard = computed(() => {
 })
 
 async function onPermissionDecide(
-  decision: 'allow_once' | 'allow_session' | 'deny',
+  decision: import('@/composables/usePermissionRequests').PermissionDecision,
   extra?: RespondExtra,
 ) {
   const req = permissionRequest.value

@@ -890,6 +890,8 @@
     "allowOnce": "Allow once",
     "allowSessionHint": "Auto-approve same tool + same key params within this session, until stream ends or session switches",
     "allowSession": "Allow for session",
+    "allowServer": "Always allow {server}",
+    "allowServerHint": "Writes an mcp__{server} rule to global settings.json: every tool from this server (including future ones) is permanently allowed across projects, effective immediately",
     "plan": {
       "title": "Plan Pending Approval",
       "subtitle": "Claude will start implementing after approval",

@@ -498,8 +498,9 @@ pub fn respond_permission(
     allow: bool,
     message: Option<String>,
     updated_input: Option<serde_json::Value>,
+    updated_permissions: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    let ok = PermissionService::respond(&request_id, allow, message, updated_input);
+    let ok = PermissionService::respond(&request_id, allow, message, updated_input, updated_permissions);
     if ok {
         Ok(())
     } else {

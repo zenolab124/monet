@@ -890,6 +890,8 @@
     "allowOnce": "允许一次",
     "allowSessionHint": "本会话内同一工具+同一关键参数自动放行，直到流式结束或会话切换",
     "allowSession": "允许此会话",
+    "allowServer": "始终允许 {server}",
+    "allowServerHint": "将 mcp__{server} 规则写入全局 settings.json：该 Server 的全部工具（含未来新增）跨项目永久放行，即刻生效",
     "plan": {
       "title": "计划待批准",
       "subtitle": "批准后 Claude 开始动手实施",
