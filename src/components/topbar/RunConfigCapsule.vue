@@ -23,7 +23,7 @@ import { inferModel, effortCapabilities } from '@/utils/modelContext'
  */
 const props = defineProps<{
   /** 会话覆盖原值(重置钮显隐/顾问开关状态判定) */
-  settings: Pick<SessionSettings, 'modelId' | 'effort' | 'channelId' | 'advisor' | 'chrome' | 'extraArgs'>
+  settings: Pick<SessionSettings, 'modelId' | 'effort' | 'channelId' | 'chrome' | 'extraArgs'>
   runConfig: ResolvedRunConfig
   /** 窄列:胶囊收起渠道段,点任意段开全景 */
   narrow?: boolean
@@ -33,7 +33,6 @@ const emit = defineEmits<{
   (e: 'modelChange', modelId: string | null): void
   (e: 'effortChange', effort: EffortSetting): void
   (e: 'channelChange', channelId: string | null): void
-  (e: 'advisorChange', advisor: boolean): void
   (e: 'chromeChange', chrome: boolean): void
   (e: 'extraArgsChange', extraArgs: string): void
 }>()
@@ -258,12 +257,6 @@ const channelSrcLabel = computed(() =>
 )
 
 // ---- 顾问 ----
-const advisorDisabled = computed(() => !!props.runConfig.channelId)
-function onAdvisorToggle() {
-  if (advisorDisabled.value) return
-  emit('advisorChange', !props.settings.advisor)
-}
-
 // ---- 自定义 CLI 参数(逃生舱) ----
 
 /** 输入草稿:失焦/回车才提交,面板重开时从 settings 同步 */
@@ -413,18 +406,7 @@ function openSettings() {
         <div class="rc-head">
           <span class="rc-label">{{ $t('topbar.advancedLabel') }}</span>
         </div>
-        <div class="rc-adv-item" :class="{ 'opacity-45': advisorDisabled }">
-          <button
-            type="button"
-            :class="['form-toggle-sm', { on: settings.advisor && !advisorDisabled }]"
-            :disabled="advisorDisabled"
-            :title="advisorDisabled ? $t('topbar.advisorDisabled') : ''"
-            @click="onAdvisorToggle"
-          ><span class="form-toggle-knob" /></button>
-          <span>{{ $t('topbar.advisorMode') }}</span>
-        </div>
-        <div class="rc-foot">{{ $t('topbar.advisorFoot') }}</div>
-        <div class="rc-adv-item rc-adv-sep">
+        <div class="rc-adv-item">
           <button
             type="button"
             :class="['form-toggle-sm', { on: settings.chrome }]"

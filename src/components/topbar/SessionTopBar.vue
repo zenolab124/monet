@@ -63,7 +63,6 @@ const emit = defineEmits<{
   (e: 'modelChange', modelId: string | null): void
   (e: 'effortChange', effort: EffortSetting): void
   (e: 'channelChange', channelId: string | null): void
-  (e: 'advisorChange', advisor: boolean): void
   (e: 'chromeChange', chrome: boolean): void
   (e: 'extraArgsChange', extraArgs: string): void
   (e: 'permissionModeChange', mode: PermissionMode): void
@@ -87,7 +86,6 @@ const capsuleSettings = computed(() => ({
   modelId: props.selectedModelId,
   effort: props.selectedEffort,
   channelId: props.selectedChannelId,
-  advisor: props.selectedAdvisor,
   chrome: props.selectedChrome,
   extraArgs: props.selectedExtraArgs,
 }))
@@ -272,7 +270,6 @@ function onPermissionModeChange(mode: PermissionMode) {
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @channel-change="onChannelChange"
-      @advisor-change="(v: boolean) => emit('advisorChange', v)"
       @chrome-change="(v: boolean) => emit('chromeChange', v)"
       @extra-args-change="(v: string) => emit('extraArgsChange', v)"
     />

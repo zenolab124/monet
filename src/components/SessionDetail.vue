@@ -457,7 +457,7 @@ async function onStop() {
 }
 
 // --- 会话级设置(模型 / 努力等级 / 渠道) ---
-const { settings, setModel, setEffort, setChannel, setAdvisor, setChrome, setExtraArgs, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
+const { settings, setModel, setEffort, setChannel, setChrome, setExtraArgs, setPermissionMode: persistPermissionMode } = useSessionSettings(effectiveSessionId)
 
 // 运行配置同源解析:顶栏展示与发送参数共用同一解析结果(会话覆盖 > 渠道默认 > CLI 默认)
 const { runConfig } = useRunConfig(settings)
@@ -482,10 +482,6 @@ function onChannelChange(channelId: string | null) {
   const list = messages.value
   const last = list.length > 0 ? list[list.length - 1] : null
   setChannel(channelId, last?.uuid ?? null)
-}
-
-function onAdvisorChange(advisor: boolean) {
-  setAdvisor(advisor)
 }
 
 function onChromeChange(chrome: boolean) {
@@ -2072,7 +2068,6 @@ async function onReload() {
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @channel-change="onChannelChange"
-      @advisor-change="onAdvisorChange"
       @chrome-change="onChromeChange"
       @extra-args-change="onExtraArgsChange"
       @permission-mode-change="onPermissionModeChange"
