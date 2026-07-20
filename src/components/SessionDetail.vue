@@ -249,6 +249,13 @@ function toggleLedgerPanel() {
 watch(asyncSidebarOpen, open => {
   if (open) ledgerPanelOpen.value = false
 })
+const ledgerPanelRef = ref<InstanceType<typeof FileLedgerPanel> | null>(null)
+// tool_use 锚点索引:文件工具卡按钮可见性 O(1) 判定(子代理转录的卡不入账,自然隐藏)
+const ledgerAnchorSet = computed(() => {
+  const s = new Set<string>()
+  for (const e of ledgerEntries.value) for (const op of e.ops) s.add(op.anchorId)
+  return s
+})
 
 provide('findSubAgent', (toolUseId: string) => findByToolUseId(toolUseId))
 provide('toggleSubAgent', (meta: SubAgentMeta) => toggleSubAgent(meta))
@@ -258,6 +265,17 @@ provide('openAsyncTask', (toolUseId: string) => {
   if (!asyncTasks.value.some(x => x.toolUseId === toolUseId)) return false
   openAsyncPanel()
   nextTick(() => asyncPanelRef.value?.openByToolUse(toolUseId))
+  return true
+})
+// 文件工具卡(Edit/Write/Read/NotebookEdit)直达账本:推开面板并下钻到该文件时间线
+provide('hasLedgerAnchor', (toolUseId: string) => ledgerAnchorSet.value.has(toolUseId))
+provide('openFileLedger', (toolUseId: string) => {
+  if (!ledgerAnchorSet.value.has(toolUseId)) return false
+  if (!ledgerPanelOpen.value) {
+    ledgerPanelOpen.value = true
+    if (asyncSidebarOpen.value) closeAsyncPanel()
+  }
+  nextTick(() => ledgerPanelRef.value?.openByAnchor(toolUseId))
   return true
 })
 
@@ -2530,6 +2548,7 @@ async function onReload() {
     >
       <FileLedgerPanel
         v-if="ledgerPanelOpen"
+        ref="ledgerPanelRef"
         :modified="ledgerModified"
         :read-only="ledgerReadOnly"
         :cwd="currentSession?.summary.cwd ?? null"

@@ -1180,6 +1180,7 @@
     "andMore": "已截断,仅显示前 200 条",
     "footnote": "仅覆盖结构化编辑工具（Edit / Write / NotebookEdit），Bash 中的文件操作不入账",
     "jump": "跳转到消息",
+    "viewInLedger": "在文件账本中查看",
     "expandAll": "展开全部（共 {n} 行）",
     "writeSummary": "写入 {lines} 行 · {chars} 字符",
     "preview": "展开预览",

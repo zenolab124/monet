@@ -19,6 +19,16 @@ const emit = defineEmits<{
 const readOpen = ref(false)
 const selected = ref<FileEntry | null>(null)
 
+/** 会话内工具卡直达:按 tool_use 锚点下钻到所属文件时间线(镜像 AsyncTaskPanel.openByToolUse) */
+function openByAnchor(anchorId: string): boolean {
+  const entry = [...props.modified, ...props.readOnly]
+    .find(e => e.ops.some(op => op.anchorId === anchorId))
+  if (!entry) return false
+  selected.value = entry
+  return true
+}
+defineExpose({ openByAnchor })
+
 // 下钻条目跟随账本实时更新(流式新操作到达时按 path 重取)
 const selectedLive = computed<FileEntry | null>(() => {
   if (!selected.value) return null

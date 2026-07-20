@@ -1180,6 +1180,7 @@
     "andMore": "Truncated to first 200 entries",
     "footnote": "Covers structured editing tools only (Edit / Write / NotebookEdit); file operations inside Bash are not tracked",
     "jump": "Jump to message",
+    "viewInLedger": "View in file ledger",
     "expandAll": "Expand all ({n} lines)",
     "writeSummary": "Wrote {lines} lines · {chars} chars",
     "preview": "Preview",

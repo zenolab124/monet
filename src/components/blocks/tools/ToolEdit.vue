@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { fileName } from '@/utils/path'
 
 const props = defineProps<{
@@ -28,12 +28,17 @@ const newString = computed(() => {
 const replaceAll = computed(() => props.input.replace_all === true)
 
 const expanded = ref(false)
+
+// 直达文件账本(仅主对话入账的调用显示;子代理转录不入账,自然隐藏)
+const hasLedgerAnchor = inject<(id: string) => boolean>('hasLedgerAnchor', () => false)
+const openFileLedger = inject<(id: string) => boolean>('openFileLedger', () => false)
+const inLedger = computed(() => hasLedgerAnchor(props.toolUseId))
 </script>
 
 <template>
   <div :data-tool-use-id="toolUseId" class="mt-2 rounded-md bg-background border border-border px-3 py-2 text-xs">
-    <button
-      class="flex items-center gap-1.5 w-full text-left"
+    <div
+      class="flex items-center gap-1.5 w-full text-left cursor-pointer"
       @click="expanded = !expanded"
     >
       <span class="i-carbon-chevron-right w-3 h-3 transition-transform shrink-0" :class="{ 'rotate-90': expanded }" />
@@ -41,7 +46,15 @@ const expanded = ref(false)
       <span class="text-foreground font-medium">Edit</span>
       <span v-if="filePath" class="font-mono text-muted-foreground truncate" :title="filePath">{{ displayName }}</span>
       <span v-if="replaceAll" class="ml-1 px-1.5 py-0.5 rounded border border-accent/50 text-accent text-2xs shrink-0">{{ $t('block.toolEdit.replaceAll') }}</span>
-    </button>
+      <button
+        v-if="inLedger"
+        class="ml-auto p-0.5 rounded text-muted-foreground/60 hover:text-claude hover:bg-muted shrink-0"
+        :title="$t('fileLedger.viewInLedger')"
+        @click.stop="openFileLedger(toolUseId)"
+      >
+        <span class="i-carbon-catalog w-3.5 h-3.5" />
+      </button>
+    </div>
     <div v-if="expanded && (oldString || newString)" class="mt-2 grid grid-cols-2 gap-1.5">
       <pre v-if="oldString" class="rounded bg-destructive/10 border border-destructive/20 px-2 py-1 text-destructive whitespace-pre-wrap break-all font-mono overflow-auto max-h-48">- {{ oldString }}</pre>
       <pre v-if="newString" class="rounded bg-primary/10 border border-primary/20 px-2 py-1 text-primary whitespace-pre-wrap break-all font-mono overflow-auto max-h-48">+ {{ newString }}</pre>

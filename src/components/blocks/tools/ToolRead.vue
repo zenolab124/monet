@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { fileName } from '@/utils/path'
 
@@ -41,6 +41,11 @@ async function openFile() {
     // 静默降级
   }
 }
+
+// 直达文件账本(仅主对话入账的调用显示;子代理转录不入账,自然隐藏)
+const hasLedgerAnchor = inject<(id: string) => boolean>('hasLedgerAnchor', () => false)
+const openFileLedger = inject<(id: string) => boolean>('openFileLedger', () => false)
+const inLedger = computed(() => hasLedgerAnchor(props.toolUseId))
 </script>
 
 <template>
@@ -55,6 +60,14 @@ async function openFile() {
         @click="openFile"
       >{{ displayName }}</button>
       <span v-if="lineRange" class="font-mono text-muted-foreground">{{ lineRange }}</span>
+      <button
+        v-if="inLedger"
+        class="ml-auto p-0.5 rounded text-muted-foreground/60 hover:text-claude hover:bg-muted shrink-0"
+        :title="$t('fileLedger.viewInLedger')"
+        @click.stop="openFileLedger(toolUseId)"
+      >
+        <span class="i-carbon-catalog w-3.5 h-3.5" />
+      </button>
     </div>
   </div>
 </template>

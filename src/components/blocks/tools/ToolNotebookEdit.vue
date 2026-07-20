@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 
 const props = defineProps<{
   input: Record<string, unknown>
@@ -37,6 +37,11 @@ const oldSource = computed(() => {
   const v = props.input.old_source
   return typeof v === 'string' ? v : ''
 })
+
+// 直达文件账本(仅主对话入账的调用显示;子代理转录不入账,自然隐藏)
+const hasLedgerAnchor = inject<(id: string) => boolean>('hasLedgerAnchor', () => false)
+const openFileLedger = inject<(id: string) => boolean>('openFileLedger', () => false)
+const inLedger = computed(() => hasLedgerAnchor(props.toolUseId))
 </script>
 
 <template>
@@ -48,6 +53,14 @@ const oldSource = computed(() => {
       <span v-if="cellId" class="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">cell {{ cellId }}</span>
       <span v-if="cellType" class="px-1.5 py-0.5 rounded border border-border text-muted-foreground">{{ cellType }}</span>
       <span v-if="editMode" class="px-1.5 py-0.5 rounded border border-accent/50 text-accent">{{ editMode }}</span>
+      <button
+        v-if="inLedger"
+        class="ml-auto p-0.5 rounded text-muted-foreground/60 hover:text-claude hover:bg-muted shrink-0"
+        :title="$t('fileLedger.viewInLedger')"
+        @click.stop="openFileLedger(toolUseId)"
+      >
+        <span class="i-carbon-catalog w-3.5 h-3.5" />
+      </button>
     </div>
     <div v-if="oldSource || newSource" class="mt-2 space-y-1">
       <pre v-if="oldSource" class="rounded bg-destructive/10 border border-destructive/20 px-2 py-1 text-destructive whitespace-pre-wrap break-all font-mono">- {{ oldSource }}</pre>
