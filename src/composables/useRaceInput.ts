@@ -62,6 +62,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
         advisor: settings.advisor,
         chrome: settings.chrome,
         forkSource: forkSourceOf(lane.sessionId) ?? undefined,
+        extraArgs: settings.extraArgs || undefined,
         images,
         permissionMode: settings.permissionMode,
       })

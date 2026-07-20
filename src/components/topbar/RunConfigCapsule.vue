@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionSettings, EffortSetting, EffortLevel } from '@/composables/useSessionSettings'
 import type { ResolvedRunConfig } from '@/composables/useRunConfig'
@@ -23,7 +23,7 @@ import { inferModel, effortCapabilities } from '@/utils/modelContext'
  */
 const props = defineProps<{
   /** 会话覆盖原值(重置钮显隐/顾问开关状态判定) */
-  settings: Pick<SessionSettings, 'modelId' | 'effort' | 'channelId' | 'advisor' | 'chrome'>
+  settings: Pick<SessionSettings, 'modelId' | 'effort' | 'channelId' | 'advisor' | 'chrome' | 'extraArgs'>
   runConfig: ResolvedRunConfig
   /** 窄列:胶囊收起渠道段,点任意段开全景 */
   narrow?: boolean
@@ -35,6 +35,7 @@ const emit = defineEmits<{
   (e: 'channelChange', channelId: string | null): void
   (e: 'advisorChange', advisor: boolean): void
   (e: 'chromeChange', chrome: boolean): void
+  (e: 'extraArgsChange', extraArgs: string): void
 }>()
 
 const { t } = useI18n()
@@ -238,6 +239,27 @@ function onAdvisorToggle() {
   emit('advisorChange', !props.settings.advisor)
 }
 
+// ---- 自定义 CLI 参数(逃生舱) ----
+
+/** 输入草稿:失焦/回车才提交,面板重开时从 settings 同步 */
+const extraArgsDraft = ref(props.settings.extraArgs)
+watch(() => props.settings.extraArgs, (v) => { extraArgsDraft.value = v })
+
+/** 协议级参数前端预警(与 Rust EXTRA_ARGS_DENYLIST 同源清单,Rust 端仍兜底剔除) */
+const EXTRA_ARGS_DENYLIST = [
+  '-p', '--print', '-c', '--continue',
+  '--output-format', '--input-format', '--session-id', '--resume', '--fork-session',
+  '--mcp-config', '--permission-prompt-tool', '--settings',
+]
+const extraArgsWarn = computed(() =>
+  EXTRA_ARGS_DENYLIST.some(f => extraArgsDraft.value.split(/\s+/).some(t => t === f || t.startsWith(`${f}=`))),
+)
+
+function commitExtraArgs() {
+  const v = extraArgsDraft.value.trim()
+  if (v !== props.settings.extraArgs) emit('extraArgsChange', v)
+}
+
 // ---- 管理渠道入口(原 ChannelDropdown 功能保留) ----
 const { switchSection } = useUiState()
 function openSettings() {
@@ -329,6 +351,21 @@ function openSettings() {
           <span>{{ $t('topbar.chromeMode') }}</span>
         </div>
         <div class="rc-foot">{{ $t('topbar.chromeFoot') }}</div>
+        <div class="rc-extra-args">
+          <input
+            v-model="extraArgsDraft"
+            type="text"
+            class="rc-args-input"
+            :class="{ 'rc-args-warn': extraArgsWarn }"
+            :placeholder="$t('topbar.extraArgsPlaceholder')"
+            spellcheck="false"
+            @blur="commitExtraArgs"
+            @keydown.enter.prevent="commitExtraArgs"
+          />
+        </div>
+        <div class="rc-foot" :class="{ 'rc-foot-warn': extraArgsWarn }">
+          {{ extraArgsWarn ? $t('topbar.extraArgsDenied') : $t('topbar.extraArgsFoot') }}
+        </div>
       </div>
 
       <!-- 模型列 -->
@@ -432,4 +469,14 @@ function openSettings() {
   border-top: 1px solid var(--border); margin-top: 5px;
 }
 .rc-foot { font-size: 9px; color: var(--muted-foreground); opacity: .75; padding: 4px 2px 0; line-height: 1.4; }
+.rc-foot-warn { color: var(--destructive); opacity: .9; }
+.rc-extra-args { padding: 5px 2px 0; border-top: 1px solid var(--border); margin-top: 5px; }
+.rc-args-input {
+  width: 100%; font-size: 11px; font-family: ui-monospace, monospace;
+  padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--background); color: var(--foreground);
+}
+.rc-args-input:focus { outline: none; border-color: var(--primary); }
+.rc-args-input::placeholder { color: var(--muted-foreground); opacity: .6; }
+.rc-args-warn { border-color: var(--destructive); }
 </style>

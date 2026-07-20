@@ -43,6 +43,82 @@ struct SessionProcess {
     advisor: bool,
     /// spawn 时的 Chrome 集成开关(--chrome 是启动参数,变更只能重启生效)
     chrome: bool,
+    /// spawn 时的用户自定义 CLI 参数原始串(逃生舱,变更只能重启生效)
+    extra_args: String,
+}
+
+/// 自定义参数黑名单:会打爆 Monet↔CLI 通信的协议级参数(会话身份/流式格式/权限桥/渠道注入)。
+/// 冲突级参数(--model/--effort/--chrome 等)刻意放行——追加在 Monet 参数之后,CLI 后者
+/// 覆盖语义让用户能强行改写,这正是逃生舱的意义
+const EXTRA_ARGS_DENYLIST: &[&str] = &[
+    "-p", "--print", "-c", "--continue",
+    "--output-format", "--input-format", "--session-id", "--resume", "--fork-session",
+    "--mcp-config", "--permission-prompt-tool", "--settings",
+];
+
+/// 解析会话自定义 CLI 参数:shell 式分词(引号值支持),黑名单项连其值一并剔除。
+/// 解析失败(未闭合引号等)返回空——宁可不加参数也不给 CLI 传半截
+fn parse_extra_args(raw: &str) -> Vec<String> {
+    let tokens = shell_words::split(raw).unwrap_or_default();
+    let mut out = Vec::new();
+    let mut skip_value = false;
+    for t in tokens {
+        if skip_value {
+            skip_value = false;
+            // 非 - 开头 = 黑名单 flag 的值,一并剔除;- 开头则不是值,落回正常处理
+            if !t.starts_with('-') {
+                continue;
+            }
+        }
+        let flag_part = t.split('=').next().unwrap_or(&t);
+        if EXTRA_ARGS_DENYLIST.contains(&flag_part) {
+            // --flag value 形式:标记跳过下一个值 token(--flag=value 形式无值可跳)
+            skip_value = !t.contains('=');
+            continue;
+        }
+        out.push(t);
+    }
+    out
+}
+
+#[cfg(test)]
+mod extra_args_tests {
+    use super::parse_extra_args;
+
+    #[test]
+    fn keeps_normal_args() {
+        assert_eq!(parse_extra_args("--betas foo --fallback-model opus"),
+            vec!["--betas", "foo", "--fallback-model", "opus"]);
+    }
+
+    #[test]
+    fn strips_denied_flag_with_value() {
+        assert_eq!(parse_extra_args("--output-format json --betas foo"),
+            vec!["--betas", "foo"]);
+    }
+
+    #[test]
+    fn strips_denied_eq_form() {
+        assert_eq!(parse_extra_args("--session-id=abc --betas foo"),
+            vec!["--betas", "foo"]);
+    }
+
+    #[test]
+    fn boolean_denied_flag_does_not_eat_next_flag() {
+        // --print 是布尔 flag,其后的 --betas 不能被当作值误剔
+        assert_eq!(parse_extra_args("--print --betas foo"), vec!["--betas", "foo"]);
+    }
+
+    #[test]
+    fn quoted_values_survive() {
+        assert_eq!(parse_extra_args(r#"--append-system-prompt "hello world""#),
+            vec!["--append-system-prompt", "hello world"]);
+    }
+
+    #[test]
+    fn unclosed_quote_yields_empty() {
+        assert!(parse_extra_args(r#"--betas "unclosed"#).is_empty());
+    }
 }
 
 /// 活跃的长活进程表（sessionId → SessionProcess）
@@ -218,6 +294,7 @@ fn open_session(
     advisor: bool,
     chrome: bool,
     fork_source: Option<&str>,
+    extra_args: Option<&str>,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
     force_new: bool,
@@ -354,6 +431,10 @@ fn open_session(
         args.push("--append-system-prompt".to_string());
         args.push(prompt.to_string());
     }
+    // 用户自定义 CLI 参数(逃生舱):置于全部 Monet 参数之后,冲突项按 CLI 后者覆盖生效
+    if let Some(raw) = extra_args.filter(|s| !s.trim().is_empty()) {
+        args.extend(parse_extra_args(raw));
+    }
 
     // 6. Spawn（stdin/stdout/stderr 全 piped）
     let mut command = Command::new(&executable);
@@ -487,6 +568,7 @@ fn open_session(
         model: model.filter(|s| !s.is_empty()).map(|s| s.to_string()),
         advisor,
         chrome,
+        extra_args: extra_args.unwrap_or("").to_string(),
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -522,6 +604,7 @@ pub fn send_message(
     advisor: bool,
     chrome: bool,
     fork_source: Option<&str>,
+    extra_args: Option<&str>,
     images: Option<&[serde_json::Value]>,
     permission_mode: Option<&str>,
     append_system_prompt: Option<&str>,
@@ -550,6 +633,8 @@ pub fn send_message(
                     || (model.is_none() && sp.model.is_some())
                     // --chrome 是启动参数,开关变更(含关闭卸载浏览器工具省上下文)只能重启生效
                     || sp.chrome != chrome
+                    // 自定义 CLI 参数同为启动参数,变更只能重启生效
+                    || sp.extra_args != extra_args.unwrap_or("")
             });
         if needs_restart {
             eprintln!("[long-lived] 渠道/effort/advisor/chrome/模型回落变更，重启进程 会话={}", &session_id[..session_id.len().min(8)]);
@@ -559,7 +644,7 @@ pub fn send_message(
     }
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, permission_mode, append_system_prompt, force_new)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, extra_args, permission_mode, append_system_prompt, force_new)?;
     }
 
     let process = ACTIVE_PROCESSES
@@ -623,6 +708,7 @@ pub fn toggle_remote_control(
     advisor: bool,
     chrome: bool,
     fork_source: Option<&str>,
+    extra_args: Option<&str>,
     enabled: bool,
     permission_mode: Option<&str>,
 ) -> Result<(), String> {
@@ -633,7 +719,7 @@ pub fn toggle_remote_control(
         .map_or(false, |m| m.contains_key(session_id));
 
     if !exists {
-        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, permission_mode, None, false)?;
+        open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, extra_args, permission_mode, None, false)?;
     }
 
     let process = ACTIVE_PROCESSES

@@ -51,6 +51,8 @@ const props = defineProps<{
   selectedAdvisor: boolean
   /** Chrome 集成开关状态 */
   selectedChrome: boolean
+  /** 自定义 CLI 参数 */
+  selectedExtraArgs: string
   /** 权限模式 */
   selectedPermissionMode: PermissionMode
   /** 会话累计 token 用量 */
@@ -63,6 +65,7 @@ const emit = defineEmits<{
   (e: 'channelChange', channelId: string | null): void
   (e: 'advisorChange', advisor: boolean): void
   (e: 'chromeChange', chrome: boolean): void
+  (e: 'extraArgsChange', extraArgs: string): void
   (e: 'permissionModeChange', mode: PermissionMode): void
   (e: 'reload'): void
   (e: 'deleted'): void
@@ -86,6 +89,7 @@ const capsuleSettings = computed(() => ({
   channelId: props.selectedChannelId,
   advisor: props.selectedAdvisor,
   chrome: props.selectedChrome,
+  extraArgs: props.selectedExtraArgs,
 }))
 
 /** 解析后的 ModelInfo。API 模型名永远不带 [1m]，无法区分 200K/1M 变体——
@@ -270,6 +274,7 @@ function onPermissionModeChange(mode: PermissionMode) {
       @channel-change="onChannelChange"
       @advisor-change="(v: boolean) => emit('advisorChange', v)"
       @chrome-change="(v: boolean) => emit('chromeChange', v)"
+      @extra-args-change="(v: string) => emit('extraArgsChange', v)"
     />
 
     <!-- token 进度(紧凑形态:条 + 百分比,永不折叠) -->

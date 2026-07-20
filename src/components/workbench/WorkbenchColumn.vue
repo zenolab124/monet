@@ -61,6 +61,7 @@ async function onToggleRC() {
       advisor: settings.value.advisor,
       chrome: settings.value.chrome,
       forkSource: forkSourceOf(props.column.sessionId) ?? null,
+      extraArgs: settings.value.extraArgs || null,
       enabled: enabling,
       permissionMode: settings.value.permissionMode ?? null,
     })

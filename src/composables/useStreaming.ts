@@ -28,6 +28,8 @@ export interface SendOptions {
    * 文件已存在则被忽略,残留无害
    */
   forkSource?: string
+  /** 自定义 CLI 参数原始串(逃生舱,变更触发进程重启;协议级参数 Rust 端黑名单剔除) */
+  extraArgs?: string
   /** Anthropic image content blocks(base64 编码) */
   images?: Array<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }>
   permissionMode?: string
@@ -1081,6 +1083,7 @@ async function sendMessage(
       advisor: opts.advisor ?? false,
       chrome: opts.chrome ?? false,
       forkSource: opts.forkSource ?? null,
+      extraArgs: opts.extraArgs || null,
       images: opts.images?.length ? opts.images : null,
       permissionMode: opts.permissionMode ?? null,
       appendSystemPrompt: opts.appendSystemPrompt ?? (htmlVisualEnabled.value ? HTML_VISUAL_PROMPT : null),

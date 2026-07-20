@@ -42,6 +42,9 @@ export interface SessionSettings {
   advisor: boolean
   /** Chrome 集成(--chrome 启动参数):浏览器工具常驻吃上下文,默认关、按需开 */
   chrome: boolean
+  /** 自定义 CLI 参数原始串(逃生舱:Monet 未原生支持的 flag 用户自行追加);
+   *  协议级参数由 Rust 端黑名单剔除,变更经 needs_restart 重启生效 */
+  extraArgs: string
   /** 权限模式:运行时热切换,通过 control_request 发给 CLI */
   permissionMode: PermissionMode
 }
@@ -67,6 +70,7 @@ export const DEFAULT_SETTINGS: SessionSettings = {
   channelMarks: [],
   advisor: false,
   chrome: false,
+  extraArgs: '',
   permissionMode: 'default',
 }
 
@@ -131,6 +135,7 @@ function loadFromStorage(sid: string): SessionSettings {
       channelMarks: sanitizeMarks(parsed.channelMarks),
       advisor: parsed.advisor === true,
       chrome: parsed.chrome === true,
+      extraArgs: typeof parsed.extraArgs === 'string' ? parsed.extraArgs : '',
       permissionMode,
     }
   } catch (_) {
@@ -182,6 +187,8 @@ export interface UseSessionSettingsReturn {
   setAdvisor: (advisor: boolean) => void
   /** 开关 Chrome 集成 */
   setChrome: (chrome: boolean) => void
+  /** 设置自定义 CLI 参数 */
+  setExtraArgs: (extraArgs: string) => void
   /** 切换权限模式 */
   setPermissionMode: (mode: PermissionMode) => void
   /** 重置为默认并清除 localStorage */
@@ -251,6 +258,10 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
     internal.value = { ...internal.value, chrome }
   }
 
+  function setExtraArgs(extraArgs: string) {
+    internal.value = { ...internal.value, extraArgs: extraArgs.trim() }
+  }
+
   function setPermissionMode(mode: PermissionMode) {
     internal.value = { ...internal.value, permissionMode: mode }
   }
@@ -263,5 +274,5 @@ export function useSessionSettings(sessionId: Ref<string | null>): UseSessionSet
 
   const settings = computed<SessionSettings>(() => internal.value)
 
-  return { settings, setModel, setEffort, setChannel, setAdvisor, setChrome, setPermissionMode, reset }
+  return { settings, setModel, setEffort, setChannel, setAdvisor, setChrome, setExtraArgs, setPermissionMode, reset }
 }

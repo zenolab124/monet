@@ -36,6 +36,8 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4"
 dirs = "6"
+# 会话自定义 CLI 参数的 shell 式解析（引号值支持）
+shell-words = "1"
 log = "0.4"
 regex = "1"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
