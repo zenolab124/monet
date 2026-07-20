@@ -1,8 +1,15 @@
 {
   "name": "monet-tauri",
   "version": "0.1.23",
-  "description": "Monet — Claude Code session viewer",
+  "private": true,
+  "description": "Monet — Mission Control for Claude Code",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zenolab124/monet.git"
+  },
+  "homepage": "https://github.com/zenolab124/monet",
+  "bugs": "https://github.com/zenolab124/monet/issues",
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
@@ -16,8 +23,16 @@
     "release": "bash scripts/release.sh",
     "version": "bash scripts/sync-version.sh"
   },
-  "author": "",
+  "author": "Zeno",
   "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "session-manager",
+    "tauri",
+    "vue",
+    "macos"
+  ],
   "packageManager": "pnpm@10.18.2",
   "devDependencies": {
     "@iconify-json/carbon": "^1.2.20",

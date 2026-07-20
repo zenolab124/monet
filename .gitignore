@@ -11,6 +11,7 @@ src-tauri/target/
 CLAUDE.md
 docs/
 .playwright-mcp/
+.scratch-*
 
 # Widget Extension build artifacts
 src-widget/build/
