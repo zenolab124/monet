@@ -580,20 +580,17 @@ pub struct ExternalSessionInfo {
 /// 2. session_id 以独立 token 出现（而非 `<sid>.jsonl` 之类的子串）
 /// 因此 `tail -f ~/.claude/projects/x/<sid>.jsonl`、`vim <sid>.jsonl`、`grep <sid> ~/.claude/…` 均不命中。
 fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
-    let mut has_claude_bin = false;
-    let mut has_sid_token = false;
-    for tok in cmd.split_whitespace() {
-        if !has_claude_bin && tok.rsplit('/').next().unwrap_or(tok) == "claude" {
-            has_claude_bin = true;
-        }
-        if !has_sid_token && tok == session_id {
-            has_sid_token = true;
-        }
-        if has_claude_bin && has_sid_token {
-            return true;
-        }
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    let has_claude_bin = tokens.iter().any(|t| t.rsplit('/').next().unwrap_or(t) == "claude");
+    if !has_claude_bin {
+        return false;
     }
-    false
+    // --fork-session 时真实身份是 --session-id 的值，--resume 的值是源会话不算归属
+    if tokens.contains(&"--fork-session") {
+        tokens.windows(2).any(|w| w[0] == "--session-id" && w[1] == session_id)
+    } else {
+        tokens.iter().any(|t| *t == session_id)
+    }
 }
 
 /// 扫描外部 claude 进程：命中匹配且非 Monet 自持进程的 pid 列表。
@@ -733,6 +730,17 @@ mod external_session_tests {
         ));
         // sid 独立 token 但没有 claude 二进制
         assert!(!command_matches_claude_session(&format!("echo {SID}"), SID));
+    }
+
+    #[test]
+    fn fork_not_counted_as_source_session() {
+        const SRC: &str = "aaaa1111-0000-0000-0000-000000000000";
+        const FORKED: &str = "bbbb2222-0000-0000-0000-000000000000";
+        let cmd = format!("claude --resume {SRC} --fork-session --session-id {FORKED}");
+        // 源会话不应命中
+        assert!(!command_matches_claude_session(&cmd, SRC));
+        // 分叉新会话才命中
+        assert!(command_matches_claude_session(&cmd, FORKED));
     }
 
     #[test]
