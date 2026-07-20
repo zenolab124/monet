@@ -26,20 +26,6 @@
     "synthetic": false
   },
   {
-    "file": "sample-03.md",
-    "chars": 12468,
-    "features": [
-      "fence",
-      "multi_fence",
-      "nested_backtick",
-      "ulist",
-      "olist",
-      "nested_list",
-      "table"
-    ],
-    "synthetic": false
-  },
-  {
     "file": "sample-04.md",
     "chars": 11103,
     "features": [

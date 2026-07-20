@@ -642,7 +642,7 @@ fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
 
 /// 沿父进程链解析归属应用名：跳过 shell/login 中转层，取第一个真实应用。
 /// 例：claude ← zsh ← login ← Terminal 解析为 "Terminal"；
-///     claude ← SomeApp 解析为 "SomeApp"。
+///     claude ← SomeApp 直挂时解析为 "SomeApp"。
 fn resolve_owner(pid: u32, table: &std::collections::HashMap<u32, (u32, String)>) -> Option<String> {
     const SHELLS: [&str; 6] = ["sh", "zsh", "bash", "fish", "dash", "login"];
     let mut cur = pid;

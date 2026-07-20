@@ -1817,7 +1817,7 @@ watch(autoTurnLanded, async () => {
 // 注意:声明须在下方 immediate watch 之前(其回调在 setup 同步阶段就会执行)。
 
 const externalRunning = ref(false)
-/** 外部进程归属应用（父进程链解析,如 Terminal / SomeApp),横幅与停止确认共用 */
+/** 外部进程归属应用（父进程链解析,如 Terminal / 其他 GUI 工具),横幅与停止确认共用 */
 const externalOwner = ref<string | null>(null)
 /** 终止外部进程进行中:锁按钮防重复 kill,SIGTERM 后到 probe 撤横幅有数秒窗口 */
 const stopping = ref(false)
