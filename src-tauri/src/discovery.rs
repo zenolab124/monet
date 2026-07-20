@@ -109,7 +109,7 @@ fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
 
 /// 解码项目目录名为可读路径
 /// 编码规则：/ → -，首个 - 代表根 /
-/// 例：-Users-xt-workspace → /Users/xt/workspace
+/// 例：-Users-alice-workspace → /Users/alice/workspace
 ///
 /// 使用贪心文件系统验证：优先匹配包含连字符的真实目录名
 fn decode_path(encoded: &str) -> String {
