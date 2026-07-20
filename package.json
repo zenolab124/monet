@@ -1,6 +1,6 @@
 {
   "name": "monet-tauri",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Monet — Claude Code session viewer",
   "type": "module",
   "scripts": {
