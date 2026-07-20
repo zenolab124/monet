@@ -73,11 +73,18 @@ async function onToggleRC() {
   }
 }
 
+/** 列头 Chrome 开关:与胶囊面板同源(settings.chrome),变更经 needs_restart 下一条消息生效 */
+function onToggleChrome() {
+  const next = !settings.value.chrome
+  setChrome(next)
+  notifyTransient(t(next ? 'session.chromeEnabled' : 'session.chromeDisabled'))
+}
+
 const sid = computed(() => props.column.sessionId)
 const stream = useSessionStream(sid)
 const status = useSessionStatus(sid)
 // RC 开关与发消息同源的运行配置(渠道/模型/effort/advisor)
-const { settings } = useSessionSettings(sid)
+const { settings, setChrome } = useSessionSettings(sid)
 const { runConfig } = useRunConfig(settings)
 
 const projectName = computed(() => {
@@ -168,6 +175,15 @@ const isDragging = defineModel<boolean>('dragging', { default: false })
         @click.stop="onToggleRC"
       >
         <span class="i-carbon-remote-connection w-3 h-3" />
+      </button>
+      <button
+        class="icon-btn icon-btn-sm"
+        :class="settings.chrome ? 'border-primary! text-primary!' : ''"
+        v-tooltip="settings.chrome ? $t('workbench.column.chromeEnabled') : $t('workbench.column.chromeEnable')"
+        @pointerdown.stop
+        @click.stop="onToggleChrome"
+      >
+        <span class="i-carbon-application-web w-3 h-3" />
       </button>
       <!-- 普通模式:赛马 + 分叉 + 新建 + 收起 + 关闭 -->
       <template v-if="!isRace">

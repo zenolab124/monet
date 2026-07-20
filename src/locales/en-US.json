@@ -279,6 +279,8 @@
     "column": {
       "rcEnabled": "Remote Control enabled (click to disable)",
       "rcEnable": "Enable Remote Control",
+      "chromeEnabled": "Chrome integration on (click to disable)",
+      "chromeEnable": "Enable Chrome integration (control browser · share login state)",
       "collapseToRail": "Collapse to rail",
       "closeExit": "Close (exit workbench)",
       "rcOpened": "Remote Control enabled",
