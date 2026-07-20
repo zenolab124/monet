@@ -2504,7 +2504,8 @@ async function onReload() {
     <!-- 异步任务面板：width transition 手风琴展开,列宽同步翻倍,主栏宽度恒定 -->
     <div
       v-if="sidePanelDom"
-      class="side-panel-accordion shrink-0 border-l border-border overflow-hidden"
+      class="side-panel-accordion shrink-0 overflow-hidden"
+      :class="asyncPanelVisible && sidePanelExpanded ? 'border-l border-border' : ''"
       :style="{ width: asyncPanelVisible && sidePanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
     >
       <AsyncTaskPanel
@@ -2523,7 +2524,8 @@ async function onReload() {
     </div>
     <!-- 文件账本面板:与异步面板互斥,同款手风琴 -->
     <div
-      class="side-panel-accordion shrink-0 border-l border-border overflow-hidden"
+      class="side-panel-accordion shrink-0 overflow-hidden"
+      :class="ledgerPanelOpen && sidePanelExpanded ? 'border-l border-border' : ''"
       :style="{ width: ledgerPanelOpen && sidePanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
     >
       <FileLedgerPanel
