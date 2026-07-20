@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SessionSettings, EffortSetting, EffortLevel } from '@/composables/useSessionSettings'
 import type { ResolvedRunConfig } from '@/composables/useRunConfig'
@@ -60,11 +60,30 @@ const visibleCols = computed<Col[]>(() => {
   }
 })
 
+/** 面板 fixed 定位(Teleport 到 body 逃出工作台列 overflow-hidden 裁剪) */
+const panelRef = ref<HTMLElement>()
+const panelPos = ref({ top: 0, left: 0 })
+
+function placePanel() {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return
+  panelPos.value = { top: rect.bottom + 4, left: rect.left }
+  // 面板宽度随列数变化,渲染后测量并钳回视口(右溢/下溢)
+  nextTick(() => {
+    const p = panelRef.value?.getBoundingClientRect()
+    if (!p) return
+    const left = Math.max(8, Math.min(panelPos.value.left, window.innerWidth - p.width - 8))
+    const top = Math.max(8, Math.min(panelPos.value.top, window.innerHeight - p.height - 8))
+    panelPos.value = { top, left }
+  })
+}
+
 function openFrom(layer: Layer) {
   // 窄列渠道段收起:点任意段直接开全景,规则简化
   const target = props.narrow ? 'channel' : layer
   openLayer.value = openLayer.value === target ? null : target
   if (openLayer.value) {
+    placePanel()
     // 渠道文件/settings.json 都是活文件:开面板即重读,不显示过期值
     refreshChannels()
     refreshCliDefaults()
@@ -74,7 +93,11 @@ function openFrom(layer: Layer) {
 function onDocumentClick(e: MouseEvent) {
   if (!openLayer.value) return
   const target = e.target as Node
-  if (containerRef.value && !containerRef.value.contains(target)) {
+  // 面板已 Teleport 到 body,点外判定须同时豁免胶囊与面板两棵子树
+  if (
+    containerRef.value && !containerRef.value.contains(target)
+    && panelRef.value && !panelRef.value.contains(target)
+  ) {
     openLayer.value = null
   }
 }
@@ -304,11 +327,15 @@ function openSettings() {
       >{{ effortSegLabel }}</button>
     </div>
 
-    <!-- 渐进面板:列式扩展 -->
+    <!-- 渐进面板:列式扩展。Teleport 到 body:工作台列容器 overflow-hidden,
+         列过窄时容器内 absolute 面板会被裁剪,fixed 悬浮层不受限 -->
+    <Teleport to="body">
     <div
       v-if="openLayer"
-      class="absolute top-full left-0 mt-1 z-50 inline-flex rounded-md border border-border
+      ref="panelRef"
+      class="fixed z-50 inline-flex rounded-md border border-border
              shadow-paper-lifted bg-popover"
+      :style="{ top: `${panelPos.top}px`, left: `${panelPos.left}px` }"
     >
       <!-- 渠道列 -->
       <div v-if="visibleCols.includes('channel')" class="rc-col">
@@ -423,6 +450,7 @@ function openSettings() {
         </div>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 
