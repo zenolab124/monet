@@ -2120,6 +2120,17 @@ async function onReload() {
       :anchors="anchorItems"
       :scroll-container="scrollContainer"
     />
+    <!-- 分叉草稿悬浮标注:垫底渲染期常显(不随滚动消失,原横线置于消息流顶部会被
+         默认滚底藏走);发出首条消息即隐,落盘收割后 forkBadgeSource 自然为 null -->
+    <div
+      v-if="forkBadgeSource && !stream.streaming && !stream.pendingUserMessage"
+      class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5
+             px-2.5 py-1 rounded-full border border-border bg-popover/70 backdrop-blur-md
+             shadow-paper text-[11px] text-muted-foreground whitespace-nowrap"
+    >
+      <span class="i-carbon-branch w-3 h-3 shrink-0" />
+      <span>{{ $t('session.forkedFrom', { id: forkBadgeSource.slice(0, 8) }) }}</span>
+    </div>
     <!-- 会话横幅:悬浮通知层,不占文档流——出现/增高不推挤消息、不触发滚动跟随,
          根除"hook 事件陆续到达时横幅增高顶块/与用户上滚手势竞态拽回"。
          最短停留 5s,首轮回合结束后到点淡出(scheduleBannerHide) -->
@@ -2151,13 +2162,6 @@ async function onReload() {
          contentRO 观察它实现水平触发的滚动跟随 -->
     <div ref="scrollContentEl" class="space-y-4 pb-2 relative">
       <template v-if="!hideHistory">
-        <!-- 分叉垫底标注:自有 jsonl 未落盘,下方为源会话历史(首条消息后由 CLI 原生分叉落盘) -->
-        <div v-if="forkBadgeSource" class="channel-mark">
-          <div class="flex-1 h-px bg-border" />
-          <span class="i-carbon-branch w-3 h-3" />
-          <span>{{ $t('session.forkedFrom', { id: forkBadgeSource.slice(0, 8) }) }}</span>
-          <div class="flex-1 h-px bg-border" />
-        </div>
         <!-- 渠道切换横线:会话起点的切换(本地记账,jsonl 无渠道信息) -->
         <div
           v-for="(m, j) in channelMarksByUuid.get(null) ?? []"
