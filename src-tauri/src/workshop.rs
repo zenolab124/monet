@@ -877,6 +877,9 @@ fn mcp_add_inner(
 
     let mut cmd = std::process::Command::new(&located.path);
     cmd.env("PATH", crate::streaming::enhanced_path());
+    if let Some((k, v)) = crate::config::claude_config_dir_env() {
+        cmd.env(k, v);
+    }
     cmd.args(["mcp", "add", name]);
 
     // scope：local 是 CLI 默认（不传 -s）
@@ -942,6 +945,9 @@ fn mcp_remove_inner(name: &str, scope: &str, project_cwd: Option<&str>) -> Resul
 
     let mut cmd = std::process::Command::new(&located.path);
     cmd.env("PATH", crate::streaming::enhanced_path());
+    if let Some((k, v)) = crate::config::claude_config_dir_env() {
+        cmd.env(k, v);
+    }
     cmd.args(["mcp", "remove", name, "-s", scope]);
 
     if scope != "user" {
@@ -979,6 +985,9 @@ fn mcp_reset_inner(project_cwd: &str) -> Result<(), String> {
 
     let mut cmd = std::process::Command::new(&located.path);
     cmd.env("PATH", crate::streaming::enhanced_path());
+    if let Some((k, v)) = crate::config::claude_config_dir_env() {
+        cmd.env(k, v);
+    }
     cmd.args(["mcp", "reset-project-choices"]);
     cmd.current_dir(project_cwd);
 

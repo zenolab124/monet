@@ -133,6 +133,19 @@ fn is_default_claude_root(root: &Path) -> bool {
     *root == default_claude_root()
 }
 
+/// spawn claude CLI 时的数据根对齐：根非默认时返回需注入的
+/// `CLAUDE_CONFIG_DIR`，让子进程 CLI 与 Monet 读取侧看到同一数据根
+/// （否则自定义根下 Monet 发起的会话会落到默认 ~/.claude，自己读不到）。
+/// 默认根时返回 None，零扰动
+pub fn claude_config_dir_env() -> Option<(&'static str, String)> {
+    let root = claude_root();
+    if is_default_claude_root(root) {
+        None
+    } else {
+        Some(("CLAUDE_CONFIG_DIR", root.display().to_string()))
+    }
+}
+
 /// 内置 Agent 的专属工作目录：spawn CLI 时的 cwd 固定在这里，
 /// 与用户项目隔离（Agent 调用另有 --no-session-persistence 保证不落盘）
 pub fn agent_cwd() -> PathBuf {

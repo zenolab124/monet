@@ -275,6 +275,9 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
         let output = match crate::claude_locator::locate() {
             Ok(located) => {
                 let mut cmd = Command::new(&located.path);
+                if let Some((k, v)) = config::claude_config_dir_env() {
+                    cmd.env(k, v);
+                }
                 cmd.arg("-p")
                     .arg(&prompt)
                     .arg("--output-format")

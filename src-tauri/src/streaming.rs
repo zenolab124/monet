@@ -446,6 +446,9 @@ fn open_session(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some((k, v)) = crate::config::claude_config_dir_env() {
+        command.env(k, v);
+    }
     // CLI 自立进程组（组 ID = CLI PID）：MCP 子进程随组，signal_session 组信号可整树回收
     #[cfg(unix)]
     {
