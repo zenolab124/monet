@@ -807,6 +807,18 @@
       "manualInvalid": "手动配置的路径无效，已回退自动探测",
       "attemptedTitle": "已尝试以下位置："
     },
+    "claudeRoot": {
+      "title": "Claude 数据目录",
+      "description": "Monet 读取 Claude Code 会话数据的根目录。若通过 CLAUDE_CONFIG_DIR 将数据存于非标准位置，可在此指定。",
+      "sourceEnv": "环境变量",
+      "sourceSettings": "手动配置",
+      "sourceDefault": "默认",
+      "envControlled": "当前由环境变量 CLAUDE_CONFIG_DIR 控制，无法在此修改",
+      "pathMissing": "路径不存在",
+      "pickDir": "选择目录",
+      "resetDefault": "恢复默认",
+      "restartHint": "重启 Monet 后生效"
+    },
     "cliConfig": {
       "title": "Claude Code 配置",
       "subtitle": "读写 ~/.claude/settings.json",

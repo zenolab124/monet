@@ -21,10 +21,7 @@ fn schema_cache_path() -> PathBuf {
 }
 
 fn claude_settings_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("settings.json")
+    config::claude_root().join("settings.json")
 }
 
 /// 读取 schema：内存缓存 → 磁盘缓存 → 远程 fetch
@@ -391,6 +388,79 @@ pub async fn redetect_claude_binary() -> Result<crate::claude_locator::LocateInf
     tauri::async_runtime::spawn_blocking(crate::claude_locator::redetect_info)
         .await
         .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Claude 数据根目录设置（设置页消费）
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeRootInfo {
+    /// 当前进程实际生效的根路径（OnceLock 缓存值）
+    pub effective: String,
+    /// 设置项 claudeRoot 原值（未配置为 None）
+    pub configured: Option<String>,
+    /// 重启后将生效的路径来源：env / settings / default
+    pub source: String,
+    /// 默认路径 ~/.claude（供 UI 展示与「恢复默认」）
+    pub default: String,
+    /// 生效路径当前是否存在
+    pub exists: bool,
+    /// 即时解析结果与当前生效值不同 → 需重启才生效
+    pub restart_required: bool,
+}
+
+fn claude_root_info() -> ClaudeRootInfo {
+    let effective = config::claude_root();
+    let resolved = config::resolve_claude_root();
+    let configured = config::read_app_setting("claudeRoot")
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .filter(|s| !s.trim().is_empty());
+    let source = if std::env::var("MONET_CLAUDE_ROOT").is_ok_and(|v| !v.trim().is_empty())
+        || std::env::var("CLAUDE_CONFIG_DIR").is_ok_and(|v| !v.trim().is_empty())
+    {
+        "env"
+    } else if configured.is_some() {
+        "settings"
+    } else {
+        "default"
+    };
+    ClaudeRootInfo {
+        effective: effective.display().to_string(),
+        configured,
+        source: source.to_string(),
+        default: config::default_claude_root().display().to_string(),
+        exists: effective.is_dir(),
+        restart_required: *effective != resolved,
+    }
+}
+
+#[tauri::command]
+pub fn get_claude_root_info() -> ClaudeRootInfo {
+    claude_root_info()
+}
+
+/// 设置自定义 Claude 数据根目录；None / 空串 = 恢复默认（删除设置键）。
+/// 只写设置不动运行态——watcher/索引启动时绑定，统一重启生效
+#[tauri::command]
+pub fn set_claude_root(path: Option<String>) -> Result<ClaudeRootInfo, String> {
+    let trimmed = path.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    match trimmed {
+        Some(p) => {
+            let expanded = if let Some(rest) = p.strip_prefix("~/") {
+                dirs::home_dir().unwrap_or_default().join(rest)
+            } else {
+                PathBuf::from(p)
+            };
+            if !expanded.is_dir() {
+                return Err(format!("目录不存在：{}", expanded.display()));
+            }
+            config::write_app_setting("claudeRoot", serde_json::json!(p));
+        }
+        None => config::write_app_setting("claudeRoot", serde_json::Value::Null),
+    }
+    Ok(claude_root_info())
 }
 
 /// 从 CLI 二进制中提取字段默认值（Python 读二进制 + 正则模式匹配，不经 Agent）

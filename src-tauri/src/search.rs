@@ -121,8 +121,8 @@ where
 
 // ── 路径与文件收集 ────────────────────────────────────────
 
-fn projects_root() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude").join("projects"))
+fn projects_root() -> PathBuf {
+    crate::config::projects_dir()
 }
 
 fn shards_dir() -> PathBuf {
@@ -142,7 +142,8 @@ fn file_stamp(meta: &fs::Metadata) -> (u64, u32, u64, f64) {
 /// 排除 agent- 前缀（与 watcher::session_file_ids 口径一致），不含 subagents 深层
 fn collect_main_sessions() -> Vec<(PathBuf, String, String)> {
     let mut out = Vec::new();
-    let Some(root) = projects_root() else { return out };
+    let root = projects_root();
+    if !root.is_dir() { return out; }
     let Ok(projects) = fs::read_dir(&root) else { return out };
     // 内置 Agent 工作目录不入索引（防旧版残留污染搜索）
     let agent_dirs = crate::config::agent_project_dirs();
@@ -399,7 +400,7 @@ pub fn warm() -> SearchStatus {
             HashMap::new()
         } else {
             let pids: HashSet<&String> = files.iter().map(|(_, pid, _)| pid).collect();
-            let root = projects_root().unwrap_or_default();
+            let root = projects_root();
             pids.into_iter()
                 .flat_map(|pid| {
                     load_shard(pid).into_values().map(|e| {
@@ -550,7 +551,7 @@ fn settle_dirty() {
     if dirty.is_empty() {
         return;
     }
-    let root = projects_root().unwrap_or_default();
+    let root = projects_root();
     let refreshed: Vec<(PathBuf, Option<SessionEntry>)> = dirty
         .par_iter()
         .filter_map(|path| {

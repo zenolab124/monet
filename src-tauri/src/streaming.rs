@@ -23,8 +23,8 @@ pub fn resolve_default_permission_mode(cwd: &str) -> Option<String> {
     let candidates = [
         cwd_path.join(".claude/settings.local.json"),
         cwd_path.join(".claude/settings.json"),
-        dirs::home_dir().map(|h| h.join(".claude/settings.local.json")).unwrap_or_default(),
-        dirs::home_dir().map(|h| h.join(".claude/settings.json")).unwrap_or_default(),
+        crate::config::claude_root().join("settings.local.json"),
+        crate::config::claude_root().join("settings.json"),
     ];
     candidates.into_iter().find_map(read_mode)
 }
@@ -272,7 +272,7 @@ fn signal_session(pid: u32, sig: &str) {
 /// 命中说明"这不是新会话，是历史不在预期位置"——静默 --session-id 会以空历史
 /// 重生同名会话，复刻「会话被覆盖」事故。
 fn find_session_elsewhere(session_id: &str, expected: &Path) -> Option<PathBuf> {
-    let root = crate::commands::projects_dir();
+    let root = crate::config::projects_dir();
     let name = format!("{}.jsonl", session_id);
     for entry in std::fs::read_dir(&root).ok()?.filter_map(|e| e.ok()) {
         let candidate = entry.path().join(&name);
@@ -336,7 +336,7 @@ fn open_session(
     // 4. CLI 参数（不带 --print，不传消息文本；加 --input-format stream-json）
     let (executable, prefix_args) = find_claude();
     let mut args = prefix_args;
-    let session_file = crate::commands::projects_dir()
+    let session_file = crate::config::projects_dir()
         .join(cwd.replace('/', "-"))
         .join(format!("{}.jsonl", session_id));
     // 会话身份参数三态:已落盘 → resume 自己;分叉意图 → CLI 原生 fork(resume 源 +

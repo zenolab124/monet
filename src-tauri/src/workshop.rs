@@ -237,14 +237,13 @@ pub async fn probe_mcp_server(url: String) -> Result<bool, String> {
 /// skills/commands/agents 目录不存在先创建再打开；mcp 打开 ~/.claude.json 所在目录（家目录，不创建）。
 #[tauri::command]
 pub fn open_workshop_dir(category: String) -> Result<(), String> {
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
     let dir = match category.as_str() {
         "skills" | "commands" | "agents" => {
-            let d = home.join(".claude").join(&category);
+            let d = crate::config::claude_root().join(&category);
             fs::create_dir_all(&d).map_err(|e| format!("创建目录失败: {}", e))?;
             d
         }
-        "mcp" => home,
+        "mcp" => dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?,
         other => return Err(format!("未知类别: {}", other)),
     };
     open_in_file_manager(&dir)
@@ -272,7 +271,6 @@ fn open_in_file_manager(dir: &Path) -> Result<(), String> {
 /// command 层装配：拼家目录与 discovery 项目列表，再交给纯函数。
 /// 同步更新扫描快照（FR-001 get_asset_detail 的安全校验依赖）
 fn collect_workshop_assets() -> Result<WorkshopAssets, String> {
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
     // 项目级遍历复用 discovery 的发现结果（display_path = 解码后的项目 cwd）；
     // 解码可能指向已不存在的目录，扫描时静默跳过是常态
     let mut seen = HashSet::new();
@@ -281,21 +279,21 @@ fn collect_workshop_assets() -> Result<WorkshopAssets, String> {
         .map(|p| p.display_path)
         .filter(|p| !p.is_empty() && seen.insert(p.clone()))
         .collect();
-    let assets = collect_assets(&home, &project_cwds);
+    let assets = collect_assets(crate::config::claude_root(), &crate::config::claude_json_path(), &project_cwds);
     update_snapshot(&assets);
     Ok(assets)
 }
 
-/// 纯函数扫描核心：home = 家目录根，project_cwds = 项目工作目录列表（单测注入 fixture）
-fn collect_assets(home: &Path, project_cwds: &[String]) -> WorkshopAssets {
-    let claude_dir = home.join(".claude");
+/// 纯函数扫描核心：claude_dir = Claude 数据根，claude_json = 顶层 .claude.json 路径，
+/// project_cwds = 项目工作目录列表（单测注入 fixture）
+fn collect_assets(claude_dir: &Path, claude_json: &Path, project_cwds: &[String]) -> WorkshopAssets {
     let mut skills = scan_skills_dir(&claude_dir.join("skills"), GLOBAL_SOURCE);
     let mut commands = scan_commands_dir(&claude_dir.join("commands"), GLOBAL_SOURCE);
     let mut agents = scan_agents_dir(&claude_dir.join("agents"), GLOBAL_SOURCE);
 
-    // ~/.claude.json：用户级 MCP + 各项目 local scope MCP 与 disabled 列表。
+    // .claude.json：用户级 MCP + 各项目 local scope MCP 与 disabled 列表。
     // 缺失或解析失败 → 用户级与 local scope MCP 计为空，项目级 .mcp.json 照常解析（FR-004 降级）
-    let claude_json_path = home.join(".claude.json");
+    let claude_json_path = claude_json.to_path_buf();
     let claude_json: Option<ClaudeJsonPartial> = fs::read_to_string(&claude_json_path)
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok());
@@ -1039,8 +1037,7 @@ pub async fn get_hooks_overview() -> Result<HooksOverview, String> {
 }
 
 fn collect_hooks_overview() -> Result<HooksOverview, String> {
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let claude_dir = home.join(".claude");
+    let claude_dir = crate::config::claude_root();
 
     let mut all_entries: HashMap<String, Vec<HookEntry>> = HashMap::new();
     let mut parse_failures: Vec<String> = Vec::new();
@@ -1292,8 +1289,7 @@ pub async fn get_memory_overview() -> Result<MemoryOverview, String> {
 }
 
 fn collect_memory_overview() -> Result<MemoryOverview, String> {
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let projects_root = home.join(".claude").join("projects");
+    let projects_root = crate::config::projects_dir();
     if !projects_root.is_dir() {
         return Ok(MemoryOverview { projects: Vec::new() });
     }
@@ -1522,10 +1518,7 @@ pub fn get_memory_detail(project_dir: String, file: String) -> Result<MemoryDeta
         return Err("非法路径: file".to_string());
     }
 
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let path = home
-        .join(".claude")
-        .join("projects")
+    let path = crate::config::projects_dir()
         .join(&project_dir)
         .join("memory")
         .join(&file);
@@ -1578,10 +1571,7 @@ pub fn get_memory_raw(project_dir: String, file: String) -> Result<MemoryRaw, St
     if file.contains('/') || file.contains("..") || file.contains('\\') {
         return Err("非法路径: file".to_string());
     }
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let path = home
-        .join(".claude")
-        .join("projects")
+    let path = crate::config::projects_dir()
         .join(&project_dir)
         .join("memory")
         .join(&file);
@@ -1602,10 +1592,7 @@ pub fn open_memory_index(project_dir: String) -> Result<(), String> {
     if project_dir.contains('/') || project_dir.contains("..") || project_dir.contains('\\') {
         return Err("非法路径: project_dir".to_string());
     }
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let path = home
-        .join(".claude")
-        .join("projects")
+    let path = crate::config::projects_dir()
         .join(&project_dir)
         .join("memory")
         .join("MEMORY.md");
@@ -1635,10 +1622,7 @@ pub fn save_memory(
         return Err("非法路径: file".to_string());
     }
 
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let path = home
-        .join(".claude")
-        .join("projects")
+    let path = crate::config::projects_dir()
         .join(&project_dir)
         .join("memory")
         .join(&file);
@@ -1669,10 +1653,7 @@ pub fn delete_memory(project_dir: String, file: String) -> Result<(), String> {
         return Err("非法路径: file".to_string());
     }
 
-    let home = dirs::home_dir().ok_or_else(|| "家目录不可访问".to_string())?;
-    let memory_dir = home
-        .join(".claude")
-        .join("projects")
+    let memory_dir = crate::config::projects_dir()
         .join(&project_dir)
         .join("memory");
     let source_path = memory_dir.join(&file);
@@ -1973,7 +1954,7 @@ mod tests {
             r#"{ "mcpServers": { "dup": { "url": "http://localhost:8888" } } }"#,
         );
 
-        let assets = collect_assets(&fx.root, &[project_cwd]);
+        let assets = collect_assets(&fx.root.join(".claude"), &fx.root.join(".claude.json"), &[project_cwd]);
         let servers = &assets.mcp_servers;
         let claude_json_path = fx.root.join(".claude.json").display().to_string();
 
@@ -2053,7 +2034,7 @@ mod tests {
 } }"#,
         );
 
-        let assets = collect_assets(&fx.root, &[project_cwd]);
+        let assets = collect_assets(&fx.root.join(".claude"), &fx.root.join(".claude.json"), &[project_cwd]);
 
         // 排序：全局在前，项目级在后；name 虽然 alpha < zeta，source 优先
         assert_eq!(assets.skills.len(), 2);

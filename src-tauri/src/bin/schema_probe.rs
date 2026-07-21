@@ -92,7 +92,7 @@ fn main() {
 
     // 与重构前行为一致：无文件可扫时报错退出（路径提示沿用原文案）
     if report.scanned_files == 0 {
-        let root = dirs::home_dir().unwrap_or_default().join(".claude/projects");
+        let root = app_lib::config::projects_dir();
         eprintln!("未找到 JSONL 文件: {}", root.display());
         std::process::exit(1);
     }

@@ -685,8 +685,7 @@ fn delegated_cli_refresh() -> bool {
 }
 
 fn read_file_credential() -> Option<OAuthCredential> {
-    let home = dirs::home_dir()?;
-    let path = home.join(".claude").join(".credentials.json");
+    let path = crate::config::claude_root().join(".credentials.json");
     let content = std::fs::read_to_string(path).ok()?;
     let creds: CredentialsFile = serde_json::from_str(&content).ok()?;
     creds.claude_ai_oauth

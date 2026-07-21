@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commands::projects_dir;
+use crate::config::projects_dir;
 use crate::config;
 use crate::models::{SessionRecord, MessageContent};
 use crate::parser;

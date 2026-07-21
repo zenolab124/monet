@@ -116,7 +116,7 @@ pub fn get_hooks_config() -> Result<HooksConfig, String> {
     let mut warnings: Vec<String> = Vec::new();
 
     // 全局 settings.json
-    let global_path = home.join(".claude").join("settings.json");
+    let global_path = crate::config::claude_root().join("settings.json");
     if global_path.exists() {
         match parse_settings_hooks(&global_path, "全局", &home_str) {
             Ok(mut e) => entries.append(&mut e),
@@ -125,7 +125,7 @@ pub fn get_hooks_config() -> Result<HooksConfig, String> {
     }
 
     // 项目级：复用 discovery 的项目根目录
-    let projects_root = home.join(".claude").join("projects");
+    let projects_root = crate::config::projects_dir();
     if projects_root.is_dir() {
         // 将 encoded dir name（-分隔）还原为 cwd 绝对路径
         let project_dirs: Vec<(PathBuf, String)> = fs::read_dir(&projects_root)
@@ -218,7 +218,7 @@ pub fn get_hooks_stats() -> Result<Vec<HookStat>, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "无法获取家目录".to_string())?;
     let home_str = home.to_string_lossy().to_string();
-    let projects_root = home.join(".claude").join("projects");
+    let projects_root = crate::config::projects_dir();
 
     let cutoff = seven_days_ago();
     // 7 天前的 Unix 时间戳（秒），用于 ISO timestamp 精筛

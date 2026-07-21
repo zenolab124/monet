@@ -265,6 +265,8 @@ pub fn run() {
             cli_settings::get_claude_binary_info,
             cli_settings::set_claude_binary_path,
             cli_settings::redetect_claude_binary,
+            cli_settings::get_claude_root_info,
+            cli_settings::set_claude_root,
             translate::translate_locale,
             translate::parse_language_intent,
             translate::list_external_locales,

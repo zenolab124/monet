@@ -807,6 +807,18 @@
       "manualInvalid": "Manual path is invalid; fell back to auto-detection",
       "attemptedTitle": "Tried the following locations:"
     },
+    "claudeRoot": {
+      "title": "Claude Data Directory",
+      "description": "Root directory where Monet reads Claude Code session data. Set this if your data lives in a non-default location (e.g. via CLAUDE_CONFIG_DIR).",
+      "sourceEnv": "Environment variable",
+      "sourceSettings": "Manual",
+      "sourceDefault": "Default",
+      "envControlled": "Controlled by CLAUDE_CONFIG_DIR environment variable — cannot be changed here",
+      "pathMissing": "Path does not exist",
+      "pickDir": "Choose directory",
+      "resetDefault": "Reset to default",
+      "restartHint": "Restart Monet to apply"
+    },
     "cliConfig": {
       "title": "Claude Code Configuration",
       "subtitle": "Read/write ~/.claude/settings.json",

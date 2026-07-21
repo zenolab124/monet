@@ -6,6 +6,7 @@ import { useCliSettings, type SettingsField, type SchemaProperty } from '@/compo
 import { useUiState } from '@/composables/useUiState'
 import PermissionsEditor from './PermissionsEditor.vue'
 import ClaudeEnvCard from './ClaudeEnvCard.vue'
+import ClaudeDataDirCard from './ClaudeDataDirCard.vue'
 
 const { t } = useI18n()
 const { activeSection } = useUiState()
@@ -264,6 +265,7 @@ async function onRemove(key: string) {
       </div>
       <!-- 本地环境:版本检查 / 升级 / 冲突诊断 / 二进制路径 -->
       <ClaudeEnvCard />
+      <ClaudeDataDirCard />
 
       <div class="flex gap-2 items-center">
         <div class="search-bar flex-1">

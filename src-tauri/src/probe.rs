@@ -289,9 +289,7 @@ fn make_tool_diff(found: HashMap<String, Entry>, decl: &Decl) -> ToolDiff {
 /// 全量（或 days 窗口）扫描 + 三态 diff。
 /// 空数据返回 scanned_files=0 的空报告；bin 侧自行决定空报告的退出行为。
 pub fn run_probe(days: Option<u64>) -> Result<Report, String> {
-    let root = dirs::home_dir()
-        .ok_or_else(|| "无法定位 home 目录".to_string())?
-        .join(".claude/projects");
+    let root = crate::config::projects_dir();
     let cutoff = days.map(|d| SystemTime::now() - Duration::from_secs(d * 86400));
 
     let mut files = Vec::new();

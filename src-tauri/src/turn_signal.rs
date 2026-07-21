@@ -47,10 +47,7 @@ fn backups_dir() -> PathBuf {
 }
 
 fn settings_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("settings.json")
+    config::claude_root().join("settings.json")
 }
 
 fn unix_now() -> u64 {

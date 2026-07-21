@@ -58,40 +58,16 @@ fn routines_path() -> PathBuf {
     config::data_dir().join("routines.json")
 }
 
-fn app_settings_path() -> PathBuf {
-    config::data_dir().join("settings.json")
-}
-
 // ---------------------------------------------------------------------------
 // App settings (wake policy etc.)
 // ---------------------------------------------------------------------------
 
 fn read_app_setting(key: &str) -> Option<serde_json::Value> {
-    let content = fs::read_to_string(app_settings_path()).ok()?;
-    let settings: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(&content).ok()?;
-    settings.get(key).cloned()
+    config::read_app_setting(key)
 }
 
 fn write_app_setting(key: &str, value: serde_json::Value) {
-    let path = app_settings_path();
-    // 文件存在但解析失败时拒绝覆写，避免带着空 map 清掉其他设置键
-    let mut settings: serde_json::Map<String, serde_json::Value> =
-        match fs::read_to_string(&path) {
-            Ok(s) => match serde_json::from_str(&s) {
-                Ok(m) => m,
-                Err(_) => return,
-            },
-            Err(_) => Default::default(),
-        };
-    if value.is_null() {
-        settings.remove(key);
-    } else {
-        settings.insert(key.to_string(), value);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(settings)) {
-        let _ = crate::config::atomic_write(&path, &json);
-    }
+    config::write_app_setting(key, value);
 }
 
 pub fn wake_policy() -> String {

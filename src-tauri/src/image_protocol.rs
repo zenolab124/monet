@@ -90,12 +90,9 @@ fn cache() -> &'static Mutex<ByteLru> {
     CACHE.get_or_init(|| Mutex::new(ByteLru::new()))
 }
 
-/// ~/.claude/projects 目录（与 commands.rs::projects_dir 同源）
+/// Claude 会话数据 projects 根目录
 fn projects_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("projects")
+    crate::config::projects_dir()
 }
 
 /// 白名单校验：仅允许 [A-Za-z0-9._-]，拒绝空串。

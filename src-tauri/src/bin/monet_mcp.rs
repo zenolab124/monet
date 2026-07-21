@@ -27,6 +27,7 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 // ---------------------------------------------------------------------------
 
 #[path = "../config.rs"]
+#[allow(dead_code)]
 mod config;
 /// 搜索引擎：独立进程直读落盘缓存 + mtime 对账自补增量，不依赖主 App 存活
 #[path = "../search.rs"]
@@ -348,10 +349,7 @@ fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
     search::warm();
     let result = search::query(query, &filter);
 
-    let projects_root = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("projects");
+    let projects_root = config::projects_dir();
     let sessions: Vec<Value> = result
         .hits
         .iter()

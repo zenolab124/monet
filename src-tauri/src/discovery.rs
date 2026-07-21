@@ -7,17 +7,17 @@ use crate::cache;
 use crate::models::*;
 
 /// Claude 项目数据根目录
-fn projects_root() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude").join("projects"))
+fn projects_root() -> PathBuf {
+    crate::config::projects_dir()
 }
 
 /// 扫描所有项目，返回按最近活跃排序的项目列表
 /// 使用 rayon 并行解析 + 内存缓存，大幅降低重复加载开销
 pub fn discover_all() -> Vec<Project> {
-    let root = match projects_root() {
-        Some(r) if r.is_dir() => r,
-        _ => return vec![],
-    };
+    let root = projects_root();
+    if !root.is_dir() {
+        return vec![];
+    }
 
     // 收集所有项目目录（排除内置 Agent 的工作目录，防旧版残留混入档案）
     let agent_dirs = crate::config::agent_project_dirs();

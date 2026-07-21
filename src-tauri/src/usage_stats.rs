@@ -223,10 +223,7 @@ fn normalize_model(raw: &str, date_suffix: &Regex, version_tail: &Regex) -> Stri
 
 /// 全量扫描 ~/.claude/projects/ 并聚合。同步阻塞实现，command 层负责丢进 blocking 线程
 pub fn collect_usage_stats() -> Result<UsageStats, String> {
-    let root = dirs::home_dir()
-        .ok_or_else(|| "无法定位 home 目录".to_string())?
-        .join(".claude")
-        .join("projects");
+    let root = crate::config::projects_dir();
     // 显式探测一次：不存在与不可读（EACCES 时 is_dir 仍为 true）都要走 Err，
     // 否则 collect_jsonl 静默吞错会让前端把「读不到」误显示为「本月 0 用量」
     std::fs::read_dir(&root).map_err(|e| format!("会话数据目录不可读 {}: {e}", root.display()))?;

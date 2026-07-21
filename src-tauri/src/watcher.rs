@@ -16,10 +16,7 @@ use tauri::{AppHandle, Emitter};
 ///   （FR-010 外部会话出错兜底；是否属于工作台由前端判定过滤）
 /// - 监控 data_dir/routines.json 变化，发送 "routines-changed" 事件（MCP 外部写入感知）
 pub fn start(app: &AppHandle) {
-    let root = match dirs::home_dir() {
-        Some(h) => h.join(".claude").join("projects"),
-        None => return,
-    };
+    let root = crate::config::projects_dir();
     if !root.is_dir() {
         return;
     }

@@ -80,12 +80,12 @@ static CACHE: OnceLock<Mutex<CacheState>> = OnceLock::new();
 // ── Private helpers ──────────────────────────────────────
 
 fn cache_file_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| {
-        h.join(".claude")
+    Some(
+        crate::config::claude_root()
             .join("cc-space")
             .join("cache")
-            .join("sessions.json")
-    })
+            .join("sessions.json"),
+    )
 }
 
 fn file_stamp(meta: &fs::Metadata) -> (u64, u32, u64) {

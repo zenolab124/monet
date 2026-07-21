@@ -6,6 +6,10 @@ use std::time::SystemTime;
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
 
+#[path = "../config.rs"]
+#[allow(dead_code)]
+mod config;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WidgetSnapshot {
@@ -68,25 +72,11 @@ struct WidgetConfig {
     month_mode: String,
 }
 
-fn data_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("MONET_DATA_DIR") {
-        PathBuf::from(d)
-    } else {
-        dirs::home_dir().unwrap_or_default().join(".monet")
-    }
-}
-
 fn read_config() -> WidgetConfig {
-    fs::read_to_string(data_dir().join("widget-config.json"))
+    fs::read_to_string(config::data_dir().join("widget-config.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
-}
-
-fn projects_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude/projects")
 }
 
 fn widget_path() -> PathBuf {
@@ -216,7 +206,7 @@ fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>
     let mut hourly = vec![0u32; 24];
     let mut total_sessions = 0u32;
 
-    let Ok(entries) = fs::read_dir(projects_dir()) else {
+    let Ok(entries) = fs::read_dir(config::projects_dir()) else {
         return (0, Vec::new(), 0, hourly);
     };
 
@@ -274,7 +264,7 @@ fn main() {
     let (start_ts, today_str) = compute_day_boundary(cfg.day_start_hour);
 
     let mut jsonl_files = Vec::new();
-    collect_jsonl(&projects_dir(), &mut jsonl_files);
+    collect_jsonl(&config::projects_dir(), &mut jsonl_files);
     let today_sessions = jsonl_files
         .iter()
         .filter(|p| {
@@ -406,7 +396,7 @@ fn main() {
     }
     let _ = fs::write(&wp, &json);
 
-    let bp = data_dir().join("widget-data.json");
+    let bp = config::data_dir().join("widget-data.json");
     if let Some(parent) = bp.parent() {
         let _ = fs::create_dir_all(parent);
     }

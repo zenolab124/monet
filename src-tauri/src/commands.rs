@@ -375,7 +375,7 @@ pub fn get_agent_session_dir() -> AgentSessionDir {
         .into_iter()
         .next()
         .unwrap_or_default();
-    let dir = projects_dir().join(&dir_name);
+    let dir = crate::config::projects_dir().join(&dir_name);
     let exists = dir.is_dir();
     AgentSessionDir {
         dir_name,
@@ -534,10 +534,7 @@ pub struct CliSettings {
 /// (Local > Project > User)，不传时只读 ~/.claude/settings.json
 #[tauri::command]
 pub fn get_cli_settings(cwd: Option<String>) -> CliSettings {
-    let path = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("settings.json");
+    let path = crate::config::claude_root().join("settings.json");
     let json: Option<serde_json::Value> = fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
@@ -973,16 +970,9 @@ pub fn read_local_image(path: String) -> Result<LocalImage, String> {
 }
 
 fn session_path(project_id: &str, session_id: &str) -> PathBuf {
-    projects_dir()
+    crate::config::projects_dir()
         .join(project_id)
         .join(format!("{}.jsonl", session_id))
-}
-
-pub(crate) fn projects_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude")
-        .join("projects")
 }
 
 // ---------- 子 Agent ----------
@@ -998,7 +988,7 @@ pub struct SubAgentMeta {
 
 #[tauri::command]
 pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMeta> {
-    let dir = projects_dir()
+    let dir = crate::config::projects_dir()
         .join(&project_id)
         .join(&session_id)
         .join("subagents");
@@ -1102,7 +1092,7 @@ pub fn get_subagent_records(
     session_id: String,
     agent_id: String,
 ) -> Vec<SessionRecord> {
-    let subagents_dir = projects_dir()
+    let subagents_dir = crate::config::projects_dir()
         .join(&project_id)
         .join(&session_id)
         .join("subagents");
