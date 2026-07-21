@@ -64,6 +64,7 @@ struct ApiUsageResponse {
     seven_day: Option<ApiWindow>,
     seven_day_opus: Option<ApiWindow>,
     seven_day_sonnet: Option<ApiWindow>,
+    #[allow(dead_code)] // API 响应字段，反序列化需要
     seven_day_routines: Option<ApiWindow>,
     seven_day_oauth_apps: Option<ApiWindow>,
     extra_usage: Option<ApiExtraUsage>,
@@ -505,11 +506,9 @@ fn make_window(utilization: f64, resets_at: Option<&str>, now: &DateTime<Utc>) -
 }
 
 fn select_primary_weekly(api: &ApiUsageResponse) -> Option<(f64, Option<&str>)> {
-    for w in [&api.seven_day, &api.seven_day_oauth_apps, &api.seven_day_sonnet, &api.seven_day_opus] {
-        if let Some(win) = w {
-            if let Some(u) = win.utilization {
-                return Some((u, win.resets_at.as_deref()));
-            }
+    for win in [&api.seven_day, &api.seven_day_oauth_apps, &api.seven_day_sonnet, &api.seven_day_opus].into_iter().flatten() {
+        if let Some(u) = win.utilization {
+            return Some((u, win.resets_at.as_deref()));
         }
     }
     None
@@ -593,13 +592,13 @@ fn get_valid_token() -> Result<(String, OAuthCredential), (String, &'static str)
         .ok_or(("No Claude credentials found".to_string(), "no_credentials"))?;
 
     let has_profile = cred.scopes.as_ref()
-        .map_or(false, |s| s.iter().any(|sc| sc == "user:profile"));
+        .is_some_and(|s| s.iter().any(|sc| sc == "user:profile"));
     if !has_profile {
         return Err(("Credentials lack user:profile scope".into(), "no_credentials"));
     }
 
     let now_ms = Utc::now().timestamp_millis() as u64;
-    if cred.expires_at.map_or(false, |exp| now_ms >= exp.saturating_sub(60_000)) {
+    if cred.expires_at.is_some_and(|exp| now_ms >= exp.saturating_sub(60_000)) {
         return Err((
             "Token expired; waiting for Claude Code CLI to refresh it".into(),
             "token_expired",

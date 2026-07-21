@@ -185,14 +185,14 @@ fn request_refresh(
 fn apply_to_tray(tray: &tray_icon::TrayIcon, info: &QuotaInfo) {
     let menu = build_menu(Some(info));
     patch_menu_styles(&menu);
-    let _ = tray.set_menu(Some(Box::new(menu)));
+    tray.set_menu(Some(Box::new(menu)));
     let _ = tray.set_tooltip(Some(quota::format_tray_tooltip(info)));
     match quota::format_tray_title(info) {
         Some(t) => {
-            let _ = tray.set_title(Some(t));
+            tray.set_title(Some(t));
         }
         None => {
-            let _ = tray.set_title(None::<String>);
+            tray.set_title(None::<String>);
         }
     }
 }
@@ -502,7 +502,7 @@ fn patch_menu_styles(menu: &muda::Menu) {
                 location: 0,
                 length: ns_str.length(),
             };
-            let bold_obj: &AnyObject = &*bold_font;
+            let bold_obj: &AnyObject = &bold_font;
             unsafe {
                 attr.addAttribute_value_range(NSFontAttributeName, bold_obj, full);
             }
@@ -521,8 +521,8 @@ fn patch_menu_styles(menu: &muda::Menu) {
                 length: ns_str.length(),
             };
 
-            let font_obj: &AnyObject = &*menu_font;
-            let para_obj: &AnyObject = &*para;
+            let font_obj: &AnyObject = &menu_font;
+            let para_obj: &AnyObject = &para;
             unsafe {
                 attr.addAttribute_value_range(NSFontAttributeName, font_obj, full);
                 attr.addAttribute_value_range(NSParagraphStyleAttributeName, para_obj, full);
@@ -536,7 +536,7 @@ fn patch_menu_styles(menu: &muda::Menu) {
                         location: tab_utf16,
                         length: rest_len,
                     };
-                    let gray_obj: &AnyObject = &*gray;
+                    let gray_obj: &AnyObject = &gray;
                     unsafe {
                         attr.addAttribute_value_range(
                             NSForegroundColorAttributeName,
@@ -561,7 +561,7 @@ fn patch_menu_styles(menu: &muda::Menu) {
                 location: 0,
                 length: ns_str.length(),
             };
-            let font_obj: &AnyObject = &*menu_font;
+            let font_obj: &AnyObject = &menu_font;
             unsafe {
                 attr.addAttribute_value_range(NSFontAttributeName, font_obj, full);
             }

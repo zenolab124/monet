@@ -337,42 +337,6 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn assistant_line(id: Option<&str>, output_tokens: u64) -> String {
-        let id_part = id.map(|i| format!("\"id\":\"{i}\",")).unwrap_or_default();
-        format!(
-            "{{\"type\":\"assistant\",\"timestamp\":\"2026-06-11T10:00:00.000Z\",\"message\":{{{id_part}\"model\":\"claude-fable-5\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":{output_tokens},\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}}}}"
-        )
-    }
-
-    /// FR-007：同一 message.id 多行只计一次 usage；无 id 行按行独立计。
-    /// 同时覆盖完整路径（前 max_lines）与轻量路径（之后）共享去重集
-    #[test]
-    fn summary_dedups_usage_by_message_id() {
-        let path = std::env::temp_dir().join("monet-test-dedup.jsonl");
-        let mut f = fs::File::create(&path).unwrap();
-        // 完整路径内：同 id 两行 + 无 id 一行
-        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
-        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
-        writeln!(f, "{}", assistant_line(None, 7)).unwrap();
-        // 轻量路径内（max_lines=3 之后）：msg_a 第三次出现 + 新 id 一次
-        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
-        writeln!(f, "{}", assistant_line(Some("msg_b"), 50)).unwrap();
-        drop(f);
-
-        let summary = parse_summary(&path, 3).unwrap();
-        // msg_a 计一次(110) + 无 id(17) + msg_b(60)
-        assert_eq!(summary.total_tokens.total(), 110 + 17 + 60);
-        // message_count 维持按行计数口径不变
-        assert_eq!(summary.message_count, 5);
-        fs::remove_file(&path).ok();
-    }
-}
-
 /// 从文件尾部搜索 ai-title 记录
 fn search_tail_for_title(path: &Path, tail_size: u64) -> Option<String> {
     let mut file = File::open(path).ok()?;
@@ -431,5 +395,41 @@ fn truncate_chars(s: &str, max: usize) -> String {
         format!("{}…", &s[..byte_end])
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn assistant_line(id: Option<&str>, output_tokens: u64) -> String {
+        let id_part = id.map(|i| format!("\"id\":\"{i}\",")).unwrap_or_default();
+        format!(
+            "{{\"type\":\"assistant\",\"timestamp\":\"2026-06-11T10:00:00.000Z\",\"message\":{{{id_part}\"model\":\"claude-fable-5\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":{output_tokens},\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}}}}"
+        )
+    }
+
+    /// FR-007：同一 message.id 多行只计一次 usage；无 id 行按行独立计。
+    /// 同时覆盖完整路径（前 max_lines）与轻量路径（之后）共享去重集
+    #[test]
+    fn summary_dedups_usage_by_message_id() {
+        let path = std::env::temp_dir().join("monet-test-dedup.jsonl");
+        let mut f = fs::File::create(&path).unwrap();
+        // 完整路径内：同 id 两行 + 无 id 一行
+        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
+        writeln!(f, "{}", assistant_line(None, 7)).unwrap();
+        // 轻量路径内（max_lines=3 之后）：msg_a 第三次出现 + 新 id 一次
+        writeln!(f, "{}", assistant_line(Some("msg_a"), 100)).unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_b"), 50)).unwrap();
+        drop(f);
+
+        let summary = parse_summary(&path, 3).unwrap();
+        // msg_a 计一次(110) + 无 id(17) + msg_b(60)
+        assert_eq!(summary.total_tokens.total(), 110 + 17 + 60);
+        // message_count 维持按行计数口径不变
+        assert_eq!(summary.message_count, 5);
+        fs::remove_file(&path).ok();
     }
 }

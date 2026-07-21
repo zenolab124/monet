@@ -144,7 +144,7 @@ fn is_codesigned(path: &std::path::Path) -> bool {
     std::process::Command::new("codesign")
         .args(["--verify", path.to_string_lossy().as_ref()])
         .output()
-        .map_or(false, |o| o.status.success())
+        .is_ok_and(|o| o.status.success())
 }
 
 #[cfg(not(target_os = "macos"))]

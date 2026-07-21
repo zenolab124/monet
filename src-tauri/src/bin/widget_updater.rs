@@ -147,11 +147,10 @@ fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
                 continue;
             }
             collect_jsonl(&path, out);
-        } else if path.extension().is_some_and(|e| e == "jsonl") {
-            if !path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("agent-")) {
+        } else if path.extension().is_some_and(|e| e == "jsonl")
+            && !path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("agent-")) {
                 out.push(path);
             }
-        }
     }
 }
 
@@ -228,8 +227,8 @@ fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>
         // 内置 Agent 目录不进项目榜（collect_jsonl 只在递归下降时过滤，入口目录须在此拦截）
         if agent_dirs().contains(&proj_name) { continue; }
         // 目录名编码规则：首个 `-` 是根 `/`，其余 `-` 是路径分隔符
-        let decoded_path = if proj_name.starts_with('-') {
-            proj_name[1..].replace('-', "/")
+        let decoded_path = if let Some(stripped) = proj_name.strip_prefix('-') {
+            stripped.replace('-', "/")
         } else {
             proj_name.replace('-', "/")
         };

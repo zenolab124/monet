@@ -74,7 +74,7 @@ pub fn run() {
             }
             ws.build()
         })
-        .menu(|app| menu::create(app))
+        .menu(menu::create)
         .on_menu_event(|app, event| menu::handle_event(app, &event))
         .setup(|app| {
             if cfg!(debug_assertions) {

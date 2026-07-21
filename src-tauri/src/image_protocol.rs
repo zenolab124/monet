@@ -363,7 +363,6 @@ fn make_thumbnail(media_type: &str, bytes: &[u8]) -> Option<CachedImage> {
         let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 82);
         enc.encode_image(&thumb.to_rgb8()).ok()?;
         drop(enc);
-        drop(cursor);
         Some(CachedImage {
             media_type: "image/jpeg".to_string(),
             bytes: buf,

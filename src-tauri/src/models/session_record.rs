@@ -4,6 +4,7 @@ use serde_json::Value;
 use super::{ContentBlock, TokenUsage};
 
 /// JSONL 行的顶层记录，按 type 字段区分
+#[allow(clippy::large_enum_variant)] // User 变体较大但 Box 会改变所有 match 分支，不值得
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionRecord {
@@ -126,6 +127,7 @@ pub enum MessageContent {
 
 impl MessageContent {
     /// 提取第一个文本内容
+    #[allow(dead_code)] // 预留给消息内容提取
     pub fn first_text(&self) -> Option<&str> {
         match self {
             MessageContent::Text(s) => Some(s.as_str()),
@@ -210,6 +212,46 @@ pub struct FileHistorySnapshotRecord {
     pub snapshot: Option<Value>,
 }
 
+/// 手动反序列化 SessionRecord，因为 JSONL 中的 type 字段值与 Rust 枚举变体不一致
+impl SessionRecord {
+    /// 取所有权版本，避免 Value::clone 开销
+    pub fn from_json_owned(value: Value) -> Option<Self> {
+        let record_type = value.get("type")?.as_str()?.to_string();
+        match record_type.as_str() {
+            "user" => {
+                let async_meta = value.get("toolUseResult").and_then(extract_async_meta);
+                let origin_kind = value
+                    .pointer("/origin/kind")
+                    .and_then(Value::as_str)
+                    .map(String::from);
+                serde_json::from_value(value).ok().map(|mut u: UserRecord| {
+                    u.async_meta = async_meta;
+                    u.origin_kind = origin_kind;
+                    SessionRecord::User(u)
+                })
+            }
+            "assistant" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::Assistant),
+            "system" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::System),
+            "ai-title" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::AiTitle),
+            "queue-operation" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::QueueOperation),
+            "file-history-snapshot" => serde_json::from_value(value)
+                .ok()
+                .map(SessionRecord::FileHistorySnapshot),
+            other => Some(SessionRecord::Unknown {
+                raw_type: other.to_string(),
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod async_meta_tests {
     use super::*;
@@ -271,45 +313,5 @@ mod async_meta_tests {
         );
         let meta = u.async_meta.unwrap();
         assert_eq!(meta.scheduled_for, Some(1779006960000.0));
-    }
-}
-
-/// 手动反序列化 SessionRecord，因为 JSONL 中的 type 字段值与 Rust 枚举变体不一致
-impl SessionRecord {
-    /// 取所有权版本，避免 Value::clone 开销
-    pub fn from_json_owned(value: Value) -> Option<Self> {
-        let record_type = value.get("type")?.as_str()?.to_string();
-        match record_type.as_str() {
-            "user" => {
-                let async_meta = value.get("toolUseResult").and_then(extract_async_meta);
-                let origin_kind = value
-                    .pointer("/origin/kind")
-                    .and_then(Value::as_str)
-                    .map(String::from);
-                serde_json::from_value(value).ok().map(|mut u: UserRecord| {
-                    u.async_meta = async_meta;
-                    u.origin_kind = origin_kind;
-                    SessionRecord::User(u)
-                })
-            }
-            "assistant" => serde_json::from_value(value)
-                .ok()
-                .map(SessionRecord::Assistant),
-            "system" => serde_json::from_value(value)
-                .ok()
-                .map(SessionRecord::System),
-            "ai-title" => serde_json::from_value(value)
-                .ok()
-                .map(SessionRecord::AiTitle),
-            "queue-operation" => serde_json::from_value(value)
-                .ok()
-                .map(SessionRecord::QueueOperation),
-            "file-history-snapshot" => serde_json::from_value(value)
-                .ok()
-                .map(SessionRecord::FileHistorySnapshot),
-            other => Some(SessionRecord::Unknown {
-                raw_type: other.to_string(),
-            }),
-        }
     }
 }

@@ -284,6 +284,7 @@ fn find_session_elsewhere(session_id: &str, expected: &Path) -> Option<PathBuf> 
 }
 
 /// 打开会话进程：spawn 长活 CLI + 初始化握手 + 启动 stdout 读取线程
+#[allow(clippy::too_many_arguments)] // 会话参数透传，拆结构体收益不大
 fn open_session(
     app: &AppHandle,
     session_id: &str,
@@ -593,6 +594,7 @@ fn open_session(
 }
 
 /// 发送消息（自动 open 会话进程；替代旧 start_streaming）
+#[allow(clippy::too_many_arguments)] // 会话参数透传，拆结构体收益不大
 pub fn send_message(
     app: &AppHandle,
     session_id: &str,
@@ -614,7 +616,7 @@ pub fn send_message(
         .lock()
         .unwrap()
         .as_ref()
-        .map_or(false, |m| m.contains_key(session_id));
+        .is_some_and(|m| m.contains_key(session_id));
 
     if exists {
         let needs_restart = ACTIVE_PROCESSES
@@ -622,7 +624,7 @@ pub fn send_message(
             .unwrap()
             .as_ref()
             .and_then(|m| m.get(session_id).cloned())
-            .map_or(false, |arc| {
+            .is_some_and(|arc| {
                 let sp = arc.lock().unwrap();
                 sp.channel.as_deref() != channel
                     || sp.effort.as_deref() != effort
@@ -698,6 +700,7 @@ pub fn send_message(
 }
 
 /// 开关 Remote Control（通过 control_request 动态启用/禁用；进程未启动时自动连接）
+#[allow(clippy::too_many_arguments)] // 会话参数透传，拆结构体收益不大
 pub fn toggle_remote_control(
     app: &AppHandle,
     session_id: &str,
@@ -716,7 +719,7 @@ pub fn toggle_remote_control(
         .lock()
         .unwrap()
         .as_ref()
-        .map_or(false, |m| m.contains_key(session_id));
+        .is_some_and(|m| m.contains_key(session_id));
 
     if !exists {
         open_session(app, session_id, cwd, model, effort, channel, advisor, chrome, fork_source, extra_args, permission_mode, None, false)?;
@@ -1160,7 +1163,7 @@ fn decode_stream_event(
     // 异步面板从 subagents 转录呈现，混入主流会把子 agent 输出渲染进主会话区
     if value
         .get("parent_tool_use_id")
-        .map_or(false, |v| !v.is_null())
+        .is_some_and(|v| !v.is_null())
     {
         return None;
     }

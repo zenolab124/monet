@@ -59,6 +59,7 @@ fn extract_usage_openai(v: &Value) -> Option<ApiUsage> {
     })
 }
 
+#[allow(dead_code)] // 供渠道翻译使用的便捷入口
 pub(crate) fn http_call_messages(
     base_url: &str,
     token: &str,
@@ -116,6 +117,7 @@ pub(crate) fn http_call_messages_with_usage(
     Ok((text, usage))
 }
 
+#[allow(dead_code)] // 供 OpenAI 协议渠道翻译使用的便捷入口
 pub(crate) fn http_call_openai(
     base_url: &str,
     token: &str,

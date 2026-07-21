@@ -474,6 +474,7 @@ pub fn warm() -> SearchStatus {
     status
 }
 
+#[allow(dead_code)] // lib 侧使用，部分 bin 编译时未引用
 pub fn status() -> SearchStatus {
     with_state(|s| SearchStatus {
         state: if s.ready { "ready" } else { "building" }.into(),
@@ -484,6 +485,7 @@ pub fn status() -> SearchStatus {
 
 /// 获取会话命中消息的完整文本 + 前后 context_n 条上下文（喂给归纳 Agent）。
 /// 等价于 recall 的 ±3 上下文窗口。返回 (role_label, full_text) 列表。
+#[allow(dead_code)] // lib 侧使用，部分 bin 编译时未引用
 pub fn get_hit_context(session_id: &str, terms: &[Regex], context_n: usize, max_chars: usize) -> Vec<(String, String)> {
     with_state(|s| {
         let entry = s.entries.values().find(|e| e.session_id == session_id);
@@ -535,6 +537,7 @@ pub fn get_hit_context(session_id: &str, terms: &[Regex], context_n: usize, max_
 }
 
 /// watcher 增量入口：只标 dirty，查询时懒重提取
+#[allow(dead_code)] // lib 侧使用，部分 bin 编译时未引用
 pub fn invalidate_file(path: &Path) {
     with_state(|s| {
         s.dirty.insert(path.to_path_buf());

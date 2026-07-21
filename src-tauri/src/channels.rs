@@ -2,9 +2,9 @@
 //!
 //! - `settings.json`        应用设置:默认会话/Agent 渠道 + 渠道展示元数据
 //! - `channels/<id>.json`   纯净 Claude Code settings 格式(顶层 env 块等),
-//!                          终端可直接 `claude --settings <路径>` 复用同一渠道
+//!   终端可直接 `claude --settings <路径>` 复用同一渠道
 //! - `runtime/<sid>-<ns>.json` per-spawn 合成产物(渠道内容 + 防御空值 + ultracode),
-//!                          进程结束即删,应用启动兜底清空
+//!   进程结束即删,应用启动兜底清空
 //!
 //! 红线:authToken 等敏感值不回传前端(list 仅给掩码)、不进 argv(经 --settings 文件
 //! 路径 + spawn env 注入)。所有读取用时重读,不做进程级缓存(同 settings.json 活文件教训)。
@@ -166,6 +166,7 @@ impl ChannelMeta {
     pub fn scope(&self) -> &str {
         self.scope.as_deref().unwrap_or("full")
     }
+    #[allow(dead_code)] // 预留给渠道过滤逻辑
     pub fn is_agent_only(&self) -> bool {
         self.scope() == "agent-only"
     }
@@ -579,6 +580,7 @@ fn validate_effort_value(effort: &str) -> Result<(), String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Tauri command 参数由前端调用签名决定
 #[tauri::command]
 pub fn save_channel(
     id: String,

@@ -27,6 +27,7 @@ pub struct SessionSummary {
 
 impl SessionSummary {
     /// 显示标题逻辑：AI 标题 > 首条用户消息（截断 60 字）> 默认
+    #[allow(dead_code)] // 预留给前端标题展示
     pub fn display_title(&self) -> String {
         if let Some(title) = &self.title {
             if !title.is_empty() {
@@ -47,6 +48,7 @@ impl SessionSummary {
 }
 
 /// 去除系统私有标签内容
+#[allow(dead_code)] // display_title 的辅助函数
 fn strip_private_tags(text: &str) -> String {
     let tag_names = [
         "ide_opened_file",

@@ -155,7 +155,7 @@ fn is_running(id: &str) -> bool {
         .lock()
         .unwrap()
         .as_ref()
-        .map_or(false, |s| s.contains_key(id))
+        .is_some_and(|s| s.contains_key(id))
 }
 
 fn running_started_at(id: &str) -> Option<String> {
@@ -213,9 +213,9 @@ fn read_latest_log(routine_id: &str) -> Option<RoutineExecutionLog> {
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .ok()?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .collect();
-    entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
     let latest = entries.first()?;
     let content = fs::read_to_string(latest.path()).ok()?;
     serde_json::from_str(&content).ok()
@@ -242,11 +242,11 @@ fn read_logs(routine_id: &str, limit: usize) -> Vec<RoutineExecutionLog> {
         .ok()
         .map(|rd| {
             rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
                 .collect()
         })
         .unwrap_or_default();
-    entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
     entries
         .into_iter()
         .take(limit)

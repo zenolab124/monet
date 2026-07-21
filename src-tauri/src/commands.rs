@@ -396,6 +396,7 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
 
 /// 发送消息（长活进程：自动 open + stdin 写入；替代旧 per-message spawn）。
 /// async + spawn_blocking：open_session 的初始化握手是阻塞 I/O，不能卡 IPC 主线程
+#[allow(clippy::too_many_arguments)] // Tauri command 参数由前端调用签名决定
 #[tauri::command]
 pub async fn start_streaming(
     app: tauri::AppHandle,
@@ -450,6 +451,7 @@ pub fn set_permission_mode(session_id: String, mode: String) -> Result<(), Strin
 }
 
 /// 开关 Remote Control（进程未启动时自动连接）
+#[allow(clippy::too_many_arguments)] // Tauri command 参数由前端调用签名决定
 #[tauri::command]
 pub async fn toggle_remote_control(
     app: tauri::AppHandle,
@@ -578,6 +580,7 @@ pub struct ExternalSessionInfo {
 /// 判断一条 ps 命令行是否是「跑着指定会话的 claude 进程」本体。双精确条件防误伤：
 /// 1. 存在 basename 恰为 "claude" 的 token（可执行本体，而非 `~/.claude/...` 路径巧合）
 /// 2. session_id 以独立 token 出现（而非 `<sid>.jsonl` 之类的子串）
+///
 /// 因此 `tail -f ~/.claude/projects/x/<sid>.jsonl`、`vim <sid>.jsonl`、`grep <sid> ~/.claude/…` 均不命中。
 fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
@@ -589,7 +592,7 @@ fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
     if tokens.contains(&"--fork-session") {
         tokens.windows(2).any(|w| w[0] == "--session-id" && w[1] == session_id)
     } else {
-        tokens.iter().any(|t| *t == session_id)
+        tokens.contains(&session_id)
     }
 }
 
@@ -1042,7 +1045,7 @@ pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMet
     let workflows_dir = dir.join("workflows");
     if let Ok(wf_entries) = fs::read_dir(&workflows_dir) {
         for wf_entry in wf_entries.flatten() {
-            if wf_entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            if wf_entry.file_type().is_ok_and(|ft| ft.is_dir()) {
                 let wf_id = wf_entry.file_name().to_string_lossy().to_string();
                 scan_dir(&wf_entry.path(), Some(wf_id), &mut result);
             }

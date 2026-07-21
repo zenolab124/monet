@@ -79,7 +79,7 @@ fn is_codesigned(path: &Path) -> bool {
     std::process::Command::new("codesign")
         .args(["--verify", path.to_string_lossy().as_ref()])
         .output()
-        .map_or(false, |o| o.status.success())
+        .is_ok_and(|o| o.status.success())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -350,6 +350,7 @@ mod platform {
         let schedule = Schedule::from_str(&full)
             .map_err(|e| format!("invalid cron: {}", e))?;
 
+        #[allow(clippy::type_complexity)] // 局部临时元组，提取 type 别名增加反而不直观
         let mut entries: Vec<(u32, u32, Option<u32>, Option<u32>, Option<u32>)> = Vec::new();
 
         // Sample next 366 occurrences (covers a full year cycle) to find the pattern
@@ -447,7 +448,7 @@ mod platform {
             .filter(|r| r.enabled)
             .map(|r| r.cron_expression.clone())
             .collect();
-        crate::wake::sync(&config::data_dir(), &cron_exprs, policy)
+        crate::wake::sync(config::data_dir(), &cron_exprs, policy)
     }
 
     use chrono::Timelike;

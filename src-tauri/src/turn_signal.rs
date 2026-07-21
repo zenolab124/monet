@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -63,7 +63,7 @@ fn unix_now() -> u64 {
 /// 生成 hook 脚本：POSIX sh 零依赖（date 为 /bin 系统命令），
 /// 把事件状态 + stdin 的 hook 载荷包成一行 JSON 追加到信号文件。
 /// hook 失败绝不能影响 CLI 本体，故一切错误吞掉并 exit 0。
-fn script_body(signal: &PathBuf) -> String {
+fn script_body(signal: &Path) -> String {
     format!(
         r#"#!/bin/sh
 # Monet 会话状态跟踪信号钩子 —— 由 Monet 生成，设置 → 扩展中卸载即自动移除。

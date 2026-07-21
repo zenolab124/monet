@@ -373,6 +373,7 @@ fn update_routine_state(routine_id: &str, last_run: &str) {
         }
     }
 
+    #[allow(clippy::incompatible_msrv)] // unlock 在当前工具链可用，MSRV 仅约束下游兼容
     let _ = file.unlock();
 }
 

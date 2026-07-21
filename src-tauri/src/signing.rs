@@ -18,7 +18,7 @@ fn has_stable_signature(path: &Path) -> bool {
         .arg("--verify")
         .arg(path)
         .output()
-        .map_or(false, |o| o.status.success());
+        .is_ok_and(|o| o.status.success());
     if !intact {
         return false;
     }
@@ -26,7 +26,7 @@ fn has_stable_signature(path: &Path) -> bool {
         .args(["-d", "-r-"])
         .arg(path)
         .output()
-        .map_or(false, |o| {
+        .is_ok_and(|o| {
             let mut req = String::from_utf8_lossy(&o.stdout).into_owned();
             req.push_str(&String::from_utf8_lossy(&o.stderr));
             o.status.success() && req.contains("designated =>") && !req.contains("cdhash")
@@ -40,7 +40,7 @@ fn identity_available() -> bool {
         Command::new("security")
             .args(["find-identity", "-v", "-p", "codesigning"])
             .output()
-            .map_or(false, |o| String::from_utf8_lossy(&o.stdout).contains(IDENTITY))
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(IDENTITY))
     })
 }
 
@@ -60,7 +60,7 @@ fn unlock_keychain() -> bool {
         .arg(pass.trim())
         .arg(&keychain)
         .output()
-        .map_or(false, |o| o.status.success())
+        .is_ok_and(|o| o.status.success())
 }
 
 /// 给二进制签名。预签保留 > 证书重签 > adhoc 兜底

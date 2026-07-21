@@ -118,8 +118,8 @@ fn decode_path(encoded: &str) -> String {
     }
 
     // 去掉开头的 - (代表根 /)
-    let rest = if encoded.starts_with('-') {
-        &encoded[1..]
+    let rest = if let Some(stripped) = encoded.strip_prefix('-') {
+        stripped
     } else {
         encoded
     };

@@ -101,7 +101,7 @@ fn spawn_agent_with(model: &str, effort: &str) -> Result<AgentProcess, String> {
     if let Some(se) = stderr {
         std::thread::spawn(move || {
             let r = BufReader::new(se);
-            for line in r.lines().flatten() {
+            for line in r.lines().map_while(Result::ok) {
                 eprintln!("[agent-stderr] {}", line);
             }
         });

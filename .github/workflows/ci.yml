@@ -1,6 +1,5 @@
 # CI 门禁：push main / PR 必绿。仓库 public，macOS runner 免费不限量。
-# clippy 目前信息性运行（存量 lint 债约 25 条：map_or 简化、too_many_arguments 等），
-# 清零后把 clippy 步骤升级为 `-- -D warnings` 变成硬门禁。
+# clippy -D warnings 硬门禁已启用，新增警告将阻断合并。
 name: CI
 
 on:
@@ -89,6 +88,5 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      # 信息性运行（不 fail）：存量 lint 债清零前先保持可见、防继续恶化靠 review
-      - name: Clippy (informational)
-        run: cargo clippy --all-targets --locked || true
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
