@@ -10,6 +10,7 @@ src-tauri/target/
 # Private docs (not public)
 CLAUDE.md
 docs/
+studio/
 .playwright-mcp/
 .scratch-*
 
