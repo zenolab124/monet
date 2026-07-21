@@ -163,7 +163,7 @@ example-server, 以及其他 stdio 类型配置
 
 ### 4. 项目级资产
 
-**项目** `/Users/zz/workspace/cc-apps/cc-space-tauri/.claude/`：
+**项目** `/Users/dev/monet/.claude/`：
 - 仅包含 `.DS_Store`（无功能性文件）
 - **无项目级 SKILL.md、command、agent、.mcp.json**
 

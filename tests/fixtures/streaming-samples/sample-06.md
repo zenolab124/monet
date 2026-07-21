@@ -2,11 +2,11 @@
 
 ## 搜索结果总结
 
-我已经完整探查了 `/Users/zz/workspace/cc-apps/cc-space-tauri/src` 中的会话对话详情页面、滚动逻辑和用户消息组件。以下是关键发现：
+我已经完整探查了 `/Users/dev/monet/src` 中的会话对话详情页面、滚动逻辑和用户消息组件。以下是关键发现：
 
 ### 1. 会话对话详情页面组件
 
-**文件位置**: `/Users/zz/workspace/cc-apps/cc-space-tauri/src/components/SessionDetail.vue`（1058 行）
+**文件位置**: `/Users/dev/monet/src/components/SessionDetail.vue`（1058 行）
 
 这是主要的会话详情容器，展示用户消息和 AI 回复。关键特性：
 - 支持两种模式：`mode='archive'`（档案馆只读）和 `mode='workbench'`（工作台完整交互）
@@ -130,7 +130,7 @@ watch(records, () => {
 
 ### 4. 流式驱动滚动的核心机制
 
-**文件位置**: `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useStreaming.ts`
+**文件位置**: `/Users/dev/monet/src/composables/useStreaming.ts`
 
 **streamingTick 全局信号**（第 159 行）：
 ```typescript
@@ -198,7 +198,7 @@ export type ContentBlock =
   | { type: string; [key: string]: unknown }
 ```
 
-**MessageBlock.vue** 组件（/Users/zz/workspace/cc-apps/cc-space-tauri/src/components/MessageBlock.vue，19 行）：
+**MessageBlock.vue** 组件（/Users/dev/monet/src/components/MessageBlock.vue，19 行）：
 - 动态解析 ContentBlock 类型，分发到对应的渲染组件
 - 传递 `streaming` 标志给 text 块（流式中降级渲染，无高亮）
 

@@ -30,7 +30,7 @@
 
 **JSONL 中的标题记录：**
 
-根据 `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/parser.rs:146-189`：
+根据 `/Users/dev/monet/src-tauri/src/parser.rs:146-189`：
 
 - **AI 生成标题（ai-title）：** 
   ```json

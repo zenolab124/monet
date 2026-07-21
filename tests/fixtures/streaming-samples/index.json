@@ -1,7 +1,7 @@
 [
   {
     "file": "sample-01.md",
-    "chars": 32838,
+    "chars": 32820,
     "features": [
       "fence",
       "multi_fence",
@@ -41,7 +41,7 @@
   },
   {
     "file": "sample-05.md",
-    "chars": 6076,
+    "chars": 5634,
     "features": [
       "fence",
       "multi_fence",
@@ -54,7 +54,7 @@
   },
   {
     "file": "sample-06.md",
-    "chars": 6039,
+    "chars": 5935,
     "features": [
       "fence",
       "multi_fence",
@@ -67,7 +67,7 @@
   },
   {
     "file": "sample-07.md",
-    "chars": 6036,
+    "chars": 6010,
     "features": [
       "fence",
       "multi_fence",
@@ -80,7 +80,7 @@
   },
   {
     "file": "sample-08.md",
-    "chars": 6032,
+    "chars": 5566,
     "features": [
       "fence",
       "multi_fence",
@@ -106,7 +106,7 @@
   },
   {
     "file": "sample-10.md",
-    "chars": 5927,
+    "chars": 5831,
     "features": [
       "fence",
       "multi_fence",
@@ -119,7 +119,7 @@
   },
   {
     "file": "sample-11.md",
-    "chars": 5884,
+    "chars": 5858,
     "features": [
       "fence",
       "multi_fence",
@@ -133,7 +133,7 @@
   },
   {
     "file": "sample-12.md",
-    "chars": 5762,
+    "chars": 5733,
     "features": [
       "fence",
       "multi_fence",
@@ -146,7 +146,7 @@
   },
   {
     "file": "sample-13.md",
-    "chars": 5524,
+    "chars": 5316,
     "features": [
       "fence",
       "multi_fence",
@@ -196,7 +196,7 @@
   },
   {
     "file": "sample-17.md",
-    "chars": 2520,
+    "chars": 2433,
     "features": [
       "fence",
       "multi_fence",
@@ -209,7 +209,7 @@
   },
   {
     "file": "sample-18.md",
-    "chars": 2195,
+    "chars": 2201,
     "features": [
       "fence",
       "multi_fence",

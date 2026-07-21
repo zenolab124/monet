@@ -909,7 +909,7 @@ export const autoLandedSessions = new Map<string, Set<string>>()
 function landAutoTurn(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state) return
-  console.log(`%c ========== [stream] landAutoTurn(自发轮收尾) sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
+  if (import.meta.env.DEV) console.log(`%c ========== [stream] landAutoTurn(自发轮收尾) sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#8b5cf6;font-weight:bold')
   // 该轮已结束,残字瞬吐落地(自发轮不做排空等待,马上要与历史区做原子切换)
   flushTextDeltas(sessionId, true)
   state.activeTool = null
@@ -992,7 +992,7 @@ function removeLandedTurns(sessionId: string, recs: ReadonlyArray<{ type: string
 function finishStream(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state || !state.streaming) return
-  console.log(`%c ========== [stream] finishStream sid=${sessionId.slice(0, 8)} pending=${hasSessionPending(sessionId)} t=${performance.now().toFixed(0)} ==========`, 'color:#f59e0b;font-weight:bold')
+  if (import.meta.env.DEV) console.log(`%c ========== [stream] finishStream sid=${sessionId.slice(0, 8)} pending=${hasSessionPending(sessionId)} t=${performance.now().toFixed(0)} ==========`, 'color:#f59e0b;font-weight:bold')
   state.activeTool = null
   markTailDirty(sessionId)
   const hasError = !!state.streamError
@@ -1010,7 +1010,7 @@ function finishStream(sessionId: string) {
 function completeFinish(sessionId: string) {
   const state = streams.get(sessionId)
   if (!state || !state.streaming) return
-  console.log(`%c ========== [stream] completeFinish → streaming=false sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#ef4444;font-weight:bold')
+  if (import.meta.env.DEV) console.log(`%c ========== [stream] completeFinish → streaming=false sid=${sessionId.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#ef4444;font-weight:bold')
   state.streaming = false
   // turn 传输态同步结束:BlockText 的 plain→shiki 上色由 streaming||live 联合 prop
   // 翻 false 触发,同一实例 patch 一次(维持零重挂契约)

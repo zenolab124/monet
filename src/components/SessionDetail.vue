@@ -1655,7 +1655,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     if (!cs) return
     const sid = cs.summary.id
     if (!interactive.value) return
-    console.log(`%c ========== [detail] streaming→false (deferred) sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
+    if (import.meta.env.DEV) console.log(`%c ========== [detail] streaming→false (deferred) sid=${sid.slice(0, 8)} t=${performance.now().toFixed(0)} ==========`, 'color:#22c55e;font-weight:bold')
     settlingSessions.add(sid)
     try {
     finishedDirty.delete(sid)
@@ -1728,11 +1728,11 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
         records.value = newRecords
         removeLandedTurns(sid, newRecords)
         deferredRecords = null
-        console.log(`%c ========== [detail] records settled immediately: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
+        if (import.meta.env.DEV) console.log(`%c ========== [detail] records settled immediately: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
       } else {
         // 落账未确认(JSONL flush 晚/reload 空手):退回暂存,下一个安全时刻应用
         deferredRecords = { sid, recs: newRecords }
-        console.log(`%c ========== [detail] records deferred: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
+        if (import.meta.env.DEV) console.log(`%c ========== [detail] records deferred: count=${newRecords.length} sid=${sid.slice(0, 8)} ==========`, 'color:#22c55e')
       }
     }
     } finally {

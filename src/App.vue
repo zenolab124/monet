@@ -119,7 +119,7 @@ function onWorkbenchDragEnd(event: any) {
 
   const sourceId = String(source.id ?? '')
   const targetId = String(target.id ?? '')
-  console.log('[dnd-end]', sourceId, '→', targetId)
+  if (import.meta.env.DEV) console.log('[dnd-end]', sourceId, '→', targetId)
 
   // Tab reorder (both start with "tab:")
   if (sourceId.startsWith('tab:') && targetId.startsWith('tab:')) {

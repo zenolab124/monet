@@ -2,23 +2,23 @@ Perfect! Now let me create a concise summary with the key files and findings:
 
 ## 总结
 
-我已完成对 cc-space-tauri 项目工作台消息流式渲染重复 bug 的深度分析。以下是核心发现：
+我已完成对 monet 项目工作台消息流式渲染重复 bug 的深度分析。以下是核心发现：
 
 ### 关键代码位置与调用关系
 
 **前端核心链路**:
-1. `/Users/zz/workspace/cc-apps/cc-space-tauri/src/components/SessionDetail.vue`
+1. `/Users/dev/monet/src/components/SessionDetail.vue`
    - **L845-882**: `watch(stream.streaming)` - 流式结束后重新加载 JSONL 记录的触发点
    - **L455-470**: `pendingUserUuid` computed - **关键问题区**，判定新 JSONL user 消息是否应被过滤
    - **L472-497**: `messages` computed - 执行过滤逻辑，调用 `pendingUserUuid`
    - **L525-538**: `messageGroups` computed - 对过滤后的消息分组渲染
 
-2. `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useStreaming.ts`
+2. `/Users/dev/monet/src/composables/useStreaming.ts`
    - **L109-135**: `getStream()` - 管理每会话的流式状态（streamingTurns/pendingUserMessage）
    - **L800-809**: `clearStreamingTurns()` - 清空流式消息，但在某些时序下可能不及时
    - **L717-736**: `completeFinish()` - 流式结束，设置 streaming=false
 
-3. `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/parser.rs`
+3. `/Users/dev/monet/src-tauri/src/parser.rs`
    - **L27-60**: `parse_messages()` - Rust 侧 JSONL 解析，不去重
 
 ### 根本原因

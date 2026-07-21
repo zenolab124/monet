@@ -2,28 +2,28 @@
 
 ## 搜索结果总结
 
-我已经完成了对 cc-space-tauri 项目 Agent 相关基础设施的详尽分析。以下是关键发现：
+我已经完成了对 monet 项目 Agent 相关基础设施的详尽分析。以下是关键发现：
 
 ### 1. **src/ 中的 Agent 相关 Composables 和工具函数**
 
 **会话自动命名（AI自动标题）**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useSessionMeta.ts`
+- `/Users/dev/monet/src/composables/useSessionMeta.ts`
   - `ensureTitle(projectId, sessionId)` — 异步触发标题生成，不阻塞发送流程
   - `triggerTitleGeneration(sessionId, cwd)` — 用户发送消息后调用，自动生成标题
   - 支持缓存，避免重复生成
 
 **权限决策辅助（权限提示生成）**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/usePermissionHints.ts`
+- `/Users/dev/monet/src/composables/usePermissionHints.ts`
   - `requestHint(requestId, toolName, input)` — 为权限审批请求生成中文解释
   - 本地缓存机制，按 `toolName + 关键参数签名` 去重
 
 **工坊资产管理（Skills/Commands/Agents/MCP 四类资产）**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useWorkshop.ts`
+- `/Users/dev/monet/src/composables/useWorkshop.ts`
   - `useWorkshop()` — 一体化工坊数据源
   - `probeMcpServers()` — 对 http/sse 类型 MCP 服务器并发探活
 
 **数据模型定义**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src/types/index.ts`
+- `/Users/dev/monet/src/types/index.ts`
   - `WorkshopAgent` 接口（Subagent 定义）
   - `WorkshopAssets` 接口（四类资产统一容器）
   - `SessionRecord` 联合类型包含 `ai_title` 记录类型
@@ -33,7 +33,7 @@
 ### 2. **src-tauri/ 中的 Agent 相关 Rust 模块**
 
 **元数据与 AI 调用层（核心）**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/metadata.rs` (249 行)
+- `/Users/dev/monet/src-tauri/src/metadata.rs` (249 行)
   
   **关键函数：**
   - `generate_title(project_id, session_id) -> Result<String>` 
@@ -42,17 +42,17 @@
     - **LLM 调用方式**：`Command::new("claude")` + 专用 system prompt
     - 模型：`claude-haiku-4-5-20251001`
     - 参数：`--effort low --output-format text`
-    - 工作目录：`~/.claude/cc-space-agent/`（隔离 agent JSONL）
+    - 工作目录：`~/.claude/monet-agent/`（隔离 agent JSONL）
     
   - `generate_permission_hint(tool_name, input_json) -> Result<String>`
     - 生成权限请求的中文批注（≤50字）
     - 同样走 CLI，使用 `--no-session-persistence` 避免误入用户会话
 
   - `update_meta(session_id, patch)` — 更新会话元数据
-  - `get_all_meta()` — 加载所有元数据（~/.claude/cc-space/metadata.json）
+  - `get_all_meta()` — 加载所有元数据（~/.claude/monet/metadata.json）
 
 **工坊资产扫描层**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/workshop.rs` (500+ 行)
+- `/Users/dev/monet/src-tauri/src/workshop.rs` (500+ 行)
   
   **关键函数：**
   - `get_workshop_assets() -> Result<WorkshopAssets>`
@@ -68,16 +68,16 @@
   - `open_workshop_dir(category)` — 打开工坊目录
 
 **模型定义**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/models/session_record.rs`
+- `/Users/dev/monet/src-tauri/src/models/session_record.rs`
   - `AiTitleRecord` — 会话标题记录结构
   - `SessionRecord::AiTitle(AiTitleRecord)` — 枚举变体，type="ai-title"
 
 **自动化域**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/automation.rs` (100+ 行)
+- `/Users/dev/monet/src-tauri/src/automation.rs` (100+ 行)
   - Hooks 配置读取与运行统计（暂无 Agent 直接调用，架构预留）
 
 **命令层暴露接口**
-- `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/lib.rs`
+- `/Users/dev/monet/src-tauri/src/lib.rs`
   ```rust
   metadata::get_all_meta,
   metadata::update_meta,
@@ -92,7 +92,7 @@
 
 ### 3. **统一的 LLM 调用抽象层（架构特点）**
 
-**核心设计原则**（见 `/Users/zz/workspace/cc-apps/cc-space-tauri/docs/agent-iframe-architecture.md`）：
+**核心设计原则**（见 `/Users/dev/monet/docs/agent-iframe-architecture.md`）：
 
 - **走 Claude CLI，不直接管理 API key**
   - `Command::new("claude")` spawn 一次性进程
@@ -113,7 +113,7 @@
   ```
 
 - **会话隔离（防止 Agent 调用混入用户数据）**
-  - Agent JSONL 路径：`~/.claude/projects/-Users-<user>-.claude-cc-space-agent/`
+  - Agent JSONL 路径：`~/.claude/projects/-Users-<user>-.claude-monet-agent/`
   - discovery 模块跳过该路径（路径前缀过滤）
   - Agent 调用加 `--no-session-persistence` 时不落盘
 
@@ -139,8 +139,8 @@
 **无显式配置文件**（所有配置硬编码）：
 - 模型：`claude-haiku-4-5-20251001`（Rust metadata.rs 中硬编码）
 - API 认证：复用 `~/.claude/claude.json`（Claude CLI 管理）
-- 工作目录隔离：`~/.claude/cc-space-agent/`
-- 元数据存储：`~/.claude/cc-space/metadata.json`（JSON 扁平化存储）
+- 工作目录隔离：`~/.claude/monet-agent/`
+- 元数据存储：`~/.claude/monet/metadata.json`（JSON 扁平化存储）
 
 **无 API key 管理层**（关键设计点）：
 - 不存在 `.env` / `secrets.json`
@@ -153,13 +153,13 @@
 
 | 文件 | 用途 | 重点接口 |
 |-----|-----|--------|
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useSessionMeta.ts` | 标题生成控制 | `ensureTitle()`, `triggerTitleGeneration()` |
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/usePermissionHints.ts` | 权限提示缓存 | `requestHint()`, `getHint()` |
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useWorkshop.ts` | 工坊资产管理 | `useWorkshop()`, `probeMcpServers()` |
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/metadata.rs` | AI 调用核心 | `generate_title()`, `generate_permission_hint()` |
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/workshop.rs` | 资产扫描 | `get_workshop_assets()`, `scan_agents_dir()` |
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/models/session_record.rs` | 数据模型 | `AiTitleRecord`, `SessionRecord::AiTitle` |
-| `/Users/zz/workspace/cc-apps/cc-space-tauri/docs/agent-iframe-architecture.md` | 架构设计文档 | 通信协议、隔离策略、场景规划 |
+| `/Users/dev/monet/src/composables/useSessionMeta.ts` | 标题生成控制 | `ensureTitle()`, `triggerTitleGeneration()` |
+| `/Users/dev/monet/src/composables/usePermissionHints.ts` | 权限提示缓存 | `requestHint()`, `getHint()` |
+| `/Users/dev/monet/src/composables/useWorkshop.ts` | 工坊资产管理 | `useWorkshop()`, `probeMcpServers()` |
+| `/Users/dev/monet/src-tauri/src/metadata.rs` | AI 调用核心 | `generate_title()`, `generate_permission_hint()` |
+| `/Users/dev/monet/src-tauri/src/workshop.rs` | 资产扫描 | `get_workshop_assets()`, `scan_agents_dir()` |
+| `/Users/dev/monet/src-tauri/src/models/session_record.rs` | 数据模型 | `AiTitleRecord`, `SessionRecord::AiTitle` |
+| `/Users/dev/monet/docs/agent-iframe-architecture.md` | 架构设计文档 | 通信协议、隔离策略、场景规划 |
 
 ---
 

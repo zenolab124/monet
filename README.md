@@ -43,17 +43,56 @@ A desktop app that turns your Claude Code session history into a browsable, sear
 
 Monet **never writes** to Claude Code's JSONL files. All metadata is stored separately in `~/.monet/`.
 
+## Why Monet?
+
+- **Mission control, not just a viewer.** Run and monitor multiple agents in parallel — split columns, a live monitor rail, and inline permission approval. Command your agents like a trader watches the market.
+- **Your data stays yours.** Read-only over Claude Code's files by architecture, fully offline, zero telemetry, no accounts. Everything Monet adds lives in its own directory.
+- **It works while you sleep.** Cron routines run through the OS scheduler even when Monet is closed — your Mac can wake itself up, run the task, and go back to sleep.
+
 ## Features
 
-**Review** — Browse all sessions across projects, full-text search in milliseconds, rich Markdown/code/tool-call rendering, thinking block expansion.
+### 🖥 Workbench — parallel agent control
 
-**Work** — Multi-tab workbench with draggable split columns. Send follow-up messages with real-time streaming. Switch models, channels, and effort levels on the fly.
+- Multi-tab workspaces with draggable split columns; 5+ sessions streaming side by side without blocking each other
+- Monitor rail: live status, tail output, and token usage for every session at a glance — approve permissions or retry right from the card
+- **Race mode**: fork a session into parallel lanes, broadcast one prompt to different models/channels, and compare answers and token cost side by side
+- Permission requests as GUI cards: dangerous commands get a red warning, AI annotates the risk in plain language; `Enter` to allow, `Esc` to deny
+- Async task panel for subagents, workflows, and background tasks with live progress
+- Sessions started in your terminal are detected, followed live, and tracked via official CLI hooks (Turn Signal)
 
-**Automate** — Schedule recurring Claude Code tasks with cron expressions. macOS wake-from-sleep support for overnight runs.
+### 📖 Reading experience
 
-**Integrate** — Built-in MCP server (`monet-mcp`) lets Claude Code search your session history and manage routines from the CLI. macOS widgets for at-a-glance stats.
+- True streaming — rendered from the CLI's character-level partial message events, with adaptive typewriter pacing
+- Purpose-built cards for 18+ tool calls: Edit shows red/green diffs, Bash shows commands and exit codes, unknown tools degrade gracefully
+- Inline HTML/SVG rendering in replies — comparison cards, tables, and diagrams instead of walls of text
+- Paste or drag images into the input; thumbnails with a full-screen viewer
+- Thinking blocks with word counts, anchor-dot navigation for long chats, sticky prompt headers, date dividers
 
-**Customize** — 12 built-in languages + AI translation for any language. Dark / light / system theme. macOS native title bar. System permission health check panel.
+### 🗄 Archive & search
+
+- Three-pane read-only browser: projects → sessions → detail; watch a live session without touching it
+- Full-text search across every project in milliseconds, plus an agent-powered semantic mode for fuzzy memories
+- AI-generated titles, tags, and summaries — stored outside the JSONL, of course
+
+### 📋 Transparency
+
+- **File ledger**: exactly which files a session touched, a per-edit diff timeline, and a read-only git snapshot
+- Per-turn token stats, cache hit rate, and a context-window usage bar that warns before you hit the ceiling
+
+### ⚙️ Automation & system integration
+
+- Cron routines executed by the OS scheduler (launchd) — they run even when Monet isn't open
+- Wake-from-sleep: schedule overnight runs; one-time authorization, then fully silent
+- Menu bar quota monitor: live session/weekly usage percentages and reset countdown
+- Native WidgetKit desktop widgets: streaks, token pulse, work-rhythm heatmap, model mix, and more
+- Built-in MCP server: search your session history and manage routines from inside any Claude Code CLI session
+
+### 🎨 Craft & customization
+
+- Paper design language — warm, matte, ink-on-paper; a dark Ink theme included
+- 12 built-in languages, and AI can translate the entire UI into any other language you name
+- Channels: official API, self-hosted proxies, OpenAI-protocol endpoints, even Apple's on-device models — switch per session
+- Per-session model, thinking effort, and permission mode, all from a capsule in the session header
 
 ## Install
 
@@ -119,6 +158,23 @@ Without it, the build falls back to ad-hoc signing — functional, but TCC permi
 | MCP registration | `~/.claude/settings.json` | Adds `monet` entry under `mcpServers` |
 
 Monet is fully offline. No telemetry, no accounts, no network calls (except when you explicitly use streaming via Claude Code CLI).
+
+## FAQ
+
+**Does Monet replace the Claude Code CLI?**
+No — it's a companion. The CLI does the work; Monet gives you eyes and hands over it. Sessions started in either place show up in both.
+
+**Is my session data safe?**
+Monet never writes to Claude Code's JSONL files — that's an architectural guarantee, not a setting. Titles, tags, and other extras live in `~/.monet/`. Delete Monet and your Claude Code data is untouched.
+
+**Why does Gatekeeper warn on first launch?**
+Monet is signed with a stable identity but not yet notarized by Apple. Right-click → Open once (or `xattr -cr /Applications/Monet.app`), and in-app updates are silent afterwards.
+
+**Why does it ask for system permissions?**
+Each feature asks only for what it uses: Terminal automation for "resume in terminal", screen recording for window previews, accessibility for global shortcuts. The Settings page has a permission health-check panel showing exactly what's granted.
+
+**What about Windows / Linux?**
+macOS (Apple Silicon) is first. The stack (Tauri + Rust) is cross-platform and Windows support is on the roadmap.
 
 ## Tech Stack
 

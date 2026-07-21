@@ -9,10 +9,10 @@
 | **uniCloud 初始化** | `cloud functions --initdatabase` | db-init 跑 db_init.json | ⭐⭐⭐ |
 | **uniCloud 切空间** | `cloud functions --assignspace N` | 切换已绑定的云空间 | ⭐⭐（你只有一个空间）|
 | **uniCloud 列资源** | `cloud functions --list cloudfunction/db/space [--cloud]` | 看本地/云端有哪些云函数、schema | ⭐⭐⭐⭐（AI 排查时） |
-| **小程序日志** | `logcat mp-weixin --project snap-ub --mode full` | 微信小程序运行时 console + 报错 | ⭐⭐⭐⭐⭐ |
-| **支付宝小程序日志** | `logcat mp-alipay --project snap-ub --mode full` | 你也发布支付宝小程序，能用 | ⭐⭐⭐⭐ |
+| **小程序日志** | `logcat mp-weixin --project demo-app --mode full` | 微信小程序运行时 console + 报错 | ⭐⭐⭐⭐⭐ |
+| **支付宝小程序日志** | `logcat mp-alipay --project demo-app --mode full` | 你也发布支付宝小程序，能用 | ⭐⭐⭐⭐ |
 | **H5 日志** | `logcat web --browser Chrome --mode full` | H5 浏览器日志 | ⭐⭐⭐ |
-| **uniCloud 日志** | `logcat unicloud --project snap-ub` | **云函数运行时报错和 console** | ⭐⭐⭐⭐⭐ |
+| **uniCloud 日志** | `logcat unicloud --project demo-app` | **云函数运行时报错和 console** | ⭐⭐⭐⭐⭐ |
 | **App 打包日志** | `logcat pack` | 云打包过程日志 | ⭐（你不打 App）|
 
 ## "AI 读报错"这件事 —— 能做到，但有 3 个 unknown
@@ -49,7 +49,7 @@ AI: 哦那应该是...
 **改造后**
 ```
 你: variantGenerator 又抛错了
-AI: [自己跑 cli logcat unicloud --project snap-ub]
+AI: [自己跑 cli logcat unicloud --project demo-app]
     [读到完整 stack trace]
     在 _timing.js:42 抛 TypeError... 已修复
 ```
@@ -60,8 +60,8 @@ AI: [自己跑 cli logcat unicloud --project snap-ub]
 
 要不要我现在用安全模式实测下面两条，把 3 个 unknown 一次解决？（都是只读，无副作用）
 
-1. `cli logcat unicloud --project snap-ub`（带 5 秒 timeout，看是流式还是一次性）
-2. `cli logcat mp-weixin --project snap-ub --mode full`（同上）
+1. `cli logcat unicloud --project demo-app`（带 5 秒 timeout，看是流式还是一次性）
+2. `cli logcat mp-weixin --project demo-app --mode full`（同上）
 
 实测完你就知道这个能力的真实形态，再决定要不要工程化。
 

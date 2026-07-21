@@ -48,7 +48,7 @@
 
 `App.vue` 用 `v-show` 切换六个域视图（WorkbenchView / SessionsView / WorkshopView / AutomationView / HomeView / SettingsView）。**刻意 DOM 常驻**：流式打字机、滚动位置、事件监听在切换间零丢失（PRD 硬指标）——引路由或 `v-if` 都会重建组件树，故不引。工作台域内部再做一层渲染分级（非激活 tab 零 DOM），见 [`workbench.md`](./workbench.md)。
 
-`useUiState.ts:8` 的 `activeSection: 'workbench' | 'sessions' | 'home' | 'settings' | 'workshop' | 'automation'`（v2.1.0 加 workbench、多渠道迭代点亮 settings、v2.3.0 加 workshop、v2.4.0 加 automation），与 `sidebarsCollapsed` 一起持久化进同一 localStorage key `cc-space-ui`，重启恢复上次所在域，非法值回退 `sessions`（validSections 白名单校验）。
+`useUiState.ts:8` 的 `activeSection: 'workbench' | 'sessions' | 'home' | 'settings' | 'workshop' | 'automation'`（v2.1.0 加 workbench、多渠道迭代点亮 settings、v2.3.0 加 workshop、v2.4.0 加 automation），与 `sidebarsCollapsed` 一起持久化进同一 localStorage key `monet-ui`，重启恢复上次所在域，非法值回退 `sessions`（validSections 白名单校验）。
 
 ## ActivityBar 七域（v2.5.0 变更：去掉 h-9 spacer，加回 data-tauri-drag-region）
 
@@ -111,7 +111,7 @@ CC Space 是 Claude Code 会话管理器，Tauri 2 双进程架构：Rust 后端
 ## 代码树
 
 ```
-cc-space-tauri/
+monet/
 ├── src/                    # Vue 3 前端（WebView 进程）
 │   ├── components/         # UI 组件（TitleBar + TitleBarTools + ActivityBar + Toolbar + 三栏 + workbench/ 五组件 + notifications/ + 详情）
 │   ├── views/              # 域视图（HomeView 首页 / SessionsView 档案馆三栏 / WorkbenchView 工作台 / WorkshopView 工坊 / AutomationView 自动化 / SettingsView 设置）
@@ -185,10 +185,10 @@ ref 更新 → Vue 渲染
 
 ## MCP 权限网关旁路
 
-`start_streaming` 会先起 `PermissionService` 监听 Unix socket，再用 `--mcp-config` 把 `cc-space-mcp` 二进制注册到 claude CLI：
+`start_streaming` 会先起 `PermissionService` 监听 Unix socket，再用 `--mcp-config` 把 `monet-mcp` 二进制注册到 claude CLI：
 
 ```
-claude CLI ↔(stdio JSON-RPC)↔ cc-space-mcp ↔(Unix socket)↔ 主进程 ↔(Tauri event)↔ 前端
+claude CLI ↔(stdio JSON-RPC)↔ monet-mcp ↔(Unix socket)↔ 主进程 ↔(Tauri event)↔ 前端
 ```
 
 工具调用前 claude CLI 先 `tools/call approve_tool_use`，主进程把请求 emit 到前端弹卡片，用户决策经 `respond_permission` command 反向打回。详见 [`./permission-request.md`](./permission-request.md) 与 [`../integrations/mcp-protocol.md`](../integrations/mcp-protocol.md)。

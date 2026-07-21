@@ -2,11 +2,11 @@
 
 ## 搜索结果总结
 
-在 `/Users/zz/workspace/cc-apps/cc-space-tauri` 项目中，我已找到所有相关的中文文本和状态判断逻辑。以下是详细的查找结果：
+在 `/Users/dev/monet` 项目中，我已找到所有相关的中文文本和状态判断逻辑。以下是详细的查找结果：
 
 ### 1. **中文文本出现位置**
 
-#### 文件：`/Users/zz/workspace/cc-apps/cc-space-tauri/src/components/SessionDetail.vue`
+#### 文件：`/Users/dev/monet/src/components/SessionDetail.vue`
 
 | 行号 | 文本 | 上下文 |
 |------|------|-------|
@@ -15,14 +15,14 @@
 | 755 | `本地流式由 stream-event 实时驱动,无需外部探测` | 代码注释 |
 | 808 | `后台结束的流式(本实例未挂载期间)留下脏标记` | 代码注释 |
 
-#### 文件：`/Users/zz/workspace/cc-apps/cc-space-tauri/README.md`
+#### 文件：`/Users/dev/monet/README.md`
 
 | 行号 | 文本 |
 |------|------|
 | 13 | `文件监控：后台监听 JSONL 变化，自动刷新列表` |
 | 10 | `流式响应：输入框发送跟进消息、实时流式渲染、Esc 中断` |
 
-#### 文件：`/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/channels.rs`
+#### 文件：`/Users/dev/monet/src-tauri/src/channels.rs`
 
 | 行号 | 文本 |
 |------|------|
@@ -36,7 +36,7 @@
 
 #### **核心状态变量：`externalRunning`**
 
-**文件**：`/Users/zz/workspace/cc-apps/cc-space-tauri/src/components/SessionDetail.vue`
+**文件**：`/Users/dev/monet/src/components/SessionDetail.vue`
 
 **定义**（第 728 行）：
 ```typescript
@@ -53,7 +53,7 @@ const externalRunning = ref(false)
 
 #### **后台运行检测函数**
 
-**文件**：`/Users/zz/workspace/cc-apps/cc-space-tauri/src/components/SessionDetail.vue`
+**文件**：`/Users/dev/monet/src/components/SessionDetail.vue`
 
 **`probeExternal()` 函数**（第 750-785 行）：
 ```typescript
@@ -105,7 +105,7 @@ async function probeExternal() {
 
 #### **Rust 端实现**
 
-**文件**：`/Users/zz/workspace/cc-apps/cc-space-tauri/src-tauri/src/commands.rs`
+**文件**：`/Users/dev/monet/src-tauri/src/commands.rs`
 
 **`check_session_running()` 命令**（第 215-226 行）：
 ```rust
@@ -132,7 +132,7 @@ pub fn check_session_running(session_id: String) -> bool {
 
 #### **会话状态判断**
 
-**文件**：`/Users/zz/workspace/cc-apps/cc-space-tauri/src/composables/useSessionStatus.ts`
+**文件**：`/Users/dev/monet/src/composables/useSessionStatus.ts`
 
 **`useSessionStatus()` composable**（第 40-65 行）：
 ```typescript

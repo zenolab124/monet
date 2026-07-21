@@ -8,7 +8,7 @@
 
 ### 1. 首页视图组件位置
 
-**文件路径**: `/Users/zz/workspace/cc-apps/cc-space-tauri/src/views/HomeView.vue`
+**文件路径**: `/Users/dev/monet/src/views/HomeView.vue`
 
 这是核心首页视图组件，使用 Vue 3 `<script setup>` 语法。首页是一个栅格系统（Grid），包含多个预内置卡片和自定义 Widget。
 
@@ -201,7 +201,7 @@ listen('projects-changed', () => {
 #### **D. localStorage 持久化（UI 状态）**
 ```typescript
 // useUiState.ts
-const STORAGE_KEY = 'cc-space-ui'
+const STORAGE_KEY = 'monet-ui'
 watch([sidebarsCollapsed, activeSection, ...], ([collapsed, section, ...]) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({...}))
 })
