@@ -288,7 +288,7 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
         .into_iter()
         .map(|(model, total)| ModelUsage { model, total })
         .collect();
-    by_model.sort_unstable_by(|a, b| b.total.cmp(&a.total));
+    by_model.sort_unstable_by_key(|m| std::cmp::Reverse(m.total));
 
     cache::flush();
 

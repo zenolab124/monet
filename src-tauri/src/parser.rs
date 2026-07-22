@@ -370,7 +370,8 @@ fn extract_first_text(value: &Value) -> Option<String> {
 
     let raw = if let Some(text) = content.as_str() {
         text.to_string()
-    } else if let Some(blocks) = content.as_array() {
+    } else {
+        let blocks = content.as_array()?;
         let mut found = None;
         for block in blocks {
             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
@@ -381,8 +382,6 @@ fn extract_first_text(value: &Value) -> Option<String> {
             }
         }
         found?
-    } else {
-        return None;
     };
 
     Some(truncate_chars(&raw, 200))

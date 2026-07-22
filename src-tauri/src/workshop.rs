@@ -1328,7 +1328,7 @@ fn collect_memory_overview() -> Result<MemoryOverview, String> {
     }
 
     // 按 lastModified 降序
-    projects.sort_unstable_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    projects.sort_unstable_by_key(|p| std::cmp::Reverse(p.last_modified));
 
     Ok(MemoryOverview { projects })
 }
@@ -1416,7 +1416,7 @@ fn scan_memory_project(
     }
 
     // 按 mtime 降序
-    entries.sort_unstable_by(|a, b| b.mtime.cmp(&a.mtime));
+    entries.sort_unstable_by_key(|e| std::cmp::Reverse(e.mtime));
 
     // 悬空引用 = 索引集合 − 磁盘存在的文件（legacy 索引集合恒空，天然无悬空）
     let disk_files: HashSet<&str> = entries.iter().map(|e| e.file.as_str()).collect();

@@ -264,8 +264,7 @@ fn parse_shell_output(output: &str) -> Option<String> {
     output
         .lines()
         .map(str::trim)
-        .filter(|l| l.starts_with('/'))
-        .next_back()
+        .rfind(|l| l.starts_with('/'))
         .map(String::from)
 }
 
