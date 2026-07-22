@@ -17,7 +17,7 @@ fn print_counts(label: &str, map: &BTreeMap<String, usize>) {
         return;
     }
     let mut pairs: Vec<_> = map.iter().collect();
-    pairs.sort_by(|a, b| b.1.cmp(a.1));
+    pairs.sort_by_key(|p| std::cmp::Reverse(*p.1));
     let joined: Vec<String> = pairs.iter().map(|(k, c)| format!("{k}({c})")).collect();
     println!("  {label}: {}", joined.join(" "));
 }
@@ -28,7 +28,7 @@ fn print_unknown(map: &BTreeMap<String, Entry>) {
         return;
     }
     let mut pairs: Vec<_> = map.iter().collect();
-    pairs.sort_by(|a, b| b.1.count.cmp(&a.1.count));
+    pairs.sort_by_key(|p| std::cmp::Reverse(p.1.count));
     println!("  ❓ 未知 {} 种:", pairs.len());
     for (k, entry) in pairs {
         println!("     {k}  ×{}", entry.count);
