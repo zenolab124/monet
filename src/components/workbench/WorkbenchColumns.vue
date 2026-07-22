@@ -20,7 +20,6 @@ const {
   minColumnWidth,
   draftCwd,
   registerFork,
-  state,
   suppressColumnTransition,
 } = useWorkbench()
 const { t } = useI18n()
@@ -41,14 +40,10 @@ function onStartRace(sessionId: string) {
     notifyTransient(t('workbench.race.noCwd'))
     return
   }
-  const isDraft = !!state.value.drafts[sessionId]
   const newSessionId = crypto.randomUUID()
-  // 懒分叉:非草稿源登记分叉意图(落盘由 CLI --fork-session 完成);草稿源无历史,仅登记草稿
-  if (!isDraft) {
-    registerFork(newSessionId, sessionId, cwd)
-  } else {
-    state.value.drafts[newSessionId] = cwd
-  }
+  // 无条件登记分叉意图:源有无历史由 Rust 端按源 jsonl 真值判决(未落盘则退化新建)。
+  // 前端 drafts 的收割是异步滞后的,不能当"源无历史"的判据
+  registerFork(newSessionId, sessionId, cwd)
   createRaceTab(sessionId, cwd, newSessionId)
 }
 

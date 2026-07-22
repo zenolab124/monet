@@ -336,13 +336,24 @@ fn open_session(
     // 4. CLI 参数（不带 --print，不传消息文本；加 --input-format stream-json）
     let (executable, prefix_args) = find_claude();
     let mut args = prefix_args;
-    let session_file = crate::config::projects_dir()
-        .join(cwd.replace('/', "-"))
-        .join(format!("{}.jsonl", session_id));
-    // 会话身份参数三态:已落盘 → resume 自己;分叉意图 → CLI 原生 fork(resume 源 +
+    // cwd 先 canonicalize 再编码:CLI 落盘用 realpath(/tmp → /private/tmp 等 symlink),
+    // 用原始 cwd 编码会对着不存在的目录做落盘判断,resume/fork 三态全部失灵
+    #[cfg(unix)]
+    let cwd_real = std::fs::canonicalize(cwd)
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| cwd.to_string());
+    #[cfg(not(unix))]
+    let cwd_real = cwd.to_string(); // Windows canonicalize 带 \\?\ 前缀,编码会乱,原样使用
+    let project_dir = crate::config::projects_dir().join(cwd_real.replace('/', "-"));
+    let session_file = project_dir.join(format!("{}.jsonl", session_id));
+    // 会话身份参数三态:已落盘 → resume 自己;分叉意图且源已落盘 → CLI 原生 fork(resume 源 +
     // --fork-session + 指定新 ID,历史行 sessionId 由 CLI 重写,替代旧 fs::copy 仿造);
-    // 否则全新会话。文件已存在时分叉意图残留无害,走正常 resume 忽略之
-    let fork_src = fork_source.filter(|s| !s.is_empty());
+    // 否则全新会话。文件已存在时分叉意图残留无害,走正常 resume 忽略之;
+    // 源未落盘(草稿源分叉)时意图同样无害,退化走新建分支——与前者对称
+    let fork_src = fork_source
+        .filter(|s| !s.is_empty())
+        .filter(|src| project_dir.join(format!("{}.jsonl", src)).is_file());
     let (session_args, resumed) = if session_file.is_file() {
         (vec!["--resume".to_string(), session_id.to_string()], true)
     } else if let Some(src) = fork_src {

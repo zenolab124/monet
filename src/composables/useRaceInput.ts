@@ -83,16 +83,11 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
   function forkNewLane() {
     const race = tab.value.race
     if (!race || race.lanes.length === 0) return
-    const { registerFork, state } = useWorkbench()
+    const { registerFork } = useWorkbench()
     const sourceLane = race.lanes[0]
-    const isDraft = !!state.value.drafts[sourceLane.sessionId]
     const newSessionId = crypto.randomUUID()
-    // 懒分叉:非草稿源登记意图(落盘由 CLI --fork-session 完成);草稿源无历史,仅登记草稿
-    if (!isDraft) {
-      registerFork(newSessionId, sourceLane.sessionId, race.cwd)
-    } else {
-      state.value.drafts[newSessionId] = race.cwd
-    }
+    // 无条件登记分叉意图:源有无历史由 Rust 端按源 jsonl 真值判决(未落盘则退化新建)
+    registerFork(newSessionId, sourceLane.sessionId, race.cwd)
     addRaceLane(tab.value.id, newSessionId)
   }
 

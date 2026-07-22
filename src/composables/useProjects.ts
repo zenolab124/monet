@@ -5,6 +5,9 @@ import type { Project, SessionSummary } from '@/types'
 import { tokenTotal } from '@/types'
 
 const projects = ref<Project[]>([])
+/** 数据修订号:全量与增量刷新后都 +1。增量路径原地 mutate 不换 projects 引用,
+ *  浅层 watch(projects) 收不到,需要跨刷新方式感知变更的一律 watch 这个 */
+const projectsRevision = ref(0)
 const selectedProjectIds = ref<Set<string>>(new Set())
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -27,6 +30,7 @@ async function loadProjects() {
   error.value = null
   try {
     projects.value = await invoke<Project[]>('get_projects')
+    projectsRevision.value++
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -62,6 +66,7 @@ async function reloadProjectsSilently() {
     } else {
       projects.value = result
     }
+    projectsRevision.value++
   } catch (_) {
     // 静默失败
   }
@@ -104,6 +109,7 @@ async function applySessionChanges(changes: SessionChange[]) {
     }
   }
   projects.value.sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
+  projectsRevision.value++
 }
 
 /** 切换项目选中状态(单选：点已选中的取消，点未选中的替换) */
@@ -171,6 +177,7 @@ const sessionStats = computed(() => {
 export function useProjects() {
   return {
     projects,
+    projectsRevision,
     selectedProjectIds,
     loading,
     error,

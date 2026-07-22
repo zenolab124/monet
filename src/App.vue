@@ -29,16 +29,17 @@ import { applyZoom, useZoom } from '@/composables/useZoom'
 import { useUpdater } from '@/composables/useUpdater'
 import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 
-const { projects, loadProjects } = useProjects()
+const { projects, projectsRevision, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 const { activeSection } = useUiState()
 const { state, activeTab, pruneDrafts, reorderTabs, reorderSessions, moveSessionToTab, reorderColumns, expandSession } = useWorkbench()
 const { t } = useI18n()
 const { zoomLevel, setZoom, STEP } = useZoom()
 
-// 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉
-watch(projects, (list) => {
-  const ids = new Set(list.flatMap(p => p.sessions.map(s => s.id)))
+// 草稿会话收割:projects 每次刷新后,把已落盘(或已被关闭弃用)的草稿清掉。
+// watch 修订号而非 projects 本体:增量刷新原地 mutate 不换引用,浅层 watch 收不到
+watch(projectsRevision, () => {
+  const ids = new Set(projects.value.flatMap(p => p.sessions.map(s => s.id)))
   pruneDrafts(sid => ids.has(sid))
 })
 
