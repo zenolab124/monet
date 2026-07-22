@@ -1,15 +1,22 @@
+// 菜单栏常驻依赖 launchd Helper App 架构，仅 macOS 提供；
+// 其他平台导出同名接口但报不支持，前端按平台隐藏入口。
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
+#[cfg(target_os = "macos")]
 const LAUNCH_AGENT_LABEL: &str = "io.github.zenolab124.monet.tray";
 
 /// 用户「退出菜单栏」意图的持久化标记。
 /// 存在 = 用户主动退过 tray，主应用启动不再自动拉起；
 /// 设置页「启动菜单栏」按钮会清除它。monet-tray 退出时写入（双端共享此路径约定）。
+#[cfg(target_os = "macos")]
 pub fn disabled_marker_path() -> PathBuf {
     crate::config::data_dir().join("tray-disabled")
 }
 
+#[cfg(target_os = "macos")]
 fn plist_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| {
         h.join("Library/LaunchAgents")
@@ -17,6 +24,7 @@ fn plist_path() -> Option<PathBuf> {
     })
 }
 
+#[cfg(target_os = "macos")]
 fn tray_bin_path() -> Option<PathBuf> {
     // Helper App: Monet.app/Contents/Library/LoginItems/MonetTray.app/Contents/MacOS/monet-tray
     // 主应用二进制在: Monet.app/Contents/MacOS/app
@@ -29,6 +37,7 @@ fn tray_bin_path() -> Option<PathBuf> {
     })
 }
 
+#[cfg(target_os = "macos")]
 fn build_plist(bin: &std::path::Path) -> String {
     let bin_str = bin.to_string_lossy();
     // MONET_TRAY_VERSION 嵌入主应用版本号：升级后 plist 内容变化 →
@@ -67,6 +76,7 @@ fn build_plist(bin: &std::path::Path) -> String {
     )
 }
 
+#[cfg(target_os = "macos")]
 fn launchctl_targets() -> (String, String) {
     let uid = unsafe { libc::getuid() };
     let domain = format!("gui/{uid}");
@@ -76,6 +86,7 @@ fn launchctl_targets() -> (String, String) {
 
 /// 安装/更新 tray LaunchAgent（幂等）。
 /// launchctl 有 IO 开销且可能慢，调用方须在非主线程执行。
+#[cfg(target_os = "macos")]
 pub fn ensure_launch_agent() {
     // 用户主动退过 tray → 尊重意图，不装不拉起
     if disabled_marker_path().exists() {
@@ -84,14 +95,25 @@ pub fn ensure_launch_agent() {
     install_and_start();
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn ensure_launch_agent() {}
+
 /// 菜单栏常驻是否开启（= 用户未主动关闭）。
 /// plist 的 RunAtLoad 决定开机自启，此标记决定要不要装/拉起 plist。
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn get_tray_enabled() -> bool {
     !disabled_marker_path().exists()
 }
 
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn get_tray_enabled() -> bool {
+    false
+}
+
 /// 设置页开关：开 = 清标记 + 安装 + 拉起；关 = 写标记 + bootout（终止进程）
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn set_tray_enabled(enabled: bool) -> Result<(), String> {
     if enabled {
@@ -121,6 +143,13 @@ pub fn set_tray_enabled(enabled: bool) -> Result<(), String> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn set_tray_enabled(_enabled: bool) -> Result<(), String> {
+    Err("menu bar tray is only available on macOS".into())
+}
+
+#[cfg(target_os = "macos")]
 fn install_and_start() {
     let Some(plist_path) = plist_path() else { return };
     let Some(tray_bin) = tray_bin_path() else { return };

@@ -287,7 +287,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // 点 Dock 图标恢复被隐藏/最小化的窗口
+            // 点 Dock 图标恢复被隐藏/最小化的窗口（Reopen 是 macOS 独有事件）
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = &event {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.unminimize();
@@ -295,6 +296,8 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app_handle, event);
         });
 }
 
