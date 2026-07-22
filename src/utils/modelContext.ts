@@ -29,6 +29,7 @@
 // alias X 的解析落点。裸 sonnet alias 解析到 200K,1M 需显式 sonnet[1m]。
 
 import i18n from '@/locales'
+import type { ModelRole } from '@/utils/modelEnv'
 
 export const DEFAULT_CONTEXT = 200_000
 const EXTENDED_CONTEXT = 1_000_000
@@ -42,6 +43,8 @@ export interface ModelInfo {
   contextWindow: number
   /** 旧版本/降级档:下拉沉底,与主区之间以分割线隔开 */
   legacy?: boolean
+  /** 第三方映射项来源的角色槽(「Opus 级」等级徽章用;官方角色项与自定义槽不标) */
+  mappedRole?: ModelRole
 }
 
 /**

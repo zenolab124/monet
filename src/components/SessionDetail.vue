@@ -19,6 +19,7 @@ import {
 import { useSessionSettings, type ChannelMark } from '@/composables/useSessionSettings'
 import { useRunConfig } from '@/composables/useRunConfig'
 import {
+  useChannels,
   refreshChannels,
   channelDisplayName,
   OFFICIAL_CHANNEL_ID,
@@ -35,6 +36,7 @@ import { useWorkshop } from '@/composables/useWorkshop'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 import { shortId, shortModel, formatTokens } from '@/types'
 import { inferModel } from '@/utils/modelContext'
+import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
@@ -481,6 +483,18 @@ refreshChannels()
 
 /** 解析后的最终注入渠道 id(null = 官方/零注入):发送与终端恢复共用 */
 const resolvedChannelId = computed(() => runConfig.value.channelId)
+
+// --- 等级徽章:流式轮次真实模型伪装的角色(当前解析渠道映射反查) ---
+const { channels: channelList } = useChannels()
+const activeModelEnv = computed(() => {
+  const id = resolvedChannelId.value
+  return id ? channelList.value.find(c => c.id === id)?.modelEnv : undefined
+})
+/** 真实模型字符串 → 伪装等级文本(官方渠道/无映射返回 null) */
+function modelTierOf(model: string | null | undefined): string | null {
+  const roles = resolveMappedRoles(model, activeModelEnv.value)
+  return roles.length ? roles.map(r => ROLE_DISPLAY[r]).join('/') : null
+}
 
 function onChannelChange(channelId: string | null) {
   const list = messages.value
@@ -2335,7 +2349,7 @@ async function onReload() {
               <span>
                 {{ $t('session.claude') }}
                 <!-- 本轮实际运行模型的真值(message_start 回显),从首字起与落账后标注同源 -->
-                <span v-if="turn.model" class="text-muted-foreground font-normal">({{ shortModel(turn.model) }})</span>
+                <span v-if="turn.model" class="text-muted-foreground font-normal">({{ shortModel(turn.model) }}<template v-if="modelTierOf(turn.model)"> · {{ $t('topbar.roleTier', { role: modelTierOf(turn.model) }) }}</template>)</span>
               </span>
               <!-- 块级 usage:该 turn 的 assistant 快照到达(message 完成)即显示真值,
                    不等整轮结束;四段格式与历史区块头同款,换树前后像素等价 -->

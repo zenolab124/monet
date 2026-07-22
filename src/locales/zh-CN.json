@@ -1008,7 +1008,8 @@
     "roleFable": "Fable · 最新",
     "roleOpus": "Opus · 最新",
     "roleSonnet": "Sonnet · 最新",
-    "roleHaiku": "Haiku · 最新"
+    "roleHaiku": "Haiku · 最新",
+    "roleTier": "{role} 级"
   },
   "slash": {
     "title": "斜杠命令",

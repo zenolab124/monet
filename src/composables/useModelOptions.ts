@@ -74,6 +74,8 @@ export function useModelOptions(channelId: Ref<string | null>): {
         id: ROLE_ALIAS[role],
         label: nameVal || modelVal,
         contextWindow: valueHasOneM(modelVal) ? EXTENDED_CONTEXT : DEFAULT_CONTEXT,
+        // 来源角色槽:UI 标注该映射模型伪装的等级(自定义槽不伪装,不标)
+        mappedRole: role,
       })
     }
 

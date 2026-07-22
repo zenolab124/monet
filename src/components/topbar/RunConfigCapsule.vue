@@ -12,6 +12,7 @@ import { useModelOptions } from '@/composables/useModelOptions'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useUiState } from '@/composables/useUiState'
 import { inferModel, effortCapabilities } from '@/utils/modelContext'
+import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 
 /**
  * 运行配置胶囊(二期,原型冻结基准 docs/prototypes/run-config-capsule.html):
@@ -237,6 +238,22 @@ const modelSegLabel = computed(() => {
   return t('topbar.modelDefault')
 })
 
+/** 等级徽章:第三方映射模型伪装的角色。选中项自带打标优先;清单外值兜底反查 modelEnv(多命中 join) */
+const modelSegTier = computed<string | null>(() => {
+  const key = selectedModelKey.value
+  const hit = key ? modelListItems.value.find(m => m.id === key) : null
+  if (hit?.mappedRole) return ROLE_DISPLAY[hit.mappedRole]
+  const roles = resolveMappedRoles(props.runConfig.model, activeModelEnv.value)
+  return roles.length ? roles.map(r => ROLE_DISPLAY[r]).join('/') : null
+})
+
+/** 模型段 title:徽章随行(截断时悬停可见全文) */
+const modelSegTitleName = computed(() =>
+  modelSegTier.value
+    ? `${modelSegLabel.value} · ${t('topbar.roleTier', { role: modelSegTier.value })}`
+    : modelSegLabel.value,
+)
+
 const effortSegLabel = computed(() => {
   const v = selectedEffort.value
   if (!v) return 'High'
@@ -308,9 +325,12 @@ function openSettings() {
           runConfig.modelSource === 'session' || runConfig.modelSource === 'advisor' ? 'seg-overridden' : 'seg-inherited',
           narrow ? 'seg-first' : '',
         ]"
-        :title="$t('topbar.modelTitle', { name: modelSegLabel })"
+        :title="$t('topbar.modelTitle', { name: modelSegTitleName })"
         @click="openFrom('model')"
-      >{{ modelSegLabel }}</button>
+      >
+        <span class="truncate">{{ modelSegLabel }}</span>
+        <span v-if="modelSegTier" class="seg-tier">{{ $t('topbar.roleTier', { role: modelSegTier }) }}</span>
+      </button>
       <button
         type="button"
         class="capsule-seg seg-sep"
@@ -371,6 +391,7 @@ function openSettings() {
               @click="pickModel(m.id)"
             >
               <span class="truncate">{{ m.label }}</span>
+              <span v-if="m.mappedRole" class="rc-hint">{{ $t('topbar.roleTier', { role: ROLE_DISPLAY[m.mappedRole] }) }}</span>
               <span v-if="m.id === defaultModelKey" class="rc-hint">{{ $t('topbar.hintDefault') }}</span>
             </button>
           </template>
@@ -459,6 +480,7 @@ function openSettings() {
 .seg-first::before { content: none; }
 .seg-inherited { opacity: .68; }
 .seg-overridden { color: var(--foreground); font-weight: 500; }
+.seg-tier { margin-left: 4px; font-size: 9px; opacity: .65; flex-shrink: 0; font-weight: 400; }
 
 .rc-col { width: 152px; padding: 8px 8px 6px; display: flex; flex-direction: column; }
 .rc-col + .rc-col { border-left: 1px solid var(--border); }

@@ -1008,7 +1008,8 @@
     "roleFable": "Fable · Latest",
     "roleOpus": "Opus · Latest",
     "roleSonnet": "Sonnet · Latest",
-    "roleHaiku": "Haiku · Latest"
+    "roleHaiku": "Haiku · Latest",
+    "roleTier": "{role}-tier"
   },
   "slash": {
     "title": "Slash Commands",

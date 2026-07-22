@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { shortModel, relativeTime, formatTokens, type TokenUsage } from '@/types'
 import { inferModel, getContextWindow, MODELS } from '@/utils/modelContext'
+import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
+import { useChannels } from '@/composables/useChannels'
 import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
 import type { ResolvedRunConfig } from '@/composables/useRunConfig'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
@@ -107,6 +109,17 @@ const effectiveModel = computed(() => {
 const { cliDefaults } = useCliDefaults()
 // 顶栏挂载即拉一次 CLI 默认值(settings.json 活文件,下拉打开时还会各自重读)
 onMounted(() => refreshCliDefaults(props.cwd ?? undefined))
+
+const { channels } = useChannels()
+
+/** 真实跑过模型的伪装等级(按当前解析渠道的映射反查;官方渠道/无映射恒 null) */
+const realModelTier = computed<string | null>(() => {
+  const id = props.resolvedChannelId
+  if (!id) return null
+  const env = channels.value.find(c => c.id === id)?.modelEnv
+  const roles = resolveMappedRoles(props.modelString, env)
+  return roles.length ? roles.map(r => ROLE_DISPLAY[r]).join('/') : null
+})
 
 /** 上下文容量:API 真值 → effectiveModel 容量 → 下次发送解析模型推断兜底 */
 const capacity = computed(() =>
@@ -316,7 +329,9 @@ function onPermissionModeChange(mode: PermissionMode) {
           <span v-if="gitBranch" class="flex items-center gap-1.5">
             <span class="i-carbon-branch w-3 h-3 shrink-0" />{{ gitBranch }}
           </span>
-          <span v-if="modelString && !effectiveModel" class="truncate">{{ shortModel(modelString) }}</span>
+          <span v-if="modelString && !effectiveModel" class="truncate">
+            {{ shortModel(modelString) }}<template v-if="realModelTier"> · {{ $t('topbar.roleTier', { role: realModelTier }) }}</template>
+          </span>
           <span>{{ relativeTime(lastModified) }}</span>
           <!-- 会话 token 统计 -->
           <div class="flex flex-col gap-0.5 pt-1 border-t border-border/50 tabular-nums">

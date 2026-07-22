@@ -19,6 +19,38 @@ export const ROLE_ALIAS: Record<ModelRole, string> = {
   HAIKU: 'haiku',
 }
 
+/** 角色的 UI 显示名(等级徽章用,跨语言统一英文家族名) */
+export const ROLE_DISPLAY: Record<ModelRole, string> = {
+  FABLE: 'Fable',
+  OPUS: 'Opus',
+  SONNET: 'Sonnet',
+  HAIKU: 'Haiku',
+}
+
+/**
+ * 反查模型字符串在渠道映射中伪装的角色(等级徽章用)。
+ * 命中条件(大小写不敏感,双方剥 [1m] 比对):
+ *   - 值等于某角色槽的映射模型(回读场景:jsonl/流式 message.model 是映射后的真实模型)
+ *   - 值等于某角色的裸 alias(配置场景:清单外持久化值直接存 alias)
+ * 同一真实模型可被映射到多个角色,故返回数组(调用方 join 展示);
+ * 自定义第五槽不伪装任何角色,不参与反查。官方渠道 modelEnv 为空 → 恒返回 []。
+ */
+export function resolveMappedRoles(
+  modelStr: string | null | undefined,
+  modelEnv: Record<string, string> | undefined | null,
+): ModelRole[] {
+  if (!modelStr || !modelEnv) return []
+  const base = stripOneM(modelStr.trim()).toLowerCase()
+  if (!base) return []
+  const hits: ModelRole[] = []
+  for (const role of MODEL_ROLES) {
+    const slot = modelEnv[roleModelKey(role)]?.trim()
+    if (!slot) continue
+    if (stripOneM(slot).toLowerCase() === base || base === ROLE_ALIAS[role]) hits.push(role)
+  }
+  return hits
+}
+
 /** 每个角色的托管键(v1 只在 UI 用 MODEL 与 _NAME,后两者保留命名空间不做 UI) */
 export function roleModelKey(role: ModelRole): string {
   return `ANTHROPIC_DEFAULT_${role}_MODEL`
