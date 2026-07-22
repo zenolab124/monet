@@ -130,12 +130,15 @@ pub fn run() {
             }
 
             // 关窗=收起（macOS 标准文档型行为）：进程与 Dock 图标保留，
-            // 点 Dock/Reopen 恢复；真退出走 Cmd+Q（quit_app）
+            // 点 Dock/Reopen 恢复；真退出走 Cmd+Q（quit_app）。
+            // 其他平台无 Dock 恢复入口，放行默认关闭（Destroyed 里做会话清理）
             let handle = app.handle().clone();
             if let Some(window) = handle.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
                 let w = window.clone();
                 window.on_window_event(move |event| {
                     match event {
+                        #[cfg(target_os = "macos")]
                         tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let _ = w.hide();

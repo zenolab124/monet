@@ -350,8 +350,24 @@ fn runner_health_result_path() -> std::path::PathBuf {
 /// 在 VSCode 中打开项目目录
 #[tauri::command]
 pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
+    let url = format!("vscode://file{}", cwd);
+    #[cfg(target_os = "macos")]
     std::process::Command::new("open")
-        .arg(format!("vscode://file{}", cwd))
+        .arg(&url)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW：cmd 不闪控制台
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&url)
         .spawn()
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -384,10 +400,21 @@ pub fn get_agent_session_dir() -> AgentSessionDir {
     }
 }
 
-/// 在 Finder 中打开目录
+/// 在系统文件管理器中打开目录（macOS: Finder / Windows: 资源管理器 / Linux: 默认）
 #[tauri::command]
 pub fn open_in_finder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
     std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
         .arg(&path)
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -899,8 +926,10 @@ pub fn open_in_default_app(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &path])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW：cmd 不闪控制台
             .spawn()
             .map_err(|e| e.to_string())?;
     }
