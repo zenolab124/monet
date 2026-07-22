@@ -1,15 +1,18 @@
 name: Release
 
 # 推 v* tag 触发:完整复刻本地发版产物(app + Tray helper + Widget + 稳定身份签名
-# + DMG + updater 三件套),发 draft release——人工检查后 publish 才对 updater 生效。
+# + DMG + updater 三件套) + Windows NSIS 安装包,发 draft release——
+# 人工检查后 publish 才对 updater 生效。
 #
 # 所需 secrets:
 #   SIGNING_CERT_P12          自签证书 "Monet Signing" 导出的 .p12,base64 编码
 #   SIGNING_CERT_PASSWORD     .p12 导出密码
-#   TAURI_SIGNING_PRIVATE_KEY updater minisign 私钥(对应 tauri.conf 的 pubkey)
+#   TAURI_SIGNING_PRIVATE_KEY updater minisign 私钥(对应 tauri.conf 的 pubkey,双平台共用)
 #
 # 签名用与本地相同的稳定自签身份:updater 静默升级后签名不变,TCC 授权不丢。
 # 公证(Developer ID)按触发式策略暂缓,届时仅需替换证书 secrets 与 SIGN_ID。
+# Windows 侧无 Authenticode 签名(SmartScreen 会拦,发布期另议),NSIS 本身即
+# updater 工件,minisign 签名后写入 latest.json 的 windows-x86_64 条目。
 
 on:
   push:
@@ -20,7 +23,55 @@ permissions:
   contents: write
 
 jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build NSIS installer
+        run: pnpm tauri build --bundles nsis
+
+      - name: Sign updater artifact
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          pnpm tauri signer sign $exe.FullName
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.sig
+          if-no-files-found: error
+
   build-macos:
+    # 串行等 Windows 工件:latest.json 需并入 windows-x86_64 条目后统一发布
+    needs: build-windows
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,6 +139,21 @@ jobs:
           codesign --verify --deep --strict src-tauri/target/release/bundle/macos/Monet.app
           codesign -dv src-tauri/target/release/bundle/macos/Monet.app 2>&1 | grep 'Authority\|Signature'
 
+      - name: Download windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-nsis
+          path: windows-artifacts
+
+      - name: Merge windows into latest.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARBALL=$(ls src-tauri/target/release/bundle/updater/*.app.tar.gz)
+          WIN_EXE=$(ls windows-artifacts/*.exe)
+          node scripts/create-latest-json.mjs "$VERSION" "$TARBALL" \
+            src-tauri/target/release/bundle/updater/latest.json "$WIN_EXE"
+          cat src-tauri/target/release/bundle/updater/latest.json
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -99,4 +165,6 @@ jobs:
             src-tauri/target/release/bundle/dmg/*.dmg \
             src-tauri/target/release/bundle/updater/*.app.tar.gz \
             src-tauri/target/release/bundle/updater/*.sig \
-            src-tauri/target/release/bundle/updater/latest.json
+            src-tauri/target/release/bundle/updater/latest.json \
+            windows-artifacts/*.exe \
+            windows-artifacts/*.sig
