@@ -253,7 +253,7 @@ fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>
         .into_iter()
         .map(|(name, sessions)| ProjectStat { name, sessions })
         .collect();
-    top.sort_by(|a, b| b.sessions.cmp(&a.sessions));
+    top.sort_by_key(|p| std::cmp::Reverse(p.sessions));
     top.truncate(8);
 
     (active_today.len() as u32, top, total_sessions, hourly)
