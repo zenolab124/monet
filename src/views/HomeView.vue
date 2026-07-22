@@ -12,6 +12,7 @@ import { useHomeStats } from '../composables/useHomeStats'
 import { useProjects } from '../composables/useProjects'
 import { useSessions } from '../composables/useSessions'
 import { useUiState } from '../composables/useUiState'
+import { isMac } from '../composables/usePlatform'
 
 const { t } = useI18n()
 const { activeSection, switchSection } = useUiState()
@@ -29,7 +30,7 @@ const { selectSession } = useSessions()
 watch(
   [usage, projects],
   async ([u, p]) => {
-    if (!u || !p.length) return
+    if (!isMac || !u || !p.length) return
     const cfg = await invoke<{ dayStartHour: number }>('get_widget_config').catch(() => ({ dayStartHour: 0 }))
     const now = new Date()
     let startTs: number

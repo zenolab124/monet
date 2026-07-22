@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiState, type AppSection } from '@/composables/useUiState'
+import { usePlatform } from '@/composables/usePlatform'
 import TitleBarNotifications from '@/components/notifications/TitleBarNotifications.vue'
 
 const { t } = useI18n()
+const { isMac } = usePlatform()
 const { activeSection, monitorRailCollapsed, toggleMonitorRail, peekMonitorRail, unpeekMonitorRail } = useUiState()
 
 const sectionTitles = computed<Partial<Record<AppSection, string>>>(() => ({
@@ -18,7 +20,9 @@ const sectionTitles = computed<Partial<Record<AppSection, string>>>(() => ({
 
 <template>
   <header class="titlebar">
-    <div class="w-[78px] shrink-0" data-tauri-drag-region />
+    <!-- macOS 红绿灯死区；其他平台有原生标题栏，无需让位 -->
+    <div v-if="isMac" class="w-[78px] shrink-0" data-tauri-drag-region />
+    <div v-else class="w-2 shrink-0" data-tauri-drag-region />
 
     <button
       v-if="activeSection === 'workbench'"

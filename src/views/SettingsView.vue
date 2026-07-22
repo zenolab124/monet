@@ -12,6 +12,7 @@ import {
   type CcSwitchProvider,
 } from '@/composables/useChannels'
 import { useUiState } from '@/composables/useUiState'
+import { usePlatform } from '@/composables/usePlatform'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import { useLocale } from '@/composables/useLocale'
@@ -218,6 +219,7 @@ const agentLogsStats = computed(() => {
 })
 
 type Tab = 'appearance' | 'channels' | 'agent' | 'claude-code' | 'permissions' | 'extensions' | 'lab' | 'system'
+const { isMac } = usePlatform()
 const activeTab = ref<Tab>('appearance')
 
 const editing = ref<'new' | ChannelInfo | null>(null)
@@ -549,7 +551,7 @@ function onSaved() {
       <button :class="['side-item', { active: activeTab === 'claude-code' }]" @click="activeTab = 'claude-code'">
         <span class="i-carbon-json w-3.5 h-3.5" />Claude Code
       </button>
-      <button :class="['side-item', { active: activeTab === 'permissions' }]" @click="activeTab = 'permissions'">
+      <button v-if="isMac" :class="['side-item', { active: activeTab === 'permissions' }]" @click="activeTab = 'permissions'">
         <span class="i-carbon-security w-3.5 h-3.5" />{{ $t('settings.permissionsNav') }}
       </button>
       <button :class="['side-item', { active: activeTab === 'lab' }]" @click="activeTab = 'lab'">
@@ -988,7 +990,7 @@ function onSaved() {
         </section>
 
         <!-- ====== 权限体检 ====== -->
-        <section v-show="activeTab === 'permissions'">
+        <section v-if="isMac" v-show="activeTab === 'permissions'">
           <h2 class="section-title">{{ $t('settings.permCheck.title') }}</h2>
           <PermissionsPanel />
         </section>
@@ -1110,8 +1112,8 @@ function onSaved() {
           </div>
 
           <div class="settings-grid">
-            <!-- 菜单栏 -->
-            <div class="setting-group">
+            <!-- 菜单栏（macOS 专属：launchd Helper 架构） -->
+            <div v-if="isMac" class="setting-group">
               <div class="setting-group-header">
                 <span class="i-carbon-menu w-3.5 h-3.5" />
                 {{ $t('settings.groupTray') }}
@@ -1142,8 +1144,8 @@ function onSaved() {
                 </div>
               </div>
             </div>
-            <!-- 桌面小组件 -->
-            <div class="setting-group">
+            <!-- 桌面小组件（macOS 专属：WidgetKit） -->
+            <div v-if="isMac" class="setting-group">
               <div class="setting-group-header">
                 <span class="i-carbon-apps w-3.5 h-3.5" />
                 {{ $t('settings.groupWidget') }}
