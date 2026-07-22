@@ -27,7 +27,9 @@ const popoverRef = ref<HTMLElement>()
 const triggerRef = ref<HTMLButtonElement>()
 
 const recentProjects = computed(() => projects.value.slice(0, 5))
-const hasMore = computed(() => projects.value.length > 5)
+// 二级面板只列一级没展示的,不重复
+const moreProjects = computed(() => projects.value.slice(5))
+const hasMore = computed(() => moreProjects.value.length > 0)
 const showAllProjects = ref(false)
 const subMenuRef = ref<HTMLElement>()
 const subMenuStyle = ref<Record<string, string>>({})
@@ -169,7 +171,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
               <span class="truncate">{{ p.display_path.split('/').pop() || p.display_path }}</span>
             </button>
 
-            <!-- 全部项目（二级） -->
+            <!-- 更多项目（二级,去重:只列一级之外的） -->
             <div
               v-if="hasMore"
               class="relative"
@@ -182,7 +184,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
                        flex items-center gap-2"
               >
                 <span class="i-carbon-list w-3.5 h-3.5 shrink-0 opacity-60" />
-                <span class="flex-1">{{ $t('workbench.rail.allProjects') }}</span>
+                <span class="flex-1">{{ $t('workbench.rail.moreProjects') }}</span>
                 <span class="i-carbon-chevron-right w-3 h-3 opacity-40" />
               </button>
 
@@ -196,7 +198,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
                        py-1 max-h-96 overflow-y-auto"
               >
                 <button
-                  v-for="p in projects"
+                  v-for="p in moreProjects"
                   :key="p.id"
                   class="w-full px-2.5 py-1.5 text-left text-muted-foreground
                          hover:bg-muted hover:text-foreground transition-colors
