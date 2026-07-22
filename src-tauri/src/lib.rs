@@ -218,6 +218,7 @@ pub fn run() {
             turn_signal::turn_signal_uninstall,
             cli_env::claude_env_check,
             cli_env::claude_env_upgrade,
+            cli_env::claude_env_install,
             cli_env::claude_env_diagnose,
             channels::list_channels,
             channels::save_channel,

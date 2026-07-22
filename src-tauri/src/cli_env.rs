@@ -222,6 +222,56 @@ pub fn claude_env_upgrade() -> Result<UpgradeResult, String> {
 }
 
 // ---------------------------------------------------------------------------
+// 安装
+// ---------------------------------------------------------------------------
+
+/// 一键安装 Claude Code（官方安装脚本）。安装器双平台落点均为 ~/.local/bin，
+/// locator 候选已覆盖；完成后清缓存重探测，"探测到 + 版本可测"才算成功
+/// （脚本 exit 0 但没装上的情况按失败报）。
+#[tauri::command]
+pub fn claude_env_install() -> Result<UpgradeResult, String> {
+    #[cfg(windows)]
+    let (mut cmd, desc): (Command, String) = {
+        use std::os::windows::process::CommandExt;
+        let mut c = Command::new("powershell");
+        c.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "irm https://claude.ai/install.ps1 | iex",
+        ]);
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        (c, "irm https://claude.ai/install.ps1 | iex".to_string())
+    };
+    #[cfg(not(windows))]
+    let (mut cmd, desc): (Command, String) = {
+        let mut c = Command::new("/bin/bash");
+        c.args(["-c", "curl -fsSL https://claude.ai/install.sh | bash"]);
+        c.env("PATH", streaming::enhanced_path());
+        (c, "curl -fsSL https://claude.ai/install.sh | bash".to_string())
+    };
+
+    let output = cmd.output().map_err(|e| format!("安装命令启动失败: {e}"))?;
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // 清缓存重探测（安装前的失败负缓存必须失效），再现测版本
+    let info = claude_locator::redetect_info();
+    let new_version = info.path.as_deref().and_then(|p| run_version(Path::new(p)));
+
+    Ok(UpgradeResult {
+        success: output.status.success() && new_version.is_some(),
+        new_version,
+        command: desc,
+        output_tail: tail(&combined),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // 冲突诊断
 // ---------------------------------------------------------------------------
 

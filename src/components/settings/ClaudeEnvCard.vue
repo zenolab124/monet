@@ -134,6 +134,32 @@ async function copyCmd(cmd: string) {
   copiedTimer = setTimeout(() => { copiedCmd.value = '' }, 1500)
 }
 
+const installing = ref(false)
+const installMsg = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
+const installTail = ref('')
+
+async function runInstall() {
+  installing.value = true
+  installMsg.value = null
+  installTail.value = ''
+  try {
+    const r = await invoke<UpgradeResult>('claude_env_install')
+    if (r.success) {
+      installMsg.value = { kind: 'ok', text: t('settings.claudeInstall.installOk', { version: r.newVersion ?? '?' }) }
+      // 刷新探测状态与版本信息，卡片自动切回已安装形态
+      await loadBin()
+      await check()
+    } else {
+      installMsg.value = { kind: 'err', text: t('settings.claudeInstall.installFail') }
+      installTail.value = r.outputTail
+    }
+  } catch (e) {
+    installMsg.value = { kind: 'err', text: String(e) }
+  } finally {
+    installing.value = false
+  }
+}
+
 function openInstallDocs() {
   invoke('open_in_default_app', { path: 'https://code.claude.com/docs' }).catch(() => {})
 }
@@ -251,14 +277,26 @@ onMounted(() => {
       </ul>
     </div>
 
-    <!-- 未检测到：安装引导 -->
+    <!-- 未检测到：安装引导（一键执行官方脚本，失败回退手动命令） -->
     <div v-if="binInfo && !binInfo.path" class="mt-2 px-2.5 py-2 rounded border border-border bg-muted/40">
       <p class="text-[11px] font-medium flex items-center gap-1">
         <span class="i-carbon-download w-3 h-3" />
         {{ t('settings.claudeInstall.title') }}
       </p>
       <p class="text-[10.5px] text-muted-foreground mt-0.5">{{ t('settings.claudeInstall.hint') }}</p>
-      <div class="mt-1.5 space-y-1">
+      <div class="mt-1.5 flex items-center gap-2">
+        <button class="env-btn primary" :disabled="installing" @click="runInstall">
+          <span v-if="installing" class="i-carbon-circle-dash w-3 h-3 animate-spin" />
+          {{ installing ? t('settings.claudeInstall.installing') : t('settings.claudeInstall.installNow') }}
+        </button>
+        <code class="env-path flex-1 !mt-0 truncate text-muted-foreground" :title="installOptions[0].cmd">{{ installOptions[0].cmd }}</code>
+      </div>
+      <p v-if="installMsg" :class="['text-[10.5px] mt-1', installMsg.kind === 'ok' ? 'text-primary' : 'text-destructive']">
+        {{ installMsg.text }}
+      </p>
+      <pre v-if="installMsg?.kind === 'err' && installTail" class="env-path !mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">{{ installTail }}</pre>
+      <div v-if="installMsg?.kind === 'err'" class="mt-1.5 space-y-1">
+        <p class="text-[10px] text-muted-foreground">{{ t('settings.claudeInstall.manualFallback') }}</p>
         <div v-for="opt in installOptions" :key="opt.cmd" class="flex items-center gap-1.5">
           <span class="text-[10px] text-muted-foreground w-20 shrink-0">{{ opt.label }}</span>
           <code class="env-path flex-1 !mt-0 truncate" :title="opt.cmd">{{ opt.cmd }}</code>

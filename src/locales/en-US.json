@@ -815,7 +815,12 @@
       "official": "Official script",
       "copy": "Copy",
       "copied": "Copied",
-      "docs": "Official install docs"
+      "docs": "Official install docs",
+      "installNow": "Install now",
+      "installing": "Installing…",
+      "installOk": "Installed ({version}), re-detected",
+      "installFail": "Install script failed. Use a command below to install manually.",
+      "manualFallback": "Manual install:"
     },
     "claudeRoot": {
       "title": "Claude Data Directory",

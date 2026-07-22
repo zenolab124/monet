@@ -815,7 +815,12 @@
       "official": "官方脚本",
       "copy": "复制",
       "copied": "已复制",
-      "docs": "官方安装文档"
+      "docs": "官方安装文档",
+      "installNow": "一键安装",
+      "installing": "安装中…",
+      "installOk": "安装完成（{version}），已重新探测",
+      "installFail": "安装脚本执行失败，可用下方命令手动安装",
+      "manualFallback": "手动安装："
     },
     "claudeRoot": {
       "title": "Claude 数据目录",
