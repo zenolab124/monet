@@ -175,6 +175,7 @@ pub fn run() {
             commands::get_runner_health_snapshot,
             commands::resume_in_vscode,
             commands::open_in_finder,
+            commands::reveal_in_finder,
             commands::set_titlebar_dark,
             commands::get_agent_session_dir,
             commands::start_streaming,

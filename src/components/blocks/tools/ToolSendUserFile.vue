@@ -74,8 +74,8 @@ function openFile(path: string) {
 }
 
 function revealInFinder(path: string) {
-  const dir = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
-  if (dir) invoke('open_in_default_app', { path: dir })
+  // 文件管理器中显示并高亮该文件(Rust 侧平台分支;Linux 退化开所在目录)
+  invoke('reveal_in_finder', { path })
 }
 </script>
 
@@ -133,6 +133,13 @@ function revealInFinder(path: string) {
           @click="openFile(f.path)"
         >
           <span class="i-carbon-launch w-3 h-3" />
+        </button>
+        <button
+          class="p-1 rounded hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
+          :title="t('block.toolSendFile.revealInFinder')"
+          @click="revealInFinder(f.path)"
+        >
+          <span class="i-carbon-folder w-3 h-3" />
         </button>
       </div>
     </div>

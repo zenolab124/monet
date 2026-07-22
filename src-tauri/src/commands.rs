@@ -448,6 +448,39 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 在系统文件管理器中显示并高亮文件（macOS: open -R / Windows: explorer /select,）。
+/// Linux 无跨桌面的 reveal 协议，退化为打开所在目录。
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // /select, 与路径须作为一个参数整体传入,std 的引号封装会破坏该格式,用 raw_arg
+        std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let dir = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(path.clone());
+        std::process::Command::new("xdg-open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// 发送消息（长活进程：自动 open + stdin 写入；替代旧 per-message spawn）。
 /// async + spawn_blocking：open_session 的初始化握手是阻塞 I/O，不能卡 IPC 主线程
 #[allow(clippy::too_many_arguments)] // Tauri command 参数由前端调用签名决定
