@@ -214,6 +214,8 @@
     "elsewhereOk": "Create New Anyway",
     "terminateExternal": "Terminate",
     "terminating": "Terminating…",
+    "autoTurnStopped": "Background turn interrupted",
+    "autoTurnStoppedHint": "If the agent has a scheduled wakeup, it will fire again; close the session column to stop it entirely",
     "inputPlaceholder": "Type a message…",
     "runningInWorkbench": "Running in \"{name}\" workbench",
     "readonlyPreview": "Read-only preview",

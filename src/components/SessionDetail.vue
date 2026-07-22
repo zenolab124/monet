@@ -89,7 +89,7 @@ const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
 const { pendingScrollTarget } = useSearch()
 const { findSession, removeSession, draftCwd, forkSourceOf } = useWorkbench()
-const { goToSession } = useNotifications()
+const { goToSession, notifyTransient } = useNotifications()
 
 // 每个实例独立的 detail 数据
 const detail = createSessionDetail()
@@ -452,8 +452,12 @@ async function onStop() {
     }
     return
   }
+  // 自发轮(后台唤醒轮):interrupt 只打断当前在跑的这一轮,进程内已武装的
+  // 定时唤醒不受影响,到点仍会再次触发——toast 说清边界,彻底断根走列头关闭
+  const autoTurnOnly = !stream.value.streaming && ownProcessBusy.value
   await denyAllForSession(sid)
   await stopStreaming(sid)
+  if (autoTurnOnly) notifyTransient(t('session.autoTurnStopped'), t('session.autoTurnStoppedHint'))
 }
 
 // --- 会话级设置(模型 / 努力等级 / 渠道) ---
@@ -2507,9 +2511,9 @@ async function onReload() {
           @click="syncCursor"
           @select="syncCursor"
         />
-        <!-- 停止/终止按钮:应用内是温和中断自家生成(停止);外部运行是 SIGTERM 别家进程(终止,destructive 色 + 进行中锁定) -->
+        <!-- 停止/终止按钮:应用内是温和中断自家生成(停止,含 streaming=false 的自发轮 ownProcessBusy);外部运行是 SIGTERM 别家进程(终止,destructive 色 + 进行中锁定) -->
         <button
-          v-if="(stream.streaming || externalRunning) && !inputText.trim() && !imageInput.images.value.length"
+          v-if="(stream.streaming || externalRunning || ownProcessBusy) && !inputText.trim() && !imageInput.images.value.length"
           :disabled="stopping"
           :class="['px-3 py-2 text-xs rounded-md hover:shadow-paper transition-shadow shrink-0 flex items-center gap-1.5',
                    externalRunning && !stream.streaming

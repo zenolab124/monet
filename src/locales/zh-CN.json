@@ -214,6 +214,8 @@
     "elsewhereOk": "仍然新建",
     "terminateExternal": "终止",
     "terminating": "终止中…",
+    "autoTurnStopped": "已中断当前后台轮",
+    "autoTurnStoppedHint": "若 Agent 定有唤醒计划，到点仍会再次触发；关闭会话列可彻底终止",
     "inputPlaceholder": "输入消息…",
     "runningInWorkbench": "正在「{name}」工作台运行",
     "readonlyPreview": "只读预览",
