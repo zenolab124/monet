@@ -809,6 +809,14 @@
       "manualInvalid": "Manual path is invalid; fell back to auto-detection",
       "attemptedTitle": "Tried the following locations:"
     },
+    "claudeInstall": {
+      "title": "Install Claude Code",
+      "hint": "Install with any method below, then click Re-detect.",
+      "official": "Official script",
+      "copy": "Copy",
+      "copied": "Copied",
+      "docs": "Official install docs"
+    },
     "claudeRoot": {
       "title": "Claude Data Directory",
       "description": "Root directory where Monet reads Claude Code session data. Set this if your data lives in a non-default location (e.g. via CLAUDE_CONFIG_DIR).",

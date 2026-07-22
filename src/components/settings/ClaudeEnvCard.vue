@@ -2,6 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
+import { isWindows } from '@/composables/usePlatform'
 
 const { t } = useI18n()
 
@@ -107,6 +108,35 @@ const SOURCE_KEYS: Record<string, string> = {
 
 /** 优先取 binInfo（locator 更权威），回退 info.binaryPath */
 const displayPath = computed(() => binInfo.value?.path ?? info.value?.binaryPath ?? null)
+
+// --- 未检测到时的安装引导 ---
+
+const installOptions = computed(() => {
+  if (isWindows) {
+    return [
+      { label: 'PowerShell', cmd: 'irm https://claude.ai/install.ps1 | iex' },
+      { label: 'npm', cmd: 'npm install -g @anthropic-ai/claude-code' },
+    ]
+  }
+  return [
+    { label: t('settings.claudeInstall.official'), cmd: 'curl -fsSL https://claude.ai/install.sh | bash' },
+    { label: 'npm', cmd: 'npm install -g @anthropic-ai/claude-code' },
+  ]
+})
+
+const copiedCmd = ref('')
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+async function copyCmd(cmd: string) {
+  await navigator.clipboard.writeText(cmd)
+  copiedCmd.value = cmd
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => { copiedCmd.value = '' }, 1500)
+}
+
+function openInstallDocs() {
+  invoke('open_in_default_app', { path: 'https://code.claude.com/docs' }).catch(() => {})
+}
 
 function applyBinInfo(next: LocateInfo) {
   binInfo.value = next
@@ -219,6 +249,27 @@ onMounted(() => {
       <ul class="mt-0.5 space-y-0.5">
         <li v-for="a in binInfo.attempted" :key="a" class="env-path !mt-0">{{ a }}</li>
       </ul>
+    </div>
+
+    <!-- 未检测到：安装引导 -->
+    <div v-if="binInfo && !binInfo.path" class="mt-2 px-2.5 py-2 rounded border border-border bg-muted/40">
+      <p class="text-[11px] font-medium flex items-center gap-1">
+        <span class="i-carbon-download w-3 h-3" />
+        {{ t('settings.claudeInstall.title') }}
+      </p>
+      <p class="text-[10.5px] text-muted-foreground mt-0.5">{{ t('settings.claudeInstall.hint') }}</p>
+      <div class="mt-1.5 space-y-1">
+        <div v-for="opt in installOptions" :key="opt.cmd" class="flex items-center gap-1.5">
+          <span class="text-[10px] text-muted-foreground w-20 shrink-0">{{ opt.label }}</span>
+          <code class="env-path flex-1 !mt-0 truncate" :title="opt.cmd">{{ opt.cmd }}</code>
+          <button class="env-btn shrink-0" @click="copyCmd(opt.cmd)">
+            {{ copiedCmd === opt.cmd ? t('settings.claudeInstall.copied') : t('settings.claudeInstall.copy') }}
+          </button>
+        </div>
+      </div>
+      <button class="text-[10.5px] text-accent hover:underline mt-1.5" @click="openInstallDocs">
+        {{ t('settings.claudeInstall.docs') }} ↗
+      </button>
     </div>
 
     <!-- 第四行：手动路径输入 + 保存/清除/重检测 -->

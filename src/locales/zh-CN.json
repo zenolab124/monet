@@ -809,6 +809,14 @@
       "manualInvalid": "手动配置的路径无效，已回退自动探测",
       "attemptedTitle": "已尝试以下位置："
     },
+    "claudeInstall": {
+      "title": "安装 Claude Code",
+      "hint": "任选一种方式安装，完成后点击「重新探测」。",
+      "official": "官方脚本",
+      "copy": "复制",
+      "copied": "已复制",
+      "docs": "官方安装文档"
+    },
     "claudeRoot": {
       "title": "Claude 数据目录",
       "description": "Monet 读取 Claude Code 会话数据的根目录。若通过 CLAUDE_CONFIG_DIR 将数据存于非标准位置，可在此指定。",
