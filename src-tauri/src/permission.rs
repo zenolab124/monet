@@ -85,9 +85,6 @@ impl PermissionService {
             .local_addr()
             .map_err(|e| format!("读取权限服务地址失败：{}", e))?
             .to_string();
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| format!("设置权限服务非阻塞失败：{}", e))?;
 
         let token = make_token();
         let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -193,9 +190,10 @@ impl PermissionService {
         }
     }
 
-    /// 内部：置停止位 + deny 全部 pending
+    /// 内部：置停止位 + 踢醒 accept 线程 + deny 全部 pending
     fn shutdown(&self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_flag.store(true, Ordering::SeqCst);
+        Self::kick_accept(&self.endpoint);
         let pending = self.pending.lock().unwrap();
         for req in pending.values() {
             let mut slot = req.decision.lock().unwrap();
@@ -204,11 +202,21 @@ impl PermissionService {
             }
         }
     }
+
+    /// self-connect 踢醒阻塞中的 accept 线程（须在 stop_flag 置位后调用）。
+    /// 失败仅意味着该线程晚退（继续阻塞在 accept 上零开销，进程退出时回收），不影响正确性
+    fn kick_accept(endpoint: &str) {
+        if let Ok(addr) = endpoint.parse::<std::net::SocketAddr>() {
+            let _ = TcpStream::connect_timeout(&addr, Duration::from_millis(500));
+        }
+    }
 }
 
 impl Drop for PermissionService {
     fn drop(&mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
+        // 兜底未走 shutdown 的丢弃路径：同样踢醒，避免 accept 线程静默泄漏
+        self.stop_flag.store(true, Ordering::SeqCst);
+        Self::kick_accept(&self.endpoint);
     }
 }
 
@@ -229,7 +237,8 @@ fn make_token() -> String {
     format!("{:016x}{:016x}", h1.finish(), h2.finish())
 }
 
-/// accept loop：每条连接 spawn 一个处理线程
+/// accept loop：阻塞 accept，每条连接 spawn 一个处理线程。
+/// 空闲零唤醒；shutdown 置 stop_flag 后 self-connect 踢醒本循环退出
 fn accept_loop(
     listener: TcpListener,
     app: AppHandle,
@@ -238,9 +247,13 @@ fn accept_loop(
     pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
 ) {
-    while !stop_flag.load(Ordering::Relaxed) {
+    loop {
         match listener.accept() {
             Ok((stream, _)) => {
+                // 踢醒连接（或 stop 竞态窗口内的真实连接，服务已停本就该拒）：丢弃退出
+                if stop_flag.load(Ordering::SeqCst) {
+                    return;
+                }
                 let app = app.clone();
                 let pending = pending.clone();
                 let stop_flag = stop_flag.clone();
@@ -252,11 +265,12 @@ fn accept_loop(
                     }
                 });
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
-            }
             Err(e) => {
+                if stop_flag.load(Ordering::SeqCst) {
+                    return;
+                }
                 log::warn!("权限服务 accept 失败：{}", e);
+                // 防错误风暴（如 fd 耗尽时 accept 立即返错）
                 thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
             }
         }
@@ -363,7 +377,7 @@ fn wait_decision(
                 return d.clone();
             }
         }
-        if stop_flag.load(Ordering::Relaxed) {
+        if stop_flag.load(Ordering::SeqCst) {
             // 服务停止时按拒绝处理
             return Decision::Deny("流式中断，自动拒绝".to_string());
         }
