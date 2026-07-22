@@ -6,18 +6,16 @@ import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
 import { useNotifications } from '@/composables/useNotifications'
 import { useHorizontalWheelScroll } from '@/composables/useHorizontalWheelScroll'
+import { useColumnResize } from '@/composables/useColumnResize'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 import SortableColumn from './SortableColumn.vue'
 
 const {
   activeTab,
-  updateColumnSize,
   expandSession,
   reorderColumns,
   focusColumnRequest,
   createRaceTab,
-  setMinColumnWidth,
-  minColumnWidth,
   draftCwd,
   registerFork,
   suppressColumnTransition,
@@ -49,7 +47,6 @@ function onStartRace(sessionId: string) {
 
 const containerRef = ref<HTMLElement>()
 const { isDropTarget } = useDroppable({ id: computed(() => 'col-zone:' + activeTab.value.id), element: containerRef })
-const dragging = ref(false)
 
 let zoneResizeObserver: ResizeObserver | null = null
 
@@ -74,49 +71,7 @@ onUnmounted(() => {
   zoneResizeObserver = null
 })
 
-const shiftDragging = ref(false)
-
-/** 拖动第 index 条分隔线:像素级调整左列宽度;Shift 按住时调整全局最小列宽 */
-function onDividerMouseDown(e: MouseEvent, index: number) {
-  e.preventDefault()
-  dragging.value = true
-  const isShift = e.shiftKey
-  shiftDragging.value = isShift
-
-  const tab = activeTab.value
-  const startX = e.clientX
-
-  if (isShift) {
-    const startMin = minColumnWidth.value
-    const onMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX
-      const newMin = startMin + delta
-      setMinColumnWidth(newMin)
-      tab.columnSizes = tab.columnSizes.map(() => minColumnWidth.value)
-    }
-    const onMouseUp = () => {
-      dragging.value = false
-      shiftDragging.value = false
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  } else {
-    const startWidth = tab.columnSizes[index]
-    const onMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX
-      updateColumnSize(tab.id, index, startWidth + delta)
-    }
-    const onMouseUp = () => {
-      dragging.value = false
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }
-}
+const { dragging, shiftDragging, onDividerMouseDown } = useColumnResize()
 
 // --- 幂等展开的滚动聚焦(FR-003:点击已展开卡 → 聚焦该列) ---
 

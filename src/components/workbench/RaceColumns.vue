@@ -3,13 +3,15 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
 import { useHorizontalWheelScroll } from '@/composables/useHorizontalWheelScroll'
+import { useColumnResize } from '@/composables/useColumnResize'
 import { useRaceInput } from '@/composables/useRaceInput'
 import { useProjects } from '@/composables/useProjects'
 import { useConfirm } from '@/composables/useConfirm'
 import { shortModel, formatTokens, type TokenUsage, type SessionSummary } from '@/types'
 import WorkbenchColumnView from './WorkbenchColumn.vue'
 
-const { activeTab, resetRaceLanes, minColumnWidth } = useWorkbench()
+const { activeTab, resetRaceLanes, minColumnWidth, suppressColumnTransition } = useWorkbench()
+const { dragging, shiftDragging, onDividerMouseDown } = useColumnResize()
 const { t } = useI18n()
 const { projects } = useProjects()
 const { confirm } = useConfirm()
@@ -101,10 +103,18 @@ function onInputKeydown(e: KeyboardEvent) {
         <div
           v-for="(col, i) in activeTab.columns"
           :key="col.id"
-          class="h-full relative"
-          :style="{ flex: `1 0 ${minColumnWidth}px` }"
+          class="h-full relative shrink-0 race-col"
+          :class="{ 'no-transition': dragging || suppressColumnTransition }"
+          :style="{ width: `${activeTab.columnSizes[i] ?? minColumnWidth}px` }"
         >
           <WorkbenchColumnView :column="col" :tab-id="activeTab.id" :index="i" />
+
+          <!-- 列右边缘 resize 手柄(与普通多列同款,Shift 调全局最小列宽) -->
+          <div
+            class="absolute top-0 bottom-0 -right-[7px] w-[14px] cursor-col-resize z-30"
+            :class="{ 'divider-shift': shiftDragging }"
+            @mousedown="onDividerMouseDown($event, i)"
+          />
 
           <!-- Token HUD 覆盖层 -->
           <div
@@ -257,6 +267,19 @@ function onInputKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
+/* 与 SortableColumn 同款宽度过渡:关道归零动画依赖它 */
+.race-col {
+  min-width: 0;
+  transition: width 250ms cubic-bezier(0.32, 0.72, 0, 1);
+  overflow: hidden;
+}
+.no-transition {
+  transition: none !important;
+}
+.divider-shift {
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
 .race-hud {
   position: absolute;
   top: 40px;

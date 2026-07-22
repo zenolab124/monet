@@ -101,7 +101,7 @@ function containerFreeWidth(n: number): number {
 /** 窗口变大时,按比例放大各列填满(仅当前全部列已 fit 时触发) */
 function redistributeOnGrow() {
   for (const tab of state.value.tabs) {
-    if (tab.race || tab.columns.length === 0) continue
+    if (tab.columns.length === 0) continue
     const free = containerFreeWidth(tab.columns.length)
     const total = tab.columnSizes.reduce((s, w) => s + w, 0)
     if (total <= 0 || total > free) continue
