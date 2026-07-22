@@ -11,6 +11,7 @@ mod image_protocol;
 mod models;
 mod parser;
 mod permission;
+mod proc_scan;
 /// pub：schema-probe bin 复用扫描与 diff 核心
 pub mod probe;
 mod streaming;

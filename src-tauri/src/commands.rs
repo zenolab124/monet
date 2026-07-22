@@ -682,47 +682,17 @@ fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
 
 /// 扫描外部 claude 进程：命中匹配且非 Monet 自持进程的 pid 列表。
 /// 交互式 REPL（命令行不带 session-id）检测不到，属已知边界。
-/// Windows 无 ps，Command 失败时返回空表优雅降级。
+/// 数据源走 proc_scan（macOS 纯 syscall / 其他平台 ps 降级），本函数在秒级
+/// 轮询节拍下常驻调用，禁止在此重新引入 spawn。
 fn scan_external_claude(session_id: &str) -> Vec<u32> {
     let own_pid = crate::streaming::get_own_pid(session_id);
-    let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "pid=,command="])
-        .output()
-    else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|l| {
-            let trimmed = l.trim_start();
-            let (pid_str, cmd) = trimmed.split_once(char::is_whitespace)?;
-            let pid: u32 = pid_str.parse().ok()?;
-            if own_pid == Some(pid) || !command_matches_claude_session(cmd, session_id) {
+    crate::proc_scan::list_commands()
+        .into_iter()
+        .filter_map(|(pid, cmd)| {
+            if own_pid == Some(pid) || !command_matches_claude_session(&cmd, session_id) {
                 return None;
             }
             Some(pid)
-        })
-        .collect()
-}
-
-/// 进程族谱表：pid → (ppid, 进程名)。进程名取 comm 首 token 的 basename
-/// （macOS 的 comm 是完整可执行路径，含空格的应用名会被截到首段，够识别用）
-fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
-    let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "pid=,ppid=,comm="])
-        .output()
-    else {
-        return Default::default();
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|l| {
-            let mut it = l.split_whitespace();
-            let pid: u32 = it.next()?.parse().ok()?;
-            let ppid: u32 = it.next()?.parse().ok()?;
-            let comm = it.next().unwrap_or("");
-            let name = comm.rsplit('/').next().unwrap_or(comm).to_string();
-            Some((pid, (ppid, name)))
         })
         .collect()
 }
@@ -765,7 +735,7 @@ pub fn has_own_process(session_id: String) -> bool {
 pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
     match scan_external_claude(&session_id).first() {
         Some(&pid) => {
-            let owner = resolve_owner(pid, &process_table());
+            let owner = resolve_owner(pid, &crate::proc_scan::process_table());
             ExternalSessionInfo { running: true, pid: Some(pid), owner }
         }
         None => ExternalSessionInfo { running: false, pid: None, owner: None },

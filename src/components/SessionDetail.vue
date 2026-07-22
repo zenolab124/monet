@@ -443,10 +443,11 @@ async function onStop() {
       : t('session.killExternalConfirm')
     if (!(await confirmDialog(msg, t('session.killExternalOk')))) return
     stopping.value = true
+    // 兜底须覆盖探测节拍(3s) + 进程收尾落盘的最坏耗时，过短会在横幅消失前解锁按钮
     stoppingTimeout = window.setTimeout(() => {
       stopping.value = false
       stoppingTimeout = null
-    }, 8000)
+    }, 12000)
     try {
       await invoke('kill_external_session', { sessionId: sid })
     } catch {
@@ -1942,7 +1943,9 @@ function startExternalFollow() {
   stopping.value = false
   externalIdleTicks = 0
   // 先起定时器再立即探一次:未运行的会话首轮探测即自停,运行中的持续跟随
-  externalTimer = window.setInterval(probeExternal, 1500)
+  // 3s 节拍：探测走全量进程扫描（macOS 已是纯 syscall 但仍非免费），
+  // 外部进程出现/消失的感知延迟秒级即可，不追流式实时性
+  externalTimer = window.setInterval(probeExternal, 3000)
   probeExternal()
 }
 
