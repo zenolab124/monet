@@ -257,6 +257,7 @@ fn write_stdin(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
 /// 向会话进程组发信号（macOS/Linux）。spawn 时已 process_group(0)，组 ID = CLI PID，
 /// 组信号可连带回收 MCP 子进程树（monet-mcp/playwright/adb 等）。
 /// 组信号失败时回退单 PID：兼容升级前 spawn 的存量进程（未自立进程组）。
+#[cfg(unix)]
 fn signal_session(pid: u32, sig: &str) {
     let group_ok = Command::new("kill")
         .args([sig, "--", &format!("-{}", pid)])
@@ -267,6 +268,22 @@ fn signal_session(pid: u32, sig: &str) {
         let _ = Command::new("kill").args([sig, &pid.to_string()]).output();
     }
 }
+
+/// Windows 无信号语义：TERM/KILL 一律 taskkill /T /F 整树强杀。
+/// CLI 的 JSONL 逐行落盘，强杀不丢会话数据（与 close_all_sessions 注释同一依据）；
+/// 已死进程上的第二次调用报 not found 被吞，与 unix 二段式击杀兼容。
+#[cfg(windows)]
+fn signal_session(pid: u32, _sig: &str) {
+    use std::os::windows::process::CommandExt;
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+/// 抑制子进程控制台窗口：GUI 子系统下 spawn console 程序会闪黑窗
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 断链探测：同 id 的 jsonl 是否存在于其他 cwd 编码目录（如 EnterWorktree 迁走的）。
 /// 命中说明"这不是新会话，是历史不在预期位置"——静默 --session-id 会以空历史
@@ -467,6 +484,12 @@ fn open_session(
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
+    }
+    // Windows 进程树由 taskkill /T 按父子关系回收，无需进程组；只抑制控制台闪窗
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
     if let Some(inj) = &channel_injection {
         for key in &inj.clear_env {
