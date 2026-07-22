@@ -1,18 +1,16 @@
 //! Monet MCP server
 //!
 //! stdio JSON-RPC 2.0 server，双职能：
-//! 1. 权限审批（--permission-prompt-tool）：通过 Unix socket 与主进程通信
+//! 1. 权限审批（--permission-prompt-tool）：通过 TCP loopback 与主进程通信（跨平台统一）
 //! 2. 通用工具：直接读写数据目录，暴露 routine 管理等能力
 //!
 //! tool 列表根据环境动态组装：
-//! - MONET_PERMISSION_SOCK 存在 → 包含 approve_tool_use
+//! - MONET_PERMISSION_ADDR 存在 → 包含 approve_tool_use
 //! - 始终包含 routine_list / routine_create / routine_delete
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
-#[cfg(unix)]
 use std::time::Duration;
 
 use chrono::Utc;
@@ -393,7 +391,7 @@ fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 fn has_permission_socket() -> bool {
-    std::env::var("MONET_PERMISSION_SOCK").is_ok()
+    std::env::var("MONET_PERMISSION_ADDR").is_ok()
 }
 
 fn handle_approve_tool_use(arguments: &Value) -> Result<String, String> {
@@ -417,13 +415,13 @@ fn handle_approve_tool_use(arguments: &Value) -> Result<String, String> {
     serde_json::to_string(&decision).map_err(|e| e.to_string())
 }
 
-#[cfg(unix)]
 fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String> {
-    let sock_path = std::env::var("MONET_PERMISSION_SOCK")
-        .map_err(|_| "环境变量 MONET_PERMISSION_SOCK 未设置".to_string())?;
+    let addr = std::env::var("MONET_PERMISSION_ADDR")
+        .map_err(|_| "环境变量 MONET_PERMISSION_ADDR 未设置".to_string())?;
+    let token = std::env::var("MONET_PERMISSION_TOKEN").unwrap_or_default();
 
-    let mut stream = UnixStream::connect(&sock_path)
-        .map_err(|e| format!("连接 {} 失败：{}", sock_path, e))?;
+    let mut stream = TcpStream::connect(&addr)
+        .map_err(|e| format!("连接 {} 失败：{}", addr, e))?;
     stream
         .set_write_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| e.to_string())?;
@@ -431,6 +429,7 @@ fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String
     let req_line = serde_json::to_string(&json!({
         "toolName": tool_name,
         "input": tool_input,
+        "token": token,
     }))
     .map_err(|e| e.to_string())?;
     stream
@@ -481,11 +480,6 @@ fn ask_main_process(tool_name: &str, tool_input: &Value) -> Result<Value, String
         "deny" => Ok(decision),
         _ => Err(format!("主进程返回未知 behavior：{:?}", behavior)),
     }
-}
-
-#[cfg(not(unix))]
-fn ask_main_process(_tool_name: &str, _tool_input: &Value) -> Result<Value, String> {
-    Err("权限审批仅支持 Unix 平台".to_string())
 }
 
 // ---------------------------------------------------------------------------

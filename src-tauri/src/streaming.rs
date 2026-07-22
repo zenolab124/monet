@@ -307,7 +307,8 @@ fn open_session(
     // 1. 权限服务（per-session 生命周期：open 时 start，进程退出时 stop）
     let permission_service = PermissionService::start(app.clone(), session_id)
         .map_err(|e| format!("权限服务启动失败：{}", e))?;
-    let socket_path = permission_service.socket_path().to_path_buf();
+    let perm_endpoint = permission_service.endpoint().to_string();
+    let perm_token = permission_service.token().to_string();
 
     // 2. MCP 二进制
     let mcp_binary = match find_mcp_binary() {
@@ -326,7 +327,8 @@ fn open_session(
                 "command": mcp_binary.to_string_lossy().into_owned(),
                 "args": [],
                 "env": {
-                    "MONET_PERMISSION_SOCK": socket_path.to_string_lossy().into_owned()
+                    "MONET_PERMISSION_ADDR": perm_endpoint.clone(),
+                    "MONET_PERMISSION_TOKEN": perm_token
                 }
             }
         }
@@ -594,11 +596,10 @@ fn open_session(
     // 10a. 启动 stdout 读取线程（reader 已消费掉握手响应，后续全是流式事件）
     let handle = app.clone();
     let sid = session_id.to_string();
-    let sock = socket_path;
     let runtime_file = channel_injection.map(|inj| inj.runtime_path);
     std::thread::spawn(move || {
         read_stream(reader, stderr, sp_arc.clone(), &handle, &sid);
-        PermissionService::stop_if_socket(&sid, &sock);
+        PermissionService::stop_if_endpoint(&sid, &perm_endpoint);
         if let Some(p) = runtime_file {
             crate::channels::cleanup_runtime_file(&p);
         }

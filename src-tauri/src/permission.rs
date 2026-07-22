@@ -1,18 +1,19 @@
 //! 权限请求服务
 //!
-//! 在主进程内启动 Unix socket server，作为 monet-mcp 子进程与前端的桥梁。
+//! 在主进程内启动 TCP loopback server（127.0.0.1 随机端口），作为 monet-mcp 子进程与前端的桥梁。
+//! 曾用 Unix socket，为 Windows 同构统一改为 TCP：接口一致、仅本机回环可达，
+//! 请求需携带一次性 token（经环境变量注入 monet-mcp），防止本机其他进程伪造请求。
 //! v2.1.0 起按会话隔离：每个流式会话一个 PermissionService 实例（工作台多列并行）。
 //! 主流程：
-//! 1. `PermissionService::start(app, session_id)` 绑定 `/tmp/monet-perm-<pid>-<rand>.sock`
+//! 1. `PermissionService::start(app, session_id)` 绑定 127.0.0.1:0（随机端口）
 //! 2. 接受连接（每条连接对应 monet-mcp 转发的一次权限请求）
 //! 3. emit Tauri Event `permission-request` 给前端（payload 带 sessionId）
 //! 4. 前端通过 `respond_permission` Tauri Command 回写决策（allow/deny）
-//! 5. service 把决策写回 socket，monet-mcp 据此返回 claude CLI
+//! 5. service 把决策写回连接，monet-mcp 据此返回 claude CLI
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -42,8 +43,10 @@ enum Decision {
 
 /// 权限服务（每个流式会话一个实例，会话归属由 SERVICES 的 key 承载）
 pub struct PermissionService {
-    /// socket 文件路径（销毁时清理）
-    socket_path: PathBuf,
+    /// 监听地址（"127.0.0.1:<port>"，注入 monet-mcp 环境变量，同时充当实例身份）
+    endpoint: String,
+    /// 连接鉴权 token（随实例生成，经环境变量注入 monet-mcp）
+    token: String,
     /// 关闭信号
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
     /// 共享的 pending 请求表
@@ -71,27 +74,29 @@ struct PermissionRequestPayload {
 }
 
 impl PermissionService {
-    /// 启动指定会话的权限服务，返回实例（socket 路径注入 monet-mcp 子进程环境变量）
+    /// 启动指定会话的权限服务，返回实例（地址与 token 注入 monet-mcp 子进程环境变量）
     pub fn start(app: AppHandle, session_id: &str) -> Result<Arc<Self>, String> {
         // 同会话旧实例先停（同会话重发场景）
         Self::stop_for(session_id);
 
-        let socket_path = make_socket_path();
-        // 防止残留文件
-        let _ = std::fs::remove_file(&socket_path);
-
-        let listener = UnixListener::bind(&socket_path)
-            .map_err(|e| format!("绑定权限 socket 失败 ({:?}): {}", socket_path, e))?;
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| format!("绑定权限服务端口失败：{}", e))?;
+        let endpoint = listener
+            .local_addr()
+            .map_err(|e| format!("读取权限服务地址失败：{}", e))?
+            .to_string();
         listener
             .set_nonblocking(true)
-            .map_err(|e| format!("设置 socket 非阻塞失败：{}", e))?;
+            .map_err(|e| format!("设置权限服务非阻塞失败：{}", e))?;
 
+        let token = make_token();
         let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
         let service = Arc::new(PermissionService {
-            socket_path: socket_path.clone(),
+            endpoint,
+            token: token.clone(),
             stop_flag: stop_flag.clone(),
             pending: pending.clone(),
         });
@@ -102,7 +107,7 @@ impl PermissionService {
             let stop_flag = stop_flag.clone();
             let sid = session_id.to_string();
             thread::spawn(move || {
-                accept_loop(listener, app, sid, pending, stop_flag);
+                accept_loop(listener, app, sid, token, pending, stop_flag);
             });
         }
 
@@ -113,8 +118,12 @@ impl PermissionService {
         Ok(service)
     }
 
-    pub fn socket_path(&self) -> &std::path::Path {
-        &self.socket_path
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     /// 提交一个用户决策（requestId 全进程唯一，跨实例查找）。返回是否找到对应的 pending 请求
@@ -148,7 +157,7 @@ impl PermissionService {
         false
     }
 
-    /// 停掉指定会话的服务（关闭 socket、pending 请求统一按 deny 收尾）
+    /// 停掉指定会话的服务（关闭监听、pending 请求统一按 deny 收尾）
     pub fn stop_for(session_id: &str) {
         let service = SERVICES
             .lock()
@@ -160,19 +169,19 @@ impl PermissionService {
         }
     }
 
-    /// 仅当该会话当前注册的服务正是 `socket_path` 这一实例时才停止。
+    /// 仅当该会话当前注册的服务正是 `endpoint` 这一实例时才停止。
     ///
-    /// 同会话连发场景下，每个 streaming turn 新建一个 socket。旧 turn 的 read_stream
-    /// 线程退出时若按 session_id 盲调 stop_for，会误删新 turn 刚注册的服务（socket 被
+    /// 同会话连发场景下，每个 streaming turn 新建一个监听端口。旧 turn 的 read_stream
+    /// 线程退出时若按 session_id 盲调 stop_for，会误删新 turn 刚注册的服务（监听被
     /// shutdown → 新 turn 的 monet-mcp 连接 Connection refused / pending 被强制 deny）。
-    /// 用 socket 路径做实例身份校验：被新 turn 接管后旧线程不再触碰。
-    pub fn stop_if_socket(session_id: &str, socket_path: &std::path::Path) {
+    /// 用监听地址做实例身份校验：被新 turn 接管后旧线程不再触碰。
+    pub fn stop_if_endpoint(session_id: &str, endpoint: &str) {
         let service = {
             let mut guard = SERVICES.lock().unwrap();
             let is_current = guard
                 .as_ref()
                 .and_then(|m| m.get(session_id))
-                .is_some_and(|s| s.socket_path.as_path() == socket_path);
+                .is_some_and(|s| s.endpoint == endpoint);
             if is_current {
                 guard.as_mut().and_then(|m| m.remove(session_id))
             } else {
@@ -184,7 +193,7 @@ impl PermissionService {
         }
     }
 
-    /// 内部：置停止位 + deny 全部 pending + 清 socket 文件
+    /// 内部：置停止位 + deny 全部 pending
     fn shutdown(&self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         let pending = self.pending.lock().unwrap();
@@ -194,33 +203,38 @@ impl PermissionService {
                 *slot = Some(Decision::Deny("流式中断，自动拒绝".to_string()));
             }
         }
-        drop(pending);
-        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
 impl Drop for PermissionService {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
-        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
-/// 生成一个进程内不冲突的 socket 路径
-fn make_socket_path() -> PathBuf {
+/// 生成连接鉴权 token。RandomState 自带进程级随机种子（std 唯一内置熵源），
+/// 叠加时间与 pid，防本机其他进程伪造权限请求足够，无密码学强度诉求
+fn make_token() -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let pid = std::process::id();
-    PathBuf::from(format!("/tmp/monet-perm-{}-{}.sock", pid, nanos))
+    let mut h1 = RandomState::new().build_hasher();
+    h1.write_u128(nanos);
+    h1.write_u32(std::process::id());
+    let mut h2 = RandomState::new().build_hasher();
+    h2.write_u64(h1.finish());
+    format!("{:016x}{:016x}", h1.finish(), h2.finish())
 }
 
 /// accept loop：每条连接 spawn 一个处理线程
 fn accept_loop(
-    listener: UnixListener,
+    listener: TcpListener,
     app: AppHandle,
     session_id: String,
+    token: String,
     pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
 ) {
@@ -231,9 +245,10 @@ fn accept_loop(
                 let pending = pending.clone();
                 let stop_flag = stop_flag.clone();
                 let sid = session_id.clone();
+                let token = token.clone();
                 thread::spawn(move || {
-                    if let Err(e) = handle_connection(stream, app, sid, pending, stop_flag) {
-                        log::warn!("权限 socket 处理失败：{}", e);
+                    if let Err(e) = handle_connection(stream, app, sid, token, pending, stop_flag) {
+                        log::warn!("权限请求处理失败：{}", e);
                     }
                 });
             }
@@ -241,18 +256,19 @@ fn accept_loop(
                 thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
             }
             Err(e) => {
-                log::warn!("权限 socket accept 失败：{}", e);
+                log::warn!("权限服务 accept 失败：{}", e);
                 thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
             }
         }
     }
 }
 
-/// 处理单次连接：读一行请求 → emit event → 等用户响应 → 写回一行决策
+/// 处理单次连接：读一行请求（校验 token）→ emit event → 等用户响应 → 写回一行决策
 fn handle_connection(
-    stream: UnixStream,
+    stream: TcpStream,
     app: AppHandle,
     session_id: String,
+    token: String,
     pending: Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
@@ -269,6 +285,11 @@ fn handle_connection(
         .map_err(|e| format!("读权限请求失败：{}", e))?;
     let req: Value = serde_json::from_str(req_line.trim())
         .map_err(|e| format!("解析权限请求 JSON 失败：{}", e))?;
+
+    // token 不符：非 monet-mcp 的来路，直接断开不回话
+    if req.get("token").and_then(Value::as_str) != Some(token.as_str()) {
+        return Err("权限请求 token 校验失败，已拒绝连接".to_string());
+    }
 
     let tool_name = req
         .get("toolName")
@@ -357,12 +378,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn make_socket_path_unique() {
-        let a = make_socket_path();
-        std::thread::sleep(Duration::from_millis(2));
-        let b = make_socket_path();
+    fn make_token_unique() {
+        let a = make_token();
+        let b = make_token();
         assert_ne!(a, b);
-        assert!(a.to_string_lossy().starts_with("/tmp/monet-perm-"));
+        assert_eq!(a.len(), 32);
     }
 
     #[test]
