@@ -210,12 +210,25 @@ pub fn find_claude() -> (String, Vec<String>) {
 /// 构建增强 PATH 环境变量
 pub fn enhanced_path() -> String {
     let home = dirs::home_dir().unwrap_or_default();
+    #[cfg(not(windows))]
     let mut extra_paths = vec![
         "/opt/homebrew/bin".to_string(),
         "/opt/homebrew/sbin".to_string(),
         "/usr/local/bin".to_string(),
         format!("{}/.local/bin", home.display()),
     ];
+    // Windows GUI 进程的 PATH 继承自注册表（相对完整），此处仅补 node 生态常见落点，
+    // 保障 claude 子进程（npx MCP servers 等）可用
+    #[cfg(windows)]
+    let mut extra_paths: Vec<String> = {
+        let mut v = Vec::new();
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            v.push(format!("{}\\npm", appdata));
+        }
+        v.push("C:\\Program Files\\nodejs".to_string());
+        v.push(format!("{}\\.local\\bin", home.display()));
+        v
+    };
 
     // 检测 nvm node 路径（语义化取最新——字典序会让 v9.x 压过 v18.x）
     let nvm_dir = home.join(".nvm/versions/node");
