@@ -171,7 +171,7 @@ Monet never writes to Claude Code's JSONL files — that's an architectural guar
 Monet is signed with a stable identity but not yet notarized by Apple. Right-click → Open once (or `xattr -cr /Applications/Monet.app`), and in-app updates are silent afterwards.
 
 **Why does it ask for system permissions?**
-Each feature asks only for what it uses: Terminal automation for "resume in terminal", screen recording for window previews, accessibility for global shortcuts. The Settings page has a permission health-check panel showing exactly what's granted.
+Each permission serves one feature: Terminal automation for "resume in terminal"; accessibility and screen recording are only used when an agent task needs to operate the UI or observe the screen. The Settings page has a permission health-check panel showing exactly what's granted.
 
 **What about Windows / Linux?**
 macOS (Apple Silicon) is first. The stack (Tauri + Rust) is cross-platform and Windows support is on the roadmap.
