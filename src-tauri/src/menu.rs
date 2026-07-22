@@ -1,10 +1,13 @@
+#[cfg(target_os = "macos")]
 use tauri::{
     menu::{Menu, MenuItemBuilder, SubmenuBuilder},
-    AppHandle, Emitter, Manager, Wry,
+    Emitter, Wry,
 };
+use tauri::{AppHandle, Manager};
 
 use crate::{agent, channels, streaming};
 
+#[cfg(target_os = "macos")]
 pub fn create(app: &AppHandle) -> Result<Menu<Wry>, tauri::Error> {
     let app_menu = SubmenuBuilder::new(app, "Monet")
         .about(None)
@@ -44,6 +47,7 @@ pub fn create(app: &AppHandle) -> Result<Menu<Wry>, tauri::Error> {
     Menu::with_items(app, &[&app_menu, &file_menu, &edit_menu, &window_menu])
 }
 
+#[cfg(target_os = "macos")]
 pub fn handle_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
     match event.id().as_ref() {
         "close-tab" => {

@@ -74,9 +74,14 @@ pub fn run() {
             }
             ws.build()
         })
-        .menu(menu::create)
-        .on_menu_event(|app, event| menu::handle_event(app, &event))
         .setup(|app| {
+            // 原生菜单仅 macOS：Windows 的 win32 菜单条不跟 app 主题且文案不走 i18n，
+            // 快捷键等价由前端 keydown 承载（useShortcuts），Linux 同理
+            #[cfg(target_os = "macos")]
+            {
+                app.set_menu(menu::create(app.handle())?)?;
+                app.on_menu_event(|app, event| menu::handle_event(app, &event));
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
