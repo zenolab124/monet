@@ -1031,14 +1031,19 @@ fn find_mcp_binary() -> Option<PathBuf> {
             return Some(path);
         }
     }
+    let (bundled, dev) = if cfg!(windows) {
+        ("monet-mcp.exe", "monet_mcp.exe")
+    } else {
+        ("monet-mcp", "monet_mcp")
+    };
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let candidate = dir.join("monet-mcp");
+            let candidate = dir.join(bundled);
             if candidate.is_file() {
                 return Some(candidate);
             }
             // dev: tauri 启动时 current_exe 在 target/debug，二进制名为 monet_mcp
-            let candidate2 = dir.join("monet_mcp");
+            let candidate2 = dir.join(dev);
             if candidate2.is_file() {
                 return Some(candidate2);
             }
