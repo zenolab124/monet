@@ -3,15 +3,32 @@ use std::path::{Path, PathBuf};
 use crate::config;
 use crate::routines::RoutineDefinition;
 
+/// 机器级调度资源（launchd LaunchAgents / pmset 唤醒 / schtasks）是单例的，
+/// 只归「默认数据目录」的实例所有。数据目录被 MONET_DATA_DIR 重定向的实例
+/// （测试/多实例场景）读的是另一套 routines，若允许其装卸，会把默认实例
+/// 注册的 agent 当孤儿清掉、再把自己的注册进真实系统——双向污染
+fn owns_machine_schedule() -> bool {
+    std::env::var("MONET_DATA_DIR").map_or(true, |v| v.trim().is_empty())
+}
+
 pub fn register_routine(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
+    if !owns_machine_schedule() {
+        return Ok(());
+    }
     platform::register(routine, runner_path)
 }
 
 pub fn unregister_routine(routine_id: &str) -> Result<(), String> {
+    if !owns_machine_schedule() {
+        return Ok(());
+    }
     platform::unregister(routine_id)
 }
 
 pub fn sync_all(routines: &[RoutineDefinition], runner_path: &Path) -> Result<(), String> {
+    if !owns_machine_schedule() {
+        return Ok(());
+    }
     let known_ids: std::collections::HashSet<&str> =
         routines.iter().map(|r| r.id.as_str()).collect();
     platform::cleanup_orphans(&known_ids);
@@ -115,6 +132,9 @@ pub fn sync_wake_schedule(
     routines: &[RoutineDefinition],
     policy: &str,
 ) -> crate::wake::SyncOutcome {
+    if !owns_machine_schedule() {
+        return crate::wake::SyncOutcome::Synced;
+    }
     platform::sync_wake(routines, policy)
 }
 
