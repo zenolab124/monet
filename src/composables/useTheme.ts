@@ -1,5 +1,6 @@
 import { ref, computed, watch } from 'vue'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
+import { isWindows } from './usePlatform'
 import i18n from '../locales'
 import { THEMES, getTheme, type ThemeMeta } from './themeRegistry'
 import { readMigratedStorage } from '../utils/storageMigrate'
@@ -60,8 +61,12 @@ function applyTheme(animate = true) {
     atmosphereClasses.forEach(cls => body.classList.remove(cls))
     if (theme.atmosphere) body.classList.add(theme.atmosphere)
 
-    const win = getCurrentWindow()
-    win.setTheme(theme.isDark ? 'dark' : 'light').catch(() => {})
+    // Windows 原生标题栏亮暗跟随（DWM 直调）。不能用 window.setTheme：
+    // 它会 override WebView 的 prefers-color-scheme，而上面 prefersDark
+    // 正以该信号为输入，回授成环（双槽交叉配置时无限闪烁）
+    if (isWindows) {
+      invoke('set_titlebar_dark', { dark: theme.isDark }).catch(() => {})
+    }
   }
 
   if (animate) {

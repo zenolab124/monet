@@ -400,6 +400,33 @@ pub fn get_agent_session_dir() -> AgentSessionDir {
     }
 }
 
+/// Windows 专属：原生标题栏亮暗跟随 app 主题。
+/// 不用 window.set_theme——它会 override WebView 的 prefers-color-scheme，而前端
+/// 亮暗双槽机制以该信号为输入，回授成环（实测切主题无限闪烁）。直调 DWM
+/// 属性只影响标题栏，不触碰 WebView。非 Windows 平台 no-op（macOS 标题栏自绘）。
+#[tauri::command]
+pub fn set_titlebar_dark(window: tauri::WebviewWindow, dark: bool) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE,
+        };
+        if let Ok(hwnd) = window.hwnd() {
+            let value: i32 = if dark { 1 } else { 0 };
+            unsafe {
+                DwmSetWindowAttribute(
+                    hwnd.0 as _,
+                    DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+                    &value as *const i32 as *const core::ffi::c_void,
+                    std::mem::size_of::<i32>() as u32,
+                );
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (window, dark);
+}
+
 /// 在系统文件管理器中打开目录（macOS: Finder / Windows: 资源管理器 / Linux: 默认）
 #[tauri::command]
 pub fn open_in_finder(path: String) -> Result<(), String> {

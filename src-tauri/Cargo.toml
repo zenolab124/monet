@@ -87,6 +87,10 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 ] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes"] }
 
+# 标题栏亮暗直调 DWM（不经 tauri set_theme，避免污染 WebView 的 prefers-color-scheme）
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }
+
 [[bin]]
 name = "monet-tray"
 path = "src/bin/monet_tray.rs"
