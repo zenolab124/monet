@@ -9,6 +9,9 @@ const props = defineProps<{
   modified: FileEntry[]
   readOnly: FileEntry[]
   cwd: string | null
+  /** 会话切换归位锚点:档案馆单 SessionDetail 跨会话复用面板实例,切会话时 selected 必须归零,
+   *  否则 selectedLive 的 `?? selected.value` 兜底会把旧 FileEntry 引用继续渲染成"当前详情"(镜像 AsyncTaskPanel L53-56) */
+  sessionId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -76,6 +79,12 @@ async function refreshSnapshot() {
   }
 }
 watch(() => props.cwd, refreshSnapshot, { immediate: true })
+
+// 会话切换:归零下钻状态与只读折叠,避免 selectedLive 的 path 兜底把旧 FileEntry 继续渲染
+watch(() => props.sessionId, () => {
+  selected.value = null
+  readOpen.value = false
+})
 
 const snapCounts = computed(() => {
   const s = snapshot.value
