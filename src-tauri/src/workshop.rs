@@ -251,8 +251,10 @@ pub fn open_workshop_dir(category: String) -> Result<(), String> {
 }
 
 /// 按平台调用系统文件管理器；spawn 后不等待退出码
-/// （Windows explorer 成功也常返回非零退出码，等待校验会误报）
+/// （Windows explorer 成功也常返回非零退出码，等待校验会误报）；
+/// 用 spawn_and_reap 在后台 wait 子进程收尸，避免 defunct 累积。
 fn open_in_file_manager(dir: &Path) -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     #[cfg(target_os = "macos")]
     let opener = "open";
     #[cfg(target_os = "windows")]
@@ -262,8 +264,7 @@ fn open_in_file_manager(dir: &Path) -> Result<(), String> {
 
     std::process::Command::new(opener)
         .arg(dir)
-        .spawn()
-        .map(|_| ())
+        .spawn_and_reap()
         .map_err(|e| format!("打开目录失败: {}", e))
 }
 

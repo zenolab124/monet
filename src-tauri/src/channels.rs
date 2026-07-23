@@ -823,6 +823,7 @@ pub fn get_channel_token(id: String) -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub fn reveal_channels_dir() -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     let dir = channels_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
@@ -833,7 +834,7 @@ pub fn reveal_channels_dir() -> Result<(), String> {
     let opener = "xdg-open";
     std::process::Command::new(opener)
         .arg(&dir)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     Ok(())
 }

@@ -213,6 +213,7 @@ fn probe_local_network() -> &'static str {
 /// 打开系统设置对应隐私面板（白名单锚点）
 #[tauri::command]
 pub fn open_privacy_settings(panel: String) -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     let anchor = match panel.as_str() {
         "automation" => "Privacy_Automation",
         "accessibility" => "Privacy_Accessibility",
@@ -226,7 +227,7 @@ pub fn open_privacy_settings(panel: String) -> Result<(), String> {
             "x-apple.systempreferences:com.apple.preference.security?{}",
             anchor
         ))
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -356,11 +357,12 @@ fn runner_health_result_path() -> std::path::PathBuf {
 /// 在 VSCode 中打开项目目录
 #[tauri::command]
 pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     let url = format!("vscode://file{}", cwd);
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")
         .arg(&url)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "windows")]
     {
@@ -368,13 +370,13 @@ pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &url])
             .hide_console() // cmd 是控制台程序，不抑制会闪黑窗
-            .spawn()
+            .spawn_and_reap()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     std::process::Command::new("xdg-open")
         .arg(&url)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -436,20 +438,21 @@ pub fn set_titlebar_dark(window: tauri::WebviewWindow, dark: bool) {
 /// 在系统文件管理器中打开目录（macOS: Finder / Windows: 资源管理器 / Linux: 默认）
 #[tauri::command]
 pub fn open_in_finder(path: String) -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")
         .arg(&path)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "windows")]
     std::process::Command::new("explorer")
         .arg(&path)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "linux")]
     std::process::Command::new("xdg-open")
         .arg(&path)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -458,11 +461,12 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
 /// Linux 无跨桌面的 reveal 协议，退化为打开所在目录。
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")
         .arg("-R")
         .arg(&path)
-        .spawn()
+        .spawn_and_reap()
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "windows")]
     {
@@ -470,7 +474,7 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
         // /select, 与路径须作为一个参数整体传入,std 的引号封装会破坏该格式,用 raw_arg
         std::process::Command::new("explorer")
             .raw_arg(format!("/select,\"{}\"", path))
-            .spawn()
+            .spawn_and_reap()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
@@ -481,7 +485,7 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
             .unwrap_or(path.clone());
         std::process::Command::new("xdg-open")
             .arg(&dir)
-            .spawn()
+            .spawn_and_reap()
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -962,11 +966,12 @@ pub async fn get_schema_diagnosis() -> Result<probe::Report, String> {
 /// 用系统默认应用打开文件(macOS: open / Windows: cmd start / Linux: xdg-open)
 #[tauri::command]
 pub fn open_in_default_app(path: String) -> Result<(), String> {
+    use crate::proc_ext::SpawnAndReap;
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
             .arg(&path)
-            .spawn()
+            .spawn_and_reap()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "windows")]
@@ -975,14 +980,14 @@ pub fn open_in_default_app(path: String) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &path])
             .hide_console() // cmd 是控制台程序，不抑制会闪黑窗
-            .spawn()
+            .spawn_and_reap()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
             .arg(&path)
-            .spawn()
+            .spawn_and_reap()
             .map_err(|e| e.to_string())?;
     }
     Ok(())
