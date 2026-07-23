@@ -620,10 +620,18 @@ fn open_session(
     // 10. 存入 ACTIVE_PROCESSES
     let pid = child.id();
     eprintln!("[long-lived] 新建进程 PID={} 会话={}", pid, &session_id[..session_id.len().min(8)]);
+    let started_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    // started_at_ms 随 connected 事件下发：warm 重启（needs_restart）时旧进程 EOF
+    // 因 superseded 不发 exited，前端 processAlive 无边沿，此事件是代际锚点
+    // 唯一不依赖竞态方向的刷新通道
     let _ = app.emit("session-connected", json!({
         "session_id": session_id,
         "resumed": resumed,
         "cwd": cwd,
+        "started_at_ms": started_at_ms,
     }));
     let sp_arc = Arc::new(Mutex::new(SessionProcess {
         child,
@@ -635,10 +643,7 @@ fn open_session(
         advisor,
         chrome,
         extra_args: extra_args.unwrap_or("").to_string(),
-        started_at_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0),
+        started_at_ms,
     }));
     ACTIVE_PROCESSES
         .lock()

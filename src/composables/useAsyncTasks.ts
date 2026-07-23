@@ -305,6 +305,9 @@ export function buildAsyncLedger(
         toolUseId: n.toolUseId,
         taskId: n.taskId,
         title: s.match(/"([^"]+)"/)?.[1] ?? s,
+        // 通知自身时刻兜底 startedAt：status=running 的中途进度孤儿（启动记录丢失）
+        // 若不带时刻会豁免代际判死，在常开进程下重现永久"进行中"（审查确认的残留实例）
+        startedAt: timestamp,
       })
       addEntry(e)
     }
@@ -381,8 +384,8 @@ export function buildAsyncLedger(
   // ---- 状态收尾 ----
   const now = Date.now()
   // 进程代际判死：live 由自有进程撑起（非外部跟看）时，启动早于本代进程的
-  // 无终态条目属于已死的前代进程，终态通知永远不会来。startedAt 为 null 的
-  // 条目（流式增量入账）必属当代，不判
+  // 无终态条目属于已死的前代进程，终态通知永远不会来。startedAt 为 null 仅剩
+  // 流式增量入账路径（必属当代，不判）；record 落账来源的条目一律带时刻
   const staleBefore = !ctx?.externalRunning ? ctx?.ownProcessStartMs ?? null : null
   const isStale = (e: LedgerEntry): boolean => {
     if (staleBefore === null || e.startedAt === null) return false
@@ -398,13 +401,16 @@ export function buildAsyncLedger(
   for (const e of order) {
     if (e.settled) continue
     if (e.species === 'wakeup') {
-      // 等待中 = 会话仍活 且 触发时刻在未来 且 是最晚排定的唤醒 且 属当代进程
-      // （唤醒是 CLI 进程内概念，进程死了排定即失效）；流式中刚设的（占位未落账）也算等待。
-      // 已过时刻/被更晚唤醒覆盖/进程已换代 → 已结束（触发/落空不可分辨）
-      const armed = live && !isStale(e)
-        && e.scheduledFor !== null && e.scheduledFor > now && e.touchIdx === latestWakeupIdx
+      // 等待中 = 会话仍活 且 属当代进程 且 触发时刻在未来 且 是最晚排定的唤醒
+      // （唤醒是 CLI 进程内概念）；流式中刚设的（占位未落账）也算等待。
+      // 未来唤醒但无活态信号/进程已换代 → 结论不明：交互式 REPL 等检测不到的
+      // 外部进程可能仍会按时触发它，断言"已结束"是误导。
+      // 已过时刻/被更晚唤醒覆盖 → 已结束（触发/落空不可分辨）
+      const pendingFuture = e.scheduledFor !== null && e.scheduledFor > now && e.touchIdx === latestWakeupIdx
       const justSet = live && e.scheduledFor === null
-      e.state = armed || justSet ? 'waiting' : 'completed'
+      e.state = pendingFuture
+        ? (live && !isStale(e) ? 'waiting' : 'unknown')
+        : justSet ? 'waiting' : 'completed'
       continue
     }
     // 无终态通知：会话活跃（自有流式/外部进程在跑）且属当代进程视为在跑；

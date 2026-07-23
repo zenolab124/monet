@@ -872,6 +872,18 @@ export async function initStreamListeners(): Promise<void> {
     finishStream(sid)
   })
 
+  // 新进程握手完成：刷新代际锚点。warm 重启（渠道/effort/模型变更 needs_restart）
+  // 时旧进程慢退 → EOF 晚于新进程入表 → superseded 抑制 exited → processAlive
+  // 无 false→true 边沿，三个锚点写入源全部落空——此监听是该场景下锚点唯一的
+  // 确定性刷新通道（Rust 在入表前 emit，与 exited 的先后序有保证）
+  await listen<{ session_id: string; started_at_ms?: number }>('session-connected', (event) => {
+    const sid = event.payload?.session_id
+    if (!sid) return
+    const s = getStream(sid)
+    s.processAlive = true
+    s.processStartedAtMs = event.payload.started_at_ms ?? Date.now()
+  })
+
   // 长活进程真正退出（与 stream-done 的"轮次结束"语义分离）。
   // 被新进程顶替的旧进程 EOF 不发此事件（Rust 端 superseded 判定），活态不抖动
   await listen<{ session_id: string }>('session-process-exited', (event) => {
