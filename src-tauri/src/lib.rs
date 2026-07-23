@@ -16,6 +16,8 @@ pub mod proc_ext;
 mod proc_scan;
 /// pub：schema-probe bin 复用扫描与 diff 核心
 pub mod probe;
+mod cron_expr;
+mod path_env;
 mod streaming;
 mod menu;
 pub mod usage_stats;

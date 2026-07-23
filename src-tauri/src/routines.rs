@@ -163,8 +163,8 @@ fn set_running(id: &str, started_at: Option<&str>) {
 fn validate_cron(cron_expr: &str) -> Result<(), String> {
     use cron::Schedule;
     use std::str::FromStr;
-    // cron crate 需要 6/7 字段（秒 分 时 日 月 周），我们的 5 字段格式需要补秒
-    let full = format!("0 {}", cron_expr);
+    // 存储用 vixie 惯例（1=Mon），cron crate 用 Quartz（1=Sun）——收口在 cron_expr 转换
+    let full = crate::cron_expr::to_quartz_full(cron_expr);
     Schedule::from_str(&full).map_err(|e| format!("无效的 cron 表达式: {}", e))?;
     Ok(())
 }
@@ -172,7 +172,7 @@ fn validate_cron(cron_expr: &str) -> Result<(), String> {
 fn compute_next_run_full(cron_expr: &str) -> Option<String> {
     use cron::Schedule;
     use std::str::FromStr;
-    let full = format!("0 {}", cron_expr);
+    let full = crate::cron_expr::to_quartz_full(cron_expr);
     let schedule = Schedule::from_str(&full).ok()?;
     let next = schedule.upcoming(chrono::Local).next()?;
     Some(next.to_rfc3339())
@@ -354,12 +354,19 @@ pub fn startup_sync() {
 
     let runner_path = scheduler::runner_binary_path();
 
-    // Ensure all enabled routines have next_run computed
+    // 无条件重算所有 enabled routine 的 next_run：cron 惯例迁移（vixie 收口）后，
+    // 存量 next_run 字符串仍是旧 Quartz 语义算出的错日期，`is_none()` 门控永远
+    // 不会自愈——直到该 routine 真正跑过一次 UI 才对上。一次性重算 O(N)，N 通
+    // 常个位数，代价可忽略
     with_routines(|routines| {
         let mut changed = false;
         for r in routines.iter_mut() {
-            if r.enabled && r.next_run.is_none() {
-                r.next_run = compute_next_run_full(&r.cron_expression);
+            if !r.enabled {
+                continue;
+            }
+            let recomputed = compute_next_run_full(&r.cron_expression);
+            if r.next_run != recomputed {
+                r.next_run = recomputed;
                 changed = true;
             }
         }
@@ -523,11 +530,16 @@ pub async fn update_routine(
 
     // Sync system scheduler
     if cron_changed || enabled_changed {
-        let _ = scheduler::unregister_routine(&result.id);
-        if result.enabled {
-            let runner_path = scheduler::runner_binary_path();
-            if let Err(e) = scheduler::register_routine(&result, &runner_path) {
-                log::warn!("scheduler re-register failed: {}", e);
+        // dev 门控须跳过整对 unregister+register：register 在 dev 下是 no-op，
+        // 只跑 unregister 会把正式 .app 装好的注册拆掉。改动落盘即可，
+        // 下次正式启动 sync_all 按 needs_update 补正（runner 侧另有 enabled 兜底）
+        if !scheduler::dev_build() {
+            let _ = scheduler::unregister_routine(&result.id);
+            if result.enabled {
+                let runner_path = scheduler::runner_binary_path();
+                if let Err(e) = scheduler::register_routine(&result, &runner_path) {
+                    log::warn!("scheduler re-register failed: {}", e);
+                }
             }
         }
         sync_wake_if_active();

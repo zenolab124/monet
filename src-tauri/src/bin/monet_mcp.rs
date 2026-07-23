@@ -42,6 +42,12 @@ use config::data_dir;
 mod routine_types;
 use routine_types::{RoutineDefinition, RoutineSource};
 
+// Cron 表达式单一入口：存储用 vixie 惯例（1=Mon），cron crate 用 Quartz
+// （1=Sun），本模块负责映射后交给 cron crate。主 App / runner / MCP 共享
+#[path = "../cron_expr.rs"]
+#[allow(dead_code)]
+mod cron_expr;
+
 /// initialize 握手记录的 MCP 客户端标识（如 claude-code 2.1.187）
 static CLIENT_INFO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -81,7 +87,7 @@ fn save_routines(data: &[RoutineDefinition]) {
 fn validate_cron(cron_expr: &str) -> Result<(), String> {
     use cron::Schedule;
     use std::str::FromStr;
-    let full = format!("0 {}", cron_expr);
+    let full = crate::cron_expr::to_quartz_full(cron_expr);
     Schedule::from_str(&full).map_err(|e| format!("无效的 cron 表达式: {}", e))?;
     Ok(())
 }
@@ -89,9 +95,11 @@ fn validate_cron(cron_expr: &str) -> Result<(), String> {
 fn compute_next_run(cron_expr: &str) -> Option<String> {
     use cron::Schedule;
     use std::str::FromStr;
-    let full = format!("0 {}", cron_expr);
+    let full = crate::cron_expr::to_quartz_full(cron_expr);
     let schedule = Schedule::from_str(&full).ok()?;
-    schedule.upcoming(Utc).next().map(|t| t.to_rfc3339())
+    // 必须用 Local：cron 表达式的 hour/minute 是本地时，launchd 也按本地时触发；
+    // 用 UTC 会把 "9 点" 解释成 UTC 9:00 落盘，前端渲染时按本地时区偏移显示错时刻
+    schedule.upcoming(chrono::Local).next().map(|t| t.to_rfc3339())
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +222,7 @@ fn handle_tools_list(id: Value) -> Value {
                 },
                 "cron_expression": {
                     "type": "string",
-                    "description": "5-field cron expression (minute hour day month weekday), e.g. '0 9 * * 1-5' for weekdays at 9am"
+                    "description": "5-field cron expression (minute hour day month weekday) in vixie/POSIX convention: 0/7=Sun, 1=Mon, ..., 6=Sat (same as crontab.guru and the system crontab). Example: '0 9 * * 1-5' = weekdays at 9am."
                 },
                 "prompt": {
                     "type": "string",

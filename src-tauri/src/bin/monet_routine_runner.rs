@@ -36,6 +36,18 @@ use routine_types::RoutineDefinition;
 #[allow(dead_code)]
 mod wake;
 
+// 增强 PATH 单一事实源：launchd 环境 PATH 极简，运行时补齐 homebrew/node
+// 等落点（plist 不再烘焙 PATH 快照——注册期快照会陈旧且随启动语境漂移）
+#[path = "../path_env.rs"]
+mod path_env;
+
+// Cron 表达式单一入口：存储用 vixie 惯例（1=Mon），cron crate 用 Quartz
+// （1=Sun），本模块负责把 dow 字段映射后再交给 cron crate。runner 与主 App
+// 共享一份实现（wake.rs 亦引用 crate::cron_expr::to_quartz_full）
+#[path = "../cron_expr.rs"]
+#[allow(dead_code)]
+mod cron_expr;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecutionLog {
@@ -114,6 +126,8 @@ fn main() {
     let output = match claude_locator::locate_lightweight() {
         Ok(located) => {
             let mut cmd = Command::new(&located.path);
+            // claude 本体走绝对路径定位，PATH 是给它的子进程（npx MCP servers 等）用的
+            cmd.env("PATH", path_env::enhanced_path());
             // 无控制台的父进程 spawn 控制台子进程会新开窗口，必须抑制
             // （runner 不链 app_lib，不走 proc_ext 收口，内联同款 cfg 块）
             #[cfg(windows)]
@@ -288,7 +302,7 @@ fn should_skip(routine: &RoutineDefinition) -> bool {
     use cron::Schedule;
     use std::str::FromStr;
 
-    let full = format!("0 {}", routine.cron_expression);
+    let full = crate::cron_expr::to_quartz_full(&routine.cron_expression);
     let schedule = match Schedule::from_str(&full) {
         Ok(s) => s,
         Err(_) => return false,
@@ -393,7 +407,7 @@ fn compute_next_run(cron_expr: &str) -> Option<String> {
     use cron::Schedule;
     use std::str::FromStr;
 
-    let full = format!("0 {}", cron_expr);
+    let full = crate::cron_expr::to_quartz_full(cron_expr);
     let schedule = Schedule::from_str(&full).ok()?;
     let next = schedule.upcoming(chrono::Local).next()?;
     Some(next.to_rfc3339())
@@ -487,7 +501,7 @@ fn has_imminent_routine() -> bool {
     let threshold = now + chrono::Duration::minutes(5);
 
     routines.iter().filter(|r| r.enabled).any(|r| {
-        let full = format!("0 {}", r.cron_expression);
+        let full = crate::cron_expr::to_quartz_full(&r.cron_expression);
         Schedule::from_str(&full)
             .ok()
             .and_then(|s| s.upcoming(chrono::Local).next())

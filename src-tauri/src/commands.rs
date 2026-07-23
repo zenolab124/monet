@@ -242,7 +242,13 @@ pub async fn run_runner_health_check(
     }
     tauri::async_runtime::spawn_blocking(move || {
         crate::scheduler::install_runner_binary()?;
-        let runner = crate::scheduler::runner_binary_path();
+        // dev 门控使 install 短路：健康检查是显式触发的瞬态 job（/tmp plist，
+        // 不产生登录项），dev 下直接用 target 目录产物保持体检可用
+        let runner = if crate::scheduler::dev_build() {
+            crate::scheduler::bundled_runner_path()
+        } else {
+            crate::scheduler::runner_binary_path()
+        };
         let result_path = runner_health_result_path();
         let _ = std::fs::remove_file(&result_path);
 

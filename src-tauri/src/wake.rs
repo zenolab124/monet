@@ -156,8 +156,8 @@ mod imp {
 
         let mut times: Vec<DateTime<Local>> = Vec::new();
         for expr in cron_exprs {
-            // 项目 cron 为 5 段（分钟起），cron crate 需 6 段（秒起）
-            let full = format!("0 {}", expr);
+            // 项目 cron 5 段 vixie 惯例 → 6 段 Quartz（cron crate 语法）
+            let full = crate::cron_expr::to_quartz_full(expr);
             let Ok(schedule) = cron::Schedule::from_str(&full) else {
                 continue;
             };

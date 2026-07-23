@@ -7,12 +7,20 @@ use crate::routines::RoutineDefinition;
 /// 只归「默认数据目录」的实例所有。数据目录被 MONET_DATA_DIR 重定向的实例
 /// （测试/多实例场景）读的是另一套 routines，若允许其装卸，会把默认实例
 /// 注册的 agent 当孤儿清掉、再把自己的注册进真实系统——双向污染
-fn owns_machine_schedule() -> bool {
+pub fn owns_machine_schedule() -> bool {
     std::env::var("MONET_DATA_DIR").map_or(true, |v| v.trim().is_empty())
 }
 
+/// dev 构建不触碰系统调度注册面（launchd/schtasks）：cargo target 目录恰好有
+/// 同名 runner 二进制，dev 会把 debug 产物拷进稳定路径并改写注册，回正式 .app
+/// 又全部翻转重装——每次语境切换都重复弹系统后台项通知。
+/// 显式卸载（删除任务）不门控：删除意图在 dev 下也应立即生效。
+pub fn dev_build() -> bool {
+    cfg!(debug_assertions)
+}
+
 pub fn register_routine(routine: &RoutineDefinition, runner_path: &Path) -> Result<(), String> {
-    if !owns_machine_schedule() {
+    if !owns_machine_schedule() || dev_build() {
         return Ok(());
     }
     platform::register(routine, runner_path)
@@ -26,7 +34,7 @@ pub fn unregister_routine(routine_id: &str) -> Result<(), String> {
 }
 
 pub fn sync_all(routines: &[RoutineDefinition], runner_path: &Path) -> Result<(), String> {
-    if !owns_machine_schedule() {
+    if !owns_machine_schedule() || dev_build() {
         return Ok(());
     }
     let known_ids: std::collections::HashSet<&str> =
@@ -53,6 +61,9 @@ pub fn runner_binary_path() -> PathBuf {
 }
 
 pub fn install_runner_binary() -> Result<(), String> {
+    if dev_build() {
+        return Ok(());
+    }
     let target = runner_binary_path();
     let source = bundled_runner_path();
 
@@ -104,7 +115,7 @@ fn is_codesigned(_path: &Path) -> bool {
     true
 }
 
-fn bundled_runner_path() -> PathBuf {
+pub fn bundled_runner_path() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join(runner_bin_name());
@@ -304,8 +315,9 @@ mod platform {
         let _ = std::fs::create_dir_all(&log_path);
         let stdout_log = log_path.join("launchd.log");
 
-        let path_env = enhanced_path();
-
+        // plist 不烘焙 PATH：注册期快照随启动语境（终端/Finder）漂移，内容一变
+        // needs_update 即误判重装 → 重复弹系统后台项通知；runner 运行时经
+        // path_env::enhanced_path() 自行补齐（claude 子进程的 npx MCP 等需要）
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -322,11 +334,6 @@ mod platform {
 {calendar_intervals}
 	<key>RunAtLoad</key>
 	<true/>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>PATH</key>
-		<string>{path_env}</string>
-	</dict>
 	<key>StandardOutPath</key>
 	<string>{stdout_log}</string>
 	<key>StandardErrorPath</key>
@@ -338,43 +345,31 @@ mod platform {
             runner = runner_path.display(),
             routine_id = routine_id,
             calendar_intervals = calendar_intervals,
-            path_env = path_env,
             stdout_log = stdout_log.display(),
         )
-    }
-
-    fn enhanced_path() -> String {
-        let home = dirs::home_dir().unwrap_or_default();
-        let extra = [
-            home.join(".local/bin"),
-            home.join(".cargo/bin"),
-            home.join(".nvm/versions/node").join("current").join("bin"),
-            PathBuf::from("/usr/local/bin"),
-            PathBuf::from("/opt/homebrew/bin"),
-        ];
-        let base = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string());
-        let mut parts: Vec<String> = extra
-            .iter()
-            .filter(|p| p.exists())
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        parts.push(base);
-        parts.join(":")
     }
 
     fn cron_to_calendar_intervals(cron_expr: &str) -> Result<String, String> {
         use cron::Schedule;
         use std::str::FromStr;
 
-        let full = format!("0 {}", cron_expr);
+        let full = crate::cron_expr::to_quartz_full(cron_expr);
         let schedule = Schedule::from_str(&full)
             .map_err(|e| format!("invalid cron: {}", e))?;
 
         #[allow(clippy::type_complexity)] // 局部临时元组，提取 type 别名增加反而不直观
         let mut entries: Vec<(u32, u32, Option<u32>, Option<u32>, Option<u32>)> = Vec::new();
 
-        // Sample next 366 occurrences (covers a full year cycle) to find the pattern
-        for dt in schedule.upcoming(chrono::Local).take(366) {
+        // Sample 366 occurrences (covers a full year cycle) to find the pattern.
+        // 采样锚点必须固定历元：以「现在」起采，fallback 分支的截断窗口会随
+        // 启动时刻漂移——同一 cron 每次生成不同 plist → needs_update 误判
+        // 重装 → 重复弹系统后台项通知。锚定后同一表达式的展开恒定
+        use chrono::TimeZone;
+        let anchor = chrono::Local
+            .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap_or_else(chrono::Local::now);
+        for dt in schedule.after(&anchor).take(366) {
             let min = dt.minute();
             let hour = dt.hour();
             let day = dt.day();
@@ -391,12 +386,31 @@ mod platform {
         }
 
         // Analyze: if all entries share the same minute+hour and vary only by date,
-        // it's a simple daily/weekly pattern
+        // it's a simple weekly/daily/day-of-month pattern.
+        // 各分支输出前必须排序：HashSet 迭代序随进程随机，plist 字符串一变，
+        // needs_update 即误判 → 每次启动重注册 → 系统重复弹后台项通知
         let all_same_time = entries.iter().all(|e| e.0 == entries[0].0 && e.1 == entries[0].1);
         let unique_weekdays: std::collections::HashSet<_> =
             entries.iter().filter_map(|e| e.4).collect();
         let unique_days: std::collections::HashSet<_> =
             entries.iter().filter_map(|e| e.2).collect();
+
+        // 星期受限判据须先于「日号覆盖 ≥28 = daily」：周节奏 cron（如 * * 1,3）
+        // 采样一年日号几乎全覆盖，先判 daily 会把它展开成每天跑
+        if all_same_time && unique_weekdays.len() < 7 {
+            // Weekly pattern — emit one dict per weekday
+            let mut wds: Vec<u32> = unique_weekdays.into_iter().collect();
+            wds.sort_unstable();
+            let mut intervals = String::from("\t<key>StartCalendarInterval</key>\n\t<array>\n");
+            for wd in &wds {
+                intervals.push_str(&format!(
+                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Weekday</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                    entries[0].1, entries[0].0, wd
+                ));
+            }
+            intervals.push_str("\t</array>");
+            return Ok(intervals);
+        }
 
         if all_same_time && unique_days.len() >= 28 {
             // Daily pattern (all days covered) — simplest: just hour+minute
@@ -406,13 +420,16 @@ mod platform {
             ));
         }
 
-        if all_same_time && unique_weekdays.len() <= 7 && unique_days.len() < 28 {
-            // Weekly pattern — emit one dict per weekday
+        if all_same_time {
+            // Day-of-month pattern（如 */2 隔日、1,15 定日）— emit one dict per day。
+            // 此前这类会误入 weekly 分支被展开成全七天 = 每天跑，调度语义错误
+            let mut days: Vec<u32> = unique_days.into_iter().collect();
+            days.sort_unstable();
             let mut intervals = String::from("\t<key>StartCalendarInterval</key>\n\t<array>\n");
-            for wd in &unique_weekdays {
+            for day in &days {
                 intervals.push_str(&format!(
-                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Weekday</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
-                    entries[0].1, entries[0].0, wd
+                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Day</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                    entries[0].1, entries[0].0, day
                 ));
             }
             intervals.push_str("\t</array>");
@@ -437,21 +454,30 @@ mod platform {
 
         if unique_hours.len() == 24 {
             // Every-N-minutes pattern — emit per-minute dicts
-            for min in &unique_minutes {
+            let mut mins: Vec<u32> = unique_minutes.into_iter().collect();
+            mins.sort_unstable();
+            for min in &mins {
                 intervals.push_str(&format!(
                     "\t\t<dict>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
                     min
                 ));
             }
         } else {
+            // 去重后排序输出：采样起点随启动时刻漂移，不排序则同一 cron
+            // 每次生成的 plist 顺序都不同
             let mut seen = std::collections::HashSet::new();
+            let mut times: Vec<(u32, u32)> = Vec::new();
             for e in capped {
                 if seen.insert((e.1, e.0)) {
-                    intervals.push_str(&format!(
-                        "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
-                        e.1, e.0
-                    ));
+                    times.push((e.1, e.0));
                 }
+            }
+            times.sort_unstable();
+            for (hour, min) in &times {
+                intervals.push_str(&format!(
+                    "\t\t<dict>\n\t\t\t<key>Hour</key>\n\t\t\t<integer>{}</integer>\n\t\t\t<key>Minute</key>\n\t\t\t<integer>{}</integer>\n\t\t</dict>\n",
+                    hour, min
+                ));
             }
         }
         intervals.push_str("\t</array>");
@@ -602,7 +628,7 @@ mod platform {
         use cron::Schedule;
         use std::str::FromStr;
 
-        let full = format!("0 {}", cron_expr);
+        let full = crate::cron_expr::to_quartz_full(cron_expr);
         let schedule = Schedule::from_str(&full).map_err(|e| format!("invalid cron: {}", e))?;
         let next = schedule.upcoming(chrono::Local).next().ok_or("no next run")?;
         let start_time = next.format("%Y-%m-%dT%H:%M:%S").to_string();
@@ -764,28 +790,14 @@ mod platform {
         }
         let (min, hour, dom, _mon, dow) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
 
+        // dow 走 vixie 惯例（0/7=Sun, 1=Mon…6=Sat），systemd OnCalendar 只吃命名
+        // 周几（Mon..Sun），需要把 vixie 数字整段展开为命名——含任意范围（如 2-4）
+        // 与 step。之前只对 `1-5/0-6/1-7` 三个硬编码范围替换，其他数字范围直接透传
+        // 会被 systemd 拒识，routine 在 Linux 上一律建不起来
         let weekday_prefix = if dow != "*" {
-            let days = dow
-                .split(',')
-                .map(|d| match d {
-                    "0" | "7" => "Sun",
-                    "1" => "Mon",
-                    "2" => "Tue",
-                    "3" => "Wed",
-                    "4" => "Thu",
-                    "5" => "Fri",
-                    "6" => "Sat",
-                    range if range.contains('-') => range, // pass-through for ranges like 1-5
-                    _ => d,
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            // Convert numeric range like 1-5 to Mon..Fri
-            let days = days
-                .replace("1-5", "Mon..Fri")
-                .replace("0-6", "*")
-                .replace("1-7", "*");
-            format!("{} ", days)
+            let converted = crate::cron_expr::vixie_dow_to_systemd(dow)
+                .ok_or_else(|| format!("invalid dow field for systemd: {}", dow))?;
+            format!("{} ", converted)
         } else {
             String::new()
         };

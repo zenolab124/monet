@@ -37,13 +37,17 @@ fn tray_bin_path() -> Option<PathBuf> {
     })
 }
 
+/// 已随本 app 版本完成 tray 换代的标记。版本号不再嵌进 plist——那会让每次
+/// 发版都走 bootout+bootstrap 重装、每次都弹系统后台项通知；改为外置标记 +
+/// kickstart -k 重启进程换新二进制（重启不重新注册，BTM 静默）
+#[cfg(target_os = "macos")]
+fn tray_version_marker() -> PathBuf {
+    crate::config::data_dir().join("tray-version")
+}
+
 #[cfg(target_os = "macos")]
 fn build_plist(bin: &std::path::Path) -> String {
     let bin_str = bin.to_string_lossy();
-    // MONET_TRAY_VERSION 嵌入主应用版本号：升级后 plist 内容变化 →
-    // ensure_launch_agent 走重装分支（bootout 杀旧进程 + bootstrap 起新二进制），
-    // 否则 tray 常驻旧版本永不更新
-    let version = env!("CARGO_PKG_VERSION");
     let log_path = crate::config::data_dir().join("tray.log");
     let log_str = log_path.to_string_lossy();
     format!(
@@ -57,11 +61,6 @@ fn build_plist(bin: &std::path::Path) -> String {
 	<array>
 		<string>{bin_str}</string>
 	</array>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>MONET_TRAY_VERSION</key>
-		<string>{version}</string>
-	</dict>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
@@ -88,6 +87,12 @@ fn launchctl_targets() -> (String, String) {
 /// launchctl 有 IO 开销且可能慢，调用方须在非主线程执行。
 #[cfg(target_os = "macos")]
 pub fn ensure_launch_agent() {
+    // 机器级 tray 注册面只归默认数据目录实例（与 scheduler 同判据）：
+    // 副实例（MONET_DATA_DIR 重定向）读不到共享版本标记，会误判升级
+    // 反复 kickstart -k 重启真 tray
+    if !crate::scheduler::owns_machine_schedule() {
+        return;
+    }
     // 用户主动退过 tray → 尊重意图，不装不拉起
     if disabled_marker_path().exists() {
         return;
@@ -166,12 +171,14 @@ fn install_and_start() {
         .map(|existing| existing != plist)
         .unwrap_or(true);
 
+    let current_version = env!("CARGO_PKG_VERSION");
+
     if need_install {
+        // plist 内容变化（首装/路径或模板变更）：bootout 杀旧进程 + bootstrap 起新
         // 全新 macOS 账号可能没有 LaunchAgents 目录
         if let Some(parent) = plist_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        // bootout 杀掉旧版进程（版本升级场景），bootstrap 拉起新二进制
         let _ = Command::new("launchctl")
             .args(["bootout", &service])
             .output();
@@ -179,9 +186,31 @@ fn install_and_start() {
             let _ = Command::new("launchctl")
                 .args(["bootstrap", &domain, &plist_path.to_string_lossy()])
                 .output();
+            let _ = std::fs::write(tray_version_marker(), current_version);
+        }
+    } else if std::fs::read_to_string(tray_version_marker())
+        .map(|v| v.trim() != current_version)
+        .unwrap_or(true)
+    {
+        // 版本升级：更新只替换了二进制，KeepAlive 常驻的旧版 tray 不会自行换代。
+        // kickstart -k 杀旧起新——只重启进程不重新注册，不触发系统后台项通知
+        let restarted = Command::new("launchctl")
+            .args(["kickstart", "-k", &service])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        // 服务被 bootout 注销过（手动运维等场景）时 kickstart 找不到目标，回退 bootstrap
+        let ok = restarted
+            || Command::new("launchctl")
+                .args(["bootstrap", &domain, &plist_path.to_string_lossy()])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+        if ok {
+            let _ = std::fs::write(tray_version_marker(), current_version);
         }
     } else {
-        // plist 未变（同版本）：tray 可能被 kill/崩溃后未重启，kickstart 兜底。
+        // 同版本：tray 可能被 kill/崩溃后未重启，kickstart 兜底。
         // kickstart 只能踢「已注册」的服务——服务被 bootout 注销过（手动运维等场景,
         // 实测事故）时它找不到目标静默死路,失败即回退 bootstrap 重新注册
         let kicked = Command::new("launchctl")

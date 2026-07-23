@@ -53,6 +53,16 @@ pub fn set_widget_config(day_start_hour: i8, month_mode: String) -> Result<(), S
 const LAUNCH_AGENT_LABEL: &str = "io.github.zenolab124.monet.widget-updater";
 
 pub fn ensure_launch_agent() {
+    // dev 构建不触碰 launchd 注册面：cargo target 目录恰好有同名 updater 二进制，
+    // dev 会把 plist 改写成指向 debug 产物，回正式 .app 又翻转回来——
+    // 每次语境切换都重装并重复弹系统后台项通知（与 scheduler/tray 同门控）
+    if cfg!(debug_assertions) {
+        return;
+    }
+    // 机器级注册面只归默认数据目录实例所有（与 scheduler 同判据）
+    if !crate::scheduler::owns_machine_schedule() {
+        return;
+    }
     let Some(home) = dirs::home_dir() else { return };
 
     // 旧标签清理:更名前(com.ccspace.widget-updater)安装的 LaunchAgent 会在用户机
@@ -99,17 +109,25 @@ pub fn ensure_launch_agent() {
 </plist>"#
     );
 
+    // 全等比较（原为 contains 判据）：模板演进时旧 plist 会静默残留旧配置
     let need_install = std::fs::read_to_string(&plist_path)
-        .map(|existing| !existing.contains(&*updater_str))
+        .map(|existing| existing != plist)
         .unwrap_or(true);
 
     if need_install {
+        let uid = Command::new("id").arg("-u").output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|_| "501".to_string());
+        // bootout/bootstrap 取代已废弃的 load/unload（与 tray/routine 同栈）
         let _ = Command::new("launchctl")
-            .args(["unload", &plist_path.to_string_lossy()])
+            .args(["bootout", &format!("gui/{uid}/{LAUNCH_AGENT_LABEL}")])
             .output();
+        if let Some(parent) = plist_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if std::fs::write(&plist_path, &plist).is_ok() {
             let _ = Command::new("launchctl")
-                .args(["load", &plist_path.to_string_lossy()])
+                .args(["bootstrap", &format!("gui/{uid}"), &plist_path.to_string_lossy()])
                 .output();
         }
     }
