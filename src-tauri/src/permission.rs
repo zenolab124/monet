@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -23,13 +23,16 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-/// 等待轮询步长（避免 busy-loop）
+/// accept 失败的错误退避步长（防 fd 耗尽等错误风暴下 accept 立即返错空转）
 const POLL_INTERVAL_MS: u64 = 50;
 
 /// 一次 pending 请求的状态
 struct PendingRequest {
     /// 收到响应后写到这里
     decision: Mutex<Option<Decision>>,
+    /// 决策就绪通知：respond/shutdown 写入后唤醒 wait_decision，
+    /// 等待方零轮询（仅留长间隔超时兜底 Drop 等只置 stop_flag 不写决策的路径）
+    ready: Condvar,
 }
 
 /// 用户决策
@@ -147,6 +150,7 @@ impl PermissionService {
                     } else {
                         Decision::Deny(message.unwrap_or_else(|| "用户拒绝".to_string()))
                     });
+                    req.ready.notify_all();
                     return true;
                 }
             }
@@ -200,6 +204,7 @@ impl PermissionService {
             if slot.is_none() {
                 *slot = Some(Decision::Deny("流式中断，自动拒绝".to_string()));
             }
+            req.ready.notify_all();
         }
     }
 
@@ -315,6 +320,7 @@ fn handle_connection(
     let request_id = format!("perm-{}", REQ_COUNTER.fetch_add(1, Ordering::Relaxed));
     let pending_req = Arc::new(PendingRequest {
         decision: Mutex::new(None),
+        ready: Condvar::new(),
     });
 
     pending
@@ -364,24 +370,27 @@ fn handle_connection(
     Ok(())
 }
 
-/// 阻塞等待决策（轮询，永不超时）：命中用户响应或服务停止两者之一返回。
-/// 不再自动拒绝——卡住等用户点，直到 stop_for/shutdown 在流式中断收尾时置 stop_flag 唤醒。
+/// 阻塞等待决策（condvar 挂起，永不超时）：命中用户响应或服务停止两者之一返回。
+/// 不自动拒绝——卡住等用户点。respond/shutdown 写入决策后 notify 即醒；
+/// 1s 超时兜底只为 Drop 等仅置 stop_flag 不写决策的路径，正常路径零空转
 fn wait_decision(
     req: &PendingRequest,
     stop_flag: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Decision {
+    let mut slot = req.decision.lock().unwrap();
     loop {
-        {
-            let slot = req.decision.lock().unwrap();
-            if let Some(d) = slot.as_ref() {
-                return d.clone();
-            }
+        if let Some(d) = slot.as_ref() {
+            return d.clone();
         }
         if stop_flag.load(Ordering::SeqCst) {
             // 服务停止时按拒绝处理
             return Decision::Deny("流式中断，自动拒绝".to_string());
         }
-        thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+        let (guard, _) = req
+            .ready
+            .wait_timeout(slot, Duration::from_secs(1))
+            .unwrap();
+        slot = guard;
     }
 }
 

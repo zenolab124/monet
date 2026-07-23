@@ -6,6 +6,30 @@
 //! 其他平台保留 `ps` 降级路径（Windows 无 ps，Command 失败时返回空表优雅降级）。
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// 短缓存 TTL：须小于前端 3s 探测节拍，保证同一实例相邻两轮必然跨缓存窗口。
+/// 缓存的意义在横向共享——工作台多列/档案馆多个探测方同窗口内只触发一次全量扫描
+const CACHE_TTL: Duration = Duration::from_secs(2);
+
+/// 短缓存槽：扫描时刻 + 快照
+type CacheSlot<T> = Mutex<Option<(Instant, T)>>;
+
+static COMMANDS_CACHE: CacheSlot<Vec<(u32, String)>> = Mutex::new(None);
+static TABLE_CACHE: CacheSlot<HashMap<u32, (u32, String)>> = Mutex::new(None);
+
+fn cached<T: Clone>(slot: &CacheSlot<T>, fetch: impl FnOnce() -> T) -> T {
+    let mut guard = slot.lock().unwrap();
+    if let Some((at, data)) = guard.as_ref() {
+        if at.elapsed() < CACHE_TTL {
+            return data.clone();
+        }
+    }
+    let fresh = fetch();
+    *guard = Some((Instant::now(), fresh.clone()));
+    fresh
+}
 
 /// 全部进程的 (pid, 完整命令行)。命令行为 argv 以单空格拼接，与 `ps -axo command=` 同构。
 /// 读不到 argv 的进程（跨用户、内核任务、竞态退出）直接跳过。已知边界：ps 是
@@ -15,9 +39,14 @@ pub fn list_commands() -> Vec<(u32, String)> {
     imp::list_commands()
 }
 
-/// 进程族谱表：pid → (ppid, 进程名)。
-pub fn process_table() -> HashMap<u32, (u32, String)> {
-    imp::process_table()
+/// list_commands 的短缓存版：秒级轮询探测用（kill 等落点动作须走新鲜版，防 pid 复用误伤）
+pub fn list_commands_cached() -> Vec<(u32, String)> {
+    cached(&COMMANDS_CACHE, imp::list_commands)
+}
+
+/// 进程族谱表（短缓存版）：pid → (ppid, 进程名)。归属应用名展示用，秒级旧数据无碍
+pub fn process_table_cached() -> HashMap<u32, (u32, String)> {
+    cached(&TABLE_CACHE, imp::process_table)
 }
 
 #[cfg(target_os = "macos")]

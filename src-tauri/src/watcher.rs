@@ -11,7 +11,8 @@ use tauri::{AppHandle, Emitter};
 /// 启动文件监控，检测 ~/.claude/projects/ 下的变化
 /// - 变更按 (project, session) 聚合，节流 1 秒发送 "projects-changed" 事件，
 ///   payload 携带变更集合供前端增量更新；项目目录级事件（新建/删除/重命名）
-///   置 full=true 让前端全量兜底。窗口内积压的末批变更由 500ms tick 补发，不丢失
+///   置 full=true 让前端全量兜底。节流窗口内积压的末批变更由 500ms tick 补发，
+///   不丢失；tick 仅在有积压时运转，空闲态纯阻塞零唤醒
 /// - 增量探测会话 jsonl 新增的 api_error 记录，发送 "session-api-error" 事件
 ///   （FR-010 外部会话出错兜底；是否属于工作台由前端判定过滤）
 /// - 监控 data_dir/routines.json 变化，发送 "routines-changed" 事件（MCP 外部写入感知）
@@ -68,9 +69,23 @@ pub fn start(app: &AppHandle) {
         let mut pending_full = false;
 
         loop {
-            // 阻塞等待事件，超时 500ms（tick 兼作积压变更的补发时机）
-            match rx.recv_timeout(Duration::from_millis(500)) {
-                Ok(event) => {
+            // 无积压时纯阻塞等事件（空闲零唤醒）；有积压时 500ms 超时兼作补发节拍。
+            // 积压只在 emit 的 1s 节流窗口内短暂存在，稳态空闲不产生任何 tick
+            let received = if pending_changes.is_empty() && !pending_full {
+                match rx.recv() {
+                    Ok(event) => Some(event),
+                    Err(_) => break,
+                }
+            } else {
+                match rx.recv_timeout(Duration::from_millis(500)) {
+                    Ok(event) => Some(event),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            };
+
+            match received {
+                Some(event) => {
                     let is_routine = event.paths.iter().any(|p| p == &routines_file);
 
                     if is_routine {
@@ -125,7 +140,7 @@ pub fn start(app: &AppHandle) {
                         &mut last_emit,
                     );
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
+                None => {
                     emit_pending_changes(
                         &handle,
                         &mut pending_changes,
@@ -133,7 +148,6 @@ pub fn start(app: &AppHandle) {
                         &mut last_emit,
                     );
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
     });

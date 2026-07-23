@@ -1840,6 +1840,8 @@ watch(autoTurnLanded, async () => {
 // 注意:声明须在下方 immediate watch 之前(其回调在 setup 同步阶段就会执行)。
 
 const externalRunning = ref(false)
+/** typing-dots 显隐总闸:false 时点从 DOM 摘除(infinite 动画在 opacity:0 下仍持续产帧,唤醒合成器) */
+const typingActive = computed(() => stream.value.streaming || externalRunning.value || hasLiveTurn.value)
 /** 外部进程归属应用（父进程链解析,如 Terminal / 其他 GUI 工具),横幅与停止确认共用 */
 const externalOwner = ref<string | null>(null)
 /** 终止外部进程进行中:锁按钮防重复 kill,SIGTERM 后到 probe 撤横幅有数秒窗口 */
@@ -1963,11 +1965,17 @@ function stopExternalFollow() {
 onUnmounted(stopExternalFollow)
 
 // 文件变化驱动探测：watcher 检测到 JSONL 增长时触发 projects-changed，
-// 如果当前会话探测已停止且未在本地流式，重启探测以捕获孤儿进程输出
+// 如果当前会话探测已停止且未在本地流式，重启探测以捕获孤儿进程输出。
+// 仅本会话入选变更集（或 full 全量刷新）才重启——其他会话写盘不改变本会话的
+// 外部进程状态，无差别重启会让多实例探测在任何会话活跃期间永不停歇
 let unlistenProjectsChanged: (() => void) | null = null
-listen('projects-changed', () => {
+listen<{ full: boolean; changes: { projectId: string; sessionId: string }[] }>('projects-changed', (event) => {
   if (externalTimer !== null) return
-  if (!currentSession.value || stream.value.streaming) return
+  const cs = currentSession.value
+  if (!cs || stream.value.streaming) return
+  const touched = event.payload?.full
+    || event.payload?.changes?.some(c => c.sessionId === cs.summary.id)
+  if (!touched) return
   startExternalFollow()
 }).then(fn => { unlistenProjectsChanged = fn })
 onUnmounted(() => unlistenProjectsChanged?.())
@@ -2395,9 +2403,11 @@ async function onReload() {
 
       <div
         class="absolute bottom-1 left-0 flex items-center gap-1 pl-5 transition-opacity duration-200"
-        :class="stream.streaming || externalRunning || hasLiveTurn ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+        :class="typingActive ? 'opacity-100' : 'opacity-0 pointer-events-none'"
       >
-        <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
+        <template v-if="typingActive">
+          <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
+        </template>
       </div>
 
       <div v-if="stream.streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">

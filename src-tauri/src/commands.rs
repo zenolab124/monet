@@ -684,9 +684,16 @@ fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
 /// 交互式 REPL（命令行不带 session-id）检测不到，属已知边界。
 /// 数据源走 proc_scan（macOS 纯 syscall / 其他平台 ps 降级），本函数在秒级
 /// 轮询节拍下常驻调用，禁止在此重新引入 spawn。
-fn scan_external_claude(session_id: &str) -> Vec<u32> {
+/// fresh：kill 等落点动作传 true 绕过短缓存（防 pid 复用误伤）；轮询探测传 false
+/// 让多个探测方共享同窗口的一次全量扫描
+fn scan_external_claude(session_id: &str, fresh: bool) -> Vec<u32> {
     let own_pid = crate::streaming::get_own_pid(session_id);
-    crate::proc_scan::list_commands()
+    let commands = if fresh {
+        crate::proc_scan::list_commands()
+    } else {
+        crate::proc_scan::list_commands_cached()
+    };
+    commands
         .into_iter()
         .filter_map(|(pid, cmd)| {
             if own_pid == Some(pid) || !command_matches_claude_session(&cmd, session_id) {
@@ -734,9 +741,9 @@ pub fn has_own_process(session_id: String) -> Option<i64> {
 /// 排除 Monet 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
 #[tauri::command]
 pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
-    match scan_external_claude(&session_id).first() {
+    match scan_external_claude(&session_id, false).first() {
         Some(&pid) => {
-            let owner = resolve_owner(pid, &crate::proc_scan::process_table());
+            let owner = resolve_owner(pid, &crate::proc_scan::process_table_cached());
             ExternalSessionInfo { running: true, pid: Some(pid), owner }
         }
         None => ExternalSessionInfo { running: false, pid: None, owner: None },
@@ -747,7 +754,7 @@ pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
 /// SIGTERM 温和终止；排除 Monet 自身持有的长活进程。
 #[tauri::command]
 pub fn kill_external_session(session_id: String) -> bool {
-    let pids = scan_external_claude(&session_id);
+    let pids = scan_external_claude(&session_id, true);
     for pid in &pids {
         let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
     }
