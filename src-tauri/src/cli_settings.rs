@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use serde_json::Value;
 
 use crate::config;
+use crate::proc_ext::HideConsole;
 
 static SCHEMA_CACHE: Mutex<Option<Value>> = Mutex::new(None);
 
@@ -532,6 +533,7 @@ print(json.dumps(results))
 "#;
 
     let output = Command::new("python3")
+        .hide_console()
         .args(["-c", script, &binary.display().to_string(), fields_json])
         .output()
         .map_err(|e| format!("python3 执行失败: {}", e))?;

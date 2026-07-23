@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::claude_locator;
+use crate::proc_ext::HideConsole;
 use crate::streaming;
 
 const NPM_LATEST_URL: &str = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest";
@@ -67,6 +68,7 @@ fn run_version(bin: &Path) -> Option<String> {
     let output = Command::new(bin)
         .arg("--version")
         .env("PATH", streaming::enhanced_path())
+        .hide_console()
         .output()
         .ok()?;
     parse_semver(&String::from_utf8_lossy(&output.stdout))
@@ -176,6 +178,7 @@ pub fn claude_env_upgrade() -> Result<UpgradeResult, String> {
         "npm" => {
             if let Some(npm) = sibling_npm(&located.path) {
                 let mut c = Command::new(&npm);
+                c.hide_console();
                 c.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
                 c.env("PATH", streaming::enhanced_path());
                 (c, format!("{} install -g @anthropic-ai/claude-code@latest", npm.display()))
@@ -183,6 +186,7 @@ pub fn claude_env_upgrade() -> Result<UpgradeResult, String> {
                 // 同目录无 npm：登录 shell 里的 npm 兜底
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
                 let mut c = Command::new(shell);
+                c.hide_console();
                 c.args(["-l", "-c", "npm install -g @anthropic-ai/claude-code@latest"]);
                 (c, "npm install -g @anthropic-ai/claude-code@latest".to_string())
             }
@@ -198,6 +202,7 @@ pub fn claude_env_upgrade() -> Result<UpgradeResult, String> {
         // official 与 unknown 都走 CLI 内置自更新——官方路径，适配面最广
         _ => {
             let mut c = Command::new(&located.path);
+            c.hide_console();
             c.arg("update");
             c.env("PATH", streaming::enhanced_path());
             (c, format!("{} update", located.path.display()))
@@ -232,7 +237,6 @@ pub fn claude_env_upgrade() -> Result<UpgradeResult, String> {
 pub fn claude_env_install() -> Result<UpgradeResult, String> {
     #[cfg(windows)]
     let (mut cmd, desc): (Command, String) = {
-        use std::os::windows::process::CommandExt;
         let mut c = Command::new("powershell");
         c.args([
             "-NoProfile",
@@ -241,7 +245,7 @@ pub fn claude_env_install() -> Result<UpgradeResult, String> {
             "-Command",
             "irm https://claude.ai/install.ps1 | iex",
         ]);
-        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        c.hide_console();
         (c, "irm https://claude.ai/install.ps1 | iex".to_string())
     };
     #[cfg(not(windows))]
@@ -296,7 +300,7 @@ pub struct DiagReport {
 /// 登录 shell 跑 `which -a claude` 拿用户完整 PATH 视角下的所有安装
 fn which_all() -> Vec<PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let Ok(output) = Command::new(shell).args(["-l", "-i", "-c", "which -a claude"]).output() else {
+    let Ok(output) = Command::new(shell).hide_console().args(["-l", "-i", "-c", "which -a claude"]).output() else {
         return Vec::new();
     };
     String::from_utf8_lossy(&output.stdout)

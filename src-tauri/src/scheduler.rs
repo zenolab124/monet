@@ -482,6 +482,7 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use super::*;
+    use crate::proc_ext::HideConsole;
     use std::fs;
     use std::process::Command;
 
@@ -504,7 +505,7 @@ mod platform {
     pub fn is_registered(routine_id: &str) -> bool {
         // 新旧两套任务名任一存在即视为已注册
         let query = |tn: &str| {
-            Command::new("schtasks")
+            Command::new("schtasks").hide_console()
                 .args(["/Query", "/TN", tn])
                 .output()
                 .map_or(false, |o| o.status.success())
@@ -531,11 +532,11 @@ mod platform {
                     continue;
                 }
                 let _ = fs::write(&xml_file, &xml);
-                let _ = Command::new("schtasks")
+                let _ = Command::new("schtasks").hide_console()
                     .args(["/Create", "/TN", &task_name(&routine.id), "/XML", &xml_file.to_string_lossy(), "/F"])
                     .output();
                 // 新任务已建，删除同 id 的旧任务名，避免新旧双份被调度重复执行
-                let _ = Command::new("schtasks")
+                let _ = Command::new("schtasks").hide_console()
                     .args(["/Delete", "/TN", &legacy_task_name(&routine.id), "/F"])
                     .output();
             }
@@ -553,7 +554,7 @@ mod platform {
         let xml = generate_task_xml(runner_path, &routine.id, &routine.cron_expression, wake)?;
         fs::write(&xml_file, &xml).map_err(|e| format!("write task xml: {}", e))?;
 
-        let output = Command::new("schtasks")
+        let output = Command::new("schtasks").hide_console()
             .args([
                 "/Create",
                 "/TN", &task_name(&routine.id),
@@ -571,7 +572,7 @@ mod platform {
         }
 
         // 新任务已建，删除同 id 的旧任务名，避免新旧双份被调度重复执行
-        let _ = Command::new("schtasks")
+        let _ = Command::new("schtasks").hide_console()
             .args(["/Delete", "/TN", &legacy_task_name(&routine.id), "/F"])
             .output();
         Ok(())
@@ -579,10 +580,10 @@ mod platform {
 
     pub fn unregister(routine_id: &str) -> Result<(), String> {
         // 新旧两套任务名都尝试删除（旧任务照常可删）
-        let _ = Command::new("schtasks")
+        let _ = Command::new("schtasks").hide_console()
             .args(["/Delete", "/TN", &task_name(routine_id), "/F"])
             .output();
-        let _ = Command::new("schtasks")
+        let _ = Command::new("schtasks").hide_console()
             .args(["/Delete", "/TN", &legacy_task_name(routine_id), "/F"])
             .output();
         let xml = xml_path(routine_id);

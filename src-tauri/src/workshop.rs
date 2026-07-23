@@ -16,6 +16,7 @@
 //! 扫描核心是接受根路径参数的纯函数，便于单测注入 fixture 目录；
 //! command 层只负责拼装家目录与 discovery 的项目列表。
 
+use crate::proc_ext::HideConsole;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -876,6 +877,7 @@ fn mcp_add_inner(
         .map_err(|e| format!("未找到 claude CLI: {}", e))?;
 
     let mut cmd = std::process::Command::new(&located.path);
+    cmd.hide_console();
     cmd.env("PATH", crate::streaming::enhanced_path());
     if let Some((k, v)) = crate::config::claude_config_dir_env() {
         cmd.env(k, v);
@@ -944,6 +946,7 @@ fn mcp_remove_inner(name: &str, scope: &str, project_cwd: Option<&str>) -> Resul
         .map_err(|e| format!("未找到 claude CLI: {}", e))?;
 
     let mut cmd = std::process::Command::new(&located.path);
+    cmd.hide_console();
     cmd.env("PATH", crate::streaming::enhanced_path());
     if let Some((k, v)) = crate::config::claude_config_dir_env() {
         cmd.env(k, v);
@@ -984,6 +987,7 @@ fn mcp_reset_inner(project_cwd: &str) -> Result<(), String> {
         .map_err(|e| format!("未找到 claude CLI: {}", e))?;
 
     let mut cmd = std::process::Command::new(&located.path);
+    cmd.hide_console();
     cmd.env("PATH", crate::streaming::enhanced_path());
     if let Some((k, v)) = crate::config::claude_config_dir_env() {
         cmd.env(k, v);
@@ -1333,11 +1337,11 @@ fn collect_memory_overview() -> Result<MemoryOverview, String> {
     Ok(MemoryOverview { projects })
 }
 
-/// 解码项目目录名：- 是路径分隔符，首个 - 是根 /
+/// 项目目录名 → 显示名:走 discovery 共享解析(优先会话 JSONL 真实 cwd)。
+/// 有损 replace 还原会把 my-app 这类含连字符的末段错拆
 fn decode_project_dir_name(encoded: &str) -> String {
-    // 取 cwd 最后一段作为显示名
-    let decoded_path = encoded.replace('-', "/");
-    Path::new(&decoded_path)
+    let resolved = crate::discovery::resolve_project_path(encoded);
+    Path::new(&resolved)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| encoded.to_string())

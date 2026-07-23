@@ -10,6 +10,7 @@ mod discovery;
 mod image_protocol;
 mod models;
 mod parser;
+pub mod proc_ext;
 mod permission;
 mod proc_scan;
 /// pub：schema-probe bin 复用扫描与 diff 核心

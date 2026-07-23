@@ -287,16 +287,12 @@ fn signal_session(pid: u32, sig: &str) {
 /// 已死进程上的第二次调用报 not found 被吞，与 unix 二段式击杀兼容。
 #[cfg(windows)]
 fn signal_session(pid: u32, _sig: &str) {
-    use std::os::windows::process::CommandExt;
+    use crate::proc_ext::HideConsole;
     let _ = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
-        .creation_flags(CREATE_NO_WINDOW)
+        .hide_console()
         .output();
 }
-
-/// 抑制子进程控制台窗口：GUI 子系统下 spawn console 程序会闪黑窗
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// 断链探测：同 id 的 jsonl 是否存在于其他 cwd 编码目录（如 EnterWorktree 迁走的）。
 /// 命中说明"这不是新会话，是历史不在预期位置"——静默 --session-id 会以空历史
@@ -368,15 +364,14 @@ fn open_session(
     // 4. CLI 参数（不带 --print，不传消息文本；加 --input-format stream-json）
     let (executable, prefix_args) = find_claude();
     let mut args = prefix_args;
-    // cwd 先 canonicalize 再编码:CLI 落盘用 realpath(/tmp → /private/tmp 等 symlink),
-    // 用原始 cwd 编码会对着不存在的目录做落盘判断,resume/fork 三态全部失灵
-    #[cfg(unix)]
+    // cwd 先 canonicalize 再编码:CLI 落盘前对 cwd 做 realpath(mac 的 /tmp → /private/tmp,
+    // Windows 的 junction/subst/8.3 短名/磁盘大小写校正),用原始 cwd 编码会对着
+    // 不存在的目录做落盘判断,resume/fork 三态失灵。Windows canonicalize 产生的
+    // \\?\ verbatim 前缀由 encode_project_dir 剥离,无需分平台
     let cwd_real = std::fs::canonicalize(cwd)
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| cwd.to_string());
-    #[cfg(not(unix))]
-    let cwd_real = cwd.to_string(); // Windows canonicalize 带 \\?\ 前缀,编码会乱,原样使用
     let project_dir = crate::config::projects_dir().join(cwd_real.replace('/', "-"));
     let session_file = project_dir.join(format!("{}.jsonl", session_id));
     // 会话身份参数三态:已落盘 → resume 自己;分叉意图且源已落盘 → CLI 原生 fork(resume 源 +
@@ -501,8 +496,8 @@ fn open_session(
     // Windows 进程树由 taskkill /T 按父子关系回收，无需进程组；只抑制控制台闪窗
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
+        use crate::proc_ext::HideConsole;
+        command.hide_console();
     }
     if let Some(inj) = &channel_injection {
         for key in &inj.clear_env {
