@@ -6,7 +6,7 @@ import { useProjects } from '@/composables/useProjects'
 import { useWorkbench, type WorkbenchColumn } from '@/composables/useWorkbench'
 import { useSessionStream } from '@/composables/useStreaming'
 import { useSessionStatus } from '@/composables/useSessionStatus'
-import { useSessionSettings } from '@/composables/useSessionSettings'
+import { useSessionSettings, inheritRunSettings } from '@/composables/useSessionSettings'
 import { useRunConfig } from '@/composables/useRunConfig'
 import { refreshChannels } from '@/composables/useChannels'
 import { useConfirm } from '@/composables/useConfirm'
@@ -112,6 +112,7 @@ function onFork() {
   // 懒分叉:只登记意图,落盘由首条消息时 CLI 原生 --fork-session 完成
   const newSessionId = crypto.randomUUID()
   registerFork(newSessionId, props.column.sessionId, session.cwd)
+  inheritRunSettings(props.column.sessionId, newSessionId)
   openSession(newSessionId)
   notifyTransient(t('workbench.column.forkCreated'))
 }
@@ -120,7 +121,9 @@ function onNewSession() {
   const session = projects.value.flatMap(p => p.sessions).find(s => s.id === props.column.sessionId)
   const cwd = session?.cwd || draftCwd(props.column.sessionId)
   if (!cwd) return
-  createDraftSession(cwd)
+  const newSessionId = createDraftSession(cwd)
+  // 同项目新建延续当前会话的模型选择(渠道/模型/effort/顾问)
+  inheritRunSettings(props.column.sessionId, newSessionId)
 }
 
 function onCollapse() {

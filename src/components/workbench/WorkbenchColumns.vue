@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDroppable } from '@dnd-kit/vue'
 import { useWorkbench, setRightZoneWidth } from '@/composables/useWorkbench'
+import { inheritRunSettings } from '@/composables/useSessionSettings'
 import { useProjects } from '@/composables/useProjects'
 import { useNotifications } from '@/composables/useNotifications'
 import { useHorizontalWheelScroll } from '@/composables/useHorizontalWheelScroll'
@@ -42,6 +43,7 @@ function onStartRace(sessionId: string) {
   // 无条件登记分叉意图:源有无历史由 Rust 端按源 jsonl 真值判决(未落盘则退化新建)。
   // 前端 drafts 的收割是异步滞后的,不能当"源无历史"的判据
   registerFork(newSessionId, sessionId, cwd)
+  inheritRunSettings(sessionId, newSessionId)
   createRaceTab(sessionId, cwd, newSessionId)
 }
 

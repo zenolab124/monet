@@ -171,6 +171,26 @@ export function readStoredChannelId(sid: string): string | null {
   return loadFromStorage(sid).channelId
 }
 
+/**
+ * 新会话继承源会话的模型选择(渠道/模型/努力等级/顾问)——列头加号新建与各分叉
+ * 入口调用,延续「当前在用什么模型」的直觉。渠道必须随模型走:渠道语境外的
+ * 模型 ID 可能无效(官方 alias vs 第三方映射)。工作方式类设置(chrome/extraArgs/
+ * permissionMode)与渠道切换横线记账(channelMarks)不继承,新会话从默认开始
+ */
+export function inheritRunSettings(fromSid: string, toSid: string): void {
+  const src = loadFromStorage(fromSid)
+  // 源全默认:不写冗余存储条目
+  if (src.modelId === null && src.effort === null && src.channelId === null && !src.advisor) return
+  saveToStorage(toSid, {
+    ...structuredClone(DEFAULT_SETTINGS),
+    permissionMode: getDefaultPermissionMode(),
+    modelId: src.modelId,
+    effort: src.effort,
+    channelId: src.channelId,
+    advisor: src.advisor,
+  })
+}
+
 export interface UseSessionSettingsReturn {
   /** 当前会话的设置(只读 computed) */
   settings: ComputedRef<SessionSettings>

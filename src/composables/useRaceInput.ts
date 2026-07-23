@@ -1,6 +1,7 @@
 import { ref, computed, type Ref } from 'vue'
 import type { WorkbenchTab } from './useWorkbench'
 import { useWorkbench } from './useWorkbench'
+import { inheritRunSettings } from './useSessionSettings'
 import { useStreaming, getStream } from './useStreaming'
 import { useImageInput } from './useImageInput'
 import { refreshChannels } from './useChannels'
@@ -88,6 +89,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
     const newSessionId = crypto.randomUUID()
     // 无条件登记分叉意图:源有无历史由 Rust 端按源 jsonl 真值判决(未落盘则退化新建)
     registerFork(newSessionId, sourceLane.sessionId, race.cwd)
+    inheritRunSettings(sourceLane.sessionId, newSessionId)
     addRaceLane(tab.value.id, newSessionId)
   }
 
