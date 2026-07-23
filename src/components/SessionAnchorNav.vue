@@ -9,6 +9,9 @@ export interface AnchorItem {
 const props = defineProps<{
   anchors: AnchorItem[]
   scrollContainer: HTMLElement | undefined
+  /** 虚拟化感知回调:目标可能不在虚拟窗口内,先由父组件用 virtualizer 滚过去,再 rAF 精调。
+   *  未传时按原路径直接找 DOM(小会话无虚拟化时行为不变) */
+  onScrollToIndex?: (index: number) => void
 }>()
 
 const activeIndex = ref(-1)
@@ -81,12 +84,21 @@ watch(() => [props.anchors, props.scrollContainer] as const, () => {
 onUnmounted(() => observer?.disconnect())
 
 function scrollTo(anchor: AnchorItem) {
-  const el = resolveEl(anchor.index)
-  if (!el || !props.scrollContainer) return
-  props.scrollContainer.scrollTo({
-    top: el.offsetTop,
-    behavior: 'smooth',
-  })
+  if (!props.scrollContainer) return
+  // 三层收敛:先给虚拟化父组件滚过去(如果传了回调),再 rAF×2 精调 offsetTop
+  props.onScrollToIndex?.(anchor.index)
+  const smooth = () => {
+    const el = resolveEl(anchor.index)
+    if (!el || !props.scrollContainer) return
+    props.scrollContainer.scrollTo({ top: el.offsetTop, behavior: 'smooth' })
+  }
+  const immediate = resolveEl(anchor.index)
+  if (immediate && !props.onScrollToIndex) {
+    // 未传回调路径:直接同步滚(行为等价原实现)
+    smooth()
+    return
+  }
+  requestAnimationFrame(() => requestAnimationFrame(smooth))
 }
 
 const hoveredIndex = ref(-1)

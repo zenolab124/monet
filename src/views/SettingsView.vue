@@ -26,6 +26,7 @@ import SystemSessionViewer from '@/components/SystemSessionViewer.vue'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useZoom } from '@/composables/useZoom'
 import { useHtmlVisual } from '@/features'
+import { useVirtualizationSettings } from '@/composables/useVirtualizationSettings'
 import { useUpdater } from '@/composables/useUpdater'
 import { MODELS } from '@/utils/modelContext'
 
@@ -50,6 +51,7 @@ const {
 const { minColumnWidth, setMinColumnWidth } = useWorkbench()
 const { zoomLevel, setZoom, MIN_ZOOM, MAX_ZOOM, STEP } = useZoom()
 const { enabled: htmlVisualEnabled } = useHtmlVisual()
+const { threshold: virtualizationThreshold } = useVirtualizationSettings()
 const { status: updateStatus, newVersion: updateVersion, errorMessage: updateError, downloadProgress, checkForUpdate, downloadAndInstall } = useUpdater()
 
 // MCP Server 注册
@@ -1065,6 +1067,22 @@ function onSaved() {
           <p class="text-xs text-muted-foreground mb-3 leading-relaxed">
             {{ $t('settings.labDesc') }}
           </p>
+          <!-- 消息虚拟化阈值 -->
+          <div class="mcp-card mb-3">
+            <div class="flex items-center gap-2">
+              <span class="i-carbon-layers w-3.5 h-3.5 text-muted-foreground" />
+              <span class="text-[11.5px] font-medium">{{ $t('settings.virtualizationThreshold') }}</span>
+              <input
+                type="number"
+                min="0"
+                class="ml-auto w-16 text-[11px] px-2 py-0.5 rounded border border-border bg-transparent text-right tabular-nums"
+                v-model.number="virtualizationThreshold"
+              />
+            </div>
+            <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">
+              {{ $t('settings.virtualizationThresholdDesc') }}
+            </p>
+          </div>
           <div class="iframe-zone">
             <span class="iframe-badge">IFRAME</span>
             <AgentIframeDemo />

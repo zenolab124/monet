@@ -739,6 +739,8 @@
     "htmlVisual": "Rich Text Sessions",
     "htmlVisualDesc": "Let AI use richer formatting in workbench sessions: side-by-side comparison cards, grouped info panels, collapsible details, and more. Injects a prompt to guide AI formatting; only affects sessions started from Monet.",
     "htmlVisualBanner": "Rich Text Sessions enabled",
+    "virtualizationThreshold": "Message Virtualization Threshold",
+    "virtualizationThresholdDesc": "Enable virtual scrolling only when history group count exceeds this value (last group always exempt). 0 = always on (recommended). Larger values let you temporarily disable it for performance comparison. Takes effect immediately.",
     "diagDesc": "Scan all session files and check record type and tool parsing coverage.",
     "channelForm": {
       "newTitle": "New Channel",

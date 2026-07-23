@@ -739,6 +739,8 @@
     "htmlVisual": "富文本会话增强",
     "htmlVisualDesc": "让 AI 在工作台会话中使用更丰富的排版：横向对比卡片、信息分组、可折叠细节等。开启后会自动向会话注入一段提示词引导 AI 排版，仅影响 Monet 工作台启动的会话。",
     "htmlVisualBanner": "富文本会话增强已启用",
+    "virtualizationThreshold": "消息虚拟化阈值",
+    "virtualizationThresholdDesc": "会话中历史消息组数超过此值才启用虚拟滚动（末组始终豁免）。0 = 始终启用（推荐），大值可临时禁用以对比性能。改动即时生效。",
     "diagDesc": "扫描所有会话文件，检查记录类型和工具的解析覆盖率。",
     "channelForm": {
       "newTitle": "新增渠道",

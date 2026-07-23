@@ -17,6 +17,9 @@ importers:
       '@shikijs/markdown-it':
         specifier: ^4.0.2
         version: 4.0.2
+      '@tanstack/vue-virtual':
+        specifier: ^3.13.34
+        version: 3.13.34(vue@3.5.32(typescript@6.0.2))
       '@tauri-apps/api':
         specifier: ^2.10.1
         version: 2.10.1
@@ -474,6 +477,14 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@tanstack/virtual-core@3.17.6':
+    resolution: {integrity: sha512-h0/Ebo18CkOrChlQIhNtQkM5ySUnh/GumQ/D1st3hG2HWUPEF+ILUc2k29UtivCi/9G7w7G3/f7Xyd5cCFbKBw==}
+
+  '@tanstack/vue-virtual@3.13.34':
+    resolution: {integrity: sha512-CBqbCcnVsKpl9IJ7frPnbBmAqmc7JttSySg04kgLYJ4yYuC8JsAbtUHP0yLtWGLyByjihN3SwaDCgHQ+Z4iPoA==}
+    peerDependencies:
+      vue: ^2.7.0 || ^3.0.0
 
   '@tauri-apps/api@2.10.1':
     resolution: {integrity: sha512-hKL/jWf293UDSUN09rR69hrToyIXBb8CjGaWC7gfinvnQrBVvnLr08FeFi38gxtugAVyVcTa5/FD/Xnkb1siBw==}
@@ -1642,6 +1653,13 @@ snapshots:
   '@shikijs/vscode-textmate@10.0.2': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@tanstack/virtual-core@3.17.6': {}
+
+  '@tanstack/vue-virtual@3.13.34(vue@3.5.32(typescript@6.0.2))':
+    dependencies:
+      '@tanstack/virtual-core': 3.17.6
+      vue: 3.5.32(typescript@6.0.2)
 
   '@tauri-apps/api@2.10.1': {}
 

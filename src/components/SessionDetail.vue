@@ -41,6 +41,7 @@ import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
 import MessageBlock from './MessageBlock.vue'
+import MessageGroup from './MessageGroup.vue'
 import SystemEventRow from './SystemEventRow.vue'
 import SessionTopBar from './topbar/SessionTopBar.vue'
 import SlashCommandPanel from './SlashCommandPanel.vue'
@@ -68,6 +69,8 @@ import { renderMarkdownDeferred } from '@/composables/useMarkdown'
 import { persistKeyOf } from '@/lib/stream-markdown/constants'
 import { useFileLedger } from '@/composables/useFileLedger'
 import FileLedgerPanel from './FileLedgerPanel.vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
+import { useVirtualizationSettings } from '@/composables/useVirtualizationSettings'
 
 /**
  * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
@@ -908,6 +911,36 @@ const messageGroups = computed(() => {
   return groups.map(g => ({ ...g, responses: mergeResponses(g.responses) }))
 })
 
+// ---- 消息组虚拟化(Task 2 主体) ----
+// 末组豁免:虚拟化只管 messageGroups[0..n-2],末组(messageGroups[n-1])独立铺——
+// 保留 anchorRO/contentRO/追随滚动/pinLastGroupBeforeSwap 全套现有语义;
+// 用户视线主要在末组,末组永在视口内,豁免代价接近零。
+const renderGroups = computed(() => {
+  const gs = messageGroups.value
+  return gs.length > 1 ? gs.slice(0, -1) : []
+})
+const lastGroup = computed(() => {
+  const gs = messageGroups.value
+  return gs.length > 0 ? gs[gs.length - 1] : null
+})
+const lastGroupIndex = computed(() => messageGroups.value.length - 1)
+
+// 虚拟化启用阈值:useVirtualizationSettings 共享 ref(SettingsView 里可调)
+const { threshold: virtualizationThreshold } = useVirtualizationSettings()
+const shouldVirtualize = computed(() => renderGroups.value.length > virtualizationThreshold.value)
+
+// tanstack-vue-virtual:count/estimateSize 走 getter 保持 reactive。
+// estimateSize 首帧粗估 200px/组,measureElement 挂载后自动校正真高;
+// overscan=5 覆盖上下 5 组,兼顾滚动流畅度与 DOM 节点数
+const messageVirtualizer = useVirtualizer(
+  computed(() => ({
+    count: renderGroups.value.length,
+    getScrollElement: () => scrollContainer.value ?? null,
+    estimateSize: () => 200,
+    overscan: 5,
+  })),
+)
+
 // ---- 滚动锚定补偿（WebKit 无原生 scroll anchoring）----
 // 消息组解冻（content-visibility 估算高度→真实高度）与图片按需加载都会改变
 // 视口上方内容的总高度；Chrome 有 scroll anchoring 自动补偿，WebKit 没有——
@@ -1549,13 +1582,48 @@ function onScroll() {
   })
 }
 
+/** SessionAnchorNav 点击时的虚拟化前置:让目标组先进虚拟窗口渲染出来,再由 SessionAnchorNav 的 rAF 精调 offsetTop */
+function onAnchorScrollToIndex(index: number) {
+  if (shouldVirtualize.value && index < renderGroups.value.length) {
+    messageVirtualizer.value.scrollToIndex(index, { align: 'start' })
+  }
+}
+
 function locateToolUse(toolUseId: string) {
-  const el = scrollContainer.value?.querySelector<HTMLElement>(`[data-tool-use-id="${CSS.escape(toolUseId)}"]`)
-  if (!el) return
+  // 三层收敛(虚拟化后 tool_use 目标可能不在 DOM 里,必须先 scrollToIndex 让它渲染出来):
+  // 1. 反查 tool_use 所在的组 gi,虚拟窗口内 scrollToIndex 到大致偏移
+  // 2. rAF×2 后精调 scrollIntoView 到 tool_use 元素(第一帧让 virtualizer 布局落定,第二帧让 measureElement 校准真高)
+  // 兼顾旧行为:目标已在 DOM(如末组或已渲染的窗口内)则同帧直接 scrollIntoView,避免多余延迟
   followStreaming.value = false
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  el.classList.add('ring-2', 'ring-primary/60')
-  setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 1500)
+  const gi = messageGroups.value.findIndex(g =>
+    g.responses.some(r => {
+      const content = (r as any).message?.content
+      return Array.isArray(content) && content.some((b: any) => b?.type === 'tool_use' && b?.id === toolUseId)
+    }),
+  )
+  const escaped = CSS.escape(toolUseId)
+  const highlight = (el: HTMLElement) => {
+    el.classList.add('ring-2', 'ring-primary/60')
+    setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 1500)
+  }
+  const tryImmediate = scrollContainer.value?.querySelector<HTMLElement>(`[data-tool-use-id="${escaped}"]`)
+  if (tryImmediate) {
+    tryImmediate.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    highlight(tryImmediate)
+    return
+  }
+  if (gi < 0) return
+  // Step 1: 目标不在 DOM → 用 virtualizer 滚到目标组附近
+  if (gi < renderGroups.value.length) {
+    messageVirtualizer.value.scrollToIndex(gi, { align: 'center' })
+  }
+  // Step 2: rAF×2 后精调
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const el = scrollContainer.value?.querySelector<HTMLElement>(`[data-tool-use-id="${escaped}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    highlight(el)
+  }))
 }
 
 function resumeFollow() {
@@ -1998,12 +2066,18 @@ function consumeScrollTarget(): boolean {
   if (gi < 0) return false
   // 定位后禁跟随:外部跟随 reload 的 scrollToBottom 不得抢走落点
   followStreaming.value = false
+  // 三层收敛:虚拟窗口内 scrollToIndex 到大致偏移 + rAF×2 精调 scrollIntoView
+  if (gi < renderGroups.value.length) {
+    messageVirtualizer.value.scrollToIndex(gi, { align: 'start' })
+  }
   nextTick(() => {
-    const el = scrollContainer.value?.querySelector<HTMLElement>(`[data-anchor-index="${gi}"]`)
-    if (!el) return
-    el.scrollIntoView({ block: 'start' })
-    el.classList.add('search-hit-flash')
-    setTimeout(() => el.classList.remove('search-hit-flash'), 1600)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = scrollContainer.value?.querySelector<HTMLElement>(`[data-anchor-index="${gi}"]`)
+      if (!el) return
+      el.scrollIntoView({ block: 'start' })
+      el.classList.add('search-hit-flash')
+      setTimeout(() => el.classList.remove('search-hit-flash'), 1600)
+    }))
   })
   return true
 }
@@ -2157,6 +2231,7 @@ async function onReload() {
     <SessionAnchorNav
       :anchors="anchorItems"
       :scroll-container="scrollContainer"
+      :on-scroll-to-index="onAnchorScrollToIndex"
     />
     <!-- 分叉草稿悬浮标注:垫底渲染期常显(不随滚动消失,原横线置于消息流顶部会被
          默认滚底藏走);发出首条消息即隐,落盘收割后 forkBadgeSource 自然为 null -->
@@ -2211,125 +2286,87 @@ async function onReload() {
           <span>{{ channelMarkLabel(m) }}</span>
           <div class="flex-1 h-px bg-border" />
         </div>
-        <!-- 按轮次分组:每组包含一条用户消息 + 后续回复,sticky 限制在组内。
-             末组豁免 cv:落账时新组若按 contain-intrinsic-size 300px 估高参与首帧布局,
-             scrollHeight 瞬时净缩会让浏览器把 scrollTop 钳离底部(视口跳中部);
-             底部组永在视口内,cv 对它零收益 -->
+        <!-- 按轮次分组,虚拟化 + 末组豁免:
+             - 非末组(0..n-2)进虚拟窗口,tanstack-vue-virtual 按 estimateSize 粗估、measureElement 校正真高;
+             - 末组独立铺,保留 anchorRO/contentRO/追随滚动/pinLastGroupBeforeSwap 全套现有语义。
+             - shouldVirtualize=false 时全部走"末组独立铺"路径,把 renderGroups 当作"上方历史组"照铺(渲染上等价原全铺) -->
         <div
-          v-for="(group, gi) in messageGroups"
-          :key="group.user?.uuid || `group-${gi}`"
-          :data-anchor-index="gi"
-          class="space-y-4"
-          :class="gi < messageGroups.length - 1 ? 'msg-group-cv' : ''"
+          v-if="shouldVirtualize"
+          :style="{ height: messageVirtualizer.getTotalSize() + 'px', position: 'relative', width: '100%' }"
         >
-          <!-- 跨天分隔:这轮起进入新的一天(首组标会话起始日) -->
-          <div v-if="dayDividers[gi]" class="channel-mark">
-            <div class="flex-1 h-px bg-border" />
-            <span class="i-carbon-calendar w-3 h-3" />
-            <span>{{ dayDividers[gi] }}</span>
-            <div class="flex-1 h-px bg-border" />
-          </div>
-          <!-- 用户消息:有 AI 回复时吸顶,无回复的短轮次不启用(减少 sticky 元素数量) -->
-          <!-- /model 切换成功(stdout 事实源):渲染成与渠道切换同款的配置分界横线 -->
           <div
-            v-if="group.user && group.user.type === 'user' && modelSwitchName(group.user)"
-            class="channel-mark"
+            v-for="vitem in messageVirtualizer.getVirtualItems()"
+            :key="renderGroups[vitem.index].user?.uuid || renderGroups[vitem.index].responses[0]?.uuid || `group-${vitem.index}`"
+            :ref="(el) => el && messageVirtualizer.measureElement(el as Element)"
+            :data-anchor-index="vitem.index"
+            :data-index="vitem.index"
+            :style="{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vitem.start}px)` }"
+            class="space-y-4"
           >
-            <div class="flex-1 h-px bg-border" />
-            <span class="i-carbon-model-alt w-3 h-3" />
-            <span>{{ $t('session.modelSwitchMark', { name: modelSwitchName(group.user) }) }}</span>
-            <div class="flex-1 h-px bg-border" />
-          </div>
-          <!-- /model 命令记录本身:静默(事件由上面的 stdout 横线承载;取消选择时无 stdout,不留痕) -->
-          <template v-else-if="group.user && group.user.type === 'user' && isModelCommandRecord(group.user)" />
-          <!-- 纯系统注入(无真实用户输入):降级为系统注解样式 -->
-          <div v-else-if="group.user && group.user.type === 'user' && isSystemOnlyUser(group.user)" class="pl-3">
-            <MessageBlock
-              v-for="(block, bi) in contentBlocks(group.user as any)"
-              :key="bi"
-              :block="block"
-              :record-uuid="group.user.uuid"
+            <MessageGroup
+              :group="renderGroups[vitem.index]"
+              :gi="vitem.index"
+              :day-label="dayDividers[vitem.index]"
+              :time-label="groupTimeLabels[vitem.index]"
+              :footer-at="groupFooterAt[vitem.index]"
+              :footer="groupFooters[vitem.index]"
+              :channel-marks-by-uuid="channelMarksByUuid"
+              :model-switch-name="modelSwitchName"
+              :is-model-command-record="isModelCommandRecord"
+              :is-system-only-user="isSystemOnlyUser"
+              :user-has-visible-content="userHasVisibleContent"
+              :content-blocks="contentBlocks"
+              :channel-mark-label="channelMarkLabel"
             />
           </div>
-          <!-- 正常用户消息(全空白内容不渲染空卡壳) -->
-          <div v-else-if="group.user && group.user.type === 'user' && userHasVisibleContent(group.user)" :class="group.responses.some(r => r.type === 'assistant') ? 'user-msg-sticky' : ''">
-            <div class="flex gap-3">
-              <div class="w-0.5 shrink-0 rounded-full bg-primary/60" />
-              <div class="min-w-0 flex-1 bg-card border border-border rounded px-3 py-2 shadow-paper">
-                <div class="text-xs font-medium mb-1 text-primary flex items-baseline gap-2">
-                  <span>{{ $t('session.you') }}</span>
-                  <span
-                    v-if="groupTimeLabels[gi]"
-                    class="text-muted-foreground/60 font-normal tabular-nums"
-                  >{{ groupTimeLabels[gi] }}</span>
-                </div>
-                <MsgClamp>
-                  <UserMsgContent :blocks="contentBlocks(group.user as any)" :record-uuid="group.user.uuid" />
-                </MsgClamp>
-              </div>
-            </div>
-          </div>
-          <!-- 渠道切换横线:用户消息锚点 -->
+        </div>
+        <!-- shouldVirtualize=false 时:renderGroups 上方历史组按原顺序全铺(渲染等价) -->
+        <template v-else>
           <div
-            v-for="(m, j) in (group.user?.uuid ? channelMarksByUuid.get(group.user.uuid) ?? [] : [])"
-            :key="`channel-mark-${group.user?.uuid}-${j}`"
-            class="channel-mark"
+            v-for="(group, gi) in renderGroups"
+            :key="group.user?.uuid || group.responses[0]?.uuid || `group-${gi}`"
+            :data-anchor-index="gi"
+            class="space-y-4"
           >
-            <div class="flex-1 h-px bg-border" />
-            <span class="i-carbon-cloud w-3 h-3" />
-            <span>{{ channelMarkLabel(m) }}</span>
-            <div class="flex-1 h-px bg-border" />
+            <MessageGroup
+              :group="group"
+              :gi="gi"
+              :day-label="dayDividers[gi]"
+              :time-label="groupTimeLabels[gi]"
+              :footer-at="groupFooterAt[gi]"
+              :footer="groupFooters[gi]"
+              :channel-marks-by-uuid="channelMarksByUuid"
+              :model-switch-name="modelSwitchName"
+              :is-model-command-record="isModelCommandRecord"
+              :is-system-only-user="isSystemOnlyUser"
+              :user-has-visible-content="userHasVisibleContent"
+              :content-blocks="contentBlocks"
+              :channel-mark-label="channelMarkLabel"
+            />
           </div>
-          <!-- 回复(AI + system) -->
-          <template v-for="(resp, ri) in group.responses" :key="resp.uuid || resp">
-            <SystemEventRow v-if="resp.type === 'system'" :record="resp" />
-            <div v-else class="flex gap-3 msg-block">
-              <div class="w-0.5 shrink-0 rounded-full bg-claude/60" />
-              <div class="min-w-0 flex-1">
-                <div class="text-xs font-medium mb-1 text-claude flex items-center gap-1.5 flex-wrap">
-                  <span>
-                    {{ $t('session.claude') }}
-                    <span v-if="(resp as any).message?.model" class="text-muted-foreground font-normal">
-                      ({{ shortModel((resp as any).message.model) }})
-                    </span>
-                  </span>
-                  <span v-if="(resp as any).message?.usage" class="text-muted-foreground/70 font-normal tabular-nums">
-                    {{ formatTokens((resp as any).message.usage.input_tokens) }} in
-                    · {{ formatTokens((resp as any).message.usage.cache_read_input_tokens) }} cache
-                    · {{ formatTokens((resp as any).message.usage.cache_creation_input_tokens) }} new
-                    · {{ formatTokens((resp as any).message.usage.output_tokens) }} out
-                  </span>
-                </div>
-                <div>
-                  <MessageBlock
-                    v-for="(block, bi) in contentBlocks(resp as any)"
-                    :key="bi"
-                    :block="block"
-                    :record-uuid="(resp as any).uuid"
-                  />
-                </div>
-                <!-- 长轮次组末统计(全轮 usage 总和+完成时间):挂在最后一条有效 assistant 块内,与回复共用竖线 -->
-                <div
-                  v-if="ri === groupFooterAt[gi] && groupFooters[gi]"
-                  class="mt-2 text-[11px] text-muted-foreground/70 tabular-nums w-fit"
-                  v-tooltip="groupFooters[gi]?.doneFull"
-                >
-                  {{ groupFooters[gi]?.text }}
-                </div>
-              </div>
-            </div>
-            <!-- 渠道切换横线:回复消息锚点 -->
-            <div
-              v-for="(m, j) in (resp.uuid ? channelMarksByUuid.get(resp.uuid) ?? [] : [])"
-              :key="`channel-mark-${resp.uuid}-${j}`"
-              class="channel-mark"
-            >
-              <div class="flex-1 h-px bg-border" />
-              <span class="i-carbon-cloud w-3 h-3" />
-              <span>{{ channelMarkLabel(m) }}</span>
-              <div class="flex-1 h-px bg-border" />
-            </div>
-          </template>
+        </template>
+        <!-- 末组独立铺(始终豁免虚拟化) -->
+        <div
+          v-if="lastGroup"
+          :key="lastGroup.user?.uuid || lastGroup.responses[0]?.uuid || `group-${lastGroupIndex}`"
+          :data-anchor-index="lastGroupIndex"
+          class="space-y-4"
+        >
+          <MessageGroup
+            :group="lastGroup"
+            :gi="lastGroupIndex"
+            :day-label="dayDividers[lastGroupIndex]"
+            :time-label="groupTimeLabels[lastGroupIndex]"
+            :footer-at="groupFooterAt[lastGroupIndex]"
+            :footer="groupFooters[lastGroupIndex]"
+            :channel-marks-by-uuid="channelMarksByUuid"
+            :model-switch-name="modelSwitchName"
+            :is-model-command-record="isModelCommandRecord"
+            :is-system-only-user="isSystemOnlyUser"
+            :user-has-visible-content="userHasVisibleContent"
+            :content-blocks="contentBlocks"
+            :channel-mark-label="channelMarkLabel"
+          />
         </div>
         <!-- 锚点失效的切换横线兜底:末尾按序渲染,不静默消失 -->
         <div
@@ -2386,7 +2423,7 @@ async function onReload() {
             <TransitionGroup name="block-fade" tag="div" appear>
               <MessageBlock
                 v-for="(block, i) in filterConsumedResults(turn.content)"
-                :key="i"
+                :key="`${turn.messageId}-${i}-${block.type}`"
                 :block="block"
                 :streaming="stream.streaming || !!turn.live"
               />
@@ -2630,6 +2667,7 @@ async function onReload() {
         :modified="ledgerModified"
         :read-only="ledgerReadOnly"
         :cwd="currentSession?.summary.cwd ?? null"
+        :session-id="currentSession?.summary.id ?? null"
         @close="ledgerPanelOpen = false"
         @locate="locateToolUse"
       />
