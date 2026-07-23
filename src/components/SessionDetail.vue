@@ -36,6 +36,7 @@ import { useWorkshop } from '@/composables/useWorkshop'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 import { shortId, shortModel, formatTokens } from '@/types'
 import { inferModel } from '@/utils/modelContext'
+import { cwdToProjectId, samePath } from '@/utils/path'
 import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 import { filterConsumedResults, type ToolResultData } from '@/utils/toolPair'
 import type { SessionRecord, SessionSummary, ContentBlock } from '@/types'
@@ -600,9 +601,9 @@ const currentSession = computed<{ summary: SessionSummary; projectId: string } |
     const s = p.sessions.find(s => s.id === sid)
     if (s) return { summary: s, projectId: p.id }
   }
-  // 工作台草稿:磁盘尚无 jsonl,合成最小 summary;projectId 按目录编码规则(/ → -)推导
+  // 工作台草稿:磁盘尚无 jsonl,合成最小 summary;projectId 按 CLI 同款编码规则推导
   const cwd = draftCwd(sid)
-  if (cwd) return { summary: draftSummary(sid, cwd), projectId: cwd.replace(/\//g, '-') }
+  if (cwd) return { summary: draftSummary(sid, cwd), projectId: cwdToProjectId(cwd) }
   return null
 })
 
@@ -1083,7 +1084,7 @@ function contentBlocks(record: Extract<SessionRecord, { type: 'user' | 'assistan
     const skillMatch = text.match(/^Base directory for this skill:\s*(\S+)/)
     if (skillMatch) {
       const skillPath = skillMatch[1]
-      const skillName = skillPath.split('/').pop() || skillPath
+      const skillName = skillPath.split(/[/\\]/).pop() || skillPath
       return [{ type: 'skill_prompt', text: text, name: skillName } as any]
     }
     if (/<(?:system-reminder|ide_opened_file|ide_selection|task-notification|user-prompt-submit-hook|persisted-output|tool_use_error|command-name|command-args|command-message|local-command-caveat|local-command-stdout|loop-pause)/.test(text)) {
@@ -1321,8 +1322,9 @@ function handleChangeDirectory(arg: string) {
     slashError.value = t('session.slashOpenInWorkbench')
     return
   }
-  // 严格匹配 display_path(已解码的项目路径)
-  const target = projects.value.find(p => p.display_path === arg)
+  // 匹配 display_path:分隔符归一 + Windows 形态盘符大小写不敏感,
+  // 免得用户必须手输与磁盘完全一致的反斜杠形态
+  const target = projects.value.find(p => samePath(p.display_path, arg))
   if (!target) {
     slashError.value = t('session.slashPathNotFound')
     return

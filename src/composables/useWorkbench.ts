@@ -145,6 +145,14 @@ function saveState() {
   } catch (_) {}
 }
 
+/** 修复历史版本落盘的畸形解码 cwd（`/X//rest` → `X:\rest`）：
+ *  旧版把 Windows 编码目录名按 Unix 规则解码后持久化,存量草稿/赛道不清洗则
+ *  发送时 spawn 仍报「工作目录不存在」,看似未修复 */
+function sanitizeCwd(cwd: string): string {
+  const m = cwd.match(/^\/([A-Za-z])\/\/(.*)$/)
+  return m ? `${m[1]}:\\${m[2].replace(/\//g, '\\')}` : cwd
+}
+
 /** 严格校验反序列化结果,任一处不符即整体作废 */
 function loadState(): WorkbenchState | null {
   try {
@@ -171,6 +179,7 @@ function loadState(): WorkbenchState | null {
       if (t.race !== undefined) {
         if (!t.race || typeof t.race !== 'object') return null
         if (typeof t.race.cwd !== 'string' || !t.race.cwd) return null
+        t.race.cwd = sanitizeCwd(t.race.cwd)
         if (!Array.isArray(t.race.lanes) || t.race.lanes.length === 0) return null
         for (const lane of t.race.lanes) {
           if (!lane || typeof lane.id !== 'string' || typeof lane.sessionId !== 'string') return null
@@ -185,7 +194,7 @@ function loadState(): WorkbenchState | null {
     const drafts: Record<string, string> = {}
     if (parsed.drafts && typeof parsed.drafts === 'object' && !Array.isArray(parsed.drafts)) {
       for (const [k, v] of Object.entries(parsed.drafts)) {
-        if (typeof v === 'string' && v) drafts[k] = v
+        if (typeof v === 'string' && v) drafts[k] = sanitizeCwd(v)
       }
     }
     // forkIntents 同为增量字段,同款宽松解析

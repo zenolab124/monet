@@ -200,6 +200,65 @@ fn estimate_cost(models: &[app_lib::usage_stats::ModelUsage]) -> f64 {
     (cost * 100.0).round() / 100.0
 }
 
+/// 项目榜显示名：优先采信目录下最新会话 JSONL 的 cwd（编码回目录名一致才认），
+/// 取其末段；无可采信会话时退回有损解码（含连字符的末段目录名会被错拆，仅兜底）
+fn project_display_name(dir: &std::path::Path, proj_name: &str) -> String {
+    if let Some(cwd) = trusted_project_cwd(dir, proj_name) {
+        if let Some(last) = cwd.rsplit(['/', '\\']).find(|s| !s.is_empty()) {
+            return last.to_string();
+        }
+    }
+    let decoded_path = if let Some(stripped) = proj_name.strip_prefix('-') {
+        stripped.replace('-', "/")
+    } else {
+        proj_name.replace('-', "/")
+    };
+    decoded_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(proj_name)
+        .to_string()
+}
+
+/// 从目录下最新的会话 JSONL 前几行提取 cwd，编码回去与目录名一致才采信
+/// （Windows 下 NTFS 大小写不敏感，忽略 ASCII 大小写差异）
+fn trusted_project_cwd(dir: &std::path::Path, proj_name: &str) -> Option<String> {
+    use std::io::BufRead;
+    let mut jsonls: Vec<(SystemTime, PathBuf)> = fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            let name = p.file_name()?.to_str()?;
+            if !name.ends_with(".jsonl") || name.starts_with("agent-") {
+                return None;
+            }
+            let mtime = e.metadata().ok()?.modified().ok()?;
+            Some((mtime, p))
+        })
+        .collect();
+    jsonls.sort_by_key(|(t, _)| std::cmp::Reverse(*t));
+
+    for (_, path) in jsonls.into_iter().take(3) {
+        let Ok(file) = fs::File::open(&path) else { continue };
+        for line in std::io::BufReader::new(file).lines().take(10).flatten() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+                let encoded = config::encode_project_dir(std::path::Path::new(cwd));
+                let matches = if cfg!(windows) {
+                    encoded.eq_ignore_ascii_case(proj_name)
+                } else {
+                    encoded == proj_name
+                };
+                if matches {
+                    return Some(cwd.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>) {
     let mut project_counts: HashMap<String, u32> = HashMap::new();
     let mut active_today = std::collections::HashSet::new();
@@ -216,19 +275,13 @@ fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>
         let proj_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
         // 内置 Agent 目录不进项目榜（collect_jsonl 只在递归下降时过滤，入口目录须在此拦截）
         if agent_dirs().contains(&proj_name) { continue; }
-        // 目录名编码规则：首个 `-` 是根 `/`，其余 `-` 是路径分隔符
-        let decoded_path = if let Some(stripped) = proj_name.strip_prefix('-') {
-            stripped.replace('-', "/")
-        } else {
-            proj_name.replace('-', "/")
-        };
-        let display = decoded_path.rsplit('/').next().unwrap_or(&proj_name);
+        let display = project_display_name(&path, &proj_name);
 
         let mut jsonls = Vec::new();
         collect_jsonl(&path, &mut jsonls);
         let count = jsonls.len() as u32;
         total_sessions += count;
-        *project_counts.entry(display.to_string()).or_default() += count;
+        *project_counts.entry(display).or_default() += count;
 
         for jf in &jsonls {
             if let Ok(meta) = fs::metadata(jf) {

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Project } from '../../types'
+import { fileName } from '@/utils/path'
 import DashboardSection from './DashboardSection.vue'
 
 const { t } = useI18n()
@@ -29,8 +30,7 @@ const rows = computed(() => {
 })
 
 function projectName(path: string): string {
-  const parts = path.split('/')
-  return parts[parts.length - 1] || path
+  return fileName(path)
 }
 
 function timeAgo(ts: number, now: number): string {

@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { formatBytes, formatTokens, tokenTotal, relativeTime } from '@/types'
+import { fileName, parentPath, abbreviateHome } from '@/utils/path'
 
 const { t } = useI18n()
 const {
@@ -19,15 +20,14 @@ function isSelected(id: string) {
 }
 
 function projectName(displayPath: string) {
-  const parts = displayPath.split('/')
-  return parts[parts.length - 1] || displayPath
+  return fileName(displayPath)
 }
 
 function projectPath(displayPath: string) {
-  const i = displayPath.lastIndexOf('/')
-  if (i <= 0) return ''
-  const raw = displayPath.slice(0, i).replace(/^\/Users\/[^/]+/, '~')
-  if (raw === '~' || raw.split('/').filter(Boolean).length < 2) return ''
+  const parent = parentPath(displayPath)
+  if (!parent) return ''
+  const raw = abbreviateHome(parent)
+  if (raw === '~' || raw.split(/[/\\]/).filter(Boolean).length < 2) return ''
   return raw
 }
 

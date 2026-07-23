@@ -372,7 +372,10 @@ fn open_session(
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| cwd.to_string());
-    let project_dir = crate::config::projects_dir().join(cwd_real.replace('/', "-"));
+    // 编码必须与 CLI 同规则(非字母数字一律 →'-')：仅替换 '/' 会漏掉 '.'/'_'
+    // 以及 Windows 的 ':'/'\\'，致 resume/fork 三态对着错误目录判定
+    let project_dir = crate::config::projects_dir()
+        .join(crate::config::encode_project_dir(std::path::Path::new(&cwd_real)));
     let session_file = project_dir.join(format!("{}.jsonl", session_id));
     // 会话身份参数三态:已落盘 → resume 自己;分叉意图且源已落盘 → CLI 原生 fork(resume 源 +
     // --fork-session + 指定新 ID,历史行 sessionId 由 CLI 重写,替代旧 fs::copy 仿造);

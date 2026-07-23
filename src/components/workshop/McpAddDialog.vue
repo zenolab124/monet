@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useProjects } from '@/composables/useProjects'
+import { fileName } from '@/utils/path'
 
 const { t } = useI18n()
 const { projects } = useProjects()
@@ -37,7 +38,7 @@ const envError = ref('')
 const projectOptions = computed(() =>
   projects.value.map(p => ({
     value: p.display_path,
-    label: p.display_path.split('/').filter(Boolean).pop() || p.display_path,
+    label: fileName(p.display_path) || p.display_path,
   })),
 )
 

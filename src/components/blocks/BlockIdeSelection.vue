@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { fileName as baseName } from '@/utils/path'
 
 const props = defineProps<{
   block: { type: 'ide_selection'; text: string; [key: string]: unknown }
@@ -11,7 +12,7 @@ const meta = computed(() => {
   const m = props.block.text.match(/selected the lines? (\d+)(?: to (\d+))? from (.+?):?\n/)
   if (!m) return { file: '', lineStart: '', lineEnd: '', content: props.block.text }
   const file = m[3].trim()
-  const fileName = file.split('/').pop() || file
+  const fileName = baseName(file)
   const content = props.block.text.slice(m.index! + m[0].length).replace(/\n*This may or may not be related to the current task\.\s*$/, '').trim()
   return {
     fileName,

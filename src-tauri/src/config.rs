@@ -155,10 +155,23 @@ pub fn agent_cwd() -> PathBuf {
 }
 
 /// Claude CLI 对 cwd 的 projects 目录编码：非字母数字字符一律替换为 `-`
-fn encode_project_dir(path: &std::path::Path) -> String {
-    path.to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+/// （CLI 实现为 `replace(/[^a-zA-Z0-9]/g, "-")`，正则无 `u` 标志、按 UTF-16 code unit
+/// 逐个替换：astral 字符（emoji 等代理对）产出 2 个 `-`，此处用 encode_utf16 对齐该语义；
+/// Windows 盘符 `C:\` 因此编码为 `C--`）。
+/// Windows canonicalize 会带 verbatim 前缀（`\\?\C:\...` 与 `\\?\UNC\server\...`），
+/// CLI 侧无此前缀，编码前剥离对齐（UNC 形态还原为 `\\server\...`）
+pub fn encode_project_dir(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    let s = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+    };
+    s.encode_utf16()
+        .map(|u| match u {
+            0x30..=0x39 | 0x41..=0x5A | 0x61..=0x7A => u as u8 as char,
+            _ => '-',
+        })
         .collect()
 }
 
@@ -192,4 +205,56 @@ pub fn atomic_write(path: &std::path::Path, content: &str) -> std::io::Result<()
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn encode_unix_path() {
+        // 非字母数字一律 → '-'：'/'、'.'、'_' 同待遇（对齐 CLI 规则）
+        assert_eq!(
+            encode_project_dir(Path::new("/Users/alice/my.app_v2")),
+            "-Users-alice-my-app-v2"
+        );
+    }
+
+    #[test]
+    fn encode_windows_drive_path() {
+        assert_eq!(
+            encode_project_dir(Path::new(r"C:\Users\alice\workspace\monet")),
+            "C--Users-alice-workspace-monet"
+        );
+    }
+
+    #[test]
+    fn encode_strips_verbatim_prefix() {
+        // canonicalize 在 Windows 产生 \\?\ 前缀，CLI 侧无此前缀
+        assert_eq!(
+            encode_project_dir(Path::new(r"\\?\C:\Users\alice")),
+            "C--Users-alice"
+        );
+    }
+
+    #[test]
+    fn encode_strips_unc_verbatim_prefix() {
+        // \\?\UNC\server\share 是 \\server\share 的 verbatim 形态，须还原后编码
+        assert_eq!(
+            encode_project_dir(Path::new(r"\\?\UNC\server\share\proj")),
+            "--server-share-proj"
+        );
+    }
+
+    #[test]
+    fn encode_astral_char_as_two_dashes() {
+        // CLI 正则无 u 标志、按 UTF-16 code unit 替换：代理对（emoji）产出 2 个 '-'
+        assert_eq!(
+            encode_project_dir(Path::new("/Users/alice/🚀proj")),
+            "-Users-alice---proj"
+        );
+        // BMP 内非 ASCII（中文）单 code unit，一比一
+        assert_eq!(encode_project_dir(Path::new("/tmp/项目")), "-tmp---");
+    }
 }

@@ -5,6 +5,7 @@ import { useSearch, type SearchHit } from '@/composables/useSearch'
 import { useAgentSearch } from '@/composables/useAgentSearch'
 import { useProjects } from '@/composables/useProjects'
 import { useUiState } from '@/composables/useUiState'
+import { fileName } from '@/utils/path'
 
 const { t } = useI18n()
 const {
@@ -39,7 +40,7 @@ watch(activeSection, async (s) => {
 const projectNames = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
   for (const p of projects.value) {
-    map[p.id] = p.display_path.split('/').filter(Boolean).pop() ?? p.id
+    map[p.id] = fileName(p.display_path) || p.id
   }
   return map
 })
