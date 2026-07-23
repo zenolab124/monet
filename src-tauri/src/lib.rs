@@ -8,8 +8,9 @@ pub mod config;
 mod commands;
 mod discovery;
 mod image_protocol;
-mod models;
+pub mod models;
 mod parser;
+pub mod pricing;
 mod permission;
 mod proc_scan;
 /// pub：schema-probe bin 复用扫描与 diff 核心

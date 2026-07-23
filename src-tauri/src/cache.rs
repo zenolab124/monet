@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::models::SessionSummary;
 use crate::parser;
 
-const CACHE_VERSION: u32 = 1;
+// v2: CachedContrib 从 tokens 总量改为四类分量（成本分价计算需要），旧缓存整体重扫
+const CACHE_VERSION: u32 = 2;
 
 // ── Disk format ──────────────────────────────────────────
 
@@ -49,7 +50,7 @@ pub struct CachedUsage {
 pub struct CachedContrib {
     pub date: String,
     pub model: Option<String>,
-    pub tokens: u64,
+    pub usage: crate::models::TokenUsage,
 }
 
 // ── In-memory state ──────────────────────────────────────

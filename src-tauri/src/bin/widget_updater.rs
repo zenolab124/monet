@@ -27,6 +27,8 @@ struct WidgetSnapshot {
     monthly_models: Vec<ModelStat>,
     // Cost
     estimated_cost_usd: f64,
+    /// 价目表匹配不到的模型 token 总量（Swift 端 Optional 消费，旧版本忽略即可）
+    unpriced_tokens: u64,
     // Weekly (last 7 days)
     weekly_tokens: Vec<DayTokens>,
     // Projects
@@ -180,24 +182,22 @@ fn compute_streak(daily: &[app_lib::usage_stats::DailyUsage]) -> (u32, u32, u32)
     (current, longest, active_days)
 }
 
-fn estimate_cost(models: &[app_lib::usage_stats::ModelUsage]) -> f64 {
+/// 按模型四类 token 分价计算月度成本。返回 (成本 USD, 未计价 token 数)——
+/// 价目表匹配不到的模型不套兜底价（第三方模型按官方价乱猜会差出数量级），
+/// 计 0 并如实上报未计价量
+fn estimate_cost(
+    pricing: &app_lib::pricing::PricingTable,
+    models: &[app_lib::usage_stats::RawModelUsage],
+) -> (f64, u64) {
     let mut cost = 0.0;
+    let mut unpriced: u64 = 0;
     for m in models {
-        // 加权混合价：约 80% input + 20% output
-        let blended_per_million = if m.model.contains("opus") {
-            15.0 * 0.8 + 75.0 * 0.2 // 27.0
-        } else if m.model.contains("sonnet") {
-            3.0 * 0.8 + 15.0 * 0.2 // 5.4
-        } else if m.model.contains("haiku") {
-            0.25 * 0.8 + 1.25 * 0.2 // 0.45
-        } else if m.model.contains("fable") {
-            15.0 * 0.8 + 75.0 * 0.2 // 27.0
-        } else {
-            5.0 * 0.8 + 25.0 * 0.2 // 9.0
-        };
-        cost += (m.total as f64 / 1_000_000.0) * blended_per_million;
+        match pricing.cost_usd(&m.model, &m.usage) {
+            Some(usd) => cost += usd,
+            None => unpriced += m.usage.total(),
+        }
     }
-    (cost * 100.0).round() / 100.0
+    ((cost * 100.0).round() / 100.0, unpriced)
 }
 
 fn collect_project_stats(start_ts: u64) -> (u32, Vec<ProjectStat>, u32, Vec<u32>) {
@@ -277,8 +277,8 @@ fn main() {
         .count() as u32;
 
     let (today_tokens, models, monthly_tokens, last_month_tokens, monthly_models,
-         estimated_cost, weekly_tokens, daily_heatmap, current_streak, longest_streak,
-         active_days, total_tokens) =
+         estimated_cost, unpriced_tokens, weekly_tokens, daily_heatmap, current_streak,
+         longest_streak, active_days, total_tokens) =
         if let Ok(stats) = app_lib::usage_stats::collect_usage_stats() {
             let now = Local::now();
             let today_date = now.date_naive();
@@ -322,7 +322,9 @@ fn main() {
                 count: 0,
                 tokens: m.total,
             }).collect();
-            let cost = estimate_cost(&stats.month.by_model);
+            // 计价用原始模型名桶（by_raw_model）：归一化名匹配不上价目表
+            let pricing = app_lib::pricing::load();
+            let (cost, unpriced) = estimate_cost(&pricing, &stats.month.by_raw_model);
             let models_list: Vec<String> = stats.month.by_model.iter().map(|m| m.model.clone()).collect();
 
             // Weekly (last 7 days)
@@ -360,9 +362,9 @@ fn main() {
             let (cs, ls, ad) = compute_streak(&stats.daily);
             let total_t: u64 = stats.daily.iter().map(|d| d.total).sum();
 
-            (tt, models_list, monthly_t, lmt, mm, cost, weekly, heatmap, cs, ls, ad, total_t)
+            (tt, models_list, monthly_t, lmt, mm, cost, unpriced, weekly, heatmap, cs, ls, ad, total_t)
         } else {
-            (0, Vec::new(), 0, 0, Vec::new(), 0.0, Vec::new(), Vec::new(), 0, 0, 0, 0)
+            (0, Vec::new(), 0, 0, Vec::new(), 0.0, 0, Vec::new(), Vec::new(), 0, 0, 0, 0)
         };
 
     let (active_projects, top_projects, total_sessions, hourly) = collect_project_stats(start_ts);
@@ -379,6 +381,7 @@ fn main() {
         last_month_tokens,
         monthly_models,
         estimated_cost_usd: estimated_cost,
+        unpriced_tokens,
         weekly_tokens,
         active_projects_today: active_projects,
         top_projects,

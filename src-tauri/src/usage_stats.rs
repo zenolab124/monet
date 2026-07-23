@@ -39,6 +39,10 @@ pub struct MonthUsage {
     pub total: u64,
     #[serde(rename = "byModel")]
     pub by_model: Vec<ModelUsage>,
+    /// 按原始模型名的四类分量，供成本分价计算——归一化名会丢失匹配价目表
+    /// 所需的原始信息（前缀/日期段），故独立成桶；前端不消费，不进 IPC
+    #[serde(skip)]
+    pub by_raw_model: Vec<RawModelUsage>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,12 +51,18 @@ pub struct ModelUsage {
     pub total: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RawModelUsage {
+    pub model: String,
+    pub usage: TokenUsage,
+}
+
 /// 单条 assistant 行的贡献；model 存原始串，归一化延后到聚合阶段
 /// （distinct 模型数有限，避免在 10 万级热路径上跑 regex）
 struct Contribution {
     date: NaiveDate,
     model: Option<String>,
-    tokens: u64,
+    usage: TokenUsage,
 }
 
 /// 文件局部聚合容器，rayon map-reduce 合并。
@@ -66,7 +76,10 @@ struct Buckets {
 impl Buckets {
     /// 已知边界：rayon reduce 的合并顺序非确定，跨文件同 id 而 usage 不一致时
     /// （resume/fork 谱系、resp_* 代理会话首行 usage=0 终行才有真值）「首次」不可复现。
-    /// Anthropic msg_* 行同 id 的 usage 逐字节相同，保留哪份结果一致，影响可忽略
+    /// Anthropic msg_* 行同 id 的 usage 逐字节相同，保留哪份结果一致，影响可忽略。
+    /// infer_cache_creation 是文件级的，混合渠道谱系（第三方文件触发推断、fork 后
+    /// 官方续写的文件不触发）会让同 id 两份 usage 的 creation/read 拆分不同——
+    /// 总量仍相同，成本估算在两次运行间有微小抖动，量级可忽略，接受
     fn merge(mut self, other: Buckets) -> Buckets {
         for (k, v) in other.by_id {
             self.by_id.entry(k).or_insert(v);
@@ -97,6 +110,8 @@ fn scan_file(path: &Path) -> Buckets {
     let Ok(file) = File::open(path) else { return out };
     let reader = BufReader::with_capacity(64 * 1024, file);
 
+    // 先按行序收集，EOF 后统一做缓存写推断再入桶（推断需要整个文件的全局判断）
+    let mut rows: Vec<(Option<String>, Contribution)> = Vec::new();
     for line in reader.lines() {
         let Ok(line) = line else { break };
         if !line.contains("\"assistant\"") || !line.contains("\"usage\"") {
@@ -120,12 +135,19 @@ fn scan_file(path: &Path) -> Buckets {
             continue;
         };
 
-        let contribution = Contribution {
-            date,
-            model: msg.model,
-            tokens: usage.total(),
-        };
-        match msg.id {
+        rows.push((
+            msg.id,
+            Contribution {
+                date,
+                model: msg.model,
+                usage,
+            },
+        ));
+    }
+
+    infer_cache_creation(&mut rows);
+    for (id, contribution) in rows {
+        match id {
             Some(id) => {
                 out.by_id.entry(id).or_insert(contribution);
             }
@@ -133,6 +155,34 @@ fn scan_file(path: &Path) -> Buckets {
         }
     }
     out
+}
+
+/// 第三方兼容层的已知缺口：部分渠道只上报 cache_read 不报 cache_creation，
+/// 缓存写入量恒 0 会让成本被系统性低估。仅当整个文件不含任何 creation 且出现过
+/// read 时启用推断：cache_read 水位单调上涨的部分视为本轮新写入的缓存（计 creation），
+/// 存量水位视为真实命中（计 read）。每行 token 总量保持不变，官方渠道会话零影响。
+///
+/// 推断假设「未上报的 creation 被渠道完全丢弃」。若渠道实际把未命中部分折进了
+/// input_tokens（OpenAI 兼容层常见），推断会对同批 token 二次计价（方向高估）；
+/// 反之会话中途缓存过期重建不产生水位增量（方向低估）。两者均为启发式固有误差，
+/// 相比不推断（creation 恒 0 的系统性低估）整体更接近真值。
+fn infer_cache_creation(rows: &mut [(Option<String>, Contribution)]) {
+    let has_creation = rows
+        .iter()
+        .any(|(_, c)| c.usage.cache_creation_input_tokens > 0);
+    let has_read = rows.iter().any(|(_, c)| c.usage.cache_read_input_tokens > 0);
+    if has_creation || !has_read {
+        return;
+    }
+    let mut max_read: u64 = 0;
+    for (_, c) in rows.iter_mut() {
+        let read = c.usage.cache_read_input_tokens;
+        if read > max_read {
+            c.usage.cache_creation_input_tokens = read - max_read;
+            c.usage.cache_read_input_tokens = max_read;
+            max_read = read;
+        }
+    }
 }
 
 fn scan_file_cached(path: &Path) -> Buckets {
@@ -157,7 +207,7 @@ fn cached_to_buckets(cached: CachedUsage) -> Buckets {
                         Contribution {
                             date,
                             model: c.model,
-                            tokens: c.tokens,
+                            usage: c.usage,
                         },
                     )
                 })
@@ -172,7 +222,7 @@ fn cached_to_buckets(cached: CachedUsage) -> Buckets {
                 .map(|date| Contribution {
                     date,
                     model: c.model,
-                    tokens: c.tokens,
+                    usage: c.usage,
                 })
         })
         .collect();
@@ -190,7 +240,7 @@ fn buckets_to_cached(buckets: &Buckets) -> CachedUsage {
                     CachedContrib {
                         date: c.date.format("%Y-%m-%d").to_string(),
                         model: c.model.clone(),
-                        tokens: c.tokens,
+                        usage: c.usage.clone(),
                     },
                 )
             })
@@ -201,7 +251,7 @@ fn buckets_to_cached(buckets: &Buckets) -> CachedUsage {
             .map(|c| CachedContrib {
                 date: c.date.format("%Y-%m-%d").to_string(),
                 model: c.model.clone(),
-                tokens: c.tokens,
+                usage: c.usage.clone(),
             })
             .collect(),
     }
@@ -257,21 +307,27 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
 
     let mut daily: HashMap<NaiveDate, u64> = HashMap::new();
     let mut by_model: HashMap<String, u64> = HashMap::new();
+    let mut by_raw_model: HashMap<String, TokenUsage> = HashMap::new();
     let mut month_total: u64 = 0;
 
     for c in buckets.by_id.into_values().chain(buckets.anon) {
+        let tokens = c.usage.total();
         if c.date >= window_start && c.date <= today {
-            *daily.entry(c.date).or_default() += c.tokens;
+            *daily.entry(c.date).or_default() += tokens;
         }
         // 上界与 daily 同口径：时钟漂移产生的未来时戳不计入月度
         if c.date.year() == today.year() && c.date.month() == today.month() && c.date <= today {
-            month_total += c.tokens;
+            month_total += tokens;
             let model = c
                 .model
                 .as_deref()
                 .map(|m| normalize_model(m, &date_suffix, &version_tail))
                 .unwrap_or_else(|| "未知".to_string());
-            *by_model.entry(model).or_default() += c.tokens;
+            *by_model.entry(model).or_default() += tokens;
+            by_raw_model
+                .entry(c.model.unwrap_or_default())
+                .or_default()
+                .accumulate(&c.usage);
         }
     }
 
@@ -290,6 +346,12 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
         .collect();
     by_model.sort_unstable_by_key(|m| std::cmp::Reverse(m.total));
 
+    let mut by_raw_model: Vec<RawModelUsage> = by_raw_model
+        .into_iter()
+        .map(|(model, usage)| RawModelUsage { model, usage })
+        .collect();
+    by_raw_model.sort_unstable_by_key(|m| std::cmp::Reverse(m.usage.total()));
+
     cache::flush();
 
     Ok(UsageStats {
@@ -297,6 +359,7 @@ pub fn collect_usage_stats() -> Result<UsageStats, String> {
         month: MonthUsage {
             total: month_total,
             by_model,
+            by_raw_model,
         },
     })
 }
@@ -342,8 +405,56 @@ mod tests {
         assert_eq!(buckets.by_id.len(), 1);
         assert!(buckets.anon.is_empty());
         // 极简 usage（缺两个 cache 字段）按 0 计：1 + 2 = 3
-        assert_eq!(buckets.by_id.get("m1").unwrap().tokens, 3);
+        assert_eq!(buckets.by_id.get("m1").unwrap().usage.total(), 3);
         std::fs::remove_file(&path).ok();
+    }
+
+    /// 第三方兼容层缓存写推断：只报 cache_read 的会话按水位差值拆出 creation，
+    /// 每行总量不变；官方会话（已含 creation）与无缓存会话零改动
+    #[test]
+    fn cache_creation_inference() {
+        let mk = |cc: u64, cr: u64| {
+            (
+                None,
+                Contribution {
+                    date: NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+                    model: None,
+                    usage: TokenUsage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        cache_creation_input_tokens: cc,
+                        cache_read_input_tokens: cr,
+                    },
+                },
+            )
+        };
+
+        // 场景一：无 creation、read 水位 0 → 1000 → 1000 → 3000
+        let mut rows = vec![mk(0, 0), mk(0, 1000), mk(0, 1000), mk(0, 3000)];
+        infer_cache_creation(&mut rows);
+        let u = |i: usize| &rows[i].1.usage;
+        assert_eq!(
+            (u(1).cache_creation_input_tokens, u(1).cache_read_input_tokens),
+            (1000, 0),
+            "首次出现的缓存全算写入"
+        );
+        assert_eq!(
+            (u(2).cache_creation_input_tokens, u(2).cache_read_input_tokens),
+            (0, 1000),
+            "水位未涨则全是命中"
+        );
+        assert_eq!(
+            (u(3).cache_creation_input_tokens, u(3).cache_read_input_tokens),
+            (2000, 1000),
+            "水位上涨部分算写入，存量算命中"
+        );
+        assert_eq!(u(3).total(), 10 + 5 + 3000, "每行总量不变");
+
+        // 场景二：已有 creation 的官方会话不触发推断
+        let mut rows = vec![mk(500, 0), mk(0, 2000)];
+        infer_cache_creation(&mut rows);
+        assert_eq!(rows[1].1.usage.cache_read_input_tokens, 2000);
+        assert_eq!(rows[1].1.usage.cache_creation_input_tokens, 0);
     }
 
     /// 联机 smoke：本机真实数据全量聚合的耗时与量级。
