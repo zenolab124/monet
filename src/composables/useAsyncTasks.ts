@@ -181,6 +181,18 @@ interface LedgerEntry extends AsyncTaskItem {
   persistent: boolean | null
 }
 
+export interface LedgerLiveContext {
+  /**
+   * 自有长活进程的启动时刻 epoch ms（进程代际锚点）。启动早于此刻且无终态的
+   * 任务属于已死的前代进程（关列重杀/渠道变更重启/resume 前的历史），终态通知
+   * 永远不会来——判「结论不明」而非「进行中」，否则 processAlive 恒 true 的
+   * 常开列下这些条目永远卡在进行中
+   */
+  ownProcessStartMs?: number | null
+  /** 外部 claude 进程在跑（跟看）：外部进程可能正是历史任务的属主，代际判据失效，跳过判死 */
+  externalRunning?: boolean
+}
+
 export function buildAsyncLedger(
   records: SessionRecord[],
   streamingTurns: StreamingTurn[],
@@ -189,6 +201,7 @@ export function buildAsyncLedger(
    * 外部 claude 进程正在跑（跟看）——决定无终态条目算 running 还是 unknown
    */
   live: boolean,
+  ctx?: LedgerLiveContext,
 ): AsyncTaskItem[] {
   const byToolUse = new Map<string, LedgerEntry>()
   const order: LedgerEntry[] = []
@@ -367,6 +380,15 @@ export function buildAsyncLedger(
 
   // ---- 状态收尾 ----
   const now = Date.now()
+  // 进程代际判死：live 由自有进程撑起（非外部跟看）时，启动早于本代进程的
+  // 无终态条目属于已死的前代进程，终态通知永远不会来。startedAt 为 null 的
+  // 条目（流式增量入账）必属当代，不判
+  const staleBefore = !ctx?.externalRunning ? ctx?.ownProcessStartMs ?? null : null
+  const isStale = (e: LedgerEntry): boolean => {
+    if (staleBefore === null || e.startedAt === null) return false
+    const t = Date.parse(e.startedAt)
+    return Number.isFinite(t) && t < staleBefore
+  }
   // wakeup 单槽语义：后排定的覆盖前排的，只有最晚一次可能仍在等。
   // 中途活动不撤销唤醒（实测通知唤起会话后，未到时刻的唤醒仍按时触发）
   let latestWakeupIdx = -1
@@ -376,15 +398,18 @@ export function buildAsyncLedger(
   for (const e of order) {
     if (e.settled) continue
     if (e.species === 'wakeup') {
-      // 等待中 = 触发时刻在未来 且 是最晚排定的唤醒；流式中刚设的（占位未落账）也算等待。
-      // 已过时刻/被更晚唤醒覆盖 → 已结束（触发/落空不可分辨）
-      const armed = e.scheduledFor !== null && e.scheduledFor > now && e.touchIdx === latestWakeupIdx
+      // 等待中 = 会话仍活 且 触发时刻在未来 且 是最晚排定的唤醒 且 属当代进程
+      // （唤醒是 CLI 进程内概念，进程死了排定即失效）；流式中刚设的（占位未落账）也算等待。
+      // 已过时刻/被更晚唤醒覆盖/进程已换代 → 已结束（触发/落空不可分辨）
+      const armed = live && !isStale(e)
+        && e.scheduledFor !== null && e.scheduledFor > now && e.touchIdx === latestWakeupIdx
       const justSet = live && e.scheduledFor === null
       e.state = armed || justSet ? 'waiting' : 'completed'
       continue
     }
-    // 无终态通知：会话活跃（自有流式/外部进程在跑）视为在跑；否则结论不明（孤儿运行态）
-    if (!live) e.state = 'unknown'
+    // 无终态通知：会话活跃（自有流式/外部进程在跑）且属当代进程视为在跑；
+    // 否则结论不明（孤儿运行态）
+    if (!live || isStale(e)) e.state = 'unknown'
   }
 
   // 内部字段不外泄

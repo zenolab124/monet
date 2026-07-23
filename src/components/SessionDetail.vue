@@ -219,7 +219,11 @@ const {
 // 缺它时这类条目会被误判 unknown 掉进"已结束"区
 const asyncTasks = computed<AsyncTaskItem[]>(() => {
   const live = stream.value.streaming || stream.value.processAlive || externalRunning.value
-  const ledger = buildAsyncLedger(records.value ?? [], stream.value.streamingTurns, live)
+  const ledger = buildAsyncLedger(records.value ?? [], stream.value.streamingTurns, live, {
+    // 进程代际锚点：live 由自有进程撑起时，前代进程的无终态任务不再恒判"进行中"
+    ownProcessStartMs: stream.value.processStartedAtMs,
+    externalRunning: externalRunning.value,
+  })
   return ledger.map(item =>
     item.species === 'workflow' && item.runId
       ? { ...item, children: subAgentList.value.filter(a => a.workflow_id === item.runId) }

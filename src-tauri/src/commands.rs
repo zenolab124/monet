@@ -724,9 +724,10 @@ fn resolve_owner(pid: u32, table: &std::collections::HashMap<u32, (u32, String)>
 
 /// 检测 Monet 自身是否为该会话持有长活进程（webview 刷新后 processAlive 状态校准用）。
 /// 与 check_session_running 互补：那边只看外部进程，这边只看自有进程。
+/// 返回进程启动时刻 epoch ms（None = 无进程）——异步账本按它判进程代际。
 #[tauri::command]
-pub fn has_own_process(session_id: String) -> bool {
-    crate::streaming::get_own_pid(&session_id).is_some()
+pub fn has_own_process(session_id: String) -> Option<i64> {
+    crate::streaming::get_own_started_at_ms(&session_id)
 }
 
 /// 检测某会话是否有**外部** claude CLI 进程在运行，并解析归属方。

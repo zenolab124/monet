@@ -106,6 +106,13 @@ export interface SessionStreamState {
    * session-process-exited 置 false、syncProcessAlive 按 Rust 进程表校准。
    */
   processAlive: boolean
+  /**
+   * 自有长活进程的启动时刻 epoch ms（进程代际锚点）。异步账本据此把
+   * 「启动于前代进程、无终态通知」的任务判为结论不明而非进行中——前代
+   * 进程已死，它名下任务的终态通知永远不会来。写入源：sendMessage 冷启动
+   * 时刻、processAlive false→true 边沿、syncProcessAlive 的 Rust 真值校准。
+   */
+  processStartedAtMs: number | null
 }
 
 interface BlockDeltaPayload {
@@ -161,6 +168,7 @@ function createState(): SessionStreamState {
     realOutputTokens: null,
     rcActive: false,
     processAlive: false,
+    processStartedAtMs: null,
   }
 }
 
@@ -210,11 +218,15 @@ const processEpoch = new Map<string, number>()
 export async function syncProcessAlive(sessionId: string): Promise<void> {
   const epoch = processEpoch.get(sessionId) ?? 0
   try {
-    const alive = await invoke<boolean>('has_own_process', { sessionId })
+    // Rust 返回进程启动时刻 epoch ms（null = 无进程）——顺带校准进程代际锚点
+    const startedAtMs = await invoke<number | null>('has_own_process', { sessionId })
+    const alive = startedAtMs !== null
     // 降级（false）永远安全；升级（true）仅在 invoke 期间无进程退出时可信。
     // false 晚到覆盖新进程 true 的反向场景由下一条 stream-event 立即纠正
     if (!alive || (processEpoch.get(sessionId) ?? 0) === epoch) {
-      getStream(sessionId).processAlive = alive
+      const s = getStream(sessionId)
+      s.processAlive = alive
+      if (alive) s.processStartedAtMs = startedAtMs
     }
   } catch {
     // 校准失败保持现值（事件流仍会驱动更新）
@@ -640,7 +652,13 @@ export async function initStreamListeners(): Promise<void> {
 
     // 进程在发事件必然存活。error 除外：它也是进程异常退出的临终报错载体，
     // 且 spawn 失败等场景只有 error 没有后续 exited 事件，置 true 会卡死活态
-    if (payload.kind !== 'error') state.processAlive = true
+    if (payload.kind !== 'error') {
+      // false→true 边沿 = 新进程代际开始，刷新锚点。webview 刷新场景下边沿
+      // 时刻晚于真实进程启动（误判死风险短暂存在），随后 syncProcessAlive 的
+      // Rust 真值校准会修正
+      if (!state.processAlive) state.processStartedAtMs = Date.now()
+      state.processAlive = true
+    }
 
     switch (payload.kind) {
       case 'block_start':
@@ -1060,6 +1078,9 @@ async function sendMessage(
   }
   tailTextAcc.delete(sessionId)
 
+  // 冷启动（无活进程）即将 spawn 新代际：先记锚点。spawn 前时刻偏早，
+  // 只会少判死不会误杀，且覆盖首事件到达前的窗口期
+  if (!state.processAlive) state.processStartedAtMs = Date.now()
   state.streaming = true
   frameWatchRetain()
   state.streamError = null

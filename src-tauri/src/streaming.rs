@@ -45,6 +45,9 @@ struct SessionProcess {
     chrome: bool,
     /// spawn 时的用户自定义 CLI 参数原始串(逃生舱,变更只能重启生效)
     extra_args: String,
+    /// 进程启动墙钟时刻(epoch ms)。异步账本的进程代际判据:启动早于本时刻的
+    /// 无终态任务属于已死的前代进程,终态通知永远不会来,不得再判"进行中"
+    started_at_ms: i64,
 }
 
 /// 自定义参数黑名单:会打爆 Monet↔CLI 通信的协议级参数(会话身份/流式格式/权限桥/渠道注入)。
@@ -133,6 +136,16 @@ pub fn get_own_pid(session_id: &str) -> Option<u32> {
         .as_ref()
         .and_then(|m| m.get(session_id))
         .map(|sp| sp.lock().unwrap().child.id())
+}
+
+/// 自有长活进程的启动时刻(epoch ms)；无进程返回 None
+pub fn get_own_started_at_ms(session_id: &str) -> Option<i64> {
+    ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id))
+        .map(|sp| sp.lock().unwrap().started_at_ms)
 }
 
 /// 前端接收的流式事件（全部携带 session_id，前端按会话分发）
@@ -622,6 +635,10 @@ fn open_session(
         advisor,
         chrome,
         extra_args: extra_args.unwrap_or("").to_string(),
+        started_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0),
     }));
     ACTIVE_PROCESSES
         .lock()
