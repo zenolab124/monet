@@ -6,6 +6,7 @@ import { useWorkbench } from '@/composables/useWorkbench'
 import { useProjects } from '@/composables/useProjects'
 import { useUiState } from '@/composables/useUiState'
 import { useNotifications } from '@/composables/useNotifications'
+import { fileName } from '@/utils/path'
 import MonitorCard from './MonitorCard.vue'
 
 const { t } = useI18n()
@@ -168,7 +169,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
               @click="selectProject(p.display_path)"
             >
               <span class="i-carbon-folder w-3.5 h-3.5 shrink-0 opacity-60" />
-              <span class="truncate">{{ p.display_path.split('/').pop() || p.display_path }}</span>
+              <span class="truncate">{{ fileName(p.display_path) }}</span>
             </button>
 
             <!-- 更多项目（二级,去重:只列一级之外的） -->
@@ -207,7 +208,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
                 >
                   <span class="i-carbon-folder w-3.5 h-3.5 shrink-0 opacity-60 mt-0.5 self-start" />
                   <span class="min-w-0">
-                    <span class="block text-xs truncate">{{ p.display_path.split('/').pop() || p.display_path }}</span>
+                    <span class="block text-xs truncate">{{ fileName(p.display_path) }}</span>
                     <span class="block text-[10px] text-muted-foreground/50 truncate">{{ p.display_path }}</span>
                   </span>
                 </button>

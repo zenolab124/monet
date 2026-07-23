@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::config;
+use crate::proc_ext::HideConsole;
 use crate::scheduler;
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,7 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
         let output = match crate::claude_locator::locate() {
             Ok(located) => {
                 let mut cmd = Command::new(&located.path);
+                cmd.hide_console();
                 if let Some((k, v)) = config::claude_config_dir_env() {
                     cmd.env(k, v);
                 }

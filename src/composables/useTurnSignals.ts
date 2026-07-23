@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import i18n from '../locales'
+import { fileName } from '../utils/path'
 import { isSessionStreaming } from './useStreaming'
 import { maybeNotifySystem } from './useNotifications'
 
@@ -50,7 +51,7 @@ async function maybeNotifyExternal(sig: TurnSignal): Promise<void> {
   if (Math.abs(Date.now() / 1000 - sig.ts) > NOTIFY_FRESH_SECS) return
 
   const t = i18n.global.t
-  const project = sig.cwd ? (sig.cwd.split('/').filter(Boolean).pop() ?? '') : ''
+  const project = sig.cwd ? fileName(sig.cwd) : ''
   const title = project ? `Claude Code · ${project}` : 'Claude Code'
   if (sig.state === 'completed') {
     await maybeNotifySystem(title, t('settings.turnSignal.notifyDone'))

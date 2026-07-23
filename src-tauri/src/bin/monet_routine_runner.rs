@@ -1,3 +1,8 @@
+// Windows：runner 是 schtasks 触发的后台进程，console 子系统会在每次触发时
+// 闪出黑窗；release 切 windows 子系统。stderr 诊断输出本就无人捕获（schtasks
+// 不重定向），执行结果走独立 JSON 执行日志，切换后行为不变
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -109,6 +114,13 @@ fn main() {
     let output = match claude_locator::locate_lightweight() {
         Ok(located) => {
             let mut cmd = Command::new(&located.path);
+            // 无控制台的父进程 spawn 控制台子进程会新开窗口，必须抑制
+            // （runner 不链 app_lib，不走 proc_ext 收口，内联同款 cfg 块）
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
             cmd.arg("-p")
                 .arg(&routine.prompt)
                 .arg("--output-format")

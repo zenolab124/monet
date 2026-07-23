@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::config;
+use crate::proc_ext::HideConsole;
 
 /// 保留 id:语义为「官方/零注入」。参与链排序,不对应 channels/ 下的文件
 pub const OFFICIAL_ID: &str = "official";
@@ -1195,6 +1196,7 @@ fn cc_switch_channel_id(cc_switch_id: &str) -> String {
 fn query_cc_switch_providers() -> Result<Vec<Value>, String> {
     let db_path = cc_switch_db_path().ok_or("CC Switch 数据库不存在")?;
     let output = Command::new("sqlite3")
+        .hide_console()
         .args([
             "-json",
             &db_path.to_string_lossy(),

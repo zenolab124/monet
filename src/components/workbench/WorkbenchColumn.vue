@@ -12,6 +12,7 @@ import { refreshChannels } from '@/composables/useChannels'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import { displayTitle } from '@/types'
+import { fileName } from '@/utils/path'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 
 const { getMeta } = useSessionMeta()
@@ -91,10 +92,10 @@ const { runConfig } = useRunConfig(settings)
 const projectName = computed(() => {
   for (const p of projects.value) {
     if (p.sessions.some(s => s.id === props.column.sessionId))
-      return p.display_path.split('/').pop() || p.display_path
+      return fileName(p.display_path)
   }
   const cwd = draftCwd(props.column.sessionId)
-  return cwd ? cwd.split('/').pop() || cwd : null
+  return cwd ? fileName(cwd) : null
 })
 
 const title = computed(() => {

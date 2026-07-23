@@ -1,4 +1,6 @@
 use std::process::{Command, Stdio};
+
+use crate::proc_ext::HideConsole;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -646,6 +648,7 @@ fn output_with_timeout(mut cmd: Command, timeout: Duration) -> Option<std::proce
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
+        .hide_console()
         .spawn()
         .ok()?;
     let deadline = Instant::now() + timeout;

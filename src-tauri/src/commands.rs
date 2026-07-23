@@ -358,10 +358,10 @@ pub fn resume_in_vscode(cwd: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
+        use crate::proc_ext::HideConsole;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &url])
-            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW：cmd 不闪控制台
+            .hide_console() // cmd 是控制台程序，不抑制会闪黑窗
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -756,7 +756,8 @@ pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
 pub fn kill_external_session(session_id: String) -> bool {
     let pids = scan_external_claude(&session_id, true);
     for pid in &pids {
-        let _ = std::process::Command::new("kill").arg(pid.to_string()).output();
+        use crate::proc_ext::HideConsole;
+        let _ = std::process::Command::new("kill").arg(pid.to_string()).hide_console().output();
     }
     !pids.is_empty()
 }
@@ -964,10 +965,10 @@ pub fn open_in_default_app(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
+        use crate::proc_ext::HideConsole;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &path])
-            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW：cmd 不闪控制台
+            .hide_console() // cmd 是控制台程序，不抑制会闪黑窗
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -1204,12 +1205,14 @@ pub struct GitWorktreeSnapshot {
 const GIT_SNAPSHOT_MAX_ENTRIES: usize = 200;
 
 fn run_git_readonly_blocking(cwd: &str, args: &[&str]) -> Result<std::process::Output, String> {
+    use crate::proc_ext::HideConsole;
     use std::process::{Command, Stdio};
     // git 位于 /usr/bin,系统命令允许裸调(spawn 铁律豁免清单);
     // 3s 超时防网络挂载盘等场景挂起(项目无 tokio 直依赖,try_wait 轮询实现)
     let mut child = Command::new("git")
         .args(args)
         .current_dir(cwd)
+        .hide_console()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

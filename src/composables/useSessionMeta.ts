@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { cwdToProjectId } from '@/utils/path'
 
 export interface SessionMeta {
   title?: string
@@ -19,10 +20,6 @@ let loaded = false
 async function loadAll() {
   metaMap.value = await invoke<Record<string, SessionMeta>>('get_all_meta')
   loaded = true
-}
-
-function cwdToProjectId(cwd: string): string {
-  return cwd.replace(/\//g, '-')
 }
 
 function shouldRefresh(sessionId: string, manualKey?: keyof SessionMeta): boolean {

@@ -124,11 +124,12 @@ pub fn get_hooks_config() -> Result<HooksConfig, String> {
         }
     }
 
-    // 项目级：复用 discovery 的项目根目录
+    // 项目级:目录名经 discovery 共享解析还原真实 cwd(优先采信会话 JSONL,
+    // 退回贪心解码)。项目级 settings 位于 <cwd>/.claude/ 下——projects 目录内
+    // 不存在 .claude 子目录,旧实现对着 projects 目录找,项目级 hooks 恒扫不到
     let projects_root = crate::config::projects_dir();
     if projects_root.is_dir() {
-        // 将 encoded dir name（-分隔）还原为 cwd 绝对路径
-        let project_dirs: Vec<(PathBuf, String)> = fs::read_dir(&projects_root)
+        let mut cwds: Vec<String> = fs::read_dir(&projects_root)
             .ok()
             .into_iter()
             .flatten()
@@ -136,13 +137,14 @@ pub fn get_hooks_config() -> Result<HooksConfig, String> {
                 let e = e.ok()?;
                 if !e.file_type().ok()?.is_dir() { return None; }
                 let dir_name = e.file_name().to_str()?.to_string();
-                // dir_name 首个 '-' 代表根 '/'，后续 '-' 代表 '/'
-                let cwd = dir_name.replacen('-', "/", 1).replace('-', "/");
-                Some((e.path(), cwd))
+                Some(crate::discovery::resolve_project_path(&dir_name))
             })
             .collect();
+        // 大小写变体等场景同一 cwd 可能出现多次,去重防 hooks 条目重复
+        cwds.sort_unstable();
+        cwds.dedup();
 
-        for (proj_dir, cwd) in &project_dirs {
+        for cwd in &cwds {
             // 项目 scope 显示为 cwd 的最后一段目录名
             let scope = Path::new(cwd)
                 .file_name()
@@ -151,7 +153,7 @@ pub fn get_hooks_config() -> Result<HooksConfig, String> {
                 .to_string();
 
             for file_name in &["settings.json", "settings.local.json"] {
-                let settings_path = proj_dir.join(".claude").join(file_name);
+                let settings_path = Path::new(cwd).join(".claude").join(file_name);
                 if settings_path.exists() {
                     match parse_settings_hooks(&settings_path, &scope, &home_str) {
                         Ok(mut e) => entries.append(&mut e),
@@ -445,8 +447,10 @@ pub fn open_hooks_config(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
+        use crate::proc_ext::HideConsole;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &path])
+            .hide_console() // cmd 是控制台程序，不抑制会闪黑窗
             .spawn()
             .map_err(|e| e.to_string())?;
     }

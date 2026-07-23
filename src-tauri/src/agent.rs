@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config::agent_cwd;
+use crate::proc_ext::HideConsole;
 use crate::streaming::{enhanced_path, find_claude};
 use crate::translate::ApiUsage;
 
@@ -86,6 +87,7 @@ fn spawn_agent_with(model: &str, effort: &str) -> Result<AgentProcess, String> {
         .args(&args)
         .current_dir(agent_cwd())
         .env("PATH", enhanced_path())
+        .hide_console()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

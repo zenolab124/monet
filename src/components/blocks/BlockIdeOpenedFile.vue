@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { fileName as baseName } from '@/utils/path'
 
 const props = defineProps<{
   block: { type: 'ide_opened_file'; text: string; [key: string]: unknown }
 }>()
 
 const filePath = computed(() => {
-  const m = props.block.text.match(/file\s+(\/\S+)/)
+  // 兼容 Unix 绝对路径与 Windows 盘符路径两种形态
+  const m = props.block.text.match(/file\s+(\/\S+|[A-Za-z]:[/\\]\S+)/)
   return m ? m[1] : ''
 })
 
 const fileName = computed(() => {
   const path = filePath.value
-  if (path) return path.split('/').pop() || path
+  if (path) return baseName(path)
   return props.block.text
 })
 </script>

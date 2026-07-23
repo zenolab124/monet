@@ -10,6 +10,7 @@ import { queueForSession, usePermissionRequests, isInteractiveTool } from '@/com
 import { useNotifications } from '@/composables/useNotifications'
 import { useConfirm } from '@/composables/useConfirm'
 import { displayTitle, formatTokens, relativeTime } from '@/types'
+import { fileName } from '@/utils/path'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 
 const { t } = useI18n()
@@ -41,7 +42,7 @@ const headPerm = computed(() => perms.value[0] ?? null)
 const summary = computed(() => {
   for (const p of projects.value) {
     const s = p.sessions.find(s => s.id === props.sessionId)
-    if (s) return { summary: s, projectName: p.display_path.split('/').pop() || p.display_path }
+    if (s) return { summary: s, projectName: fileName(p.display_path) }
   }
   return null
 })
@@ -50,7 +51,7 @@ const summary = computed(() => {
 const draft = computed(() => {
   if (summary.value) return null
   const cwd = draftCwd(props.sessionId)
-  return cwd ? { projectName: cwd.split('/').pop() || cwd } : null
+  return cwd ? { projectName: fileName(cwd) } : null
 })
 
 const title = computed(() =>

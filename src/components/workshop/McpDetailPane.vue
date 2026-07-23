@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useConfirm } from '@/composables/useConfirm'
+import { parentPath } from '@/utils/path'
 import type { WorkshopMcpServer } from '@/types'
 
 /**
@@ -40,9 +41,8 @@ function deriveScope(server: WorkshopMcpServer): string {
 
 /** 从 path 推导 projectCwd */
 function deriveProjectCwd(server: WorkshopMcpServer): string {
-  // .mcp.json 文件的 projectCwd 是其所在目录
-  const idx = server.path.lastIndexOf('/')
-  return idx > 0 ? server.path.substring(0, idx) : server.path
+  // .mcp.json 文件的 projectCwd 是其所在目录（兼容 / 与 \ 分隔符）
+  return parentPath(server.path) || server.path
 }
 
 /** 移除 MCP 服务器 */

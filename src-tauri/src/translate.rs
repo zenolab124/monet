@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::channels::{resolve_agent_for_feature, AgentChannelCredentials};
 use crate::config;
+use crate::proc_ext::HideConsole;
 use crate::streaming::{enhanced_path, find_claude};
 
 fn locales_dir() -> PathBuf {
@@ -232,6 +233,7 @@ fn translate_via_cli(
         .args(&args)
         .current_dir(crate::config::agent_cwd())
         .env("PATH", enhanced_path())
+        .hide_console()
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
