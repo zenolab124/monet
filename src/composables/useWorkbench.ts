@@ -307,14 +307,6 @@ function setActiveTab(tabId: string) {
   }
 }
 
-function reorderTabs(fromIndex: number, toIndex: number) {
-  const tabs = state.value.tabs
-  if (fromIndex < 0 || fromIndex >= tabs.length || toIndex < 0 || toIndex >= tabs.length) return
-  if (fromIndex === toIndex) return
-  const [moved] = tabs.splice(fromIndex, 1)
-  tabs.splice(toIndex, 0, moved)
-}
-
 function reorderSessions(tabId: string, fromIndex: number, toIndex: number) {
   const tab = state.value.tabs.find(t => t.id === tabId)
   if (!tab) return
@@ -617,19 +609,6 @@ function removeSession(sessionId: string) {
   teardownSession(sessionId)
 }
 
-/**
- * 跨工作台移动(FR-005 拖拽②):移入目标 tab 左列末尾,不自动展开;
- * 源 tab 中已展开则先收起。
- */
-function moveSessionToTab(sessionId: string, toTabId: string) {
-  const found = findSession(sessionId)
-  const target = state.value.tabs.find(t => t.id === toTabId)
-  if (!target) return
-  if (found?.tab.id === toTabId) return
-  if (found) removeSession(sessionId)
-  target.sessionIds.push(sessionId)
-}
-
 // ---- 右区列布局(FR-004/005) ----
 
 function reorderColumns(tabId: string, fromIndex: number, toIndex: number) {
@@ -709,7 +688,6 @@ export function useWorkbench() {
     renameTab,
     closeTab,
     setActiveTab,
-    reorderTabs,
     reorderSessions,
     openSession,
     createDraftSession,
@@ -720,7 +698,6 @@ export function useWorkbench() {
     expandSession,
     collapseColumn,
     removeSession,
-    moveSessionToTab,
     reorderColumns,
     updateColumnSize,
     resetColumnSizes,

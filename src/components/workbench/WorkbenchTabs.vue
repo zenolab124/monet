@@ -4,12 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { Menu } from '@tauri-apps/api/menu'
 import { useWorkbench, type WorkbenchTab } from '@/composables/useWorkbench'
 import { useConfirm } from '@/composables/useConfirm'
-import SortableTab from './SortableTab.vue'
 
 /**
- * 工作台 tab 条(FR-001):创建/重命名/关闭/拖拽重排;
- * 同时是卡片拖拽的跨台移动落点(FR-005 ②)。
- * 溢出时横向滚动,不换行、不下拉收纳。
+ * 工作台 tab 条(FR-001):创建/重命名/关闭;溢出时横向滚动,不换行、不下拉收纳。
+ * tab 不参与拖拽——排序与跨台移动会话均已废弃(切走再拖入的路径无价值)。
  */
 const { t } = useI18n()
 const { state, activeTab, setActiveTab, createTab, renameTab, closeTab } = useWorkbench()
@@ -82,40 +80,40 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
   <div
     class="h-full flex items-center gap-0.5 pr-2 overflow-x-auto tabs-scroll"
   >
-    <SortableTab
-      v-for="(tab, i) in state.tabs"
+    <div
+      v-for="tab in state.tabs"
       :key="tab.id"
-      :tab-id="tab.id"
-      :index="i"
+      class="wb-tab"
+      :class="{ active: tab.id === activeTab.id }"
+      @click="setActiveTab(tab.id)"
+      @dblclick="startRename(tab)"
+      @contextmenu="onContextMenu($event, tab)"
     >
-      <template #default>
-        <div
-          class="wb-tab"
-          :class="{ active: tab.id === activeTab.id }"
-          @click="setActiveTab(tab.id)"
-          @dblclick="startRename(tab)"
-          @contextmenu="onContextMenu($event, tab)"
-        >
-          <input
-            v-if="editingTabId === tab.id"
-            :ref="focusEditInput"
-            v-model="editingName"
-            class="w-24 bg-transparent border-none outline-none text-xs text-foreground"
-            maxlength="20"
-            @keydown.enter.prevent="commitRename"
-            @keydown.esc.prevent="cancelRename"
-            @blur="commitRename"
-            @click.stop
-            @pointerdown.stop
-          />
-          <template v-else>
-            <span v-if="tab.race" class="i-app-horse w-3 h-3 shrink-0 text-muted-foreground" />
-            <span class="truncate max-w-36">{{ tab.name }}</span>
-            <span v-if="tab.sessionIds.length > 0" class="text-[10px] text-muted-foreground">{{ tab.sessionIds.length }}</span>
-          </template>
-        </div>
+      <input
+        v-if="editingTabId === tab.id"
+        :ref="focusEditInput"
+        v-model="editingName"
+        class="w-24 bg-transparent border-none outline-none text-xs text-foreground"
+        maxlength="20"
+        @keydown.enter.prevent="commitRename"
+        @keydown.esc.prevent="cancelRename"
+        @blur="commitRename"
+        @click.stop
+        @pointerdown.stop
+      />
+      <template v-else>
+        <span v-if="tab.race" class="i-app-horse w-3 h-3 shrink-0 text-muted-foreground" />
+        <span class="truncate max-w-36">{{ tab.name }}</span>
+        <span v-if="tab.sessionIds.length > 0" class="text-[10px] text-muted-foreground">{{ tab.sessionIds.length }}</span>
+        <button
+          v-if="state.tabs.length > 1"
+          class="wb-tab-close i-carbon-close"
+          :title="$t('common.close')"
+          @click.stop="requestClose(tab)"
+          @pointerdown.stop
+        />
       </template>
-    </SortableTab>
+    </div>
 
     <button
       class="wb-tab add shrink-0"
@@ -140,6 +138,7 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
   white-space: nowrap;
   flex-shrink: 0;
   height: 22px;
+  cursor: default;
 }
 .wb-tab:hover {
   background: var(--muted);
@@ -152,6 +151,27 @@ async function onContextMenu(e: MouseEvent, tab: WorkbenchTab) {
 }
 .wb-tab.add {
   padding: 4px 8px;
+  cursor: pointer;
+}
+/* 关闭按钮:hover 常显、active tab 常显;最后一个 tab 不渲染此按钮(见 v-if)。
+   width/height 归零替代 v-if 隐藏,避免 tab 尺寸随 hover 抖动 */
+.wb-tab-close {
+  width: 0;
+  height: 12px;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: width 0.12s ease, opacity 0.12s ease;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.wb-tab-close:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.wb-tab:hover .wb-tab-close,
+.wb-tab.active .wb-tab-close {
+  width: 12px;
+  opacity: 0.7;
 }
 /* tab 条横向滚动:细滚动条 */
 .tabs-scroll {

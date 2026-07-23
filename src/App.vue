@@ -32,7 +32,7 @@ import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 const { projects, projectsRevision, loadProjects } = useProjects()
 const { selectSession } = useSessions()
 const { activeSection } = useUiState()
-const { state, activeTab, pruneDrafts, reorderTabs, reorderSessions, moveSessionToTab, reorderColumns, expandSession } = useWorkbench()
+const { state, activeTab, pruneDrafts, reorderSessions, reorderColumns, expandSession } = useWorkbench()
 const { t } = useI18n()
 const { zoomLevel, setZoom, STEP } = useZoom()
 
@@ -121,22 +121,6 @@ function onWorkbenchDragEnd(event: any) {
   const sourceId = String(source.id ?? '')
   const targetId = String(target.id ?? '')
   if (import.meta.env.DEV) console.log('[dnd-end]', sourceId, '→', targetId)
-
-  // Tab reorder (both start with "tab:")
-  if (sourceId.startsWith('tab:') && targetId.startsWith('tab:')) {
-    const fromIdx = state.value.tabs.findIndex(t => t.id === sourceId.slice(4))
-    const toIdx = state.value.tabs.findIndex(t => t.id === targetId.slice(4))
-    if (fromIdx >= 0 && toIdx >= 0 && fromIdx !== toIdx) {
-      reorderTabs(fromIdx, toIdx > fromIdx ? toIdx : toIdx)
-    }
-    return
-  }
-
-  // Session dropped on tab
-  if (sourceId.startsWith('session:') && targetId.startsWith('tab:')) {
-    moveSessionToTab(sourceId.slice(8), targetId.slice(4))
-    return
-  }
 
   // Column reorder (both start with "col:")
   if (sourceId.startsWith('col:') && targetId.startsWith('col:')) {
