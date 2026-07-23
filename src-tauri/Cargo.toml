@@ -62,27 +62,30 @@ fs2 = "0.4"
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-updater = "2"
 urlencoding = "2"
-# monet-tray 独立二进制解码 PNG icon 为 RGBA（tray-icon crate 需要原始像素）
+# ccimg 缩略图降采样解码
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-# monet-tray 独立二进制直接使用底层 tray/menu crate，无需 Tauri runtime
-tray-icon = "0.21"
+# monet-tray 独立二进制直接使用底层 menu crate，无需 Tauri runtime；
+# 图标层为手写原生 NSStatusItem（菜单弹出走 AppKit 标准路径）
 muda = "0.17"
 libc = "0.2"
 tauri-plugin-process = "2.3.1"
 
-# macOS: attributed-title tab alignment in tray menu (right-aligned reset times)
-# These are already transitive deps via muda/tray-icon; we add them directly to
-# enable extra features (NSFont, NSParagraphStyle, NSText) without pulling new crates.
+# macOS: monet-tray 的原生 NSStatusItem 图标层 + attributed-title 菜单样式。
+# 这些 crate 本就是 muda 的传递依赖，直接声明只为启用额外 features；
+# 注意 features 必须显式列全，不能依赖其他 crate 传递启用（依赖变动会静默丢失）
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false }
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSString", "NSDictionary", "NSArray", "NSObject",
     "NSAttributedString", "NSEnumerator", "NSRange",
+    "NSData", "NSGeometry", "NSDate", "NSRunLoop", "NSThread",
 ] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSFont", "NSParagraphStyle", "NSText", "NSAttributedString",
     "NSMenu", "NSMenuItem", "NSStatusItem", "NSColor",
     "NSApplication", "NSResponder", "NSRunningApplication",
+    "NSStatusBar", "NSStatusBarButton", "NSButton", "NSControl",
+    "NSView", "NSCell", "NSImage",
     "objc2-core-foundation",
 ] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes"] }

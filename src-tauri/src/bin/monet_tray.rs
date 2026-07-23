@@ -27,18 +27,19 @@ fn macos_main() {
     // 完成应用注册握手：裸 NSRunLoop 轮询（无 NSApp.run）场景下的稳态加固
     ns_app.finishLaunching();
 
-    let icon = load_icon();
-    let menu = build_menu(None);
+    // 原生 NSStatusItem + statusItem.menu：点击与菜单弹出全权交给 AppKit
+    // （与主流菜单栏应用同路径）。此前经 tray-icon 的自定义 view 拦截鼠标事件
+    // 再 performClick 编程弹出，属模仿 AppKit 私有行为的非标准路径，
+    // 在新系统上偶发菜单错位弹到屏幕左上角
+    let status_item = create_status_item(mtm);
+    // muda 菜单句柄保活：NSMenu 本体被 statusItem retain，但 Rust 侧句柄
+    // 持有到下一次替换，避免依赖 muda 内部释放语义
+    let mut menu_keeper: Option<muda::Menu> = None;
+    let initial_menu = build_menu(None);
+    apply_menu(&status_item, initial_menu, &mut menu_keeper);
+    set_tooltip(&status_item, "Monet");
 
-    let tray = tray_icon::TrayIconBuilder::new()
-        .with_icon(icon)
-        .with_icon_as_template(true)
-        .with_menu(Box::new(menu))
-        .with_tooltip("Monet")
-        .build()
-        .expect("failed to create tray icon");
-
-    let menu_channel = tray_icon::menu::MenuEvent::receiver();
+    let menu_channel = muda::MenuEvent::receiver();
     let pending: Arc<Mutex<Option<QuotaInfo>>> = Arc::new(Mutex::new(None));
     let fetching = Arc::new(std::sync::atomic::AtomicBool::new(false));
     // 计时一律用墙钟毫秒：Instant 在 macOS 睡眠期间暂停，合盖过夜后
@@ -53,7 +54,7 @@ fn macos_main() {
 
     // 冷启动先用磁盘缓存渲染一帧（含数据年龄行），不等首次 fetch
     if let Some(info) = quota::peek_cached_quota() {
-        apply_to_tray(&tray, &info);
+        apply_to_tray(&status_item, &info, &mut menu_keeper);
         last_info = Some(info);
     }
 
@@ -81,7 +82,7 @@ fn macos_main() {
         // 用新数据清 error 的机会；tray 自己写盘引发的 mtime 分支多渲染一帧无害
         if let Ok(mut guard) = pending.try_lock() {
             if let Some(info) = guard.take() {
-                apply_to_tray(&tray, &info);
+                apply_to_tray(&status_item, &info, &mut menu_keeper);
                 last_info = Some(info);
                 last_render_ms = now_ms();
             }
@@ -92,7 +93,7 @@ fn macos_main() {
         if mtime != title_config_mtime {
             title_config_mtime = mtime;
             if let Some(info) = last_info.clone().or_else(quota::peek_cached_quota) {
-                apply_to_tray(&tray, &info);
+                apply_to_tray(&status_item, &info, &mut menu_keeper);
                 last_render_ms = now_ms();
             }
         }
@@ -103,7 +104,7 @@ fn macos_main() {
         if cm != cache_mtime {
             cache_mtime = cm;
             if let Some(info) = quota::peek_cached_quota() {
-                apply_to_tray(&tray, &info);
+                apply_to_tray(&status_item, &info, &mut menu_keeper);
                 last_info = Some(info);
                 last_render_ms = now_ms();
             }
@@ -113,7 +114,7 @@ fn macos_main() {
         // 不重建菜单就会停在上一帧（曾因此显示 fetch 时刻算死的倒计时）
         if now_ms() - last_render_ms >= 30_000 {
             if let Some(info) = &last_info {
-                apply_to_tray(&tray, info);
+                apply_to_tray(&status_item, info, &mut menu_keeper);
             }
             last_render_ms = now_ms();
         }
@@ -180,21 +181,84 @@ fn request_refresh(
     });
 }
 
-/// 主线程上应用 quota 数据到 tray（set_menu + patch_menu_styles + set_tooltip + set_title）
+/// 创建原生 NSStatusItem：template 图标（随亮暗菜单栏自动配色）+ 变长宽度
 #[cfg(target_os = "macos")]
-fn apply_to_tray(tray: &tray_icon::TrayIcon, info: &QuotaInfo) {
-    let menu = build_menu(Some(info));
-    patch_menu_styles(&menu);
-    tray.set_menu(Some(Box::new(menu)));
-    let _ = tray.set_tooltip(Some(quota::format_tray_tooltip(info)));
-    match quota::format_tray_title(info) {
-        Some(t) => {
-            tray.set_title(Some(t));
-        }
-        None => {
-            tray.set_title(None::<String>);
+fn create_status_item(
+    mtm: objc2_foundation::MainThreadMarker,
+) -> objc2::rc::Retained<objc2_app_kit::NSStatusItem> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSCellImagePosition, NSImage, NSStatusBar, NSVariableStatusItemLength};
+    use objc2_foundation::{NSData, NSSize};
+
+    let bar = NSStatusBar::systemStatusBar();
+    let item = bar.statusItemWithLength(NSVariableStatusItemLength);
+    if let Some(button) = item.button(mtm) {
+        let data = NSData::with_bytes(include_bytes!("../../icons/tray-template.png"));
+        if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+            let size = image.size();
+            if size.height > 0.0 {
+                // 菜单栏标准图标高 18pt，等比缩放
+                let h = 18.0;
+                image.setSize(NSSize::new(size.width * h / size.height, h));
+            }
+            image.setTemplate(true);
+            button.setImage(Some(&image));
+            // 额度标题显示在图标右侧
+            button.setImagePosition(NSCellImagePosition::ImageLeft);
         }
     }
+    item
+}
+
+/// 挂载新菜单并保活 muda 句柄（旧句柄随赋值 drop，其 NSMenu 由 AppKit 引用计数收尾）
+#[cfg(target_os = "macos")]
+fn apply_menu(
+    status_item: &objc2_app_kit::NSStatusItem,
+    menu: muda::Menu,
+    keeper: &mut Option<muda::Menu>,
+) {
+    use muda::ContextMenu;
+    unsafe {
+        let ns_menu = menu.ns_menu().cast::<objc2_app_kit::NSMenu>();
+        status_item.setMenu(ns_menu.as_ref());
+    }
+    *keeper = Some(menu);
+}
+
+#[cfg(target_os = "macos")]
+fn set_tooltip(status_item: &objc2_app_kit::NSStatusItem, tooltip: &str) {
+    use objc2_foundation::{MainThreadMarker, NSString};
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if let Some(button) = status_item.button(mtm) {
+        button.setToolTip(Some(&NSString::from_str(tooltip)));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_button_title(status_item: &objc2_app_kit::NSStatusItem, title: &str) {
+    use objc2_foundation::{MainThreadMarker, NSString};
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if let Some(button) = status_item.button(mtm) {
+        // 空串真正清空标题（此前 tray-icon 的 set_title(None) 清不掉，一并修复）
+        button.setTitle(&NSString::from_str(title));
+    }
+}
+
+/// 主线程上应用 quota 数据到 tray（重建菜单 + patch 样式 + tooltip + 标题）
+#[cfg(target_os = "macos")]
+fn apply_to_tray(
+    status_item: &objc2_app_kit::NSStatusItem,
+    info: &QuotaInfo,
+    menu_keeper: &mut Option<muda::Menu>,
+) {
+    let menu = build_menu(Some(info));
+    patch_menu_styles(&menu);
+    apply_menu(status_item, menu, menu_keeper);
+    set_tooltip(status_item, &quota::format_tray_tooltip(info));
+    set_button_title(
+        status_item,
+        quota::format_tray_title(info).as_deref().unwrap_or(""),
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -204,14 +268,6 @@ fn run_loop_once(seconds: f64) {
         let date = NSDate::dateWithTimeIntervalSinceNow(seconds);
         let _ = NSRunLoop::currentRunLoop().runMode_beforeDate(NSDefaultRunLoopMode, &date);
     }
-}
-
-fn load_icon() -> tray_icon::Icon {
-    let img = image::load_from_memory(include_bytes!("../../icons/tray-template.png"))
-        .expect("failed to decode tray icon");
-    let rgba = img.to_rgba8();
-    let (w, h) = (rgba.width(), rgba.height());
-    tray_icon::Icon::from_rgba(rgba.into_raw(), w, h).expect("failed to create tray icon")
 }
 
 fn build_menu(info: Option<&QuotaInfo>) -> muda::Menu {

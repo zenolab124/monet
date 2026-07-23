@@ -117,7 +117,6 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
- "tray-icon",
  "urlencoding",
  "uuid",
  "windows-sys 0.61.2",
