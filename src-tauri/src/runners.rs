@@ -138,7 +138,7 @@ fn create_job_for_child(pid: u32) -> Option<JobHandle> {
 
     unsafe {
         let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job == 0 {
+        if job.is_null() {
             return None;
         }
 
@@ -156,7 +156,7 @@ fn create_job_for_child(pid: u32) -> Option<JobHandle> {
         }
 
         let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
-        if process == 0 {
+        if process.is_null() {
             CloseHandle(job);
             return None;
         }
