@@ -414,13 +414,21 @@ function renderLogContent(log: RoutineExecutionLog): string {
                   <span class="truncate-cmd cursor-pointer" @click="detailPopup = { title: r.name, content: r.prompt }">{{ r.prompt }}</span>
                 </td>
                 <td class="text-xs whitespace-nowrap">
-                  <span v-if="r.isRunning" class="inline-flex items-center gap-1 text-accent">
-                    <span class="i-carbon-circle-dash w-3 h-3 animate-spin" />
-                    {{ $t('common.running') }}
-                    <span v-if="runningElapsed(r)" class="text-[10px] text-muted-foreground tabular-nums">{{ runningElapsed(r) }}</span>
-                  </span>
-                  <span v-else-if="r.enabled" class="text-success">{{ $t('common.enabled') }}</span>
-                  <span v-else class="text-muted-foreground">{{ $t('common.paused') }}</span>
+                  <div class="inline-flex items-center gap-2">
+                    <!-- 调度开关（持续状态）与操作列的单次动作按钮分离，避免播放器图标混淆 -->
+                    <button
+                      :class="['form-toggle-sm', { on: r.enabled }]"
+                      v-tooltip="r.enabled ? $t('automation.pause') : $t('automation.enable')"
+                      @click="onToggleRoutine(r)"
+                    ><span class="form-toggle-knob" /></button>
+                    <span v-if="r.isRunning" class="inline-flex items-center gap-1 text-accent">
+                      <span class="i-carbon-circle-dash w-3 h-3 animate-spin" />
+                      {{ $t('common.running') }}
+                      <span v-if="runningElapsed(r)" class="text-[10px] text-muted-foreground tabular-nums">{{ runningElapsed(r) }}</span>
+                    </span>
+                    <span v-else-if="r.enabled" class="text-success">{{ $t('common.enabled') }}</span>
+                    <span v-else class="text-muted-foreground">{{ $t('common.paused') }}</span>
+                  </div>
                 </td>
                 <td class="text-xs whitespace-nowrap">
                   <template v-if="!r.lastExecution">—</template>
@@ -433,9 +441,6 @@ function renderLogContent(log: RoutineExecutionLog): string {
                 </td>
                 <td>
                   <div class="routine-actions">
-                    <button class="icon-btn icon-btn-sm" v-tooltip="r.enabled ? $t('automation.pause') : $t('automation.enable')" @click="onToggleRoutine(r)">
-                      <span class="w-3 h-3 block" :class="r.enabled ? 'i-carbon-pause' : 'i-carbon-play'" />
-                    </button>
                     <button class="icon-btn icon-btn-sm" v-tooltip="$t('common.edit')" @click="showRoutineForm = r">
                       <span class="i-carbon-edit w-3 h-3 block" />
                     </button>
