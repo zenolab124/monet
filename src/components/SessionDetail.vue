@@ -69,8 +69,10 @@ import { renderMarkdownDeferred } from '@/composables/useMarkdown'
 import { persistKeyOf } from '@/lib/stream-markdown/constants'
 import { useFileLedger } from '@/composables/useFileLedger'
 import FileLedgerPanel from './FileLedgerPanel.vue'
+import RunnerPanel from './runner/RunnerPanel.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useVirtualizationSettings } from '@/composables/useVirtualizationSettings'
+import { useRunners } from '@/composables/useRunners'
 
 /**
  * 会话详情。两种宿主形态(v2.1.0 FR-004/009,档案馆分屏已下线):
@@ -254,10 +256,14 @@ const ledgerPanelOpen = ref(false)
 function toggleLedgerPanel() {
   ledgerPanelOpen.value = !ledgerPanelOpen.value
   if (ledgerPanelOpen.value && asyncSidebarOpen.value) closeAsyncPanel()
+  if (ledgerPanelOpen.value) runnerDockOpen.value = false
 }
-// 反向互斥:异步面板打开时收起账本
+// 反向互斥:异步面板打开时收起账本和 runner
 watch(asyncSidebarOpen, open => {
-  if (open) ledgerPanelOpen.value = false
+  if (open) {
+    ledgerPanelOpen.value = false
+    runnerDockOpen.value = false
+  }
 })
 const ledgerPanelRef = ref<InstanceType<typeof FileLedgerPanel> | null>(null)
 // tool_use 锚点索引:文件工具卡按钮可见性 O(1) 判定(子代理转录的卡不入账,自然隐藏)
@@ -289,12 +295,136 @@ provide('openFileLedger', (toolUseId: string) => {
   return true
 })
 
-// --- 侧栏面板（异步/账本互斥共用）手风琴展开：列宽 + 侧边栏 width 同步 transition ---
+// ---- Runner 跑单面板(v2.11.0):与异步/账本三方互斥 ----
+const {
+  runnerPinned,
+  runningCount: runnerRunningCount,
+  hasCrashed: runnerHasCrashed,
+  setCurrentProject: setRunnerProject,
+  stopAllForSession: runnerStopAll,
+  loadRunners,
+  dialogOpen: runnerDialogOpen,
+} = useRunners()
+// 停靠形态开关（三方互斥的第三方）
+const runnerDockOpen = ref(false)
+// 悬浮形态开关
+const runnerFloatOpen = ref(false)
+
+/** 切换 runner 面板：根据 pin 状态决定形态 */
+function toggleRunnerPanel() {
+  if (runnerPinned.value) {
+    runnerDockOpen.value = !runnerDockOpen.value
+    if (runnerDockOpen.value) {
+      ledgerPanelOpen.value = false
+      if (asyncSidebarOpen.value) closeAsyncPanel()
+    }
+  } else {
+    runnerFloatOpen.value = !runnerFloatOpen.value
+  }
+  // 面板打开时增量水合
+  const sid = currentSession.value?.summary?.id
+  if (sid && (runnerDockOpen.value || runnerFloatOpen.value)) {
+    loadRunners(sid)
+  }
+}
+
+function closeRunnerPanel() {
+  runnerDockOpen.value = false
+  runnerFloatOpen.value = false
+}
+
+function toggleRunnerPin() {
+  runnerPinned.value = !runnerPinned.value
+  if (runnerPinned.value) {
+    // 悬浮→停靠
+    runnerFloatOpen.value = false
+    runnerDockOpen.value = true
+    ledgerPanelOpen.value = false
+    if (asyncSidebarOpen.value) closeAsyncPanel()
+  } else {
+    // 停靠→悬浮
+    runnerDockOpen.value = false
+    runnerFloatOpen.value = true
+  }
+}
+
+// 当前会话 runner 数量（用于顶栏徽标）
+const sessionRunnersCount = computed(() => {
+  const sid = currentSession.value?.summary?.id
+  if (!sid) return 0
+  return runnerRunningCount(sid)
+})
+const sessionHasCrashed = computed(() => {
+  const sid = currentSession.value?.summary?.id
+  if (!sid) return false
+  return runnerHasCrashed(sid)
+})
+
+// 提供塞输入框能力给 RunnerPanel（Teleport 不影响 provide/inject 树）
+provide('runnerAppendToInput', (text: string) => {
+  const existing = inputText.value
+  if (existing && !existing.endsWith('\n')) {
+    inputText.value = existing + '\n' + text
+  } else {
+    inputText.value = (existing || '') + text
+  }
+  nextTick(() => {
+    const el = textareaRef.value
+    if (!el) return
+    // 光标移到末尾
+    el.selectionStart = el.selectionEnd = el.value.length
+    el.focus()
+    // 触发 autoResize
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+  })
+})
+
+// 会话切换时设置 runner 项目上下文 + 增量水合
+watch(() => currentSession.value?.summary?.id, (sid) => {
+  const cwd = currentSession.value?.summary?.cwd
+  setRunnerProject(cwd ?? null)
+  if (sid) loadRunners(sid)
+}, { immediate: true })
+
+// 悬浮面板 ref + 点击外部关闭
+const runnerFloatRef = ref<HTMLElement>()
+const runnerToggleBtnRef = ref<HTMLElement>()
+function onRunnerClickOutside(e: MouseEvent) {
+  if (!runnerFloatOpen.value || runnerPinned.value) return
+  if (runnerDialogOpen.value) return
+  const target = e.target as Node
+  // 豁免面板自身、输入框、顶栏切换按钮
+  if (runnerFloatRef.value?.contains(target)) return
+  if (textareaRef.value?.contains(target)) return
+  if (runnerToggleBtnRef.value?.contains(target)) return
+  closeRunnerPanel()
+}
+onMounted(() => document.addEventListener('mousedown', onRunnerClickOutside))
+onUnmounted(() => document.removeEventListener('mousedown', onRunnerClickOutside))
+
+// 悬浮面板 Esc 关闭（document 级监听，div 不可聚焦无法捕获 keydown）
+function onRunnerEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (!runnerFloatOpen.value || runnerPinned.value) return
+  if (runnerDialogOpen.value) return
+  closeRunnerPanel()
+}
+watch(runnerFloatOpen, (open) => {
+  if (open && !runnerPinned.value) {
+    document.addEventListener('keydown', onRunnerEscape)
+  } else {
+    document.removeEventListener('keydown', onRunnerEscape)
+  }
+})
+onUnmounted(() => document.removeEventListener('keydown', onRunnerEscape))
+
+// --- 侧栏面板（异步/账本/runner 三方互斥共用）手风琴展开：列宽 + 侧边栏 width 同步 transition ---
 // 互斥切换时 sidePanelVisible 保持 true 不触发 watch,列宽维持翻倍,无竞态
 const columnIndex = inject<ComputedRef<number>>('columnIndex', undefined as any)
 const columnTabId = inject<ComputedRef<string>>('tabId', undefined as any)
 const { activeTab: wbActiveTab } = useWorkbench()
-const sidePanelVisible = computed(() => asyncPanelVisible.value || ledgerPanelOpen.value)
+const sidePanelVisible = computed(() => asyncPanelVisible.value || ledgerPanelOpen.value || runnerDockOpen.value)
 const sidePanelDom = ref(false)
 const sidePanelExpanded = ref(false)
 const sidebarTargetWidth = ref(0)
@@ -341,6 +471,7 @@ watch(() => {
   if (colW < sidebarTargetWidth.value * 2 - 20) {
     closeAsyncPanel()
     ledgerPanelOpen.value = false
+    runnerDockOpen.value = false
   }
 })
 
@@ -566,6 +697,8 @@ function channelMarkLabel(m: ChannelMark): string {
 
 function onDeleted() {
   const sid = effectiveSessionId.value
+  // 删除会话时停止该会话下所有 runner（FR-007 生命周期治理）
+  if (sid) runnerStopAll(sid)
   // 在工作台中的会话被删除:一并移出工作台(FR-009)
   if (sid && findSession(sid)) {
     removeSession(sid)
@@ -590,6 +723,12 @@ function draftSummary(id: string, cwd: string): SessionSummary {
     timestamp: null,
     last_modified: Math.floor(Date.now() / 1000),
     total_tokens: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+    subagent_tokens: {
       input_tokens: 0,
       output_tokens: 0,
       cache_creation_input_tokens: 0,
@@ -2164,6 +2303,7 @@ async function onReload() {
       :used-context-tokens="stream.realUsedTokens ?? lastAssistantContextSize"
       :real-context-window="stream.realContextWindow ?? currentSession.summary.context_window ?? null"
       :total-tokens="currentSession.summary.total_tokens"
+      :subagent-tokens="currentSession.summary.subagent_tokens"
       :last-modified="currentSession.summary.last_modified"
       :selected-model-id="settings.modelId"
       :selected-effort="settings.effort"
@@ -2207,6 +2347,25 @@ async function onReload() {
         <span class="i-carbon-catalog w-3.5 h-3.5" />
         <span class="text-[10px] font-semibold tabular-nums leading-none">{{ ledgerEntries.length }}</span>
       </button>
+      <!-- Runner 跑单按钮（ref 用于点外关闭豁免） -->
+      <span ref="runnerToggleBtnRef">
+        <button
+          v-if="interactive"
+          class="p-1 rounded transition-colors flex items-center gap-1"
+          :class="(runnerDockOpen || runnerFloatOpen)
+            ? 'text-claude bg-claude/10'
+            : sessionHasCrashed
+              ? 'text-destructive hover:bg-muted'
+              : sessionRunnersCount > 0
+                ? 'text-claude hover:bg-muted'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+          :title="$t('runner.title')"
+          @click="toggleRunnerPanel"
+        >
+          <span class="i-carbon-play w-3.5 h-3.5" />
+          <span v-if="sessionRunnersCount > 0" class="text-[10px] font-semibold tabular-nums leading-none">{{ sessionRunnersCount }}</span>
+        </button>
+      </span>
     </SessionTopBar>
 
     <!-- 加载态 -->
@@ -2672,7 +2831,41 @@ async function onReload() {
         @locate="locateToolUse"
       />
     </div>
+    <!-- Runner 停靠面板:与异步/账本互斥,同款手风琴 -->
+    <div
+      class="side-panel-accordion shrink-0 overflow-hidden"
+      :class="runnerDockOpen && sidePanelExpanded ? 'border-l border-border' : ''"
+      :style="{ width: runnerDockOpen && sidePanelExpanded ? sidebarTargetWidth + 'px' : '0', transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1)' }"
+    >
+      <RunnerPanel
+        v-if="runnerDockOpen"
+        mode="dock"
+        :session-id="currentSession?.summary.id ?? ''"
+        :session-cwd="currentSession?.summary.cwd ?? ''"
+        :project-name="currentSession?.projectId ?? ''"
+        @close="closeRunnerPanel"
+        @toggle-pin="toggleRunnerPin"
+      />
+    </div>
   </div>
+
+  <!-- Runner 悬浮面板（Teleport 到 body 避免 overflow 裁剪） -->
+  <Teleport to="body">
+    <div
+      v-if="runnerFloatOpen && !runnerPinned"
+      ref="runnerFloatRef"
+      class="runner-float"
+    >
+      <RunnerPanel
+        mode="float"
+        :session-id="currentSession?.summary.id ?? ''"
+        :session-cwd="currentSession?.summary.cwd ?? ''"
+        :project-name="currentSession?.projectId ?? ''"
+        @close="closeRunnerPanel"
+        @toggle-pin="toggleRunnerPin"
+      />
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -2732,5 +2925,22 @@ async function onReload() {
 @keyframes search-hit-fade {
   0%, 25% { background-color: color-mix(in srgb, var(--accent) 12%, transparent); }
   100% { background-color: transparent; }
+}
+/* Runner 悬浮面板 */
+.runner-float {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 120px));
+  height: 62vh;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-paper-lifted);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 </style>

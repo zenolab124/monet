@@ -52,6 +52,20 @@
     0 1px 0 rgba(255, 250, 235, 0.6) inset,
     0 4px 10px rgba(70, 45, 20, 0.14),
     0 8px 24px rgba(70, 45, 20, 0.08);
+
+  /* Runner 状态色（v2.11.0） */
+  --run-running: var(--primary);
+  --run-exited: oklch(0.68 0.15 82);
+  --run-exited-wash: oklch(0.93 0.04 82);
+  --run-crashed: var(--destructive);
+  --run-starting: var(--muted-foreground);
+
+  /* ANSI 终端色收敛为纸面五色 */
+  --ansi-green: oklch(0.45 0.08 148);
+  --ansi-red: oklch(0.50 0.12 25);
+  --ansi-yellow: oklch(0.55 0.11 82);
+  --ansi-blue: oklch(0.45 0.07 232);
+  --ansi-magenta: oklch(0.48 0.08 295);
 }
 
 /* === 氛围层：颗粒 + vignette === */

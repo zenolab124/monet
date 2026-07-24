@@ -19,7 +19,10 @@ export interface SessionSummary {
   version: string | null
   timestamp: string | null
   last_modified: number
+  /** 会话总消耗（已含子 Agent/工作流） */
   total_tokens: TokenUsage
+  /** 其中子 Agent/工作流分项（total_tokens 已含） */
+  subagent_tokens: TokenUsage
   file_size: number
   message_count: number
   context_window: number | null
@@ -257,6 +260,46 @@ export interface MemoryDetail {
   body: string
   mtime: number
   sizeBytes: number
+}
+
+// --- Runner 域（v2.11.0）---
+
+/** 跑单进程状态 */
+export type RunnerStatus = 'starting' | 'running' | 'exited' | 'killed' | 'crashed' | 'spawn-failed'
+
+/** 跑单进程快照（Rust serde camelCase） */
+export interface RunnerSnapshot {
+  id: string
+  sessionId: string
+  alias: string | null
+  cmd: string
+  cwd: string
+  status: RunnerStatus
+  startedAt: number
+  exitedAt: number | null
+  exitCode: number | null
+  pid: number | null
+  logPath: string
+}
+
+/** 日志行 */
+export interface LogLine {
+  seq: number
+  ts: number
+  stream: 'stdout' | 'stderr'
+  text: string
+}
+
+/** 候选命令（项目级资产） */
+export interface RunnerCommand {
+  id: string
+  cmd: string
+  cwd: string | null
+  alias: string | null
+  note: string | null
+  source: 'agent' | 'user'
+  createdAt: number
+  lastUsedAt: number
 }
 
 // --- 工具函数 ---

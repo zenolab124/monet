@@ -12,6 +12,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import { displayTitle, formatTokens, relativeTime } from '@/types'
 import { fileName } from '@/utils/path'
 import { useSessionMeta } from '@/composables/useSessionMeta'
+import { useRunners } from '@/composables/useRunners'
 
 const { t } = useI18n()
 const { getMeta } = useSessionMeta()
@@ -37,6 +38,10 @@ const { confirm } = useConfirm()
 const stream = useSessionStream(sid)
 const status = useSessionStatus(sid)
 const perms = queueForSession(sid)
+
+// Runner 运行中计数（用于小徽标）
+const { runningCount: getRunnerCount } = useRunners()
+const runnerCount = computed(() => getRunnerCount(props.sessionId))
 const headPerm = computed(() => perms.value[0] ?? null)
 
 const summary = computed(() => {
@@ -206,6 +211,11 @@ const { isDropTarget } = useDroppable({
         v-if="expanded"
         class="px-1 text-[9.5px] border border-primary text-primary rounded-sm shrink-0"
       >{{ $t('workbench.monitor.expanded') }}</span>
+      <span
+        v-if="runnerCount > 0"
+        class="px-1 text-[9.5px] border border-primary text-primary rounded-sm shrink-0"
+        @click.stop="onCardClick"
+      >▶ {{ runnerCount }}</span>
       <button
         class="ml-auto w-4 h-4 grid place-items-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-muted shrink-0"
         :title="$t('workbench.monitor.exitWorkbench')"

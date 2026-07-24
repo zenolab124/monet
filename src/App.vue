@@ -22,6 +22,7 @@ import { initStreamListeners } from '@/composables/useStreaming'
 import { initTurnSignalListener } from '@/composables/useTurnSignals'
 import { initNotificationLayer, useNotifications } from '@/composables/useNotifications'
 import { useRoutines } from '@/composables/useRoutines'
+import { initRunnerListeners } from '@/composables/useRunners'
 import { initShortcuts } from '@/composables/useShortcuts'
 import { migrateLegacyAppDefaults } from '@/composables/useChannels'
 import { stateWasReset, useWorkbench } from '@/composables/useWorkbench'
@@ -153,6 +154,7 @@ onMounted(async () => {
   await initNotificationLayer()
   await initShortcuts()
   await useRoutines().initRoutineListener()
+  await initRunnerListeners()
   applyZoom()
   // 旧「应用默认思考强度」一次性迁移进 official 渠道默认(不阻塞启动)
   migrateLegacyAppDefaults()

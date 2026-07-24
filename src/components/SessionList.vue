@@ -13,6 +13,7 @@ import {
   shortModel,
 } from '@/types'
 import type { SessionSummary } from '@/types'
+import { useRunners } from '@/composables/useRunners'
 
 const { t } = useI18n()
 const { getMeta } = useSessionMeta()
@@ -187,6 +188,8 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
         if (!ok) return
         removeSession(session.id)
       }
+      // 删除会话前先停止该会话下所有 runner（FR-007 生命周期治理）
+      await useRunners().stopAllForSession(session.id)
       await invoke('delete_session', { projectId: project.id, sessionId: session.id })
       if (selectedSessionId.value === session.id) selectSession(null)
       loadProjects()

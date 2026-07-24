@@ -11,6 +11,7 @@ import type { ResolvedRunConfig } from '@/composables/useRunConfig'
 import { useCliDefaults, refreshCliDefaults } from '@/composables/useCliDefaults'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
+import { useRunners } from '@/composables/useRunners'
 import RunConfigCapsule from './RunConfigCapsule.vue'
 import ContextProgress from './ContextProgress.vue'
 import type { PermissionMode } from '@/composables/useSessionSettings'
@@ -57,8 +58,10 @@ const props = defineProps<{
   selectedExtraArgs: string
   /** 权限模式 */
   selectedPermissionMode: PermissionMode
-  /** 会话累计 token 用量 */
+  /** 会话累计 token 用量(已含子 Agent/工作流) */
   totalTokens: TokenUsage
+  /** 其中子 Agent/工作流分项(totalTokens 已含) */
+  subagentTokens: TokenUsage
 }>()
 
 const emit = defineEmits<{
@@ -247,6 +250,8 @@ async function onDelete() {
   const ok = await confirm(t('archive.deleteSessionConfirm'), t('common.delete'))
   if (!ok) return
   try {
+    // 删除会话前先停止该会话下所有 runner（FR-007 生命周期治理）
+    await useRunners().stopAllForSession(props.sessionId)
     await invoke('delete_session', { projectId: props.projectId, sessionId: props.sessionId })
     emit('deleted')
   } catch (e) {
@@ -372,6 +377,13 @@ function onPermissionModeChange(mode: PermissionMode) {
             <div class="flex items-center justify-between font-medium text-foreground">
               <span>{{ $t('topbar.tokenTotal') }}</span>
               <span>{{ formatTokens(totalTokens.input_tokens + totalTokens.output_tokens + totalTokens.cache_read_input_tokens + totalTokens.cache_creation_input_tokens) }}</span>
+            </div>
+            <div
+              v-if="subagentTokens.input_tokens + subagentTokens.output_tokens + subagentTokens.cache_read_input_tokens + subagentTokens.cache_creation_input_tokens > 0"
+              class="flex items-center justify-between"
+            >
+              <span>{{ $t('topbar.tokenSubagents') }}</span>
+              <span>{{ formatTokens(subagentTokens.input_tokens + subagentTokens.output_tokens + subagentTokens.cache_read_input_tokens + subagentTokens.cache_creation_input_tokens) }}</span>
             </div>
           </div>
         </div>
