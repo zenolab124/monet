@@ -16,7 +16,11 @@ pub struct SessionSummary {
     pub timestamp: Option<String>,
     /// 文件最后修改时间（秒级 Unix 时间戳）
     pub last_modified: f64,
+    /// 会话总消耗（含子 Agent/工作流），单一事实源：所有展示点直接用它
     pub total_tokens: TokenUsage,
+    /// 其中子 Agent/工作流的消耗分项（total_tokens 已含），供明细面板展示
+    #[serde(default)]
+    pub subagent_tokens: TokenUsage,
     /// 文件大小（字节）
     pub file_size: u64,
     /// 用户+助手消息计数

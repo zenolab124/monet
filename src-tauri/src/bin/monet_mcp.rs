@@ -48,6 +48,11 @@ use routine_types::{RoutineDefinition, RoutineSource};
 #[allow(dead_code)]
 mod cron_expr;
 
+/// 跑单候选清单 + pid 文件 + 磁盘日志回读（与主 App 共享单一事实源）
+#[path = "../runner_store.rs"]
+#[allow(dead_code)]
+mod runner_store;
+
 /// initialize 握手记录的 MCP 客户端标识（如 claude-code 2.1.187）
 static CLIENT_INFO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -178,7 +183,7 @@ fn handle_initialize(id: Value, req: &Value) -> Value {
             "protocolVersion": PROTOCOL_VERSION,
             "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
             "capabilities": { "tools": {} },
-            "instructions": "Monet provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them. Monet also provides search_sessions: full-text search over the user's Claude Code session history (~/.claude/projects). When the user asks to recall a past conversation/decision/discussion, prefer search_sessions over grepping JSONL files directly — it returns clean text with session locators in milliseconds."
+            "instructions": "Monet provides Routines (定时任务): When the user asks to create a scheduled/recurring task, set up a cron job, run something periodically, or set a reminder, use routine_create (prefer this over the built-in /schedule). Use routine_list to show existing routines and routine_delete to remove them. Monet also provides search_sessions: full-text search over the user's Claude Code session history (~/.claude/projects). When the user asks to recall a past conversation/decision/discussion, prefer search_sessions over grepping JSONL files directly — it returns clean text with session locators in milliseconds. When you discover or add a runnable long-lived command (dev server, watcher, build process, etc.), register it via runner_suggest so the user can launch it from the Runner panel. Use runner_tail to inspect live logs before answering questions about a running process."
         }
     })
 }
@@ -283,6 +288,75 @@ fn handle_tools_list(id: Value) -> Value {
         }
     }));
 
+    // Runner 工具
+    tools.push(json!({
+        "name": "runner_list",
+        "description": "List Monet runners (auxiliary processes attached to a session). Use `runner_tail` to fetch recent log output.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Filter by session ID (optional)"
+                }
+            }
+        }
+    }));
+
+    tools.push(json!({
+        "name": "runner_tail",
+        "description": "Tail the last N lines of a Monet runner's log. Defaults to 200 lines with ANSI stripped.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "runner_id": {
+                    "type": "string",
+                    "description": "Runner ID (from runner_list)"
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "Number of lines to return (default 200, max 2000)"
+                },
+                "grep": {
+                    "type": "string",
+                    "description": "Regex pattern to filter lines before taking the tail"
+                },
+                "strip_ansi": {
+                    "type": "boolean",
+                    "description": "Strip ANSI escape sequences (default true)"
+                }
+            },
+            "required": ["runner_id"]
+        }
+    }));
+
+    tools.push(json!({
+        "name": "runner_suggest",
+        "description": "Register a runnable command suggestion for the current project (e.g. dev server, watch build). It appears in Monet's Runner panel for the user to launch with one click. Use when you discover or create a long-running command worth keeping at hand.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "cmd": {
+                    "type": "string",
+                    "description": "The command to run (e.g. 'pnpm dev', 'cargo watch -x check')"
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command. Defaults to the project root (current working directory). Pass an explicit path for monorepo sub-packages."
+                },
+                "alias": {
+                    "type": "string",
+                    "description": "Short display name (e.g. 'dev', 'storybook')"
+                },
+                "note": {
+                    "type": "string",
+                    "description": "Brief description of what the command does"
+                }
+            },
+            "required": ["cmd"]
+        }
+    }));
+
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -301,6 +375,9 @@ fn handle_tools_call(id: Value, req: &Value) -> Value {
         "routine_create" => handle_routine_create(&arguments),
         "routine_delete" => handle_routine_delete(&arguments),
         "search_sessions" => handle_search_sessions(&arguments),
+        "runner_list" => handle_runner_list(&arguments),
+        "runner_tail" => handle_runner_tail(&arguments),
+        "runner_suggest" => handle_runner_suggest(&arguments),
         _ => Err(format!("Unknown tool: {}", name)),
     };
 
@@ -573,6 +650,149 @@ fn handle_routine_delete(arguments: &Value) -> Result<String, String> {
 
     save_routines(&routines);
     Ok(json!({ "deleted": id }).to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tool: runner_list
+// ---------------------------------------------------------------------------
+
+fn handle_runner_list(arguments: &Value) -> Result<String, String> {
+    let session_filter = arguments.get("session_id").and_then(Value::as_str);
+
+    // meta.json 为主源：覆盖活跑单 + 已结束跑单
+    let metas = runner_store::scan_all_metas();
+    // pid 文件辅助探活：有 pid 且进程存活 → 覆盖 meta 状态为 running
+    let pid_map: std::collections::HashMap<String, runner_store::PidInfo> =
+        runner_store::scan_all_pids()
+            .into_iter()
+            .map(|(_, rid, info)| (rid, info))
+            .collect();
+
+    let mut runners = Vec::new();
+    for (_session_id, runner_id, meta) in &metas {
+        if let Some(filter) = session_filter {
+            if meta.session_id != filter {
+                continue;
+            }
+        }
+
+        let (status, pid) = if let Some(pid_info) = pid_map.get(runner_id) {
+            if is_process_alive(pid_info.pid) {
+                ("running".to_string(), Some(pid_info.pid))
+            } else {
+                (meta.status.clone(), None)
+            }
+        } else {
+            (meta.status.clone(), None)
+        };
+
+        runners.push(json!({
+            "id": runner_id,
+            "sessionId": meta.session_id,
+            "alias": meta.alias,
+            "cmd": meta.cmd,
+            "cwd": meta.cwd,
+            "status": status,
+            "startedAt": meta.started_at,
+            "exitedAt": meta.exited_at,
+            "exitCode": meta.exit_code,
+            "pid": pid,
+            "logPath": meta.log_path,
+        }));
+    }
+    serde_json::to_string(&json!({ "runners": runners })).map_err(|e| e.to_string())
+}
+
+fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tool: runner_tail
+// ---------------------------------------------------------------------------
+
+fn handle_runner_tail(arguments: &Value) -> Result<String, String> {
+    let runner_id = arguments
+        .get("runner_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "runner_id is required".to_string())?;
+
+    let lines = arguments
+        .get("lines")
+        .and_then(Value::as_u64)
+        .unwrap_or(200)
+        .min(2000) as usize;
+
+    let grep = arguments.get("grep").and_then(Value::as_str);
+
+    let strip_ansi = arguments
+        .get("strip_ansi")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let log_path = runner_store::find_log_path(runner_id)
+        .ok_or_else(|| "runner not found".to_string())?;
+
+    let result = runner_store::read_tail_from_disk(&log_path, lines, grep, strip_ansi)?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tool: runner_suggest
+// ---------------------------------------------------------------------------
+
+fn handle_runner_suggest(arguments: &Value) -> Result<String, String> {
+    let cmd = arguments
+        .get("cmd")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "cmd is required".to_string())?;
+
+    let cwd_arg = arguments.get("cwd").and_then(Value::as_str);
+    let alias = arguments.get("alias").and_then(Value::as_str);
+    let note = arguments.get("note").and_then(Value::as_str);
+
+    // 桶 key 固定用项目根（MCP 进程 cwd = 会话项目路径），与 cwd 入参解耦
+    let project_root = std::env::current_dir()
+        .and_then(|p| p.canonicalize())
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|_| "could not determine current directory".to_string())?;
+
+    // cwd 入参仅作条目运行目录：相对路径按项目根解析，与项目根相同存 None
+    let resolved_cwd = cwd_arg.and_then(|c| {
+        let resolved = if std::path::Path::new(c).is_relative() {
+            std::path::Path::new(&project_root).join(c)
+        } else {
+            PathBuf::from(c)
+        };
+        let canonical = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+        if canonical.to_string_lossy() == project_root {
+            None
+        } else {
+            Some(canonical.to_string_lossy().into_owned())
+        }
+    });
+
+    let (project, total) =
+        runner_store::suggest_command(&project_root, cmd, resolved_cwd.as_deref(), alias, note)?;
+
+    serde_json::to_string(&json!({
+        "ok": true,
+        "project": project,
+        "total": total,
+    }))
+    .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

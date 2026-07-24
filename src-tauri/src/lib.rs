@@ -47,6 +47,9 @@ mod tray_agent;
 mod translate;
 mod turn_signal;
 mod widget;
+/// pub：候选清单+pid+日志回读，MCP bin 经 #[path] 共享
+pub mod runner_store;
+mod runners;
 
 
 #[cfg(target_os = "macos")]
@@ -114,6 +117,9 @@ pub fn run() {
             channels::cleanup_runtime_dir();
             // 会话进程残留清扫(上次崩溃/强杀遗留的 CLI+MCP 孤儿树,须在任何会话 spawn 前)
             streaming::cleanup_orphans();
+            // 跑单 supervisor 初始化 + 日志 flusher + 孤儿清扫
+            // 候选清单变更感知已迁入 watcher.rs（data_dir 监听 runner-commands.json）
+            runners::init(app.handle());
             // AgentService 常驻进程
             agent::init();
             // Apple FM 自动检测
@@ -164,6 +170,7 @@ pub fn run() {
                         }
                         tauri::WindowEvent::Destroyed => {
                             streaming::close_all_sessions();
+                            runners::shutdown_all();
                             agent::shutdown();
                             channels::shutdown_fm_serve();
                         }
@@ -309,6 +316,14 @@ pub fn run() {
             tray_agent::set_tray_enabled,
             menu::hide_main_window,
             menu::quit_app,
+            runners::runner_spawn,
+            runners::runner_stop,
+            runners::runner_restart,
+            runners::runner_list,
+            runners::runner_tail,
+            runners::runner_commands_list,
+            runners::runner_command_remove,
+            runners::runner_session_stop_all,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

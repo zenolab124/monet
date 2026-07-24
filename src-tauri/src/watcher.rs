@@ -24,6 +24,7 @@ pub fn start(app: &AppHandle) {
 
     let data_dir = crate::config::data_dir().to_path_buf();
     let routines_file = data_dir.join("routines.json");
+    let runner_commands_file = data_dir.join("runner-commands.json");
     // 运行标记目录：cron 触发的 routine 执行由独立 runner 进程承载，
     // 主 App 只能靠 marker 文件的增删感知「开始/结束」
     let running_dir = crate::routine_run::running_dir(&data_dir);
@@ -81,6 +82,8 @@ pub fn start(app: &AppHandle) {
         // 事件若被节流吞掉且无后续事件，UI 会永久卡在「运行中」
         let mut pending_routine_file = false;
         let mut pending_routine_marker = false;
+        let mut pending_runner_commands = false;
+        let mut last_runner_commands_emit = Instant::now() - Duration::from_secs(10);
 
         loop {
             // 无积压时纯阻塞等事件（空闲零唤醒）；有积压时 500ms 超时兼作补发节拍。
@@ -89,6 +92,7 @@ pub fn start(app: &AppHandle) {
                 && !pending_full
                 && !pending_routine_file
                 && !pending_routine_marker
+                && !pending_runner_commands
             {
                 match rx.recv() {
                     Ok(event) => Some(event),
@@ -105,7 +109,9 @@ pub fn start(app: &AppHandle) {
             match received {
                 Some(event) => {
                     let is_routine = event.paths.iter().any(|p| p == &routines_file);
+                    let is_runner_commands = event.paths.iter().any(|p| p == &runner_commands_file);
                     let is_marker = !is_routine
+                        && !is_runner_commands
                         && event
                             .paths
                             .iter()
@@ -117,11 +123,19 @@ pub fn start(app: &AppHandle) {
                     if is_marker {
                         pending_routine_marker = true;
                     }
+                    if is_runner_commands {
+                        pending_runner_commands = true;
+                    }
                     flush_routines_emit(
                         &handle,
                         &mut pending_routine_file,
                         &mut pending_routine_marker,
                         &mut last_routines_emit,
+                    );
+                    flush_runner_commands_emit(
+                        &handle,
+                        &mut pending_runner_commands,
+                        &mut last_runner_commands_emit,
                     );
 
                     // api_error 增量探测：每个事件都处理（需要 paths，不能合并丢弃）
@@ -165,6 +179,11 @@ pub fn start(app: &AppHandle) {
                         &mut pending_full,
                         &mut last_emit,
                     );
+                    flush_runner_commands_emit(
+                        &handle,
+                        &mut pending_runner_commands,
+                        &mut last_runner_commands_emit,
+                    );
                 }
                 None => {
                     emit_pending_changes(
@@ -178,6 +197,11 @@ pub fn start(app: &AppHandle) {
                         &mut pending_routine_file,
                         &mut pending_routine_marker,
                         &mut last_routines_emit,
+                    );
+                    flush_runner_commands_emit(
+                        &handle,
+                        &mut pending_runner_commands,
+                        &mut last_runner_commands_emit,
                     );
                 }
             }
@@ -208,6 +232,24 @@ fn flush_routines_emit(
     *pending_file = false;
     *pending_marker = false;
     let _ = app.emit("routines-changed", ());
+}
+
+/// 距上次发射满 1 秒且有积压时，发送 runner-commands-changed（MCP 写入后前端实时感知）
+fn flush_runner_commands_emit(
+    app: &AppHandle,
+    pending: &mut bool,
+    last_emit: &mut Instant,
+) {
+    if !*pending {
+        return;
+    }
+    let now = Instant::now();
+    if now.duration_since(*last_emit) < Duration::from_secs(1) {
+        return;
+    }
+    *last_emit = now;
+    *pending = false;
+    let _ = app.emit("runner-commands-changed", ());
 }
 
 /// 距上次发射满 1 秒且有积压变更时，发送 projects-changed 并清空积压

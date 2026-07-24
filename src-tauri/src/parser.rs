@@ -331,10 +331,45 @@ pub fn parse_summary(path: &Path, max_lines: usize) -> Option<SessionSummary> {
         timestamp: earliest_timestamp,
         last_modified,
         total_tokens,
+        subagent_tokens: TokenUsage::default(),
         file_size,
         message_count,
         context_window,
     })
+}
+
+/// 累计单个子 Agent 转录文件的 token 用量（轻量路径：只提取 assistant usage）。
+/// 与 parse_summary 同口径：同一 API 响应拆多行时按 message.id 去重只计首次。
+pub fn parse_subagent_usage(path: &Path) -> TokenUsage {
+    let mut total = TokenUsage::default();
+    let Ok(file) = File::open(path) else {
+        return total;
+    };
+    let reader = BufReader::with_capacity(64 * 1024, file);
+    let mut seen_usage_ids: HashSet<String> = HashSet::new();
+
+    for line in reader.lines() {
+        let Ok(line) = line else { continue };
+        if !line.contains("\"assistant\"") || !line.contains("\"usage\"") {
+            continue;
+        }
+        let Ok(ext) = serde_json::from_str::<UsageExtractor>(&line) else {
+            continue;
+        };
+        if ext.record_type.as_deref() != Some("assistant") {
+            continue;
+        }
+        let Some(msg) = ext.message else { continue };
+        let Some(u) = msg.usage else { continue };
+        let first_seen = match &msg.id {
+            Some(id) => seen_usage_ids.insert(id.clone()),
+            None => true,
+        };
+        if first_seen {
+            total.accumulate(&u);
+        }
+    }
+    total
 }
 
 /// 从文件尾部搜索 ai-title 记录
@@ -429,6 +464,23 @@ mod tests {
         assert_eq!(summary.total_tokens.total(), 110 + 17 + 60);
         // message_count 维持按行计数口径不变
         assert_eq!(summary.message_count, 5);
+        fs::remove_file(&path).ok();
+    }
+
+    /// 子 Agent 转录 usage 累计：同 id 去重、非 assistant 行忽略
+    #[test]
+    fn subagent_usage_accumulates_with_dedup() {
+        let path = std::env::temp_dir().join("monet-test-subagent-usage.jsonl");
+        let mut f = fs::File::create(&path).unwrap();
+        writeln!(f, "{{\"type\":\"user\",\"message\":{{\"content\":\"hi assistant usage\"}}}}").unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_x"), 200)).unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_x"), 200)).unwrap();
+        writeln!(f, "{}", assistant_line(Some("msg_y"), 30)).unwrap();
+        drop(f);
+
+        let usage = parse_subagent_usage(&path);
+        // msg_x 计一次(210) + msg_y(40)
+        assert_eq!(usage.total(), 210 + 40);
         fs::remove_file(&path).ok();
     }
 }

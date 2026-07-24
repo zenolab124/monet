@@ -81,6 +81,7 @@ pub fn quit_app(app: AppHandle) {
         let _ = window.hide();
     }
     streaming::close_all_sessions();
+    crate::runners::shutdown_all();
     agent::shutdown();
     // exit(0) 不保证触发窗口 Destroyed 清理，fm serve 需显式关停防孤儿
     channels::shutdown_fm_serve();

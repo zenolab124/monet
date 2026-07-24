@@ -6,11 +6,12 @@ use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::SessionSummary;
+use crate::models::{SessionSummary, TokenUsage};
 use crate::parser;
 
 // v2: CachedContrib 从 tokens 总量改为四类分量（成本分价计算需要），旧缓存整体重扫
-const CACHE_VERSION: u32 = 2;
+// v3: SessionSummary 增加 subagent_tokens 分项且 total_tokens 口径改为含子 Agent，旧缓存整体重扫
+const CACHE_VERSION: u32 = 3;
 
 // ── Disk format ──────────────────────────────────────────
 
@@ -20,6 +21,9 @@ struct DiskCache {
     summaries: HashMap<String, DiskSummaryEntry>,
     #[serde(default)]
     usages: HashMap<String, DiskUsageEntry>,
+    /// 子 Agent 转录文件 → token 用量。子 Agent 跑完后文件不再变，命中率极高
+    #[serde(default)]
+    subs: HashMap<String, DiskSubEntry>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -36,6 +40,14 @@ struct DiskUsageEntry {
     mtime_nsec: u32,
     size: u64,
     usage: CachedUsage,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DiskSubEntry {
+    mtime_secs: u64,
+    mtime_nsec: u32,
+    size: u64,
+    tokens: TokenUsage,
 }
 
 // ── Public types (usage_stats 消费) ──────────────────────
@@ -69,9 +81,17 @@ struct UsageEntry {
     usage: CachedUsage,
 }
 
+struct SubEntry {
+    mtime_secs: u64,
+    mtime_nsec: u32,
+    size: u64,
+    tokens: TokenUsage,
+}
+
 struct CacheState {
     summaries: HashMap<PathBuf, SummaryEntry>,
     usages: HashMap<PathBuf, UsageEntry>,
+    subs: HashMap<PathBuf, SubEntry>,
     paths: HashMap<String, String>,
     dirty: bool,
 }
@@ -99,7 +119,7 @@ fn file_stamp(meta: &fs::Metadata) -> (u64, u32, u64) {
 }
 
 fn load_from_disk() -> CacheState {
-    let (summaries, usages) = cache_file_path()
+    let (summaries, usages, subs) = cache_file_path()
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|data| serde_json::from_str::<DiskCache>(&data).ok())
         .filter(|dc| dc.version == CACHE_VERSION)
@@ -134,13 +154,29 @@ fn load_from_disk() -> CacheState {
                     )
                 })
                 .collect();
-            (summaries, usages)
+            let subs = dc
+                .subs
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        PathBuf::from(k),
+                        SubEntry {
+                            mtime_secs: v.mtime_secs,
+                            mtime_nsec: v.mtime_nsec,
+                            size: v.size,
+                            tokens: v.tokens,
+                        },
+                    )
+                })
+                .collect();
+            (summaries, usages, subs)
         })
         .unwrap_or_default();
 
     CacheState {
         summaries,
         usages,
+        subs,
         paths: HashMap::new(),
         dirty: false,
     }
@@ -164,7 +200,15 @@ pub fn get_summary(path: &Path) -> Option<SessionSummary> {
         }
     }
 
-    let summary = parser::parse_summary(path, 50)?;
+    let mut summary = parser::parse_summary(path, 50)?;
+
+    // 会话总消耗口径含子 Agent/工作流：total_tokens 合并、subagent_tokens 留分项。
+    // 以主文件 stamp 锚定缓存：工作流进行中主文件不动则数字滞后，
+    // 与 watcher 只监听主文件的行为一致，轮次落账（tool result 写回）即追平
+    let sub_tokens = collect_subagent_tokens(path);
+    summary.total_tokens.accumulate(&sub_tokens);
+    summary.subagent_tokens = sub_tokens;
+
     if let Ok(mut cache) = state().lock() {
         cache.summaries.insert(
             path.to_path_buf(),
@@ -178,6 +222,76 @@ pub fn get_summary(path: &Path) -> Option<SessionSummary> {
         cache.dirty = true;
     }
     Some(summary)
+}
+
+/// 累计一个会话全部子 Agent 转录的 token 用量。
+/// 覆盖直接子 Agent（subagents/agent-*.jsonl）与工作流
+/// （subagents/workflows/<run>/agent-*.jsonl），逐文件走 (mtime, size) 缓存。
+fn collect_subagent_tokens(main_path: &Path) -> TokenUsage {
+    let mut total = TokenUsage::default();
+    let Some(stem) = main_path.file_stem() else {
+        return total;
+    };
+    let Some(parent) = main_path.parent() else {
+        return total;
+    };
+    let subagents_dir = parent.join(stem).join("subagents");
+
+    let mut scan = |dir: &Path| {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("agent-") && name.ends_with(".jsonl") {
+                total.accumulate(&sub_file_tokens(&path));
+            }
+        }
+    };
+
+    scan(&subagents_dir);
+
+    let workflows_dir = subagents_dir.join("workflows");
+    if let Ok(wf_entries) = fs::read_dir(&workflows_dir) {
+        for wf_entry in wf_entries.flatten() {
+            if wf_entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+                scan(&wf_entry.path());
+            }
+        }
+    }
+
+    total
+}
+
+/// 单个子 Agent 文件的 token 用量，(mtime, size) 命中则免解析
+fn sub_file_tokens(path: &Path) -> TokenUsage {
+    let Ok(meta) = fs::metadata(path) else {
+        return TokenUsage::default();
+    };
+    let (secs, nanos, size) = file_stamp(&meta);
+
+    if let Ok(cache) = state().lock() {
+        if let Some(e) = cache.subs.get(path) {
+            if e.mtime_secs == secs && e.mtime_nsec == nanos && e.size == size {
+                return e.tokens.clone();
+            }
+        }
+    }
+
+    let tokens = parser::parse_subagent_usage(path);
+    if let Ok(mut cache) = state().lock() {
+        cache.subs.insert(
+            path.to_path_buf(),
+            SubEntry {
+                mtime_secs: secs,
+                mtime_nsec: nanos,
+                size,
+                tokens: tokens.clone(),
+            },
+        );
+        cache.dirty = true;
+    }
+    tokens
 }
 
 // ── Public API: usage ────────────────────────────────────
@@ -259,6 +373,21 @@ pub fn flush() {
                     )
                 })
                 .collect(),
+            subs: cache
+                .subs
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        DiskSubEntry {
+                            mtime_secs: v.mtime_secs,
+                            mtime_nsec: v.mtime_nsec,
+                            size: v.size,
+                            tokens: v.tokens.clone(),
+                        },
+                    )
+                })
+                .collect(),
         };
 
         match serde_json::to_string(&disk) {
@@ -294,4 +423,48 @@ pub fn get_decoded_path(encoded: &str, decode_fn: impl FnOnce(&str) -> String) -
         cache.paths.insert(encoded.to_string(), decoded.clone());
     }
     decoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn assistant_line(id: &str, output_tokens: u64) -> String {
+        format!(
+            "{{\"type\":\"assistant\",\"timestamp\":\"2026-06-11T10:00:00.000Z\",\"message\":{{\"id\":\"{id}\",\"model\":\"claude-fable-5\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":{output_tokens},\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}}}}"
+        )
+    }
+
+    /// 会话总消耗口径：total_tokens = 主转录 + 直接子 Agent + 工作流子 Agent，
+    /// subagent_tokens 为子 Agent 分项
+    #[test]
+    fn summary_includes_subagent_tokens() {
+        let root = std::env::temp_dir().join("monet-test-sub-cache");
+        let session_dir = root.join("sess-1").join("subagents");
+        let wf_dir = session_dir.join("workflows").join("wf_abc123");
+        fs::create_dir_all(&wf_dir).unwrap();
+
+        let main_path = root.join("sess-1.jsonl");
+        let mut f = fs::File::create(&main_path).unwrap();
+        writeln!(f, "{}", assistant_line("msg_main", 90)).unwrap();
+        drop(f);
+
+        let mut f = fs::File::create(session_dir.join("agent-a1.jsonl")).unwrap();
+        writeln!(f, "{}", assistant_line("msg_sub_a", 190)).unwrap();
+        drop(f);
+        // meta.json 与非 agent 前缀文件不参与累计
+        fs::write(session_dir.join("agent-a1.meta.json"), "{}").unwrap();
+
+        let mut f = fs::File::create(wf_dir.join("agent-b2.jsonl")).unwrap();
+        writeln!(f, "{}", assistant_line("msg_sub_b", 40)).unwrap();
+        drop(f);
+
+        let summary = get_summary(&main_path).unwrap();
+        // 主(100) + 直接子(200) + 工作流子(50)
+        assert_eq!(summary.total_tokens.total(), 100 + 200 + 50);
+        assert_eq!(summary.subagent_tokens.total(), 200 + 50);
+
+        fs::remove_dir_all(&root).ok();
+    }
 }
