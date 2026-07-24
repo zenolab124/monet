@@ -27,6 +27,7 @@ mod agent;
 mod automation;
 mod metadata;
 mod routines;
+pub mod routine_run;
 /// pub：结构定义同时被 monet-mcp / monet-routine-runner 以 #[path] 方式复用
 pub mod routine_types;
 /// pub：搜索引擎同时被 monet-mcp 以 #[path] 方式复用（search_sessions 工具）
@@ -266,6 +267,7 @@ pub fn run() {
             routines::delete_routine,
             routines::get_routine_logs,
             routines::run_routine_now,
+            routines::stop_routine,
             routines::get_routine_wake_policy,
             routines::set_routine_wake_policy,
             routines::get_wake_authorization_status,

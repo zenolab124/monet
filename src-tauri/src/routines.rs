@@ -30,6 +30,9 @@ pub struct RoutineExecutionLog {
     /// 落盘会话 ID（agent_cwd 目录下的 <id>.jsonl）。会话落盘设置关闭时为 None
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// 用户手动终止（区别于执行失败）。旧日志无此字段
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancelled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,14 +130,6 @@ pub fn sync_scheduler() {
     }
 }
 
-fn is_running(id: &str) -> bool {
-    RUNNING
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|s| s.contains_key(id))
-}
-
 fn running_started_at(id: &str) -> Option<String> {
     RUNNING
         .lock()
@@ -153,6 +148,23 @@ fn set_running(id: &str, started_at: Option<&str>) {
         None => {
             map.remove(id);
         }
+    }
+}
+
+/// 运行状态两源汇总：内存（本进程立即运行）优先，其次运行标记
+/// （cron 触发的 runner 是独立进程，主 App 只能经 marker 感知）。
+/// marker 在但执行锁空闲 = 执行方已死（崩溃/断电残留），顺手清理。
+fn effective_running_started_at(id: &str) -> Option<String> {
+    if let Some(at) = running_started_at(id) {
+        return Some(at);
+    }
+    let data_dir = config::data_dir();
+    let marker = crate::routine_run::read_marker(data_dir, id)?;
+    if crate::routine_run::executor_alive(data_dir, id) {
+        Some(marker.started_at)
+    } else {
+        crate::routine_run::remove_marker(data_dir, id);
+        None
     }
 }
 
@@ -248,11 +260,26 @@ fn truncate_str(s: &str, max: usize) -> String {
 
 use crate::config::agent_cwd;
 
-fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
+fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) -> Result<(), String> {
     let id = routine.id.clone();
     let name = routine.name.clone();
     let prompt = routine.prompt.clone();
     let app = app.clone();
+
+    // 与 runner 同一把执行锁：防「立即运行」与 cron 触发并发同跑；
+    // 持锁至收尾，运行标记的存活判定（锁空闲=执行方已死）依赖它
+    let lock_path = crate::routine_run::lock_path(config::data_dir(), &id);
+    if let Some(parent) = lock_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let lock_file =
+        fs::File::create(&lock_path).map_err(|e| format!("无法创建执行锁: {}", e))?;
+    {
+        use fs2::FileExt;
+        if lock_file.try_lock_exclusive().is_err() {
+            return Err("任务正在运行中".to_string());
+        }
+    }
 
     let started_at = Utc::now().to_rfc3339();
     let t0 = std::time::Instant::now();
@@ -266,6 +293,8 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
     }));
 
     tauri::async_runtime::spawn_blocking(move || {
+        let _lock = lock_file; // 持锁至本闭包结束（drop 释放）
+        let data_dir = config::data_dir().clone();
 
         // 会话落盘（与 Agent 能力同一设置）：落盘时指定 session id 并记入执行日志，
         // 供事后在 agent_cwd 目录定位完整会话（可 claude --resume 追查）
@@ -280,6 +309,13 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
                 if let Some((k, v)) = config::claude_config_dir_env() {
                     cmd.env(k, v);
                 }
+                // claude 自立进程组（组 ID = claude PID）：stop_routine 组信号
+                // 整树回收（含其 MCP 子进程），且不伤及主 App 自身
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt;
+                    cmd.process_group(0);
+                }
                 cmd.arg("-p")
                     .arg(&prompt)
                     .arg("--output-format")
@@ -291,10 +327,34 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
                 }
                 cmd.env("PATH", crate::streaming::enhanced_path())
                     .current_dir(agent_cwd())
-                    .output()
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+                match cmd.spawn() {
+                    Ok(child) => {
+                        // spawn 成功即写运行标记：终止能力与跨进程状态展示的事实源
+                        crate::routine_run::write_marker(
+                            &data_dir,
+                            &id,
+                            &crate::routine_run::RunningMarker {
+                                pid: child.id(),
+                                started_at: started_at.clone(),
+                                source: "manual".to_string(),
+                                cancelled: false,
+                            },
+                        );
+                        child.wait_with_output()
+                    }
+                    Err(e) => Err(e),
+                }
             }
             Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e)),
         };
+
+        // 收尾前读取终止标志：stop_routine 杀进程前会置位 cancelled
+        let cancelled = crate::routine_run::read_marker(&data_dir, &id)
+            .is_some_and(|m| m.cancelled);
+        crate::routine_run::remove_marker(&data_dir, &id);
 
         let finished_at = Utc::now().to_rfc3339();
 
@@ -307,6 +367,7 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
                 stdout: truncate_str(&String::from_utf8_lossy(&out.stdout), 10240),
                 stderr: truncate_str(&String::from_utf8_lossy(&out.stderr), 4096),
                 session_id: persist.then(|| session_id.clone()),
+                cancelled: cancelled.then_some(true),
             },
             Err(e) => RoutineExecutionLog {
                 routine_id: id.clone(),
@@ -316,6 +377,7 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
                 stdout: String::new(),
                 stderr: format!("spawn failed: {}", e),
                 session_id: None,
+                cancelled: None,
             },
         };
 
@@ -331,14 +393,16 @@ fn execute_routine(routine: &RoutineDefinition, app: &AppHandle) {
 
         set_running(&id, None);
 
-        // 完成事件带结果概要：前端据此弹完成/失败 toast，无需再查日志
+        // 完成事件带结果概要：前端据此弹完成/失败/终止 toast，无需再查日志
         let _ = app.emit("routine-executed", serde_json::json!({
             "routineId": id,
             "name": name,
             "exitCode": log.exit_code,
             "durationMs": t0.elapsed().as_millis() as u64,
+            "cancelled": cancelled,
         }));
     });
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -419,11 +483,14 @@ pub fn get_routines() -> Result<Vec<RoutineRow>, String> {
     Ok(with_routines(|routines| {
         routines
             .iter()
-            .map(|r| RoutineRow {
-                definition: r.clone(),
-                last_execution: read_latest_log(&r.id),
-                is_running: is_running(&r.id),
-                running_started_at: running_started_at(&r.id),
+            .map(|r| {
+                let running_at = effective_running_started_at(&r.id);
+                RoutineRow {
+                    definition: r.clone(),
+                    last_execution: read_latest_log(&r.id),
+                    is_running: running_at.is_some(),
+                    running_started_at: running_at,
+                }
             })
             .collect()
     }))
@@ -569,7 +636,8 @@ pub fn get_routine_logs(id: String, limit: Option<usize>) -> Result<Vec<RoutineE
 
 #[tauri::command]
 pub fn run_routine_now(id: String, app: AppHandle) -> Result<(), String> {
-    if is_running(&id) {
+    // cron 触发的执行也要挡（marker 感知）；execute_routine 内抢锁是最终闸门
+    if effective_running_started_at(&id).is_some() {
         return Err("任务正在运行中".to_string());
     }
 
@@ -578,8 +646,54 @@ pub fn run_routine_now(id: String, app: AppHandle) -> Result<(), String> {
     })
     .ok_or_else(|| format!("找不到任务: {}", id))?;
 
-    execute_routine(&routine, &app);
+    execute_routine(&routine, &app)
+}
+
+/// 终止正在执行的任务：置 cancelled 标志后对 claude 进程组发 TERM，
+/// 3 秒未退（marker 未被执行方收尾清除）则 KILL 兜底。执行方（主 App
+/// 闭包 / cron runner）的 wait 随即返回，正常落日志并清理状态。
+#[tauri::command]
+pub fn stop_routine(id: String) -> Result<(), String> {
+    let data_dir = config::data_dir();
+    let marker = crate::routine_run::mark_cancelled(data_dir, &id)
+        .ok_or_else(|| "任务未在运行".to_string())?;
+
+    signal_routine_group(marker.pid, "-TERM");
+
+    let dir = data_dir.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if let Some(m) = crate::routine_run::read_marker(&dir, &id) {
+            if m.pid == marker.pid {
+                signal_routine_group(m.pid, "-KILL");
+            }
+        }
+    });
     Ok(())
+}
+
+/// 与 streaming::signal_session 同模式：组信号整树回收（claude spawn 时
+/// process_group(0) 自立门户），组不存在时退化单杀
+#[cfg(unix)]
+fn signal_routine_group(pid: u32, sig: &str) {
+    let group_ok = Command::new("kill")
+        .args([sig, "--", &format!("-{}", pid)])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !group_ok {
+        let _ = Command::new("kill").args([sig, &pid.to_string()]).output();
+    }
+}
+
+/// Windows 无信号语义：一律 taskkill /T /F 整树强杀；
+/// 已死进程上的第二发报 not found 被吞，与 unix 二段式击杀兼容
+#[cfg(windows)]
+fn signal_routine_group(pid: u32, _sig: &str) {
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .hide_console()
+        .output();
 }
 
 #[tauri::command]

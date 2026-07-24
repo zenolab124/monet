@@ -429,6 +429,7 @@
     "pause": "Pause",
     "enable": "Enable",
     "runNow": "Run now",
+    "stop": "Stop",
     "routineForm": {
       "newTitle": "New Scheduled Task",
       "editTitle": "Edit · {name}",
@@ -452,10 +453,12 @@
       "duration": "Duration {duration}",
       "exitCode": "Exit code {code}",
       "stderr": "Stderr",
-      "running": "Running…"
+      "running": "Running…",
+      "cancelled": "Stopped"
     },
     "runDone": "“{name}” completed",
     "runFailed": "“{name}” failed",
+    "runCancelled": "“{name}” stopped",
     "runFailedHint": "Open the log icon on the task row for details",
     "sourceUi": "Created manually"
   },

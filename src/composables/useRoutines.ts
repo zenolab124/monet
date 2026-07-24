@@ -36,6 +36,8 @@ export interface RoutineExecutionLog {
   stderr: string
   /** 落盘会话 ID（会话落盘开启时才有），据此打开完整会话 */
   sessionId?: string
+  /** 用户手动终止（区别于执行失败）；旧日志无此字段 */
+  cancelled?: boolean
 }
 
 export interface RoutineRow extends RoutineDefinition {
@@ -77,6 +79,7 @@ interface RoutineExecutedPayload {
   name: string
   exitCode: number | null
   durationMs: number
+  cancelled?: boolean
 }
 
 function formatDuration(ms: number): string {
@@ -95,8 +98,13 @@ async function initRoutineListener() {
   })
   await listen<RoutineExecutedPayload>('routine-executed', (e) => {
     loadRoutines()
-    const { name, exitCode, durationMs } = e.payload
-    if (exitCode === 0) {
+    const { name, exitCode, durationMs, cancelled } = e.payload
+    if (cancelled) {
+      notifyTransient(
+        i18n.global.t('automation.runCancelled', { name }),
+        formatDuration(durationMs),
+      )
+    } else if (exitCode === 0) {
       notifyTransient(
         i18n.global.t('automation.runDone', { name }),
         formatDuration(durationMs),
@@ -145,6 +153,12 @@ async function runNow(id: string): Promise<void> {
   await loadRoutines()
 }
 
+async function stopRoutine(id: string): Promise<void> {
+  await invoke('stop_routine', { id })
+  // 进程退出与状态归位由执行方收尾驱动（事件/watcher），此处不立刷——
+  // TERM 生效前 marker 仍在，立刷只会读回「运行中」
+}
+
 async function getRoutineLogs(id: string, limit?: number): Promise<RoutineExecutionLog[]> {
   return invoke<RoutineExecutionLog[]>('get_routine_logs', { id, limit: limit ?? 20 })
 }
@@ -165,6 +179,7 @@ export function useRoutines() {
     updateRoutine,
     deleteRoutine,
     runNow,
+    stopRoutine,
     getRoutineLogs,
     parseNaturalSchedule,
   }

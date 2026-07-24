@@ -24,6 +24,10 @@ pub fn start(app: &AppHandle) {
 
     let data_dir = crate::config::data_dir().to_path_buf();
     let routines_file = data_dir.join("routines.json");
+    // 运行标记目录：cron 触发的 routine 执行由独立 runner 进程承载，
+    // 主 App 只能靠 marker 文件的增删感知「开始/结束」
+    let running_dir = crate::routine_run::running_dir(&data_dir);
+    let _ = std::fs::create_dir_all(&running_dir);
 
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -51,6 +55,11 @@ pub fn start(app: &AppHandle) {
                 log::warn!("Failed to watch data dir {:?}: {}", data_dir, e);
             }
         }
+        if running_dir.is_dir() {
+            if let Err(e) = watcher.watch(&running_dir, RecursiveMode::NonRecursive) {
+                log::warn!("Failed to watch running dir {:?}: {}", running_dir, e);
+            }
+        }
 
         log::info!("File watcher started on {:?}", root);
 
@@ -67,11 +76,20 @@ pub fn start(app: &AppHandle) {
         // 节流窗口内累积的会话变更 (project_id, session_id)；full 表示需要全量刷新
         let mut pending_changes: HashSet<(String, String)> = HashSet::new();
         let mut pending_full = false;
+        // routines 侧积压：file = routines.json 有写入（需失效缓存+同步调度器），
+        // marker = 运行标记增删（只需通知前端刷新）。带补发——marker 的「结束」
+        // 事件若被节流吞掉且无后续事件，UI 会永久卡在「运行中」
+        let mut pending_routine_file = false;
+        let mut pending_routine_marker = false;
 
         loop {
             // 无积压时纯阻塞等事件（空闲零唤醒）；有积压时 500ms 超时兼作补发节拍。
             // 积压只在 emit 的 1s 节流窗口内短暂存在，稳态空闲不产生任何 tick
-            let received = if pending_changes.is_empty() && !pending_full {
+            let received = if pending_changes.is_empty()
+                && !pending_full
+                && !pending_routine_file
+                && !pending_routine_marker
+            {
                 match rx.recv() {
                     Ok(event) => Some(event),
                     Err(_) => break,
@@ -87,16 +105,24 @@ pub fn start(app: &AppHandle) {
             match received {
                 Some(event) => {
                     let is_routine = event.paths.iter().any(|p| p == &routines_file);
+                    let is_marker = !is_routine
+                        && event
+                            .paths
+                            .iter()
+                            .any(|p| p.parent() == Some(running_dir.as_path()));
 
                     if is_routine {
-                        let now = Instant::now();
-                        if now.duration_since(last_routines_emit) >= Duration::from_secs(1) {
-                            last_routines_emit = now;
-                            crate::routines::invalidate_cache();
-                            crate::routines::sync_scheduler();
-                            let _ = handle.emit("routines-changed", ());
-                        }
+                        pending_routine_file = true;
                     }
+                    if is_marker {
+                        pending_routine_marker = true;
+                    }
+                    flush_routines_emit(
+                        &handle,
+                        &mut pending_routine_file,
+                        &mut pending_routine_marker,
+                        &mut last_routines_emit,
+                    );
 
                     // api_error 增量探测：每个事件都处理（需要 paths，不能合并丢弃）
                     // Agent 目录跳过——Agent 调用失败有自己的 fallback 链和日志，不弹用户通知
@@ -147,10 +173,41 @@ pub fn start(app: &AppHandle) {
                         &mut pending_full,
                         &mut last_emit,
                     );
+                    flush_routines_emit(
+                        &handle,
+                        &mut pending_routine_file,
+                        &mut pending_routine_marker,
+                        &mut last_routines_emit,
+                    );
                 }
             }
         }
     });
+}
+
+/// 距上次发射满 1 秒且有 routines 侧积压时，发送 routines-changed 并清空积压；
+/// routines.json 本体变更同时失效缓存并同步调度器（marker 增删不需要）
+fn flush_routines_emit(
+    app: &AppHandle,
+    pending_file: &mut bool,
+    pending_marker: &mut bool,
+    last_emit: &mut Instant,
+) {
+    if !*pending_file && !*pending_marker {
+        return;
+    }
+    let now = Instant::now();
+    if now.duration_since(*last_emit) < Duration::from_secs(1) {
+        return;
+    }
+    *last_emit = now;
+    if *pending_file {
+        crate::routines::invalidate_cache();
+        crate::routines::sync_scheduler();
+    }
+    *pending_file = false;
+    *pending_marker = false;
+    let _ = app.emit("routines-changed", ());
 }
 
 /// 距上次发射满 1 秒且有积压变更时，发送 projects-changed 并清空积压

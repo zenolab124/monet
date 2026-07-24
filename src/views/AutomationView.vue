@@ -25,6 +25,7 @@ const {
   deleteRoutine,
   updateRoutine,
   runNow,
+  stopRoutine,
   getRoutineLogs,
 } = useRoutines()
 
@@ -113,6 +114,25 @@ async function onRunNow(r: RoutineRow) {
     // 已在运行中，忽略
   }
 }
+
+// 终止请求已发出的任务：TERM 生效有延迟，期间按钮呈加载态防重复点击，
+// 运行状态翻转（事件/watcher 驱动刷新）后解除
+const stoppingIds = ref(new Set<string>())
+async function onStopRoutine(r: RoutineRow) {
+  stoppingIds.value.add(r.id)
+  stoppingIds.value = new Set(stoppingIds.value)
+  try {
+    await stopRoutine(r.id)
+  } catch {
+    stoppingIds.value.delete(r.id)
+    stoppingIds.value = new Set(stoppingIds.value)
+  }
+}
+watch(routineRows, (rows) => {
+  if (stoppingIds.value.size === 0) return
+  const next = new Set([...stoppingIds.value].filter(id => rows.find(r => r.id === id)?.isRunning))
+  if (next.size !== stoppingIds.value.size) stoppingIds.value = next
+})
 
 // --- 运行中已耗时：存在运行行时每秒 tick ---
 const nowTick = ref(Date.now())
@@ -405,8 +425,8 @@ function renderLogContent(log: RoutineExecutionLog): string {
                 <td class="text-xs whitespace-nowrap">
                   <template v-if="!r.lastExecution">—</template>
                   <template v-else>
-                    <span :class="r.lastExecution.exitCode === 0 ? 'text-success' : 'text-destructive'">
-                      {{ r.lastExecution.exitCode === 0 ? '✓' : '✗' }}
+                    <span :class="r.lastExecution.cancelled ? 'text-muted-foreground' : r.lastExecution.exitCode === 0 ? 'text-success' : 'text-destructive'">
+                      {{ r.lastExecution.cancelled ? '⊘' : r.lastExecution.exitCode === 0 ? '✓' : '✗' }}
                     </span>
                     <span class="text-muted-foreground">{{ formatTime(r.lastExecution.startedAt) }}</span>
                   </template>
@@ -419,7 +439,10 @@ function renderLogContent(log: RoutineExecutionLog): string {
                     <button class="icon-btn icon-btn-sm" v-tooltip="$t('common.edit')" @click="showRoutineForm = r">
                       <span class="i-carbon-edit w-3 h-3 block" />
                     </button>
-                    <button class="icon-btn icon-btn-sm" v-tooltip="$t('automation.runNow')" :disabled="r.isRunning" @click="onRunNow(r)">
+                    <button v-if="r.isRunning" class="icon-btn icon-btn-sm text-destructive" v-tooltip="$t('automation.stop')" :disabled="stoppingIds.has(r.id)" @click="onStopRoutine(r)">
+                      <span class="w-3 h-3 block" :class="stoppingIds.has(r.id) ? 'i-carbon-circle-dash animate-spin' : 'i-carbon-stop-filled-alt'" />
+                    </button>
+                    <button v-else class="icon-btn icon-btn-sm" v-tooltip="$t('automation.runNow')" @click="onRunNow(r)">
                       <span class="i-carbon-flash w-3 h-3 block" />
                     </button>
                     <button class="icon-btn icon-btn-sm" v-tooltip="$t('automation.routineColumns.lastRun')" @click="openLogs(r)">
@@ -502,7 +525,7 @@ function renderLogContent(log: RoutineExecutionLog): string {
               :class="['log-list-item', { active: logPopup.selected === i }]"
               @click="selectLog(i)"
             >
-              <span class="log-status" :class="log.exitCode === 0 ? 'success' : log.exitCode == null ? 'running' : 'failed'" />
+              <span class="log-status" :class="log.cancelled ? 'cancelled' : log.exitCode === 0 ? 'success' : log.exitCode == null ? 'running' : 'failed'" />
               <span class="text-xs">{{ formatLogTime(log.startedAt) }}</span>
               <span v-if="log.finishedAt" class="text-[10px] text-muted-foreground ml-auto">{{ formatDuration(log.startedAt, log.finishedAt) }}</span>
               <span v-else class="text-[10px] text-accent ml-auto">{{ $t('automation.logs.running') }}</span>
@@ -518,7 +541,10 @@ function renderLogContent(log: RoutineExecutionLog): string {
                 <span v-if="logPopup.logs[logPopup.selected].finishedAt">
                   {{ $t('automation.logs.duration', { duration: formatDuration(logPopup.logs[logPopup.selected].startedAt, logPopup.logs[logPopup.selected].finishedAt) }) }}
                 </span>
-                <span v-if="logPopup.logs[logPopup.selected].exitCode != null" :class="logPopup.logs[logPopup.selected].exitCode === 0 ? 'text-success' : 'text-destructive'">
+                <span v-if="logPopup.logs[logPopup.selected].cancelled" class="text-muted-foreground">
+                  {{ $t('automation.logs.cancelled') }}
+                </span>
+                <span v-else-if="logPopup.logs[logPopup.selected].exitCode != null" :class="logPopup.logs[logPopup.selected].exitCode === 0 ? 'text-success' : 'text-destructive'">
                   {{ $t('automation.logs.exitCode', { code: logPopup.logs[logPopup.selected].exitCode }) }}
                 </span>
                 <button
@@ -821,6 +847,7 @@ function renderLogContent(log: RoutineExecutionLog): string {
 .log-status.success { background: var(--success, #2d7d3a); }
 .log-status.failed { background: var(--destructive); }
 .log-status.running { background: var(--accent); animation: pulse 1.5s infinite; }
+.log-status.cancelled { background: var(--muted-foreground); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }

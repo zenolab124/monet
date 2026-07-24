@@ -48,6 +48,12 @@ mod path_env;
 #[allow(dead_code)]
 mod cron_expr;
 
+// 运行标记单一事实源：spawn claude 后写入、收尾删除，主 App 据此
+// 展示「运行中」并实现终止（stop_routine 置 cancelled 后杀进程组）
+#[path = "../routine_run.rs"]
+#[allow(dead_code)]
+mod routine_run;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecutionLog {
@@ -60,6 +66,9 @@ struct ExecutionLog {
     /// 落盘会话 ID（agent cwd 目录下的 <id>.jsonl）。会话落盘设置关闭时为 None
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<String>,
+    /// 用户手动终止（区别于执行失败）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cancelled: Option<bool>,
 }
 
 fn main() {
@@ -95,7 +104,7 @@ fn main() {
     }
 
     // File lock to prevent concurrent execution
-    let lock_path = locks_dir().join(format!("{}.lock", routine_id));
+    let lock_path = routine_run::lock_path(&data_dir(), &routine_id);
     let _ = fs::create_dir_all(lock_path.parent().unwrap());
     let lock_file = fs::File::create(&lock_path).unwrap_or_else(|e| {
         eprintln!("cannot create lock file: {}", e);
@@ -135,6 +144,13 @@ fn main() {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
             }
+            // claude 自立进程组（组 ID = claude PID）：主 App 终止时组信号
+            // 整树回收（含其 MCP 子进程），runner 不在组内、存活收尾写日志
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(0);
+            }
             cmd.arg("-p")
                 .arg(&routine.prompt)
                 .arg("--output-format")
@@ -144,10 +160,35 @@ fn main() {
             if !persist {
                 cmd.arg("--no-session-persistence");
             }
-            cmd.current_dir(agent_cwd()).output()
+            cmd.current_dir(agent_cwd())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            match cmd.spawn() {
+                Ok(child) => {
+                    // spawn 成功即写运行标记：主 App 终止能力与状态展示的事实源
+                    routine_run::write_marker(
+                        &data_dir(),
+                        &routine_id,
+                        &routine_run::RunningMarker {
+                            pid: child.id(),
+                            started_at: started_at.clone(),
+                            source: "cron".to_string(),
+                            cancelled: false,
+                        },
+                    );
+                    child.wait_with_output()
+                }
+                Err(e) => Err(e),
+            }
         }
         Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e)),
     };
+
+    // 收尾前读取终止标志：主 App stop_routine 杀进程前会置位 cancelled
+    let cancelled = routine_run::read_marker(&data_dir(), &routine_id)
+        .is_some_and(|m| m.cancelled);
+    routine_run::remove_marker(&data_dir(), &routine_id);
 
     let finished_at = Utc::now().to_rfc3339();
 
@@ -160,6 +201,7 @@ fn main() {
             stdout: truncate(&String::from_utf8_lossy(&out.stdout), 10240),
             stderr: truncate(&String::from_utf8_lossy(&out.stderr), 4096),
             session_id: persist.then(|| session_id.clone()),
+            cancelled: cancelled.then_some(true),
         },
         Err(e) => ExecutionLog {
             routine_id: routine_id.clone(),
@@ -169,13 +211,17 @@ fn main() {
             stdout: String::new(),
             stderr: format!("spawn failed: {}", e),
             session_id: None,
+            cancelled: None,
         },
     };
 
     write_log(&log);
     update_routine_state(&routine_id, &started_at);
     refresh_wake_schedule();
-    maybe_sleep_after_run();
+    // 用户刚手动终止 = 人在电脑前，此时把系统睡下去违背在场事实
+    if !cancelled {
+        maybe_sleep_after_run();
+    }
 }
 
 /// 续设唤醒计划（必须在回睡之前）。授权不在位时 wake::sync 静默返回，
@@ -269,10 +315,6 @@ fn logs_dir(routine_id: &str) -> PathBuf {
         .join("routines")
         .join("logs")
         .join(routine_id)
-}
-
-fn locks_dir() -> PathBuf {
-    data_dir().join("routines").join("locks")
 }
 
 fn agent_cwd() -> PathBuf {
