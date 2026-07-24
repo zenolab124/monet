@@ -88,13 +88,21 @@ pub fn run() {
                 app.set_menu(menu::create(app.handle())?)?;
                 app.on_menu_event(|app, event| menu::handle_event(app, &event));
             }
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+            // 日志双档：dev 全量 Info；release 只落 WARN+ 到 LogDir，线上问题可查。
+            // 时间戳用本地时区（默认 UTC 与系统日志/文件 mtime 对不上，排查时易错位 8 小时）
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(if cfg!(debug_assertions) {
+                        log::LevelFilter::Info
+                    } else {
+                        log::LevelFilter::Warn
+                    })
+                    .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                    .max_file_size(5 * 1024 * 1024)
+                    .build(),
+            )?;
 
+            if cfg!(debug_assertions) {
                 // 开发模式：窗口移到非主显示器（扩展屏）
                 move_to_secondary_monitor(app);
             }

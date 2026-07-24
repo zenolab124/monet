@@ -175,6 +175,8 @@ fn install_and_start() {
 
     if need_install {
         // plist 内容变化（首装/路径或模板变更）：bootout 杀旧进程 + bootstrap 起新
+        // WARN 档：重装触发系统后台项通知，release 日志留第一现场
+        log::warn!("tray agent plist changed, reinstalling");
         // 全新 macOS 账号可能没有 LaunchAgents 目录
         if let Some(parent) = plist_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -200,12 +202,14 @@ fn install_and_start() {
             .map(|o| o.status.success())
             .unwrap_or(false);
         // 服务被 bootout 注销过（手动运维等场景）时 kickstart 找不到目标，回退 bootstrap
-        let ok = restarted
-            || Command::new("launchctl")
+        let ok = restarted || {
+            log::warn!("tray agent kickstart missed (service unregistered), re-bootstrapping");
+            Command::new("launchctl")
                 .args(["bootstrap", &domain, &plist_path.to_string_lossy()])
                 .output()
                 .map(|o| o.status.success())
-                .unwrap_or(false);
+                .unwrap_or(false)
+        };
         if ok {
             let _ = std::fs::write(tray_version_marker(), current_version);
         }
@@ -219,6 +223,7 @@ fn install_and_start() {
             .map(|o| o.status.success())
             .unwrap_or(false);
         if !kicked {
+            log::warn!("tray agent kickstart missed (service unregistered), re-bootstrapping");
             let _ = Command::new("launchctl")
                 .args(["bootstrap", &domain, &plist_path.to_string_lossy()])
                 .output();

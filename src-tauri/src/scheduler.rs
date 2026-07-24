@@ -44,8 +44,11 @@ pub fn sync_all(routines: &[RoutineDefinition], runner_path: &Path) -> Result<()
     for routine in routines {
         if routine.enabled {
             if !platform::is_registered(&routine.id) {
+                // WARN 档：注册面变更（新装/重装）会触发系统后台项通知，留第一现场
+                log::warn!("routine agent missing, registering: {}", routine.id);
                 platform::register(routine, runner_path)?;
             } else if platform::needs_update(routine, runner_path) {
+                log::warn!("routine agent outdated, reinstalling: {}", routine.id);
                 let _ = platform::unregister(&routine.id);
                 platform::register(routine, runner_path)?;
             }
@@ -235,7 +238,8 @@ mod platform {
             });
             if let Some(id) = id {
                 if !known_ids.contains(id) {
-                    log::info!("cleaning up orphaned routine agent: {}", id);
+                    // WARN 档：登录项清理是注册面破坏性动作，release 日志须留痕
+                    log::warn!("cleaning up orphaned routine agent: {}", id);
                     let _ = unregister(id);
                 }
             }

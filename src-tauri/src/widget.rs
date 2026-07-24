@@ -115,6 +115,8 @@ pub fn ensure_launch_agent() {
         .unwrap_or(true);
 
     if need_install {
+        // WARN 档：重装触发系统后台项通知，release 日志留第一现场
+        log::warn!("widget updater agent outdated, reinstalling");
         let uid = Command::new("id").arg("-u").output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_else(|_| "501".to_string());
