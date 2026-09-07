@@ -1,7 +1,8 @@
 //! Codex CLI 本地环境检查与一键安装。
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,8 @@ const INSTALL_SCRIPT_URL: &str = "https://chatgpt.com/codex/install.sh";
 const LATEST_RELEASE_URL: &str = "https://releases.openai.com/codex/channels/latest";
 const LATEST_CACHE_TTL: Duration = Duration::from_secs(3600);
 const OUTPUT_TAIL: usize = 2000;
+
+static CODEX_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 static LATEST_CACHE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
 
@@ -36,6 +39,72 @@ pub struct CodexEnvInfo {
     pub cache_version: Option<String>,
     pub cache_version_mismatch: bool,
     pub computer_use: Option<ComputerUseEnvInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexBinaryInfo {
+    pub manual_path: Option<String>,
+    pub resolved_path: Option<String>,
+    pub manual_valid: bool,
+}
+
+fn binary_info() -> CodexBinaryInfo {
+    let manual_path = codex_locator::configured_manual_path();
+    let resolved = codex_locator::locate_configured_standalone().ok();
+    CodexBinaryInfo {
+        manual_valid: manual_path.is_none() || resolved.is_some(),
+        manual_path,
+        resolved_path: resolved.map(|path| path.to_string_lossy().into_owned()),
+    }
+}
+
+#[tauri::command]
+pub fn get_codex_binary_info() -> CodexBinaryInfo {
+    binary_info()
+}
+
+#[tauri::command]
+pub async fn set_codex_binary_path(path: Option<String>) -> Result<CodexBinaryInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || set_binary_path_sync(path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn set_binary_path_sync(path: Option<String>) -> Result<CodexBinaryInfo, String> {
+    let _guard = CODEX_SETTINGS_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    // 即使尚未启动过会话，也先固定本进程的配置，再写下次启动的选择。
+    codex_locator::active_manual_path();
+    codex_locator::active_runtime_source();
+    let selected = path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty());
+    let resolved = selected
+        .map(codex_locator::resolve_manual_path)
+        .transpose()?;
+    if let Some(path) = resolved.as_deref() {
+        let version = run_version(path)
+            .ok_or_else(|| "所选程序未返回有效的 Codex 版本（探测限时 5 秒）".to_string())?;
+        if crate::engines::codex::supported_version(Some(&version)) != Some(true) {
+            return Err(format!("Codex 版本 {version} 低于 Monet 支持的最低版本"));
+        }
+    }
+    crate::config::write_app_setting_checked(
+        codex_locator::BINARY_PATH_SETTING_KEY,
+        serde_json::to_value(resolved.map(|path| path.to_string_lossy().into_owned()))
+            .map_err(|error| error.to_string())?,
+    )?;
+    let _ = codex_locator::redetect_standalone();
+    Ok(binary_info())
+}
+
+#[tauri::command]
+pub fn redetect_codex_binary() -> CodexBinaryInfo {
+    let _ = codex_locator::redetect_standalone();
+    binary_info()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -87,14 +156,57 @@ fn parse_semver(text: &str) -> Option<String> {
 }
 
 fn run_version(path: &Path) -> Option<String> {
-    let output = Command::new(path)
+    run_version_with_timeout(path, Duration::from_secs(5))
+}
+
+fn parse_codex_version(output: &str) -> Option<String> {
+    let mut words = output.split_whitespace();
+    if words.next()? != "codex-cli" {
+        return None;
+    }
+    let version = words.next()?;
+    (words.next().is_none())
+        .then(|| parse_semver(version))
+        .flatten()
+}
+
+fn run_version_with_timeout(path: &Path, timeout: Duration) -> Option<String> {
+    let mut child = Command::new(path)
         .arg("--version")
         .env("PATH", streaming::enhanced_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
         .hide_console()
-        .output()
+        .spawn()
         .ok()?;
-    parse_semver(&String::from_utf8_lossy(&output.stdout))
-        .or_else(|| parse_semver(&String::from_utf8_lossy(&output.stderr)))
+    let stdout = child.stdout.take()?;
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.take(4096).read_to_end(&mut bytes).map(|_| bytes);
+        let _ = send.send(result);
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
+        return None;
+    }
+    let bytes = receive
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()?
+        .ok()?;
+    parse_codex_version(&String::from_utf8_lossy(&bytes))
 }
 
 type VersionParts<'a> = ((u64, u64, u64), Option<&'a str>);
@@ -319,7 +431,7 @@ fn tail(text: &str) -> String {
 }
 
 fn codex_env_check_sync() -> CodexEnvInfo {
-    let standalone_path = codex_locator::locate_standalone().ok();
+    let standalone_path = codex_locator::locate_configured_standalone().ok();
     let binary_path = standalone_path
         .as_ref()
         .map(|path| path.to_string_lossy().into_owned());
@@ -338,7 +450,13 @@ fn codex_env_check_sync() -> CodexEnvInfo {
     let active_runtime_source = codex_locator::active_runtime_source();
     let configured_runtime_source = codex_locator::configured_runtime_source();
     let active_runtime_version = match active_runtime_source {
-        codex_locator::CodexRuntimeSource::Standalone => installed_version.clone(),
+        codex_locator::CodexRuntimeSource::Standalone => {
+            if codex_locator::path_restart_required() {
+                current_runtime_version()
+            } else {
+                installed_version.clone()
+            }
+        }
         codex_locator::CodexRuntimeSource::Desktop => desktop_version.clone(),
     };
     let desktop_supported =
@@ -365,7 +483,8 @@ fn codex_env_check_sync() -> CodexEnvInfo {
         active_runtime_source,
         configured_runtime_source,
         active_runtime_version,
-        runtime_restart_required: active_runtime_source != configured_runtime_source,
+        runtime_restart_required: active_runtime_source != configured_runtime_source
+            || codex_locator::path_restart_required(),
         runtime_selection_suggested,
         cache_version,
         cache_version_mismatch,
@@ -382,8 +501,15 @@ pub async fn codex_env_check() -> Result<CodexEnvInfo, String> {
 
 #[tauri::command]
 pub fn codex_runtime_source_set(source: codex_locator::CodexRuntimeSource) -> Result<(), String> {
+    let _guard = CODEX_SETTINGS_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    codex_locator::active_runtime_source();
+    codex_locator::active_manual_path();
     let path = match source {
-        codex_locator::CodexRuntimeSource::Standalone => codex_locator::locate_standalone()?,
+        codex_locator::CodexRuntimeSource::Standalone => {
+            codex_locator::locate_configured_standalone()?
+        }
         codex_locator::CodexRuntimeSource::Desktop => codex_locator::desktop_bundle_path()
             .ok_or_else(|| "ChatGPT 内置 Codex 运行时不可用".to_string())?,
     };
@@ -453,6 +579,94 @@ pub async fn codex_env_install(app: AppHandle) -> Result<CodexInstallResult, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_probe_requires_codex_identity() {
+        assert_eq!(
+            parse_codex_version("codex-cli 0.150.0\n"),
+            Some("0.150.0".into())
+        );
+        for output in [
+            "node v22.0.0",
+            "0.150.0",
+            "codex-cli",
+            "codex-cli 0.150.0 extra",
+        ] {
+            assert_eq!(parse_codex_version(output), None);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_save_validates_before_writing_and_preserves_active_runtime() {
+        const CHILD: &str = "MONET_CODEX_PATH_SAVE_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let directory =
+                std::env::temp_dir().join(format!("monet-codex-save-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&directory).unwrap();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "codex_env::tests::path_save_validates_before_writing_and_preserves_active_runtime", "--nocapture"])
+                .env(CHILD, "1").env("MONET_DATA_DIR", &directory).output().unwrap();
+            let _ = std::fs::remove_dir_all(directory);
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let root = crate::config::data_dir();
+        let script = |name: &str, body: &str| {
+            let path = root.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let original = script("original codex", "echo 'codex-cli 0.150.0'");
+        let replacement = script("replacement codex", "echo 'codex-cli 0.151.0'");
+        let settings = root.join("settings.json");
+        let original_settings =
+            serde_json::json!({"codexBinaryPath": original, "unrelated": "preserved"});
+        std::fs::write(&settings, original_settings.to_string()).unwrap();
+        assert_eq!(codex_locator::locate().unwrap(), original);
+        for (name, body) in [
+            ("wrong-program", "echo 'node v22.0.0'"),
+            ("old-codex", "echo 'codex-cli 0.1.0'"),
+            ("failed-program", "echo 'codex-cli 0.151.0'; exit 1"),
+        ] {
+            let invalid = script(name, body);
+            assert!(set_binary_path_sync(Some(invalid.to_string_lossy().into_owned())).is_err());
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&std::fs::read(&settings).unwrap())
+                    .unwrap(),
+                original_settings
+            );
+        }
+        let stuck = script("stuck-program", "while :; do :; done");
+        let start = Instant::now();
+        assert_eq!(
+            run_version_with_timeout(&stuck, Duration::from_millis(100)),
+            None
+        );
+        assert!(start.elapsed() < Duration::from_secs(2));
+        let result =
+            set_binary_path_sync(Some(replacement.to_string_lossy().into_owned())).unwrap();
+        assert_eq!(result.resolved_path.as_deref(), replacement.to_str());
+        assert_eq!(codex_locator::locate().unwrap(), original);
+        assert!(codex_locator::path_restart_required());
+        assert_eq!(
+            crate::config::read_app_setting("unrelated"),
+            Some(serde_json::json!("preserved"))
+        );
+        set_binary_path_sync(None).unwrap();
+        assert!(codex_locator::configured_manual_path().is_none());
+        assert_eq!(codex_locator::locate().unwrap(), original);
+        std::fs::write(&settings, b"invalid JSON").unwrap();
+        assert!(set_binary_path_sync(Some(replacement.to_string_lossy().into_owned())).is_err());
+        assert_eq!(std::fs::read_to_string(settings).unwrap(), "invalid JSON");
+    }
 
     #[test]
     fn parses_codex_versions() {

@@ -1151,6 +1151,18 @@
       "installFail": "Install script failed. Use a command below to install manually.",
       "manualFallback": "Manual install:"
     },
+    "codexBin": {
+      "title": "Codex CLI path",
+      "hint": "Choose an executable or installation directory. The Codex version is validated before saving; path changes take effect after restarting Monet.",
+      "placeholder": "Leave empty for automatic detection",
+      "chooseFile": "Choose file",
+      "chooseDirectory": "Choose folder",
+      "automatic": "Use automatic",
+      "redetect": "Detect again",
+      "resolved": "Detected path: {path}",
+      "invalid": "The custom path is no longer available. Choose another path or restore automatic detection.",
+      "saved": "Path settings saved. Restart Monet to apply any pending changes."
+    },
     "codexEnv": {
       "title": "Local environment",
       "notFound": "Not detected",

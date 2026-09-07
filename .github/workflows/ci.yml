@@ -13,6 +13,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  codex-windows:
+    name: Codex CLI discovery (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Stub frontend dist for tests
+        run: mkdir -p ../dist && touch ../dist/index.html
+      - name: Test Codex discovery and environment
+        run: cargo test --lib codex_ --locked
+
   frontend:
     name: Frontend (vue-tsc + vite build)
     runs-on: ubuntu-latest

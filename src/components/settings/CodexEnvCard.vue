@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { isWindows } from '@/composables/usePlatform'
 import { openExternalUrl } from '@/composables/useFileOpener'
 import { useEngineNotices, type CodexRuntimeSource } from '@/composables/useEngineNotices'
+import CodexBinaryPathControl from './CodexBinaryPathControl.vue'
 
 const { t } = useI18n()
 
@@ -32,6 +33,7 @@ const installMsg = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
 const installTail = ref('')
 const copiedCmd = ref('')
 const savingRuntime = ref(false)
+const pathBusy = ref(false)
 const runtimeMsg = ref<{ kind: 'ok' | 'err'; text: string } | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -92,7 +94,7 @@ async function runInstall() {
     const result = await invoke<InstallResult>('codex_env_install')
     if (result.success) {
       installPhase.value = 'verifying'
-      await check()
+      await check(true)
       installMsg.value = { kind: 'ok', text: t('settings.codexInstall.installOk', { version: result.newVersion ?? '?' }) }
     } else {
       installMsg.value = { kind: 'err', text: t('settings.codexInstall.installFail') }
@@ -113,7 +115,7 @@ async function changeRuntimeSource(event: Event) {
   runtimeMsg.value = null
   try {
     await invoke('codex_runtime_source_set', { source })
-    await check()
+    await check(true)
     runtimeMsg.value = { kind: 'ok', text: t('settings.codexEnv.runtimeSaved') }
   } catch (cause) {
     runtimeMsg.value = { kind: 'err', text: String(cause) }
@@ -124,7 +126,11 @@ async function changeRuntimeSource(event: Event) {
 
 async function restartForRuntime() {
   runtimeMsg.value = { kind: 'ok', text: t('engineSettings.restarting') }
-  await relaunch()
+  try {
+    await relaunch()
+  } catch (cause) {
+    runtimeMsg.value = { kind: 'err', text: String(cause) }
+  }
 }
 
 async function copyCmd(command: string) {
@@ -172,7 +178,7 @@ onUnmounted(() => {
       </template>
 
       <span class="flex-1" />
-      <button class="env-btn" :disabled="checking || installing" @click="check">
+      <button class="env-btn" :disabled="checking || installing || pathBusy" @click="check()">
         {{ t('settings.codexEnv.refresh') }}
       </button>
     </div>
@@ -187,6 +193,18 @@ onUnmounted(() => {
     <p v-if="info?.binaryPath" class="env-path" :title="info.binaryPath">{{ info.binaryPath }}</p>
     <p v-if="info?.binaryPath && !info.latestVersion" class="mt-0.5 text-[10px] text-muted-foreground">
       {{ t('settings.codexEnv.latestUnknown') }}
+    </p>
+
+    <CodexBinaryPathControl :disabled="installing || savingRuntime || checking" @busy="pathBusy = $event" @changed="check(true)" />
+
+    <div v-if="info?.runtimeRestartRequired" class="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2">
+      <p class="text-[10px] text-muted-foreground">{{ t('settings.codexEnv.runtimeRestartHint') }}</p>
+      <button type="button" class="env-btn shrink-0" :disabled="pathBusy || installing || savingRuntime" @click="restartForRuntime">
+        {{ t('engineSettings.restart') }}
+      </button>
+    </div>
+    <p v-if="runtimeMsg" role="status" :class="['mt-1.5 text-[10px]', runtimeMsg.kind === 'ok' ? 'text-primary' : 'text-destructive']">
+      {{ runtimeMsg.text }}
     </p>
 
     <div v-if="info?.computerUse" class="mt-2 flex items-start gap-2 border-t border-border pt-2">
@@ -255,7 +273,7 @@ onUnmounted(() => {
         <select
           class="form-select form-select-sm w-52 shrink-0"
           :value="info?.configuredRuntimeSource"
-          :disabled="savingRuntime"
+          :disabled="savingRuntime || pathBusy || installing"
           :aria-label="t('settings.codexEnv.runtimeSourceTitle')"
           @change="changeRuntimeSource"
         >
@@ -280,19 +298,6 @@ onUnmounted(() => {
         }) }}</span>
       </div>
 
-      <div v-if="info?.runtimeRestartRequired" class="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2">
-        <p class="text-[10px] text-muted-foreground">{{ t('settings.codexEnv.runtimeRestartHint') }}</p>
-        <button type="button" class="env-btn shrink-0" @click="restartForRuntime">
-          {{ t('engineSettings.restart') }}
-        </button>
-      </div>
-      <p
-        v-if="runtimeMsg"
-        role="status"
-        :class="['mt-1.5 text-[10px]', runtimeMsg.kind === 'ok' ? 'text-primary' : 'text-destructive']"
-      >
-        {{ runtimeMsg.text }}
-      </p>
     </div>
 
     <div v-if="info && (!info.binaryPath || info.updateAvailable)" class="mt-2 px-2.5 py-2 rounded border border-border bg-muted/40">
@@ -304,7 +309,7 @@ onUnmounted(() => {
         {{ t(info.updateAvailable ? 'settings.codexInstall.updateHint' : 'settings.codexInstall.hint') }}
       </p>
       <div class="mt-1.5 flex items-center gap-2">
-        <button class="env-btn primary" :disabled="installing" @click="runInstall">
+        <button class="env-btn primary" :disabled="installing || pathBusy || savingRuntime" @click="runInstall">
           <span v-if="installing" class="i-carbon-circle-dash w-3 h-3 animate-spin" />
           {{ installing
             ? t(installPhase === 'verifying' ? 'settings.codexInstall.verifying' : 'settings.codexInstall.installing')

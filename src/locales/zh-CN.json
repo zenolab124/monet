@@ -1151,6 +1151,18 @@
       "installFail": "安装脚本执行失败，可用下方命令手动安装",
       "manualFallback": "手动安装："
     },
+    "codexBin": {
+      "title": "Codex CLI 路径",
+      "hint": "选择可执行文件或安装目录。保存前会校验 Codex 版本；路径变更在重启 Monet 后生效。",
+      "placeholder": "留空使用自动检测",
+      "chooseFile": "选择文件",
+      "chooseDirectory": "选择目录",
+      "automatic": "恢复自动",
+      "redetect": "重新检测",
+      "resolved": "检测路径：{path}",
+      "invalid": "自定义路径已失效，请重新选择或恢复自动检测。",
+      "saved": "路径设置已保存；如有待生效变更，请重启 Monet。"
+    },
     "codexEnv": {
       "title": "本地环境",
       "notFound": "未检测到",

@@ -39,8 +39,11 @@ interface CodexReadinessSnapshot {
   error: string | null
 }
 
-async function refreshEngineNotices(): Promise<CodexEnvInfo | null> {
-  if (pendingCheck) return pendingCheck
+async function refreshEngineNotices(force = false): Promise<CodexEnvInfo | null> {
+  if (pendingCheck) {
+    const result = await pendingCheck
+    return force ? refreshEngineNotices() : result
+  }
   checking.value = true
   pendingCheck = invoke<CodexEnvInfo>('codex_env_check')
     .then((info) => {
