@@ -16,11 +16,11 @@ ASSETS=(
     src-tauri/target/release/bundle/updater/*.app.tar.gz
     src-tauri/target/release/bundle/updater/*.sig
     src-tauri/target/release/bundle/updater/nightly.json
+    windows-artifacts/*.exe
+    windows-artifacts/*.sig
 )
-if [ "${#ASSETS[@]}" -ne 4 ]; then
-    echo "Error: expected exactly four Nightly assets, found ${#ASSETS[@]}" >&2
-    exit 1
-fi
+node scripts/verify-nightly-assets.mjs "$VERSION" \
+    src-tauri/target/release/bundle/updater/nightly.json "${ASSETS[@]}"
 
 CANDIDATE_TAG="nightly-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 RELEASE_TITLE="Nightly $VERSION"
