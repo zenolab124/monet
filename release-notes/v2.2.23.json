@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "version": "2.2.23",
+  "locales": {
+    "zh-CN": {
+      "summary": "Monet 2.2.23 新增档案标签管理、Worktree 会话聚合和项目文件引用，改进 Codex 运行时与 CLI 检测，并修复额度凭据过期、会话顺序和 Windows 控制台弹窗。",
+      "items": [
+        {
+          "type": "new",
+          "title": "档案标签与星标管理",
+          "detail": "支持编辑会话标题、筛选星标会话，以及跨引擎设置标签颜色、重命名、合并和删除标签。"
+        },
+        {
+          "type": "new",
+          "title": "Worktree 会话聚合",
+          "detail": "同一仓库的 Worktree 会话集中展示，并标明来源与分支；原工作区删除后仍可查看历史，支持的引擎可在主目录续写。"
+        },
+        {
+          "type": "new",
+          "title": "在输入框引用项目文件",
+          "detail": "支持文件和目录路径补全，发送前校验引用是否有效，并在编辑排队输入时保留引用。"
+        },
+        {
+          "type": "improved",
+          "title": "Codex Computer Use 运行时检查",
+          "detail": "设置页显示插件与本地服务的兼容状态；运行时组件更新后，在下一轮任务前重新连接。"
+        },
+        {
+          "type": "improved",
+          "title": "Windows Nightly 安装包",
+          "detail": "Nightly 现提供与 macOS 同版本的 Windows 安装包，双平台工件与更新清单验证通过后统一发布。"
+        },
+        {
+          "type": "fixed",
+          "title": "自定义 Codex CLI 路径与 Windows 检测",
+          "detail": "支持选择 Codex 可执行文件或安装目录，并修复 Windows 上通过 npm 安装的 CLI 检测。"
+        },
+        {
+          "type": "fixed",
+          "title": "中断后的 Codex 提问顺序",
+          "detail": "立即中断的提问会保留在原来的时间线位置，避免被后续轮次挤到错误位置。"
+        },
+        {
+          "type": "fixed",
+          "title": "图片加载对 Codex 任务的干扰",
+          "detail": "限制并发资源加载，并保护正在执行的轮次，避免历史图片读取干扰当前任务。"
+        },
+        {
+          "type": "fixed",
+          "title": "Claude 额度凭据续期",
+          "detail": "凭据过期时委托官方 Claude Code CLI 续期，并改进失败提示与重试退避。"
+        },
+        {
+          "type": "fixed",
+          "title": "Windows 工作区 Git 探测弹窗",
+          "detail": "后台检查工作区和分支信息时隐藏 Git 控制台，避免反复弹出命令行窗口。"
+        }
+      ]
+    },
+    "en-US": {
+      "summary": "Monet 2.2.23 adds archive tag management, Worktree session grouping, and project file references, improves Codex runtime discovery, and fixes expired quota credentials, timeline ordering, and Windows console popups.",
+      "items": [
+        {
+          "type": "new",
+          "title": "Archive tags and stars",
+          "detail": "Edit session titles, filter starred sessions, and manage tag colors, renaming, merging, and deletion across engines."
+        },
+        {
+          "type": "new",
+          "title": "Worktree session grouping",
+          "detail": "Browse a repository's Worktree sessions together with source and branch labels. History remains readable after a workspace is deleted; supported engines can continue in the main directory."
+        },
+        {
+          "type": "new",
+          "title": "Project file references in composers",
+          "detail": "Complete file and directory paths, validate references before sending, and preserve them when editing queued input."
+        },
+        {
+          "type": "improved",
+          "title": "Codex Computer Use runtime checks",
+          "detail": "Settings shows plugin and local-service compatibility. Updated runtime components reconnect before the next task turn."
+        },
+        {
+          "type": "improved",
+          "title": "Windows Nightly installers",
+          "detail": "Nightly now includes Windows installers matching the macOS version, with both platforms' artifacts and updater metadata verified before publication."
+        },
+        {
+          "type": "fixed",
+          "title": "Custom Codex CLI paths and Windows discovery",
+          "detail": "Select a Codex executable or installation directory, with corrected discovery of npm-installed CLI versions on Windows."
+        },
+        {
+          "type": "fixed",
+          "title": "Interrupted Codex prompt ordering",
+          "detail": "Immediately interrupted prompts stay anchored in their original timeline position instead of moving after later turns."
+        },
+        {
+          "type": "fixed",
+          "title": "Image loading during Codex tasks",
+          "detail": "Limits concurrent asset requests and protects active turns so historical image loading does not interfere with the current task."
+        },
+        {
+          "type": "fixed",
+          "title": "Claude quota credential renewal",
+          "detail": "Delegates expired credential renewal to the official Claude Code CLI and improves failure messages and retry backoff."
+        },
+        {
+          "type": "fixed",
+          "title": "Windows workspace Git console popups",
+          "detail": "Hides Git consoles during background workspace and branch probes to prevent repeated command-window popups."
+        }
+      ]
+    }
+  }
+}
