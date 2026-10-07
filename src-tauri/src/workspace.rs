@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::engines::core::{ActionAvailability, SessionActions, SessionRef};
+use crate::proc_ext::HideConsole;
 
 const SCHEMA_VERSION: u32 = 1;
 const STORE_FILE: &str = "worktree-sessions-v1.json";
@@ -385,6 +386,7 @@ fn git_output(cwd: &Path, args: &[&str]) -> Option<Vec<u8>> {
         .arg(cwd)
         .args(args)
         .env("PATH", crate::path_env::enhanced_path())
+        .hide_console()
         .output()
         .ok()?;
     output.status.success().then_some(output.stdout)
