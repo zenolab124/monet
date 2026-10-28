@@ -549,9 +549,19 @@ fn actor_loop(
 }
 
 fn decrement_active_turns(active_turns: &AtomicU64) {
-    let _ = active_turns.try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-        Some(count.saturating_sub(1))
-    });
+    // 饱和递减；手写 CAS 循环，避开新版弃用的 fetch_update 与高于 MSRV 的 try_update
+    let mut current = active_turns.load(Ordering::Acquire);
+    while current > 0 {
+        match active_turns.compare_exchange_weak(
+            current,
+            current - 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
+        }
+    }
 }
 
 fn runtime_identity(path: &Path) -> Option<RuntimeIdentity> {
