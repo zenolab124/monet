@@ -122,6 +122,25 @@ describe('macOS release signing architecture', () => {
     }
   })
 
+  it('reports Release and Nightly failures through a non-blocking issue alert', () => {
+    for (const [workflowPath, needs] of [
+      ['../../.github/workflows/nightly.yml', '[prepare, build-windows, build-macos]'],
+      ['../../.github/workflows/release.yml', '[validate-release-notes, build-windows, build-macos]'],
+    ]) {
+      const workflow = source(workflowPath)
+      const job = workflow.slice(workflow.indexOf('\n  report-ci-status:'))
+
+      // 工作流级权限不变，issues: write 只授予告警 job
+      expect(workflow).toMatch(/^permissions:\n {2}contents: write\n\n/m)
+      expect(job).toContain(`needs: ${needs}`)
+      expect(job).toContain('if: ${{ !cancelled() }}')
+      expect(job).toContain('continue-on-error: true')
+      expect(job).toContain('issues: write')
+      expect(job).toContain('NEEDS_JSON: ${{ toJSON(needs) }}')
+      expect(job).toContain('run: node scripts/ci-failure-alert.mjs')
+    }
+  })
+
   it('pins every workflow action to an immutable commit SHA', () => {
     for (const workflowPath of [
       '../../.github/workflows/nightly.yml',
