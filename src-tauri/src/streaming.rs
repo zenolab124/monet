@@ -11,6 +11,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
+use crate::engines::claude::diagnostics;
+use crate::engines::claude::protocol::{self, ControlOutcome, LiveSignal, ReverseRequest};
 use crate::models::ContentBlock;
 use crate::permission::PermissionService;
 use crate::session_capabilities::{
@@ -43,7 +45,20 @@ struct SessionProcess {
     /// 进程启动墙钟时刻(epoch ms)。异步账本的进程代际判据:启动早于本时刻的
     /// 无终态任务属于已死的前代进程,终态通知永远不会来,不得再判"进行中"
     started_at_ms: i64,
+    /// 已发出、等待 CLI 判决的权限模式切换（request_id → 请求）
+    pending_permission: HashMap<String, PendingPermission>,
+    /// 本进程是否已上报过 system/init 中的插件/MCP 加载问题（每进程只提示一次）
+    init_reported: bool,
 }
+
+struct PendingPermission {
+    requested: String,
+    /// 超时已向前端报失败；迟到的成功判决仍会生效并重新同步界面
+    timed_out: bool,
+}
+
+/// 权限模式切换等待 CLI 判决的时限
+const PERMISSION_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 仅用于 SessionProcess 尚未接管 Child 的启动阶段错误路径。
 fn terminate_and_reap_startup_child(child: &mut Child) {
@@ -1050,6 +1065,23 @@ fn open_session(
         if let Ok(v) = serde_json::from_str::<Value>(&line_buf) {
             let t = v.get("type").and_then(|t| t.as_str());
             if t == Some("control_response") {
+                // 握手响应体是 CLI 自报的命令/agents/模型目录；解析失败回退磁盘扫描与内置列表
+                if let Some((_, ControlOutcome::Success, Some(body))) =
+                    protocol::control_response(&v)
+                {
+                    if let Some(catalog) = protocol::parse_initialize_response(body) {
+                        if let Some(version) = catalog.cli_version.as_deref() {
+                            diagnostics::note_cli_version(version);
+                        }
+                        diagnostics::store_models(&catalog.models);
+                        let _ = app.emit(
+                            "session-catalog",
+                            json!({ "session_id": session_id, "catalog": catalog }),
+                        );
+                    } else {
+                        eprintln!("[long-lived] 握手响应结构不符，回退本地命令与模型列表");
+                    }
+                }
                 break;
             }
             // 握手阶段也可能收到 hook 事件（SessionStart hooks 在 initialize 前执行）
@@ -1113,6 +1145,8 @@ fn open_session(
         extra_args: extra_args.unwrap_or("").to_string(),
         capability_fingerprint: capability_bundle.fingerprint().to_string(),
         started_at_ms,
+        pending_permission: HashMap::new(),
+        init_reported: false,
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -1248,15 +1282,7 @@ pub fn send_message(
     }
 
     if let Some(mode) = normalized_override(permission_mode) {
-        sp.request_counter += 1;
-        let req_id = format!("set-perm-mode-{}", sp.request_counter);
-        let ctrl = json!({
-            "type": "control_request",
-            "request_id": req_id,
-            "request": {"subtype": "set_permission_mode", "permission_mode": mode}
-        });
-        write_stdin(&mut sp.stdin, &ctrl)?;
-        sp.permission_mode = Some(mode.to_string());
+        request_permission_mode(app, &process, &mut sp, session_id, mode)?;
     }
     let mut content: Vec<serde_json::Value> = Vec::new();
     if let Some(imgs) = images {
@@ -1354,15 +1380,7 @@ pub fn toggle_remote_control(
     let mut sp = process.lock().unwrap();
     if exists {
         if let Some(mode) = normalized_override(permission_mode) {
-            sp.request_counter += 1;
-            let req_id = format!("set-perm-mode-{}", sp.request_counter);
-            let ctrl = json!({
-                "type": "control_request",
-                "request_id": req_id,
-                "request": {"subtype": "set_permission_mode", "permission_mode": mode}
-            });
-            write_stdin(&mut sp.stdin, &ctrl)?;
-            sp.permission_mode = Some(mode.to_string());
+            request_permission_mode(app, &process, &mut sp, session_id, mode)?;
         }
     }
     eprintln!(
@@ -1477,8 +1495,8 @@ pub fn stop_async_task(session_id: &str, task_id: &str) -> Result<(), String> {
     write_stdin(&mut sp.stdin, &request)
 }
 
-/// 运行时切换权限模式
-pub fn set_permission_mode(session_id: &str, mode: &str) -> Result<(), String> {
+/// 运行时切换权限模式；判决经 `permission-mode-result` 信号回报
+pub fn set_permission_mode(app: &AppHandle, session_id: &str, mode: &str) -> Result<(), String> {
     let process = ACTIVE_PROCESSES
         .lock()
         .unwrap()
@@ -1488,18 +1506,126 @@ pub fn set_permission_mode(session_id: &str, mode: &str) -> Result<(), String> {
     match process {
         Some(p) => {
             let mut sp = p.lock().unwrap();
-            sp.request_counter += 1;
-            let req_id = format!("set-perm-mode-{}", sp.request_counter);
-            let msg = json!({
-                "type": "control_request",
-                "request_id": req_id,
-                "request": {"subtype": "set_permission_mode", "permission_mode": mode}
-            });
-            write_stdin(&mut sp.stdin, &msg)?;
-            sp.permission_mode = Some(mode.to_string());
-            Ok(())
+            request_permission_mode(app, &p, &mut sp, session_id, mode)
         }
         None => Err("会话进程不存在".to_string()),
+    }
+}
+
+/// 发出权限模式切换。进程记录只在 CLI 判决成功后更新——CLI 对读不懂的请求会回
+/// error，乐观更新会让界面显示新模式而进程仍按旧模式运行。
+fn request_permission_mode(
+    app: &AppHandle,
+    process: &Arc<Mutex<SessionProcess>>,
+    sp: &mut SessionProcess,
+    session_id: &str,
+    mode: &str,
+) -> Result<(), String> {
+    let already_pending = sp
+        .pending_permission
+        .values()
+        .any(|pending| pending.requested == mode && !pending.timed_out);
+    if sp.permission_mode.as_deref() == Some(mode) || already_pending {
+        return Ok(());
+    }
+    sp.request_counter += 1;
+    let req_id = format!(
+        "{}{}",
+        protocol::PERMISSION_REQUEST_PREFIX,
+        sp.request_counter
+    );
+    write_stdin(
+        &mut sp.stdin,
+        &protocol::permission_mode_request(&req_id, mode),
+    )?;
+    sp.pending_permission.insert(
+        req_id.clone(),
+        PendingPermission {
+            requested: mode.to_string(),
+            timed_out: false,
+        },
+    );
+
+    let app = app.clone();
+    let process = Arc::downgrade(process);
+    let sid = session_id.to_string();
+    let requested = mode.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(PERMISSION_CONFIRM_TIMEOUT);
+        let Some(process) = process.upgrade() else {
+            return;
+        };
+        let confirmed = {
+            let mut sp = process.lock().unwrap();
+            match sp.pending_permission.get_mut(&req_id) {
+                Some(pending) => pending.timed_out = true,
+                None => return,
+            }
+            sp.permission_mode.clone()
+        };
+        emit_permission_result(
+            &app,
+            &sid,
+            false,
+            confirmed.as_deref(),
+            &requested,
+            Some("timeout"),
+        );
+    });
+    Ok(())
+}
+
+fn emit_permission_result(
+    app: &AppHandle,
+    session_id: &str,
+    ok: bool,
+    mode: Option<&str>,
+    requested: &str,
+    error: Option<&str>,
+) {
+    dispatch_stream_signal(
+        app,
+        "permission-mode-result",
+        json!({
+            "session_id": session_id,
+            "ok": ok,
+            "mode": mode,
+            "requested": requested,
+            "error": error,
+        }),
+    );
+}
+
+/// CLI 对权限切换的判决：成功才落进程记录；失败回报进程当前真实模式供界面回退
+fn settle_permission_response(
+    app: &AppHandle,
+    process: &Arc<Mutex<SessionProcess>>,
+    session_id: &str,
+    request_id: &str,
+    outcome: &ControlOutcome,
+) {
+    let (requested, confirmed) = {
+        let mut sp = process.lock().unwrap();
+        let Some(pending) = sp.pending_permission.remove(request_id) else {
+            return;
+        };
+        if *outcome == ControlOutcome::Success {
+            sp.permission_mode = Some(pending.requested.clone());
+        }
+        (pending.requested, sp.permission_mode.clone())
+    };
+    match outcome {
+        ControlOutcome::Success => {
+            emit_permission_result(app, session_id, true, Some(&requested), &requested, None)
+        }
+        ControlOutcome::Error(error) => emit_permission_result(
+            app,
+            session_id,
+            false,
+            confirmed.as_deref(),
+            &requested,
+            Some(error),
+        ),
     }
 }
 
@@ -1843,6 +1969,7 @@ fn read_stream(
             }
         }
         emit_fast_mode_status(app, session_id, &value);
+        route_protocol_signals(app, &process, session_id, &value);
 
         // Remote Control 判决回报：success/error 都上报，前端 rcActive 完全由本事件驱动
         // （不能乐观置位——判决与 invoke 返回并发，先到的判决会被晚写的乐观值覆盖）。
@@ -1959,6 +2086,99 @@ fn read_stream(
         } else {
             emit_error(app, session_id, "进程异常退出".to_string());
         }
+    }
+}
+
+/// Claude 协议的扩展信号：控制判决、反向请求兜底、限额、init 问题、实时状态与未知采样。
+/// 只做翻译与转发；任何一项解析失败都只是跳过，不影响主流读取。
+fn route_protocol_signals(
+    app: &AppHandle,
+    process: &Arc<Mutex<SessionProcess>>,
+    session_id: &str,
+    value: &Value,
+) {
+    if let Some((request_id, outcome, _)) = protocol::control_response(value) {
+        if request_id.starts_with(protocol::PERMISSION_REQUEST_PREFIX) {
+            settle_permission_response(app, process, session_id, &request_id, &outcome);
+        }
+        return;
+    }
+
+    match protocol::classify_reverse_request(value) {
+        ReverseRequest::Reject { subtype, response } => {
+            // 立即应答，CLI 走取消分支而不是挂到超时
+            if let Err(error) = write_stdin(&mut process.lock().unwrap().stdin, &response) {
+                eprintln!("[long-lived] 反向请求兜底应答写入失败 subtype={subtype}: {error}");
+            }
+            if subtype == "can_use_tool" {
+                eprintln!("[long-lived] warn: 收到 can_use_tool，已按不支持拒绝");
+            }
+            diagnostics::record_unknown(value);
+            dispatch_stream_signal(
+                app,
+                "session-notice",
+                json!({ "session_id": session_id, "kind": "unsupported_request", "subtype": subtype }),
+            );
+            return;
+        }
+        ReverseRequest::MissingId { subtype } => {
+            eprintln!("[long-lived] 反向请求缺少 request_id，未应答 subtype={subtype}");
+            return;
+        }
+        ReverseRequest::NotARequest => {}
+    }
+
+    if let Some(signal) = protocol::parse_rate_limit_event(value) {
+        // 额度面板据此暂停 usage API 自动轮询（跨进程经快照文件共享给托盘）
+        crate::quota::record_live_rate_limit(&crate::quota::LiveRateLimitSnapshot {
+            rate_limit_type: signal.rate_limit_type.clone(),
+            utilization: signal.utilization,
+            resets_at_ms: signal.resets_at_ms,
+            received_at_ms: chrono::Utc::now().timestamp_millis(),
+        });
+        let mut payload = serde_json::to_value(&signal).unwrap_or_else(|_| json!({}));
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("session_id".to_string(), json!(session_id));
+        }
+        dispatch_stream_signal(app, "session-rate-limit", payload);
+        return;
+    }
+
+    if let Some(report) = protocol::parse_system_init(value) {
+        if let Some(version) = report.cli_version.as_deref() {
+            diagnostics::note_cli_version(version);
+        }
+        let first = {
+            let mut sp = process.lock().unwrap();
+            !std::mem::replace(&mut sp.init_reported, true)
+        };
+        if first && !report.issues.is_empty() {
+            dispatch_stream_signal(
+                app,
+                "session-notice",
+                json!({ "session_id": session_id, "kind": "init_issues", "items": report.issues }),
+            );
+        }
+        return;
+    }
+
+    if let Some(signal) = protocol::parse_live_signal(value) {
+        let name = match signal {
+            LiveSignal::ModelFallback { .. } | LiveSignal::PermissionDenied { .. } => {
+                "session-notice"
+            }
+            _ => "session-live-status",
+        };
+        let mut payload = serde_json::to_value(&signal).unwrap_or_else(|_| json!({}));
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("session_id".to_string(), json!(session_id));
+        }
+        dispatch_stream_signal(app, name, payload);
+        return;
+    }
+
+    if !protocol::is_known_event(value) {
+        diagnostics::record_unknown(value);
     }
 }
 

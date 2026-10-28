@@ -764,10 +764,29 @@ pub fn stop_async_task(session_id: String, task_id: String) -> Result<(), String
     streaming::stop_async_task(&session_id, &task_id)
 }
 
+/// 自动续跑计划（额度恢复后继续）。前端负责调度，这里只做 Monet 数据目录内的读写
+#[tauri::command]
+pub fn load_auto_resume_state() -> Option<String> {
+    std::fs::read_to_string(crate::config::data_dir().join("auto-resume.json")).ok()
+}
+
+#[tauri::command]
+pub fn save_auto_resume_state(content: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?;
+    crate::config::atomic_write(&crate::config::data_dir().join("auto-resume.json"), &content)
+        .map_err(|e| e.to_string())
+}
+
+/// Claude 协议诊断：本机 CLI 版本、已验证版本与未识别协议消息的结构采样
+#[tauri::command]
+pub fn get_claude_protocol_diagnostics() -> crate::engines::claude::diagnostics::ProtocolDiagnostics {
+    crate::engines::claude::diagnostics::protocol_diagnostics()
+}
+
 /// 运行时切换权限模式
 #[tauri::command]
-pub fn set_permission_mode(session_id: String, mode: String) -> Result<(), String> {
-    streaming::set_permission_mode(&session_id, &mode)
+pub fn set_permission_mode(app: tauri::AppHandle, session_id: String, mode: String) -> Result<(), String> {
+    streaming::set_permission_mode(&app, &session_id, &mode)
 }
 
 /// 开关 Remote Control（进程未启动时自动连接）

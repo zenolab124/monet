@@ -10,7 +10,9 @@ mod claude;
 mod codex;
 mod tray_title;
 
-pub use claude::{ExtraUsage, ModelQuota, QuotaInfo, QuotaWindow};
+pub use claude::{
+    record_live_rate_limit, ExtraUsage, LiveRateLimitSnapshot, ModelQuota, QuotaInfo, QuotaWindow,
+};
 pub use tray_title::{TrayTitleConfig, TrayTitleConfigV2, TrayTitleSlot, TrayTitleSlotV2};
 
 const PROVIDER_CACHE_TTL_SECS: i64 = 300;
@@ -172,7 +174,11 @@ impl QuotaProvider for ClaudeProvider {
     }
 
     fn watch_paths(&self) -> Vec<PathBuf> {
-        vec![claude::disk_cache_path(), claude::backoff_path()]
+        vec![
+            claude::disk_cache_path(),
+            claude::backoff_path(),
+            claude::live_snapshot_path(),
+        ]
     }
 }
 
