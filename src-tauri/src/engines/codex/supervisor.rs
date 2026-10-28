@@ -549,7 +549,7 @@ fn actor_loop(
 }
 
 fn decrement_active_turns(active_turns: &AtomicU64) {
-    let _ = active_turns.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+    let _ = active_turns.try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
         Some(count.saturating_sub(1))
     });
 }
