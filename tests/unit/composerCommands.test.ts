@@ -73,3 +73,33 @@ describe('multi-engine composer commands', () => {
     expect(filterCommands('$cl', [], [], { engineId: 'codex' }).map(item => item.name)).toContain('clear')
   })
 })
+
+describe('engine-reported commands', () => {
+  const reported = [
+    { name: 'plugin:deploy', description: 'Deploy via plugin', argument_hint: '<env>' },
+    { name: 'lint-fix', description: 'CLI lint fix', argument_hint: null },
+    { name: 'compact', description: 'CLI compact', argument_hint: null },
+  ]
+
+  it('adds commands only the engine reports and lets them pass through', () => {
+    const all = getAllCommands([], [], { engineId: 'claude-code', reported })
+    const plugin = all.find(entry => entry.name === 'plugin:deploy')
+    expect(plugin).toMatchObject({ category: 'command', hasArg: true, argHint: '<env>', wirePrefix: '/' })
+    expect(parseCommand('/plugin:deploy prod', [], [], { engineId: 'claude-code', reported }))
+      .toMatchObject({ kind: 'pass', arg: 'prod' })
+  })
+
+  it('keeps disk entries and builtins when names collide', () => {
+    const all = getAllCommands([skill({ name: 'lint-fix' })], [], { engineId: 'claude-code', reported })
+    expect(all.filter(entry => entry.name === 'lint-fix')).toHaveLength(1)
+    expect(all.find(entry => entry.name === 'lint-fix')?.category).toBe('skill')
+    expect(all.filter(entry => entry.name === 'compact')).toHaveLength(1)
+    expect(all.find(entry => entry.name === 'compact')?.category).toBe('pass')
+  })
+
+  it('falls back to disk scan when nothing is reported', () => {
+    const withReport = getAllCommands([], [command()], { engineId: 'claude-code', reported: [] })
+    const without = getAllCommands([], [command()], { engineId: 'claude-code' })
+    expect(withReport).toEqual(without)
+  })
+})

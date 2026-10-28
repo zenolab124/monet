@@ -8,6 +8,7 @@ import { collectSessionCapabilities } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import { useConfirm } from './useConfirm'
+import { initSessionSignalListeners } from './useSessionSignals'
 import i18n from '../locales'
 import {
   resolveStreamRenderPriority,
@@ -747,6 +748,7 @@ export const finishedDirty = reactive(new Set<string>())
 let listenersReady = false
 
 export async function initStreamListeners(): Promise<void> {
+  void initSessionSignalListeners()
   if (listenersReady) return
   listenersReady = true
   document.addEventListener('visibilitychange', () => bump(true))
@@ -1240,6 +1242,15 @@ function enqueuePendingQueueItem(sessionId: string, message: string, opts: SendO
   return id
 }
 
+type BeforeSendListener = (sessionId: string) => void
+const beforeSendListeners = new Set<BeforeSendListener>()
+
+/** 订阅会话发送（自动续跑据此在用户手动发送时取消计划） */
+export function onBeforeSend(listener: BeforeSendListener): () => void {
+  beforeSendListeners.add(listener)
+  return () => beforeSendListeners.delete(listener)
+}
+
 async function sendMessage(
   sessionId: string,
   cwd: string,
@@ -1248,6 +1259,7 @@ async function sendMessage(
   queueWhenBusy = true,
 ): Promise<boolean> {
   const state = getStream(sessionId)
+  for (const listener of beforeSendListeners) listener(sessionId)
 
   if (state.streaming) {
     if (queueWhenBusy) enqueuePendingQueueItem(sessionId, message, opts)
