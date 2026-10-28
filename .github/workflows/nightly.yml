@@ -61,6 +61,7 @@ jobs:
         with:
           node-version: 22
 
+
       # 正式 tag、package.json 与当前 Nightly 共同构成版本账本。每次成功打包消耗
       # 一个新的数字版本，不论渠道：1.0.4 stable → 1.0.5 nightly → 1.0.6 stable。
       - name: Compute nightly version
@@ -195,10 +196,23 @@ jobs:
     runs-on: macos-latest
     env:
       SIGN_ID: ${{ vars.MACOS_SIGNING_IDENTITY || 'Monet Signing' }}
+    outputs:
+      notary_preflight_reason: ${{ steps.notary_preflight.outputs.reason }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # 发布说明需要上次 Nightly 以来的历史
+
+      # 构建前用公证 API key 预检账号状态，协议过期 / key 失效时立即失败
+      - name: Notary preflight
+        id: notary_preflight
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_API_KEY: ${{ vars.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          exec src-widget/build.sh --notary-preflight
 
       - name: Restore versioned manifests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

@@ -97,8 +97,21 @@ jobs:
     runs-on: macos-latest
     env:
       SIGN_ID: ${{ vars.MACOS_SIGNING_IDENTITY || 'Monet Signing' }}
+    outputs:
+      notary_preflight_reason: ${{ steps.notary_preflight.outputs.reason }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # 构建前用公证 API key 预检账号状态，协议过期 / key 失效时立即失败
+      - name: Notary preflight
+        id: notary_preflight
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_API_KEY: ${{ vars.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          exec src-widget/build.sh --notary-preflight
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
