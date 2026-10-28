@@ -43,24 +43,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 定时触发时若 24h 内无提交就跳过，避免天天发同一份包
-      - name: Check for new commits
-        id: check
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "schedule" ] && [ -z "$(git log --since='24 hours ago' --oneline)" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "24 小时内无新提交，跳过本次 nightly"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Setup Node.js
-        if: steps.check.outputs.skip == 'false'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
+      # 定时触发只在 HEAD 已作为当前 Nightly 发布时跳过；上次失败则 tag 未移动，
+      # 次日照常重试。判定依据写入运行摘要。手动触发始终构建。
+      - name: Check whether HEAD is already published
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: node scripts/nightly-skip-decision.mjs
 
       # 正式 tag、package.json 与当前 Nightly 共同构成版本账本。每次成功打包消耗
       # 一个新的数字版本，不论渠道：1.0.4 stable → 1.0.5 nightly → 1.0.6 stable。

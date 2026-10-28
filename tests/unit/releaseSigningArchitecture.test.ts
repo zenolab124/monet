@@ -141,6 +141,14 @@ describe('macOS release signing architecture', () => {
     }
   })
 
+  it('skips scheduled Nightly runs only when HEAD is already published', () => {
+    const workflow = source('../../.github/workflows/nightly.yml')
+    expect(workflow).not.toContain("--since='24 hours ago' --oneline")
+    const check = workflow.indexOf('id: check')
+    expect(workflow.slice(check, workflow.indexOf('\n      - ', check))).toContain('run: node scripts/nightly-skip-decision.mjs')
+    expect(workflow.indexOf('name: Setup Node.js')).toBeLessThan(check)
+  })
+
   it('pins every workflow action to an immutable commit SHA', () => {
     for (const workflowPath of [
       '../../.github/workflows/nightly.yml',
