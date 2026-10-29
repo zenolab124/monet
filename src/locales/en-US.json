@@ -375,7 +375,39 @@
     "idle": "Idle",
     "externalActive": "Running · External",
     "streamInterrupted": "Stream interrupted",
-    "system": "System"
+    "system": "System",
+    "signals": {
+      "continueMessage": "Continue",
+      "permissionModeFailed": "Permission mode not changed: {error}",
+      "permissionModeTimeout": "Permission mode not changed: the CLI did not confirm within 5 seconds",
+      "unsupportedRequests": "The CLI asked for interactions Monet doesn't support yet; they were cancelled ({list})",
+      "initIssues": "Some plugins or MCP servers failed to load:",
+      "modelFallback": "Model switched from {from} to {to}",
+      "modelFallbackTo": "Model switched to {to}",
+      "modelFallbackFrom": "Model switched from {from}",
+      "modelFallbackUnknown": "The model for this turn was switched",
+      "permissionDenied": "A {tool} call was denied by permission rules",
+      "permissionDeniedUnknown": "A tool call was denied by permission rules",
+      "retrying": "Retrying request (attempt {attempt})",
+      "retryingNoCount": "Retrying request",
+      "compacting": "Compacting context",
+      "windowFiveHour": "5-hour",
+      "windowSevenDay": "7-day",
+      "rateWarning": "{window} limit almost reached",
+      "rateRejected": "{window} limit reached",
+      "resetsAt": "resets around {time}",
+      "tomorrow": "tomorrow {time}",
+      "overage": "using overage",
+      "autoResume": "Continue automatically when the limit resets",
+      "autoResumeScheduled": "Will continue automatically at {time}",
+      "autoResumeExpired": "Automatic continue expired and was not sent",
+      "autoResumeStillLimited": "Still over the limit after continuing automatically; stopped",
+      "autoResumeSent": "Continued automatically after the limit reset",
+      "cacheRebuild": "Cache expired: this send will reprocess about {tokens} tokens of context",
+      "compactFirst": "Compact first",
+      "compactAfterTurn": "Available after the current turn ends",
+      "realtimeSource": "From live session data"
+    }
   },
   "workbench": {
     "defaultTabName": "Workbench {seq}",
@@ -1299,7 +1331,18 @@
     "stickyUserPrompt": "Sticky user prompt",
     "stickyUserPromptHint": "Keep the current user prompt at the top while scrolling; turn this off to let it scroll with the conversation.",
     "stickyUserPromptOn": "On",
-    "stickyUserPromptOff": "Off"
+    "stickyUserPromptOff": "Off",
+    "protocol": {
+      "title": "Claude Code protocol diagnostics",
+      "cliVersion": "Local CLI version",
+      "verifiedVersion": "Version verified by Monet",
+      "unknown": "Unknown",
+      "newerThanVerified": "The local CLI is newer than the version Monet has verified; unrecognized protocol messages are listed below",
+      "samples": "Unrecognized protocol messages",
+      "empty": "No unrecognized protocol messages yet",
+      "count": "{count}×",
+      "fields": "Fields"
+    }
   },
   "notification": {
     "claudeAsking": "Claude is asking",

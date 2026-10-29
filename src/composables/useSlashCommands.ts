@@ -26,6 +26,8 @@ export interface SlashCommand {
 export interface CommandCatalogContext {
   engineId?: string
   cwd?: string | null
+  /** 引擎在握手时自报的命令（含插件命令与新内置命令） */
+  reported?: ReadonlyArray<{ name: string; description: string; argument_hint: string | null }>
 }
 
 function commonCommands(): SlashCommand[] {
@@ -170,6 +172,19 @@ export function getAllCommands(
     if (reserved.has(key)) continue
     const current = dynamic.get(key)
     if (!current || outranks(candidate, current, context.cwd)) dynamic.set(key, candidate)
+  }
+  // 引擎自报而内置与磁盘扫描都没有的命令补入；同名时保留磁盘项（带路径与作用域）
+  for (const reported of context.reported ?? []) {
+    const key = normalizedName(reported.name)
+    if (!key || reserved.has(key) || dynamic.has(key)) continue
+    dynamic.set(key, {
+      name: reported.name,
+      hint: shorten(reported.description || ''),
+      hasArg: !!reported.argument_hint,
+      argHint: reported.argument_hint ?? undefined,
+      category: 'command',
+      wirePrefix: '/',
+    })
   }
   return [...builtins, ...dynamic.values()]
 }

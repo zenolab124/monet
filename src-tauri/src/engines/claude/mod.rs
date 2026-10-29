@@ -1,4 +1,6 @@
 mod adapter;
+pub mod diagnostics;
+pub mod protocol;
 mod runtime;
 mod source;
 

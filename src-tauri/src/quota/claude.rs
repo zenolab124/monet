@@ -176,6 +176,102 @@ fn write_disk_cache(info: &QuotaInfo) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 会话实时额度：主应用收到 CLI 流内的 rate_limit_event 时写快照。快照 10 分钟内有效，
+// 期间自动刷新（周期与活跃两路）不再请求 usage API，直接把快照叠加到上次的缓存上。
+// 用户手动刷新不受影响。快照只含窗口类型、利用率与恢复时刻，不含凭据。
+// ---------------------------------------------------------------------------
+
+const LIVE_SNAPSHOT_TTL_MS: i64 = 10 * 60 * 1000;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveRateLimitSnapshot {
+    pub rate_limit_type: Option<String>,
+    pub utilization: Option<f64>,
+    pub resets_at_ms: Option<i64>,
+    pub received_at_ms: i64,
+}
+
+pub(super) fn live_snapshot_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("quota-live.json")
+}
+
+/// 主应用在收到实时额度事件时调用
+pub fn record_live_rate_limit(snapshot: &LiveRateLimitSnapshot) {
+    if let Ok(json) = serde_json::to_string(snapshot) {
+        let _ = crate::config::atomic_write(&live_snapshot_path(), &json);
+    }
+}
+
+fn fresh_live_snapshot(now_ms: i64) -> Option<LiveRateLimitSnapshot> {
+    let content = std::fs::read_to_string(live_snapshot_path()).ok()?;
+    let snapshot: LiveRateLimitSnapshot = serde_json::from_str(&content).ok()?;
+    (now_ms - snapshot.received_at_ms < LIVE_SNAPSHOT_TTL_MS).then_some(snapshot)
+}
+
+/// 把实时快照叠加到已有数据上；快照未覆盖的窗口沿用上次结果
+fn overlay_live(
+    base: Option<QuotaInfo>,
+    live: &LiveRateLimitSnapshot,
+    now: &DateTime<Utc>,
+) -> QuotaInfo {
+    let mut info = base.unwrap_or_else(|| QuotaInfo {
+        session: None,
+        weekly: None,
+        weekly_models: Vec::new(),
+        extra_usage: None,
+        plan: None,
+        account_email: None,
+        updated_at: now.to_rfc3339(),
+        error: None,
+        error_kind: None,
+    });
+    info.error = None;
+    info.error_kind = None;
+    let resets_at = live
+        .resets_at_ms
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
+        .map(|t| t.to_rfc3339());
+    let target = match live.rate_limit_type.as_deref() {
+        Some("five_hour") => Some(&mut info.session),
+        Some("seven_day") => Some(&mut info.weekly),
+        _ => None,
+    };
+    if let Some(slot) = target {
+        // CLI 报 0~1 的比例；兼容直接报百分数
+        let percent = live
+            .utilization
+            .map(|u| if u <= 1.0 { u * 100.0 } else { u })
+            .or_else(|| slot.as_ref().map(|w| w.used_percent));
+        if let Some(used_percent) = percent {
+            let window = make_window(used_percent, resets_at.as_deref(), now);
+            *slot = Some(window);
+        }
+    }
+    info.updated_at = now.to_rfc3339();
+    info
+}
+
+/// 有新鲜实时快照时直接采用并写入缓存；返回 None 表示需要走正常刷新
+fn apply_live_snapshot(now: DateTime<Utc>) -> Option<QuotaInfo> {
+    let live = fresh_live_snapshot(now.timestamp_millis())?;
+    let base = read_disk_cache().map(|(info, _)| info).or_else(|| {
+        CACHE
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|c| c.info.clone()))
+    });
+    let info = overlay_live(base, &live, &now);
+    write_disk_cache(&info);
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some(CachedQuota {
+            info: info.clone(),
+            fetched_at_ms: now.timestamp_millis(),
+        });
+    }
+    Some(info)
+}
+
 fn disk_cache_age_secs() -> Option<i64> {
     let content = std::fs::read_to_string(disk_cache_path()).ok()?;
     let dc: DiskCache = serde_json::from_str(&content).ok()?;
@@ -312,6 +408,12 @@ pub(super) fn refresh_for_activity(now_ms: i64) {
     // 必须在统一 Provider 锁内重读共享缓存时间；另一进程可能在等待锁期间刚完成刷新。
     let latest = latest_fetched_at_ms().unwrap_or(0);
     if now_ms - latest >= ACTIVITY_MIN_INTERVAL_SECS * 1000
+        && apply_live_snapshot(Utc::now()).is_some()
+    {
+        LAST_ACTIVITY_MS.store(Utc::now().timestamp_millis(), Ordering::Relaxed);
+        return;
+    }
+    if now_ms - latest >= ACTIVITY_MIN_INTERVAL_SECS * 1000
         && backoff_remaining_secs().is_none()
         && quota_available()
     {
@@ -371,6 +473,13 @@ fn fetch_and_cache(force: bool) -> QuotaInfo {
     if let Some(remain) = backoff_remaining_secs() {
         let mins = (remain + 59) / 60;
         return stale_with_error(format!("Rate limited, retry in {mins}m"), "rate_limited");
+    }
+
+    // 会话正在报实时额度：自动刷新直接采用，不请求 usage API
+    if !force {
+        if let Some(info) = apply_live_snapshot(Utc::now()) {
+            return info;
+        }
     }
 
     // 磁盘缓存 TTL 内直接采用（另一进程可能刚刷过，双进程共享省 API 调用）；
@@ -803,6 +912,70 @@ pub fn format_tray_tooltip(info: &QuotaInfo) -> String {
         "Monet".into()
     } else {
         parts.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod live_snapshot_tests {
+    use super::*;
+
+    fn now() -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp_millis(1_761_750_000_000).unwrap()
+    }
+
+    #[test]
+    fn overlay_updates_matching_window_and_keeps_others() {
+        let base = overlay_live(
+            None,
+            &LiveRateLimitSnapshot {
+                rate_limit_type: Some("seven_day".into()),
+                utilization: Some(40.0),
+                resets_at_ms: None,
+                received_at_ms: 0,
+            },
+            &now(),
+        );
+        let merged = overlay_live(
+            Some(base),
+            &LiveRateLimitSnapshot {
+                rate_limit_type: Some("five_hour".into()),
+                utilization: Some(0.93),
+                resets_at_ms: Some(1_761_753_600_000),
+                received_at_ms: 0,
+            },
+            &now(),
+        );
+        let session = merged.session.unwrap();
+        assert!((session.used_percent - 93.0).abs() < 1e-6);
+        assert!(session.resets_at.is_some());
+        assert!((merged.weekly.unwrap().used_percent - 40.0).abs() < 1e-6);
+        assert!(merged.error.is_none());
+    }
+
+    #[test]
+    fn overlay_ignores_unknown_windows_and_missing_utilization() {
+        let merged = overlay_live(
+            None,
+            &LiveRateLimitSnapshot {
+                rate_limit_type: Some("overage".into()),
+                utilization: Some(0.5),
+                resets_at_ms: None,
+                received_at_ms: 0,
+            },
+            &now(),
+        );
+        assert!(merged.session.is_none() && merged.weekly.is_none());
+        let merged = overlay_live(
+            None,
+            &LiveRateLimitSnapshot {
+                rate_limit_type: Some("five_hour".into()),
+                utilization: None,
+                resets_at_ms: None,
+                received_at_ms: 0,
+            },
+            &now(),
+        );
+        assert!(merged.session.is_none());
     }
 }
 

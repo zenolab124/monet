@@ -41,6 +41,7 @@ import {
   type SlashCommand,
 } from '@/composables/useSlashCommands'
 import { useComposerCommands } from '@/composables/useComposerCommands'
+import { useSessionSignals } from '@/composables/useSessionSignals'
 import { useSessionMeta } from '@/composables/useSessionMeta'
 import { displayTitle, shortId, hasReportedUsage, shouldReplaceUsage } from '@/types'
 import { inferModel } from '@/utils/modelContext'
@@ -71,6 +72,7 @@ import SessionComposer from './session/SessionComposer.vue'
 import SessionComposerField from './session/SessionComposerField.vue'
 import SessionComposerAttachments from './session/SessionComposerAttachments.vue'
 import SessionComposerQueue, { type ComposerQueueItem } from './session/SessionComposerQueue.vue'
+import SessionSignalNotices from './session/SessionSignalNotices.vue'
 import SessionSidePanel from './session/SessionSidePanel.vue'
 import { shouldSubmitComposer } from './session/composerAction'
 import SessionViewport from './session/SessionViewport.vue'
@@ -856,7 +858,22 @@ function onExtraArgsChange(extraArgs: string) {
 
 function onPermissionModeChange(mode: import('@/composables/useSessionSettings').PermissionMode | null) {
   persistPermissionMode(mode)
+  // 进程活着时立即下发，不等下一条消息；CLI 判决经 permission-mode-result 回报。
+  // 回落「跟随 CLI」无法热撤销覆盖，仍由下次发送时的重启判定处理
+  const sid = effectiveSessionId.value
+  if (mode && sid && stream.value.processAlive) {
+    void invoke('set_permission_mode', { sessionId: sid, mode }).catch(() => { /* 进程刚退出：下次发送时随 spawn 下发 */ })
+  }
 }
+
+const sessionSignals = useSessionSignals(effectiveSessionId)
+// CLI 拒绝或超时未确认权限切换：界面回到进程真实模式
+watch(() => sessionSignals.value?.permissionRevert?.seq, (seq) => {
+  const revert = sessionSignals.value?.permissionRevert
+  if (!seq || !revert) return
+  if ((settings.value.permissionMode ?? null) === revert.mode) return
+  persistPermissionMode(revert.mode as import('@/composables/useSessionSettings').PermissionMode | null)
+})
 
 /** 当前消息流里出现的 uuid 集合:判断 mark 锚点是否还在视图内 */
 const messageUuidSet = computed(() => {
@@ -974,6 +991,7 @@ const composerCwd = computed(() => currentSession.value
 const composerCommandContext = computed(() => ({
   engineId: 'claude-code',
   cwd: composerCwd.value,
+  reported: sessionSignals.value?.catalog?.commands,
 }))
 const {
   skills: composerSkills,
@@ -2080,6 +2098,29 @@ async function handleSend() {
   if (preparingMessage.value) return
   preparingMessage.value = true
   try { await sendComposerDraft() } finally { preparingMessage.value = false }
+}
+
+const composerFocused = ref(false)
+
+/** 最近一条带时间戳记录的时刻：判断缓存是否已过期 */
+const lastActivityAt = computed<number | null>(() => {
+  const list = messages.value
+  for (let i = list.length - 1; i >= 0; i--) {
+    const stamp = (list[i] as { timestamp?: string | null }).timestamp
+    if (stamp) {
+      const ms = Date.parse(stamp)
+      if (Number.isFinite(ms)) return ms
+    }
+  }
+  return null
+})
+
+/** 一键压缩：借用输入框发送 /compact，发送后恢复用户原有草稿 */
+async function compactFromNotice() {
+  if (stream.value.streaming || preparingMessage.value) return
+  const draft = inputText.value
+  inputText.value = '/compact'
+  try { await handleSend() } finally { if (draft && !inputText.value) inputText.value = draft }
 }
 
 async function sendComposerDraft() {
@@ -3698,8 +3739,20 @@ async function onReload() {
         : $t('common.stop')"
       @send="handleSend"
       @stop="onStop"
+      @focusin="composerFocused = true"
+      @focusout="composerFocused = false"
     >
       <template #notices>
+        <SessionSignalNotices
+          v-if="effectiveSessionId"
+          :session-id="effectiveSessionId"
+          :context-tokens="stream.realUsedTokens ?? lastAssistantContextSize"
+          :last-activity-at="lastActivityAt"
+          :composer-focused="composerFocused"
+          :busy="stream.streaming || preparingMessage"
+          @compact="compactFromNotice"
+        />
+
         <div v-if="slashError" class="mb-1 text-xs text-destructive">
           {{ slashError }}
         </div>

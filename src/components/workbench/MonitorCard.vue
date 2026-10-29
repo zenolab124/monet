@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useSessionStream, useStreaming } from '@/composables/useStreaming'
+import { useSessionSignals } from '@/composables/useSessionSignals'
 import { useSessionStatus } from '@/composables/useSessionStatus'
 import { queueForSession, usePermissionRequests, isInteractiveTool } from '@/composables/usePermissionRequests'
 import { useNotifications, isInteractiveKind } from '@/composables/useNotifications'
@@ -30,6 +31,12 @@ const props = defineProps<{
 }>()
 
 const sid = computed(() => props.sessionId)
+const signals = useSessionSignals(sid)
+/** 额度预警/上限：与会话详情的额度条同源 */
+const rateLimitStatus = computed(() => {
+  const status = signals.value?.rateLimit?.status
+  return status === 'allowed_warning' || status === 'rejected' ? status : null
+})
 
 const { projects } = useProjects()
 const { expandSession, removeSession, flashSessionId, pendingTaskCwd, draftCwd, engineDraft } = useWorkbench()
@@ -244,6 +251,12 @@ const { isDropTarget } = useDroppable({
         class="px-1 text-[9.5px] border border-primary text-primary rounded-sm shrink-0"
         @click.stop="onCardClick"
       >▶ {{ runnerCount }}</span>
+      <span
+        v-if="rateLimitStatus"
+        class="w-3 h-3 shrink-0"
+        :class="rateLimitStatus === 'rejected' ? 'i-carbon-error text-destructive' : 'i-carbon-warning text-amber-600 dark:text-amber-400'"
+        :title="rateLimitStatus === 'rejected' ? $t('session.signals.rateRejected', { window: '' }) : $t('session.signals.rateWarning', { window: '' })"
+      />
       <button
         class="ml-auto w-4 h-4 grid place-items-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-muted shrink-0"
         :title="$t('workbench.monitor.exitWorkbench')"

@@ -263,6 +263,26 @@ impl RuntimeCommandProvider for ClaudeEngine {
 impl ModelCatalogProvider for ClaudeEngine {
     fn list_models(&self) -> EngineFuture<'_, Vec<ModelDescriptor>> {
         Box::pin(async {
+            // 握手报过模型列表时以 CLI 自报为准；从未握手成功则回退内置别名
+            if let Some(cache) = super::diagnostics::cached_models() {
+                return Ok(cache
+                    .models
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, model)| ModelDescriptor {
+                        id: model.value.clone(),
+                        model: model.value,
+                        display_name: model.display_name,
+                        description: model.description,
+                        is_default: index == 0,
+                        hidden: false,
+                        default_effort: None,
+                        efforts: Vec::new(),
+                        default_service_tier: None,
+                        service_tiers: Vec::new(),
+                    })
+                    .collect());
+            }
             Ok(["fable", "opus", "sonnet", "haiku"]
                 .into_iter()
                 .map(|model| ModelDescriptor {

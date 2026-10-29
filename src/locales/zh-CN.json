@@ -375,7 +375,39 @@
     "idle": "空闲",
     "externalActive": "运行中 · 外部",
     "streamInterrupted": "流式已中断",
-    "system": "系统"
+    "system": "系统",
+    "signals": {
+      "continueMessage": "继续",
+      "permissionModeFailed": "权限模式未切换：{error}",
+      "permissionModeTimeout": "权限模式未切换：CLI 未在 5 秒内确认",
+      "unsupportedRequests": "CLI 请求了 Monet 尚不支持的交互，已自动取消（{list}）",
+      "initIssues": "部分插件或 MCP 未能加载：",
+      "modelFallback": "模型已从 {from} 切换为 {to}",
+      "modelFallbackTo": "模型已切换为 {to}",
+      "modelFallbackFrom": "模型已从 {from} 切换",
+      "modelFallbackUnknown": "本轮模型已被切换",
+      "permissionDenied": "工具 {tool} 的调用被权限规则拒绝",
+      "permissionDeniedUnknown": "一次工具调用被权限规则拒绝",
+      "retrying": "请求重试中（第 {attempt} 次）",
+      "retryingNoCount": "请求重试中",
+      "compacting": "正在压缩上下文",
+      "windowFiveHour": "5 小时",
+      "windowSevenDay": "7 天",
+      "rateWarning": "{window}额度即将用尽",
+      "rateRejected": "已达{window}额度上限",
+      "resetsAt": "预计 {time} 恢复",
+      "tomorrow": "明天 {time}",
+      "overage": "正在使用超额",
+      "autoResume": "额度恢复后自动继续",
+      "autoResumeScheduled": "将于 {time} 自动继续",
+      "autoResumeExpired": "自动续跑已过期，未发送",
+      "autoResumeStillLimited": "自动续跑后仍超额，已停止",
+      "autoResumeSent": "额度恢复后已自动继续",
+      "cacheRebuild": "缓存已过期，这次发送将重新处理约 {tokens} token 上下文",
+      "compactFirst": "先压缩",
+      "compactAfterTurn": "当前轮次结束后可压缩",
+      "realtimeSource": "来自会话实时数据"
+    }
   },
   "workbench": {
     "defaultTabName": "工作台 {seq}",
@@ -1299,7 +1331,18 @@
     "stickyUserPrompt": "用户提问吸顶显示",
     "stickyUserPromptHint": "滚动会话时在顶部保留当前用户提问；关闭后消息随正文正常滚动。",
     "stickyUserPromptOn": "已开启",
-    "stickyUserPromptOff": "已关闭"
+    "stickyUserPromptOff": "已关闭",
+    "protocol": {
+      "title": "Claude Code 协议诊断",
+      "cliVersion": "本机 CLI 版本",
+      "verifiedVersion": "Monet 已验证版本",
+      "unknown": "未知",
+      "newerThanVerified": "本机 CLI 比 Monet 已验证的版本新，下面列出了未识别的协议消息",
+      "samples": "未识别的协议消息",
+      "empty": "暂无未识别的协议消息",
+      "count": "{count} 次",
+      "fields": "字段"
+    }
   },
   "notification": {
     "claudeAsking": "Claude 在提问",

@@ -13,6 +13,7 @@ import { openExternalUrl, showSystemOpenMenu } from '@/composables/useFileOpener
 import type { EngineDescriptor } from '@/engines/types'
 import ClaudeEnvCard from './ClaudeEnvCard.vue'
 import ClaudeDataDirCard from './ClaudeDataDirCard.vue'
+import ClaudeProtocolCard from './ClaudeProtocolCard.vue'
 import CodexEnvCard from './CodexEnvCard.vue'
 
 const { t } = useI18n()
@@ -173,6 +174,7 @@ function showConfigurationMenu(event: MouseEvent, engine: EngineDescriptor) {
             <template v-if="engine.instance.engineId === 'claude-code'">
               <ClaudeEnvCard />
               <ClaudeDataDirCard />
+              <ClaudeProtocolCard />
             </template>
             <CodexEnvCard v-else />
           </div>
