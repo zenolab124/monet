@@ -7,6 +7,7 @@ const { t } = useI18n()
 
 interface RemoteHost {
   alias: string
+  instanceId: string
   source: 'ssh_config' | 'manual'
   enabled: boolean
   claudePath: string | null

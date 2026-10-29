@@ -41,6 +41,8 @@ pub struct HostStore {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteHost {
     pub alias: String,
+    /// 引擎实例 id（由 alias 派生，见 `instance_id_for_alias`）
+    pub instance_id: String,
     pub source: HostSource,
     pub enabled: bool,
     pub claude_path: Option<String>,
@@ -51,6 +53,41 @@ pub struct RemoteHost {
 pub struct SshTarget {
     pub destination: String,
     pub port: Option<u16>,
+}
+
+/// 规范化部分的长度上限：`ssh-` + 主体 + `-` + 6 位短码不超过实例 id 的 64 字节
+const INSTANCE_BODY_MAX: usize = 53;
+
+/// FNV-1a 64：标准库哈希不保证跨 Rust 版本稳定，实例 id 需要长期不变
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// alias → 合法的引擎实例 id：`ssh-<规范化 alias>-<6 位短码>`。
+/// 规范化后相同的 alias（如 `PC` 与 `pc`）靠基于原名的短码区分；同一 alias 每次结果相同。
+pub fn instance_id_for_alias(alias: &str) -> String {
+    let mut body = String::new();
+    for c in alias.chars().map(|c| c.to_ascii_lowercase()) {
+        let mapped = if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' {
+            c
+        } else {
+            '-'
+        };
+        if mapped == '-' && body.ends_with('-') {
+            continue;
+        }
+        body.push(mapped);
+    }
+    let body = body.trim_matches('-');
+    let body: String = body.chars().take(INSTANCE_BODY_MAX).collect();
+    let body = body.trim_end_matches('-');
+    let body = if body.is_empty() { "host" } else { body };
+    format!("ssh-{}-{:06x}", body, fnv1a64(alias.as_bytes()) & 0xff_ffff)
 }
 
 fn store_path() -> PathBuf {
@@ -193,6 +230,7 @@ pub fn merge_hosts(config_aliases: &[String], store: &HostStore) -> Vec<RemoteHo
         let settings = store.hosts.get(alias).cloned().unwrap_or_default();
         hosts.push(RemoteHost {
             alias: alias.clone(),
+            instance_id: instance_id_for_alias(alias),
             source: HostSource::SshConfig,
             enabled: settings.enabled,
             claude_path: settings.claude_path,
@@ -202,6 +240,7 @@ pub fn merge_hosts(config_aliases: &[String], store: &HostStore) -> Vec<RemoteHo
         if settings.manual && seen.insert(alias.clone()) {
             hosts.push(RemoteHost {
                 alias: alias.clone(),
+                instance_id: instance_id_for_alias(alias),
                 source: HostSource::Manual,
                 enabled: settings.enabled,
                 claude_path: settings.claude_path.clone(),
@@ -323,6 +362,44 @@ mod tests {
                 ("bob@box", HostSource::Manual, false),
             ]
         );
+    }
+
+    #[test]
+    fn instance_ids_are_valid_stable_and_distinct() {
+        let aliases = [
+            "PC",
+            "pc",
+            "my_host",
+            "my-host",
+            "alice@example.com:2222",
+            "--",
+            "主机",
+            &"x".repeat(90),
+        ];
+        let ids: Vec<String> = aliases.iter().map(|a| instance_id_for_alias(a)).collect();
+        for (alias, id) in aliases.iter().zip(&ids) {
+            assert!(
+                crate::engines::core::EngineInstanceId::new("claude-code", id.as_str()).is_ok(),
+                "{alias} -> {id}"
+            );
+            assert_eq!(&instance_id_for_alias(alias), id, "stable for {alias}");
+        }
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len());
+        assert!(ids[0].starts_with("ssh-pc-") && ids[1].starts_with("ssh-pc-"));
+        assert!(ids[4].starts_with("ssh-alice-example.com-2222-"));
+        assert!(ids[5].starts_with("ssh-host-") && ids[6].starts_with("ssh-host-"));
+    }
+
+    #[test]
+    fn instance_id_is_pinned_for_a_known_alias() {
+        // 编码规则一旦发布就不能变：变了会让已有主机的会话元数据失联
+        assert_eq!(
+            instance_id_for_alias("devbox"),
+            format!("ssh-devbox-{:06x}", fnv1a64(b"devbox") & 0xff_ffff)
+        );
+        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
     }
 
     #[test]

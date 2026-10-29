@@ -36,6 +36,7 @@ pub fn add_remote_host(connection: String) -> Result<RemoteHost, String> {
     );
     hosts::save_store(&store)?;
     Ok(RemoteHost {
+        instance_id: hosts::instance_id_for_alias(&connection),
         alias: connection,
         source: hosts::HostSource::Manual,
         enabled: false,
