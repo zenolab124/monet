@@ -803,6 +803,20 @@ pub fn inject_streaming_message(
     streaming::inject_message(&app, &session_id, &message, images.as_deref())
 }
 
+/// 回退某条用户消息之后的文件改动（dry_run 只预览）
+#[tauri::command]
+pub async fn rewind_files(
+    session_id: String,
+    user_message_id: String,
+    dry_run: bool,
+) -> Result<crate::engines::claude::protocol::RewindFilesResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        streaming::rewind_files(&session_id, &user_message_id, dry_run)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 开关 Remote Control（进程未启动时自动连接）
 #[allow(clippy::too_many_arguments)] // Tauri command 参数由前端调用签名决定
 #[tauri::command]

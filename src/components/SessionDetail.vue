@@ -1188,6 +1188,74 @@ async function processComposerQueueItem(id: string) {
   if (!stopped) failPendingQueueItem(sid, id, t('session.queueInterruptFailed'))
 }
 
+// ---- 文件回退：CLI 按文件快照恢复某条用户消息之后的改动，Monet 不直接写文件 ----
+interface RewindFilesResult {
+  can_rewind: boolean
+  error: string | null
+  files_changed: string[]
+  insertions: number | null
+  deletions: number | null
+}
+
+/** 只对本窗口在跑的会话进程提供；运行中置灰，避免与正在执行的工具互相覆盖 */
+const rewindState = computed<'available' | 'busy' | null>(() => {
+  if (!interactive.value || !stream.value.processAlive) return null
+  return stream.value.streaming || ownProcessBusy.value || externalRunning.value ? 'busy' : 'available'
+})
+const rewinding = ref(false)
+
+function rewindFileLabel(path: string, cwd: string | null): string {
+  if (!cwd) return path
+  const root = cwd.replace(/[/\\]+$/, '')
+  return path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? path.slice(root.length + 1) : path
+}
+
+async function requestRewind(sessionId: string, userMessageId: string, dryRun: boolean): Promise<RewindFilesResult | null> {
+  try {
+    return await invoke<RewindFilesResult>('rewind_files', { sessionId, userMessageId, dryRun })
+  } catch (error) {
+    notifyTransient(t('session.rewind.failed'), String(error))
+    return null
+  }
+}
+
+async function onRewindFiles(userMessageId: string) {
+  const sid = effectiveSessionId.value
+  if (!sid || rewinding.value || rewindState.value !== 'available') return
+  rewinding.value = true
+  try {
+    const preview = await requestRewind(sid, userMessageId, true)
+    if (!preview) return
+    if (!preview.can_rewind) {
+      notifyTransient(t('session.rewind.unavailable'), preview.error ?? undefined)
+      return
+    }
+    if (!preview.files_changed.length) {
+      notifyTransient(t('session.rewind.noFiles'))
+      return
+    }
+    const cwd = currentSession.value ? workspaceCwd(currentSession.value.summary) : null
+    const files = preview.files_changed.map(path => `· ${rewindFileLabel(path, cwd)}`).join('\n')
+    const approved = await confirmDialog(t('session.rewind.confirm', {
+      count: preview.files_changed.length,
+      insertions: preview.insertions ?? 0,
+      deletions: preview.deletions ?? 0,
+      files,
+    }), t('session.rewind.confirmOk'))
+    if (!approved) return
+    if (rewindState.value !== 'available') {
+      notifyTransient(t('session.rewind.busy'))
+      return
+    }
+    const result = await requestRewind(sid, userMessageId, false)
+    if (!result) return
+    if (!result.can_rewind) notifyTransient(t('session.rewind.failed'), result.error ?? undefined)
+    else notifyTransient(t('session.rewind.done', { count: preview.files_changed.length }))
+  } finally {
+    rewinding.value = false
+  }
+}
+
 // 会话级图片定位上下文(主会话,无 agentId);历史区图片按此拼 ccimg 协议 URL
 const imageLocator = computed<ImageLocator | null>(() => {
   const cs = currentSession.value
@@ -3602,6 +3670,8 @@ async function onReload() {
               :user-has-visible-content="userHasVisibleContent"
               :content-blocks="contentBlocks"
               :channel-mark-label="channelMarkLabel"
+              :rewind-state="rewindState"
+              @rewind-files="onRewindFiles"
             />
           </div>
         </div>
@@ -3631,6 +3701,8 @@ async function onReload() {
               :user-has-visible-content="userHasVisibleContent"
               :content-blocks="contentBlocks"
               :channel-mark-label="channelMarkLabel"
+              :rewind-state="rewindState"
+              @rewind-files="onRewindFiles"
             />
           </div>
         </template>
@@ -3659,6 +3731,8 @@ async function onReload() {
             :user-has-visible-content="userHasVisibleContent"
             :content-blocks="contentBlocks"
             :channel-mark-label="channelMarkLabel"
+              :rewind-state="rewindState"
+              @rewind-files="onRewindFiles"
             auto-open-artifact
             granular-visibility
           />

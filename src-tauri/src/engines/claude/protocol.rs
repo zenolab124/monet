@@ -498,6 +498,62 @@ pub fn parse_command_lifecycle(value: &Value) -> Option<CommandLifecycle> {
 }
 
 // ---------------------------------------------------------------------------
+// 文件回退
+// ---------------------------------------------------------------------------
+
+/// 启用用户消息处文件快照的环境变量；stream-json 模式默认不建快照。
+pub const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
+
+/// 文件回退请求的 request_id 前缀。
+pub const REWIND_FILES_REQUEST_PREFIX: &str = "rewind-files-";
+
+pub fn rewind_files_request(request_id: &str, user_message_id: &str, dry_run: bool) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {
+            "subtype": "rewind_files",
+            "user_message_id": user_message_id,
+            "dry_run": dry_run
+        }
+    })
+}
+
+/// rewind_files 的判决。`can_rewind: false` 时 `error` 带 CLI 原文
+/// （例如该消息没有文件快照）；dry_run 时 `files_changed` 是将被恢复的绝对路径。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RewindFilesResult {
+    pub can_rewind: bool,
+    pub error: Option<String>,
+    pub files_changed: Vec<String>,
+    pub insertions: Option<u64>,
+    pub deletions: Option<u64>,
+}
+
+pub fn parse_rewind_files_result(body: &Value) -> RewindFilesResult {
+    RewindFilesResult {
+        can_rewind: body
+            .get("canRewind")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        error: body.get("error").and_then(Value::as_str).map(String::from),
+        files_changed: body
+            .get("filesChanged")
+            .and_then(Value::as_array)
+            .map(|files| {
+                files
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        insertions: body.get("insertions").and_then(Value::as_u64),
+        deletions: body.get("deletions").and_then(Value::as_u64),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 未知协议面采样
 // ---------------------------------------------------------------------------
 
@@ -810,6 +866,45 @@ mod tests {
         ] {
             assert!(parse_command_lifecycle(&event).is_none(), "{event}");
         }
+    }
+
+    #[test]
+    fn rewind_files_request_and_preview() {
+        let request = rewind_files_request("rewind-files-3", "u-1", true);
+        assert_eq!(request["request"]["subtype"], "rewind_files");
+        assert_eq!(request["request"]["user_message_id"], "u-1");
+        assert_eq!(request["request"]["dry_run"], true);
+
+        let preview = parse_rewind_files_result(&json!({
+            "canRewind": true,
+            "filesChanged": ["/w/a.txt", "/w/b.txt"],
+            "insertions": 1,
+            "deletions": 2
+        }));
+        assert!(preview.can_rewind);
+        assert_eq!(preview.files_changed, vec!["/w/a.txt", "/w/b.txt"]);
+        assert_eq!((preview.insertions, preview.deletions), (Some(1), Some(2)));
+    }
+
+    #[test]
+    fn rewind_files_result_tolerates_missing_and_wrong_fields() {
+        let refused = parse_rewind_files_result(&json!({
+            "canRewind": false,
+            "error": "No file checkpoint found for this message."
+        }));
+        assert!(!refused.can_rewind);
+        assert!(refused.error.unwrap().contains("checkpoint"));
+        assert!(refused.files_changed.is_empty());
+
+        let malformed = parse_rewind_files_result(&json!({
+            "canRewind": "yes",
+            "filesChanged": "a.txt",
+            "insertions": -1
+        }));
+        assert!(!malformed.can_rewind);
+        assert!(malformed.files_changed.is_empty());
+        assert_eq!(malformed.insertions, None);
+        assert!(!parse_rewind_files_result(&Value::Null).can_rewind);
     }
 
     #[test]

@@ -51,6 +51,8 @@ struct SessionProcess {
     init_reported: bool,
     /// 运行中插入、尚未到达终态的用户消息（uuid → 状态）
     pending_injections: HashMap<String, PendingInjection>,
+    /// 等待 CLI 回包的同步控制请求（request_id → 回包投递口）
+    pending_controls: HashMap<String, std::sync::mpsc::Sender<Result<Value, String>>>,
 }
 
 struct PendingInjection {
@@ -69,6 +71,9 @@ const PERMISSION_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 运行中插入的消息等待 CLI 回报 queued 的时限
 const INJECTION_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 文件回退等待 CLI 回包的时限（真正回退要逐个恢复文件，留足余量）
+const REWIND_FILES_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 仅用于 SessionProcess 尚未接管 Child 的启动阶段错误路径。
 fn terminate_and_reap_startup_child(child: &mut Child) {
@@ -980,6 +985,9 @@ fn open_session(
     if let Some((k, v)) = crate::config::claude_config_dir_env() {
         command.env(k, v);
     }
+    // 文件快照：stream-json 模式默认不在用户消息处建快照，rewind_files 依赖它。
+    // 用户自设 CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING 时 CLI 仍以禁用为准
+    command.env(protocol::FILE_CHECKPOINTING_ENV, "true");
     // CLI 自立进程组（组 ID = CLI PID）：MCP 子进程随组，signal_session 组信号可整树回收
     #[cfg(unix)]
     {
@@ -1158,6 +1166,7 @@ fn open_session(
         pending_permission: HashMap::new(),
         init_reported: false,
         pending_injections: HashMap::new(),
+        pending_controls: HashMap::new(),
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -1711,6 +1720,44 @@ pub fn inject_message(
     Ok(uuid)
 }
 
+/// 回退某条用户消息之后的文件改动（dry_run 只预览）。改动由 CLI 按文件快照执行，
+/// Monet 不直接写任何文件；只作用于本窗口正在运行的会话进程。
+pub fn rewind_files(
+    session_id: &str,
+    user_message_id: &str,
+    dry_run: bool,
+) -> Result<protocol::RewindFilesResult, String> {
+    let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned())
+        .ok_or("会话进程不存在")?;
+    let (reply, receiver) = std::sync::mpsc::channel();
+    let request_id = {
+        let mut sp = process.lock().unwrap();
+        sp.request_counter += 1;
+        let request_id = format!(
+            "{}{}",
+            protocol::REWIND_FILES_REQUEST_PREFIX,
+            sp.request_counter
+        );
+        write_stdin(
+            &mut sp.stdin,
+            &protocol::rewind_files_request(&request_id, user_message_id, dry_run),
+        )?;
+        sp.pending_controls.insert(request_id.clone(), reply);
+        request_id
+    };
+    let outcome = receiver.recv_timeout(REWIND_FILES_TIMEOUT);
+    process.lock().unwrap().pending_controls.remove(&request_id);
+    match outcome {
+        Ok(Ok(body)) => Ok(protocol::parse_rewind_files_result(&body)),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err("timeout".to_string()),
+    }
+}
+
 fn emit_injection_state(app: &AppHandle, session_id: &str, uuid: &str, state: &str) {
     dispatch_stream_signal(
         app,
@@ -2187,9 +2234,14 @@ fn route_protocol_signals(
     session_id: &str,
     value: &Value,
 ) {
-    if let Some((request_id, outcome, _)) = protocol::control_response(value) {
+    if let Some((request_id, outcome, body)) = protocol::control_response(value) {
         if request_id.starts_with(protocol::PERMISSION_REQUEST_PREFIX) {
             settle_permission_response(app, process, session_id, &request_id, &outcome);
+        } else if let Some(reply) = process.lock().unwrap().pending_controls.remove(&request_id) {
+            let _ = reply.send(match outcome {
+                ControlOutcome::Success => Ok(body.cloned().unwrap_or(Value::Null)),
+                ControlOutcome::Error(error) => Err(error),
+            });
         }
         return;
     }

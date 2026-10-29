@@ -270,6 +270,7 @@ pub fn run() {
             commands::respond_permission,
             commands::set_permission_mode,
             commands::inject_streaming_message,
+            commands::rewind_files,
             commands::load_auto_resume_state,
             commands::save_auto_resume_state,
             commands::get_claude_protocol_diagnostics,

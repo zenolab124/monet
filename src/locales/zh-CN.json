@@ -369,6 +369,17 @@
     "queueSendCurrentFailed": "未能发送到当前任务",
     "queueInjectionWaiting": "等待并入当前任务",
     "queueInjectionStarted": "已并入当前任务",
+    "rewind": {
+      "action": "回退文件到此处",
+      "hint": "把这条消息之后由编辑工具改动的文件恢复到发送前（Bash 命令改动的文件不在记录范围内）",
+      "busy": "当前轮次结束后可回退",
+      "noFiles": "这条消息之后没有编辑工具记录的文件改动（Bash 命令改动的文件无法回退）",
+      "unavailable": "无法回退这条消息之后的文件",
+      "failed": "文件回退失败",
+      "confirm": "将把以下 {count} 个文件恢复到这条消息发送前的状态（+{insertions} −{deletions} 行）：\n\n{files}\n\n只恢复文件，对话记录保持不变。",
+      "confirmOk": "恢复文件",
+      "done": "已恢复 {count} 个文件"
+    },
     "queueInterruptAndSend": "中断并发送",
     "queueInterruptConfirm": "将停止当前生成，等待已有输出安全收尾后立即发送这条消息。",
     "queueResolveApprovalFirst": "请先处理当前审批请求",
