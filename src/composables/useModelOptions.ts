@@ -1,4 +1,4 @@
-import { computed, type ComputedRef, type Ref } from 'vue'
+import { computed, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue'
 import {
   MODELS,
   officialRoleItems,
@@ -19,13 +19,14 @@ import {
 } from '@/utils/modelEnv'
 import { useChannels, OFFICIAL_CHANNEL_ID, OFFICIAL_DIRECT_CHANNEL_ID } from '@/composables/useChannels'
 import { useClaudeModelCatalog } from '@/composables/useClaudeModelCatalog'
+import type { EngineInstanceId } from '@/engines/types'
 
 const EXTENDED_CONTEXT = 1_000_000
 
 /**
  * 按渠道产出模型下拉候选项。
  *
- * 输入:渠道 id 的 Ref。null / 'official' 视为官方渠道。
+ * 输入:渠道 id 的 Ref。null / 'official' 视为官方渠道;可选的原生实例决定读哪个实例的 CLI 模型目录(缺省本机)。
  * 输出:items —— 供运行配置胶囊(RunConfigCapsule)模型列消费的 ModelInfo[]。
  *
  * 三分支:
@@ -36,11 +37,14 @@ const EXTENDED_CONTEXT = 1_000_000
  *      全部以真实 ID 直传。映射只增加语义，不再充当模型过滤器。
  *   3. 旧渠道既无目录也无映射时，回退 MODELS，保持存量行为。
  */
-export function useModelOptions(channelId: Ref<string | null>): {
+export function useModelOptions(
+  channelId: Ref<string | null>,
+  instance?: MaybeRefOrGetter<EngineInstanceId | null | undefined>,
+): {
   items: ComputedRef<ModelInfo[]>
 } {
   const { channels } = useChannels()
-  const { pinnedModels, roleNames } = useClaudeModelCatalog()
+  const { pinnedModels, roleNames } = useClaudeModelCatalog(instance)
 
   const isOfficial = computed(
     () => !channelId.value || channelId.value === OFFICIAL_CHANNEL_ID || channelId.value === OFFICIAL_DIRECT_CHANNEL_ID,

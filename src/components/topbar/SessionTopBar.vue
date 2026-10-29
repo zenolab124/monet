@@ -8,6 +8,7 @@ import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 import { useChannels } from '@/composables/useChannels'
 import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
 import type { ResolvedRunConfig } from '@/composables/useRunConfig'
+import type { EngineInstanceId } from '@/engines/types'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import { useRunners } from '@/composables/useRunners'
@@ -59,6 +60,8 @@ const props = defineProps<{
   selectedChannelId: string | null
   /** 解析后的最终注入渠道 id(null = 官方):终端恢复带渠道用 */
   resolvedChannelId: string | null
+  /** 原生会话所属实例:模型下拉按实例读取 CLI 自报目录 */
+  nativeInstance?: EngineInstanceId
   /** 运行配置同源解析结果（display 用于回显，launch 用于发送，见 useRunConfig） */
   runConfig: ResolvedRunConfig
   /** 顾问模式开关状态 */
@@ -243,6 +246,7 @@ function onPermissionModeChange(mode: PermissionMode | null) {
       <RunConfigCapsule
         :settings="capsuleSettings"
         :run-config="runConfig"
+        :native-instance="nativeInstance"
         :cwd="cwd"
         :fast-mode-notice="fastModeNotice"
         :model-refreshable="modelRefreshable"
