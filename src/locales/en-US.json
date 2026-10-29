@@ -1880,6 +1880,17 @@
       "awaitingInteraction": "Awaiting approval",
       "failed": "Failed",
       "exited": "Exited"
+    },
+    "remote": {
+      "runtimePending": "Continuing remote sessions isn't available yet",
+      "mirrorPending": "Remote session sync isn't available yet",
+      "unreachable": "Can't connect to the remote host",
+      "authFailed": "SSH authentication failed",
+      "hostKeyUntrusted": "The remote host key isn't trusted",
+      "unsupportedOs": "The remote system isn't supported",
+      "cliNotFound": "Claude Code CLI not found on the remote host",
+      "dataRootMissing": "No Claude Code data directory on the remote host",
+      "timeout": "The remote check timed out"
     }
   },
   "diff": {
@@ -2041,6 +2052,7 @@
       "not_manual_host": "Only manually added hosts can be removed. Edit ssh config to change hosts listed there."
     },
     "cliMissingAuto": "not found in PATH or the login shell",
-    "cliMissingUser": "the path you entered doesn’t exist or isn’t executable"
+    "cliMissingUser": "the path you entered doesn’t exist or isn’t executable",
+    "restartHint": "After enabling or disabling a host, restart Monet for it to appear in or leave the engine list."
   }
 }

@@ -136,6 +136,7 @@ onMounted(async () => {
       <span class="text-[11.5px] font-medium">{{ t('remote.title') }}</span>
     </div>
     <p class="text-[10.5px] text-muted-foreground mt-1 leading-snug">{{ t('remote.intro') }}</p>
+    <p class="text-[10.5px] text-muted-foreground/80 mt-0.5 leading-snug">{{ t('remote.restartHint') }}</p>
 
     <p v-if="!hosts.length" class="text-[10.5px] text-muted-foreground/80 mt-2">{{ t('remote.empty') }}</p>
 

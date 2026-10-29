@@ -1,7 +1,8 @@
 //! SSH 远端主机：经用户自己的 ssh 配置访问另一台 macOS / Linux 电脑上的 Claude Code。
 //!
-//! 本模块目前提供主机配置与连接体检；远端实例注册、镜像同步与远端进程在后续阶段接入。
+//! 本模块目前提供主机配置、连接体检与引擎实例注册；镜像同步与远端进程在后续阶段接入。
 
+pub mod adapter;
 pub mod executor;
 pub mod health;
 pub mod hosts;

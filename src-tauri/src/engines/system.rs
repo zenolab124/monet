@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+use super::claude::remote::adapter::RemoteClaudeEngine;
 use super::claude::ClaudeEngine;
 use super::codex::CodexEngine;
 use super::core::{
@@ -52,6 +53,16 @@ impl EngineSystem {
             ClaudeEngine::descriptor(),
             || ClaudeEngine::new(app.clone()).map(|adapter| adapter as Arc<dyn EngineAdapter>),
         );
+        // 远端主机：启动时按已启用的主机注册，启用或停用在重启 Monet 后生效
+        for host in super::claude::remote::adapter::enabled_hosts() {
+            register_configured_adapter(
+                &mut registry,
+                &mut initialization_errors,
+                "claude-code",
+                RemoteClaudeEngine::descriptor_for(&host),
+                || RemoteClaudeEngine::new(&host).map(|adapter| adapter as Arc<dyn EngineAdapter>),
+            );
+        }
         register_configured_adapter(
             &mut registry,
             &mut initialization_errors,

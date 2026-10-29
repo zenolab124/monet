@@ -1880,6 +1880,17 @@
       "awaitingInteraction": "等待批准",
       "failed": "失败",
       "exited": "已退出"
+    },
+    "remote": {
+      "runtimePending": "远端续聊尚未接入",
+      "mirrorPending": "远端会话同步尚未接入",
+      "unreachable": "无法连接到远端主机",
+      "authFailed": "SSH 认证失败",
+      "hostKeyUntrusted": "远端主机密钥未被信任",
+      "unsupportedOs": "远端系统不受支持",
+      "cliNotFound": "远端未找到 Claude Code CLI",
+      "dataRootMissing": "远端没有 Claude Code 数据目录",
+      "timeout": "远端体检超时"
     }
   },
   "diff": {
@@ -2041,6 +2052,7 @@
       "not_manual_host": "只能移除手动添加的主机；ssh config 中的主机请在配置文件里修改。"
     },
     "cliMissingAuto": "未在 PATH 或登录 shell 中找到",
-    "cliMissingUser": "填写的路径不存在或不可执行"
+    "cliMissingUser": "填写的路径不存在或不可执行",
+    "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。"
   }
 }
