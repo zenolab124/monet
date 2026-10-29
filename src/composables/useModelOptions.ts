@@ -18,6 +18,7 @@ import {
   stripOneM,
 } from '@/utils/modelEnv'
 import { useChannels, OFFICIAL_CHANNEL_ID, OFFICIAL_DIRECT_CHANNEL_ID } from '@/composables/useChannels'
+import { useClaudeModelCatalog } from '@/composables/useClaudeModelCatalog'
 
 const EXTENDED_CONTEXT = 1_000_000
 
@@ -28,9 +29,9 @@ const EXTENDED_CONTEXT = 1_000_000
  * 输出:items —— 供运行配置胶囊(RunConfigCapsule)模型列消费的 ModelInfo[]。
  *
  * 三分支:
- *   1. 官方渠道:OFFICIAL_ROLE_ITEMS(四角色主区) + MODELS 全量标 legacy 沉底
- *      (原本 legacy 与非 legacy 项在官方角色语境下统一视为「钉版本」沉底区,
- *       复用模型列现有 legacy 分割线渲染)。
+ *   1. 官方渠道:四角色主区(标签带 CLI 解析到的具体版本) + 钉版本全量标 legacy 沉底。
+ *      钉版本以 CLI 握手自报的列表为准,从未握手时回退内置 MODELS
+ *      (官方角色语境下统一视为「钉版本」沉底区,复用模型列现有 legacy 分割线渲染)。
  *   2. 第三方:角色映射作为快捷入口排在前面；渠道模型目录中未被角色占用的模型
  *      全部以真实 ID 直传。映射只增加语义，不再充当模型过滤器。
  *   3. 旧渠道既无目录也无映射时，回退 MODELS，保持存量行为。
@@ -39,6 +40,7 @@ export function useModelOptions(channelId: Ref<string | null>): {
   items: ComputedRef<ModelInfo[]>
 } {
   const { channels } = useChannels()
+  const { pinnedModels, roleNames } = useClaudeModelCatalog()
 
   const isOfficial = computed(
     () => !channelId.value || channelId.value === OFFICIAL_CHANNEL_ID || channelId.value === OFFICIAL_DIRECT_CHANNEL_ID,
@@ -52,8 +54,8 @@ export function useModelOptions(channelId: Ref<string | null>): {
   const items = computed<ModelInfo[]>(() => {
     // 分支 1:官方渠道 —— 角色主区 + 钉版本沉底
     if (isOfficial.value) {
-      const roles = officialRoleItems()
-      const pinned = MODELS.map<ModelInfo>(m => ({ ...m, legacy: true }))
+      const roles = officialRoleItems(roleNames.value)
+      const pinned = pinnedModels.value.map<ModelInfo>(m => ({ ...m, legacy: true }))
       return [...roles, ...pinned]
     }
 

@@ -1500,6 +1500,7 @@
     "roleOpus": "Opus · 最新",
     "roleSonnet": "Sonnet · 最新",
     "roleHaiku": "Haiku · 最新",
+    "roleResolved": "{name} · 最新",
     "roleTier": "{role} 级",
     "channelOfficialDirect": "官方"
   },

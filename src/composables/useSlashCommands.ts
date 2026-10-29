@@ -5,7 +5,7 @@
  * Claude Code 的 skill/command 使用 `/`，Codex skill 使用 `$` + 结构化 skill item。
  */
 
-import { MODELS, MODEL_ALIASES } from '@/utils/modelContext'
+import { currentKnownClaudeModelIds } from '@/composables/useClaudeModelCatalog'
 import type { WorkshopSkill, WorkshopCommand } from '@/types'
 import i18n from '../locales'
 
@@ -189,14 +189,6 @@ export function getAllCommands(
   return [...builtins, ...dynamic.values()]
 }
 
-const KNOWN_CLAUDE_MODELS = new Set([
-  ...MODELS.map(model => model.id),
-  ...Object.keys(MODEL_ALIASES),
-])
-
-function resolveClaudeModelArg(arg: string): string {
-  return MODEL_ALIASES[arg] ?? arg
-}
 
 const TRIGGER_RE = /^[/$][\p{L}\p{N}_:./-]*$/u
 
@@ -254,10 +246,11 @@ export function parseCommand(
     }
     if ((context.engineId ?? 'claude-code') === 'claude-code') {
       const normalized = arg.toLowerCase()
-      if (!KNOWN_CLAUDE_MODELS.has(normalized)) {
+      if (!currentKnownClaudeModelIds().has(normalized)) {
         return { kind: 'invalid', cmd: command, reason: i18n.global.t('slash.errorModelUnknown'), prefix }
       }
-      return { kind: 'pass', cmd: command, arg: resolveClaudeModelArg(normalized), prefix }
+      // 角色别名原样交给 CLI 解析到当前版本,与模型下拉的角色项一致
+      return { kind: 'pass', cmd: command, arg: normalized, prefix }
     }
     return { kind: 'pass', cmd: command, arg, prefix }
   }

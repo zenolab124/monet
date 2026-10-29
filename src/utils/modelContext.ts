@@ -66,18 +66,23 @@ const OFFICIAL_ROLE_DEFS: { id: string; labelKey: string; contextWindow: number 
 /**
  * 官方渠道角色清单(label 在调用时解析,随 locale 切换刷新)。
  * 在响应式 computed 内调用(依赖 i18n locale)即可获得可切换语言的标签。
+ * resolvedNames:CLI 握手报出的别名当前落点(alias → "Opus 5.5"),有则标签带出具体版本。
  */
-export function officialRoleItems(): ModelInfo[] {
-  return OFFICIAL_ROLE_DEFS.map(d => ({
-    id: d.id,
-    label: i18n.global.t(d.labelKey),
-    contextWindow: d.contextWindow,
-  }))
+export function officialRoleItems(resolvedNames: Record<string, string> = {}): ModelInfo[] {
+  return OFFICIAL_ROLE_DEFS.map(d => {
+    const name = resolvedNames[d.id.replace(/\[1m\]$/, '')]
+    return {
+      id: d.id,
+      label: name ? i18n.global.t('topbar.roleResolved', { name }) : i18n.global.t(d.labelKey),
+      contextWindow: d.contextWindow,
+    }
+  })
 }
 
 /**
- * 候选模型列表(顺序即下拉展示顺序)。具体版本层:
- * /model 命令校验、inferModel 匹配、容量推断、官方渠道钉版本沉底区都从这里派生。
+ * 内置具体版本清单:inferModel 匹配与容量推断的依据,也是钉版本候选的兜底。
+ * 官方渠道钉版本沉底区与 /model 校验以 CLI 握手自报的列表为准(见 claudeModelCatalog.ts),
+ * 从未握手时才回退本清单。
  */
 export const MODELS: ModelInfo[] = [
   { id: 'claude-fable-5', label: 'Fable 5', contextWindow: EXTENDED_CONTEXT },
@@ -92,7 +97,7 @@ export const MODELS: ModelInfo[] = [
 
 /**
  * 短别名 → 完整 ID。与 CLI 的别名解析行为对齐(CLI 的 sonnet 别名实测为 200K 档),
- * 用于 /model 输入与旧持久化值兼容。
+ * 只用于旧持久化值的标签与容量推断;发给 CLI 的别名原样传递,由 CLI 解析到当前版本。
  */
 export const MODEL_ALIASES: Record<string, string> = {
   fable: 'claude-fable-5',

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useChannels, type ChannelInfo } from '@/composables/useChannels'
-import { MODELS, MODEL_ALIASES } from '@/utils/modelContext'
+import { MODEL_ALIASES } from '@/utils/modelContext'
+import { useClaudeModelCatalog } from '@/composables/useClaudeModelCatalog'
 
 /**
  * official 渠道的轻量编辑:只有「默认模型 + 默认思考强度」两个预设字段
@@ -23,12 +24,14 @@ const defaultEffort = ref(props.channel.defaultEffort ?? '')
 const saving = ref(false)
 const formError = ref<string | null>(null)
 
-/** 候选 = 官方角色 alias(始终最新) + 钉版本完整 ID */
-const modelCandidates = [
+const { pinnedModels } = useClaudeModelCatalog()
+
+/** 候选 = 官方角色 alias(始终最新) + 钉版本完整 ID(以 CLI 自报为准) */
+const modelCandidates = computed(() => [
   ...Object.keys(MODEL_ALIASES),
   'sonnet[1m]',
-  ...MODELS.map(m => m.id),
-]
+  ...pinnedModels.value.map(m => m.id),
+])
 
 async function onSave() {
   formError.value = null

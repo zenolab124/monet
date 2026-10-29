@@ -46,7 +46,7 @@ import {
   type SessionReadingEngineId,
 } from '@/composables/sessionReadingEngines'
 import { useUpdater } from '@/composables/useUpdater'
-import { MODELS } from '@/utils/modelContext'
+import { useClaudeModelCatalog } from '@/composables/useClaudeModelCatalog'
 import EngineCenter from '@/components/settings/EngineCenter.vue'
 import RunConfigCapsule from '@/components/topbar/RunConfigCapsule.vue'
 import type { EffortSetting } from '@/composables/useSessionSettings'
@@ -564,10 +564,12 @@ async function onSessionDefaultChange(engine: SessionEngineId, id: string) {
   }
 }
 
+const { pinnedModels: claudePinnedModels } = useClaudeModelCatalog()
+
 function sessionDefaultModelsFor(engine: SessionEngineId): string[] {
   const channelId = defaultSessionChannels.value[engine] ?? OFFICIAL_CHANNEL_ID
   if (channelId === OFFICIAL_CHANNEL_ID) {
-    return engine === 'claude-code' ? [...new Set(MODELS.map(model => model.id))] : []
+    return engine === 'claude-code' ? [...new Set(claudePinnedModels.value.map(model => model.id))] : []
   }
   return channels.value.find(channel => channel.id === channelId)?.availableModels ?? []
 }
@@ -584,11 +586,11 @@ async function onSessionRuntimeChange(engine: SessionEngineId, field: 'model' | 
   }
 }
 
-// 官方渠道 Agent 可选模型:从 modelContext 的 MODELS 派生(单源,消灭第二份清单)。
+// 官方渠道 Agent 可选模型:与模型下拉同源(CLI 自报的钉版本,从未握手时回退内置清单)。
 // 取具体版本 id 并剥 [1m] 后缀(Agent 用的是 API 模型名,1M 由 CLI/请求侧处理),去重。
-const OFFICIAL_MODELS = [
-  ...new Set(MODELS.map(m => m.id.replace(/\[1m\]$/i, ''))),
-]
+const officialAgentModels = computed(() => [
+  ...new Set(claudePinnedModels.value.map(m => m.id.replace(/\[1m\]$/i, ''))),
+])
 
 const codexAgentModels = ref<EngineCapsuleModel[]>([])
 
@@ -717,7 +719,7 @@ const agentModelOptions = () => {
   const opts: { channel: string; channelName: string; model: string }[] = []
   const officialModels = defaultAgentEngine.value === 'codex'
     ? codexAgentModels.value.filter(model => !model.hidden).map(model => model.id)
-    : OFFICIAL_MODELS
+    : officialAgentModels.value
   for (const model of officialModels) {
     opts.push({ channel: OFFICIAL_CHANNEL_ID, channelName: defaultAgentEngine.value === 'codex' ? 'Codex' : 'Claude Code', model })
   }
