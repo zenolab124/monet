@@ -44,6 +44,13 @@ pub struct FileState {
 pub struct SyncState {
     #[serde(default)]
     pub files: BTreeMap<String, FileState>,
+    /// 最近一次全量同步用的远端数据根；单文件跟随据此免去每次体检
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_root: Option<String>,
+    /// 子 Agent 文件（`<项目目录>/<会话 id>/subagents/...`）：打开会话时按需拉取，
+    /// 不参与全量索引，也不因主列表里没有而被标记为远端已删除
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subagents: BTreeMap<String, FileState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +70,21 @@ pub struct SyncReport {
     pub cancelled: bool,
     /// 单个文件失败不中断整轮；记录 `rel: 原因`
     pub errors: Vec<String>,
+    /// 本轮镜像内容或远端存在状态有变化的 `rel`，用于按会话增量刷新
+    #[serde(skip)]
+    pub changed: Vec<String>,
+    /// 本轮新发现远端已删除的文件数（摘要要带上标记，界面需整实例重载）
+    #[serde(skip)]
+    pub newly_missing: usize,
+}
+
+/// 单文件跟随的结果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Follow {
+    Unchanged,
+    Updated,
+    /// 远端已删除，镜像保留并标记
+    Gone,
 }
 
 /// 只接受 `<目录>/<名称>.jsonl`：两段、无 `..`、无隐藏项、无控制字符
@@ -71,40 +93,84 @@ pub fn valid_rel(rel: &str) -> bool {
     let (Some(dir), Some(file), None) = (parts.next(), parts.next(), parts.next()) else {
         return false;
     };
-    let ok = |part: &str| {
-        !part.is_empty()
-            && !part.starts_with('.')
-            && part != ".."
-            && !part.chars().any(char::is_control)
-    };
-    ok(dir) && ok(file) && file.ends_with(".jsonl") && file.len() > ".jsonl".len()
+    safe_part(dir) && safe_part(file) && file.ends_with(".jsonl") && file.len() > ".jsonl".len()
 }
 
-/// 列目录脚本：每行 `大小\t修改时间\t相对路径`；stat 兼容 GNU（-c）与 BSD（-f）。
-/// 编码后的项目目录以 `-` 开头，传给命令时一律加 `./`，防止被当成选项
+fn safe_part(part: &str) -> bool {
+    !part.is_empty() && !part.starts_with('.') && !part.chars().any(char::is_control)
+}
+
+/// 子 Agent 目录内的相对路径：`<名称>` 或 `workflows/<工作流>/<名称>`；
+/// 名称为按行追加的 `.jsonl`，或整份写入的 `.json`（元数据）
+pub fn valid_subagent_rel(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    let name = match parts.as_slice() {
+        [name] => *name,
+        ["workflows", workflow, name] if safe_part(workflow) => *name,
+        _ => return false,
+    };
+    safe_part(name)
+        && [".jsonl", ".json"]
+            .iter()
+            .any(|ext| name.ends_with(ext) && name.len() > ext.len())
+}
+
+/// 列目录脚本：每行 `大小 修改时间 ./相对路径`。用 `find -exec stat {} +` 批量取元数据，
+/// 一万个文件也只起少量进程；stat 兼容 GNU（-c）与 BSD（-f）。
+/// 编码后的项目目录以 `-` 开头，路径一律以 `./` 开头，不会被当成选项
 pub fn list_script(root: &str) -> String {
     format!(
         r#"cd {}/projects 2>/dev/null || exit 3
-for f in */*.jsonl; do
-  [ -f "$f" ] || continue
-  s=$(wc -c < "./$f" | tr -d ' ')
-  m=$(stat -c %Y "./$f" 2>/dev/null || stat -f %m "./$f" 2>/dev/null)
-  printf '%s\t%s\t%s\n' "$s" "$m" "$f"
-done
+{STAT_SETUP}
+find . -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -exec stat "$o" "$f" {{}} +
+exit 0
+"#,
+        sh_quote(root)
+    )
+}
+
+/// 选 stat 的参数：GNU `-c '%s %Y %n'`，BSD `-f '%z %m %N'`
+const STAT_SETUP: &str = r#"if stat -c %s . 2>/dev/null 1>/dev/null; then o=-c; f='%s %Y %n'; else o=-f; f='%z %m %N'; fi"#;
+
+/// 列一个会话的子 Agent 文件，路径相对 `subagents/`；目录不存在时输出为空
+pub fn subagent_list_script(root: &str, session_dir: &str) -> String {
+    format!(
+        r#"cd {} 2>/dev/null || exit 0
+{STAT_SETUP}
+find . -maxdepth 3 -type f \( -name '*.jsonl' -o -name '*.json' \) -exec stat "$o" "$f" {{}} +
+exit 0
+"#,
+        sh_quote(&format!("{root}/projects/{session_dir}/subagents"))
+    )
+}
+
+/// 只列一个文件（打开中的会话跟随用）；文件不存在时输出为空
+pub fn stat_script(root: &str, rel: &str) -> String {
+    let path = format!("./{}", sh_quote(rel));
+    format!(
+        r#"cd {}/projects 2>/dev/null || exit 3
+[ -f {path} ] || exit 0
+{STAT_SETUP}
+stat "$o" "$f" {path}
 "#,
         sh_quote(root)
     )
 }
 
 pub fn parse_listing(stdout: &str) -> Vec<RemoteFile> {
+    parse_listing_with(stdout, valid_rel)
+}
+
+fn parse_listing_with(stdout: &str, valid: fn(&str) -> bool) -> Vec<RemoteFile> {
     stdout
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(3, '\t');
+            let mut fields = line.splitn(3, [' ', '\t']);
             let size = fields.next()?.trim().parse().ok()?;
             let mtime = fields.next()?.trim().parse().ok()?;
-            let rel = fields.next()?.to_string();
-            valid_rel(&rel).then_some(RemoteFile { rel, size, mtime })
+            let rest = fields.next()?;
+            let rel = rest.strip_prefix("./").unwrap_or(rest).to_string();
+            valid(&rel).then_some(RemoteFile { rel, size, mtime })
         })
         .collect()
 }
@@ -122,6 +188,14 @@ pub fn plan(remote: &RemoteFile, local: Option<&FileState>) -> FetchPlan {
         }
     } else {
         FetchPlan::Skip
+    }
+}
+
+/// 整份写入的 JSON：大小或修改时间任一不同就整份重拉
+pub fn plan_whole(remote: &RemoteFile, local: Option<&FileState>) -> FetchPlan {
+    match local {
+        Some(local) if local.size == remote.size && local.mtime == remote.mtime => FetchPlan::Skip,
+        _ => FetchPlan::Full,
     }
 }
 
@@ -173,10 +247,17 @@ impl Mirror {
         crate::config::atomic_write(&self.root.join(STATE_FILE), &text)
     }
 
-    /// 落盘一次拉取结果，返回镜像中该文件的新长度
-    pub fn apply(&self, rel: &str, plan: FetchPlan, bytes: &[u8]) -> std::io::Result<u64> {
+    /// 落盘一次拉取结果，返回镜像中该文件的新长度。JSONL 只落完整行；
+    /// `whole` 为整份文件（JSON 元数据），原样写入
+    pub fn apply(
+        &self,
+        rel: &str,
+        plan: FetchPlan,
+        bytes: &[u8],
+        whole: bool,
+    ) -> std::io::Result<u64> {
         let path = self.file_path(rel);
-        let complete = complete_prefix(bytes);
+        let complete = if whole { bytes } else { complete_prefix(bytes) };
         match plan {
             FetchPlan::Skip => Ok(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)),
             FetchPlan::Full => {
@@ -203,6 +284,90 @@ impl Mirror {
     }
 }
 
+/// 按计划拉取一个文件并落盘，成功后更新状态；失败时清掉记录，下一轮全量重拉。
+/// 返回本次拉取的原始字节数，以及镜像内容是否变化（只拉到半截末行时不算）。
+#[allow(clippy::too_many_arguments)]
+fn fetch_file(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    remote_root: &str,
+    mirror: &Mirror,
+    files: &mut BTreeMap<String, FileState>,
+    file: &RemoteFile,
+    file_plan: FetchPlan,
+    whole: bool,
+) -> Result<(u64, bool), String> {
+    let before = files.get(&file.rel).map(|state| state.mirrored);
+    let offset = match file_plan {
+        FetchPlan::Append { offset } => offset,
+        _ => 0,
+    };
+    let result = executor
+        .run_raw(
+            target,
+            &fetch_script(remote_root, &file.rel, offset),
+            FETCH_TIMEOUT,
+        )
+        .map_err(|e| e.to_string())
+        .and_then(|out| match (out.timed_out, out.code) {
+            (true, _) => Err("fetch_timeout".into()),
+            (false, Some(0)) => Ok(out.stdout),
+            _ => Err(format!("fetch_failed: {}", out.stderr.trim())),
+        })
+        .and_then(|bytes| {
+            mirror
+                .apply(&file.rel, file_plan, &bytes, whole)
+                .map(|len| (len, bytes.len() as u64))
+                .map_err(|e| e.to_string())
+        });
+    match result {
+        Ok((mirrored, fetched_bytes)) => {
+            let grew = file_plan == FetchPlan::Full || before != Some(mirrored);
+            files.insert(
+                file.rel.clone(),
+                FileState {
+                    size: file.size,
+                    mtime: file.mtime,
+                    mirrored,
+                    missing: false,
+                },
+            );
+            Ok((fetched_bytes, grew))
+        }
+        Err(error) => {
+            files.remove(&file.rel);
+            Err(error)
+        }
+    }
+}
+
+fn list_files(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    script: &str,
+) -> Result<Vec<RemoteFile>, String> {
+    list_files_with(executor, target, script, valid_rel)
+}
+
+fn list_files_with(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    script: &str,
+    valid: fn(&str) -> bool,
+) -> Result<Vec<RemoteFile>, String> {
+    let listing = executor
+        .run(target, script, LIST_TIMEOUT)
+        .map_err(|e| e.to_string())?;
+    if listing.timed_out {
+        return Err("list_timeout".into());
+    }
+    match listing.code {
+        Some(0) => Ok(parse_listing_with(&listing.stdout, valid)),
+        Some(3) => Err("projects_missing".into()),
+        _ => Err(format!("list_failed: {}", listing.stderr.trim())),
+    }
+}
+
 /// 同步一轮：列目录 → 逐个文件按计划拉取 → 保存状态。`cancel` 置位后在文件之间停下。
 pub fn sync_once(
     executor: &dyn RemoteExecutor,
@@ -212,19 +377,9 @@ pub fn sync_once(
     cancel: &AtomicBool,
     mut progress: impl FnMut(usize, usize),
 ) -> Result<SyncReport, String> {
-    let listing = executor
-        .run(target, &list_script(remote_root), LIST_TIMEOUT)
-        .map_err(|e| e.to_string())?;
-    if listing.timed_out {
-        return Err("list_timeout".into());
-    }
-    match listing.code {
-        Some(0) => {}
-        Some(3) => return Err("projects_missing".into()),
-        _ => return Err(format!("list_failed: {}", listing.stderr.trim())),
-    }
-    let remote = parse_listing(&listing.stdout);
+    let remote = list_files(executor, target, &list_script(remote_root))?;
     let mut state = mirror.load_state();
+    state.remote_root = Some(remote_root.to_string());
     let mut report = SyncReport {
         listed: remote.len(),
         ..SyncReport::default()
@@ -242,47 +397,24 @@ pub fn sync_once(
             report.cancelled = true;
             break;
         }
-        let offset = match file_plan {
-            FetchPlan::Append { offset } => *offset,
-            _ => 0,
-        };
-        let result = executor
-            .run_raw(
-                target,
-                &fetch_script(remote_root, &file.rel, offset),
-                FETCH_TIMEOUT,
-            )
-            .map_err(|e| e.to_string())
-            .and_then(|out| match (out.timed_out, out.code) {
-                (true, _) => Err("fetch_timeout".into()),
-                (false, Some(0)) => Ok(out.stdout),
-                _ => Err(format!("fetch_failed: {}", out.stderr.trim())),
-            })
-            .and_then(|bytes| {
-                mirror
-                    .apply(&file.rel, *file_plan, &bytes)
-                    .map(|len| (len, bytes.len() as u64))
-                    .map_err(|e| e.to_string())
-            });
-        match result {
-            Ok((mirrored, fetched_bytes)) => {
+        match fetch_file(
+            executor,
+            target,
+            remote_root,
+            mirror,
+            &mut state.files,
+            file,
+            *file_plan,
+            false,
+        ) {
+            Ok((fetched_bytes, grew)) => {
                 report.fetched += 1;
                 report.bytes += fetched_bytes;
-                state.files.insert(
-                    file.rel.clone(),
-                    FileState {
-                        size: file.size,
-                        mtime: file.mtime,
-                        mirrored,
-                        missing: false,
-                    },
-                );
+                if grew {
+                    report.changed.push(file.rel.clone());
+                }
             }
-            // 镜像长度与记录不符：清掉记录，下一轮全量重拉
-            Err(error) => {
-                state.files.remove(&file.rel);
-                report.errors.push(format!("{}: {error}", file.rel));
-            }
+            Err(error) => report.errors.push(format!("{}: {error}", file.rel)),
         }
     }
     progress(pending.len(), pending.len());
@@ -291,6 +423,8 @@ pub fn sync_once(
         let gone = !present.contains(rel.as_str());
         if gone && !file_state.missing {
             file_state.missing = true;
+            report.changed.push(rel.clone());
+            report.newly_missing += 1;
         }
         if gone {
             report.missing += 1;
@@ -298,6 +432,117 @@ pub fn sync_once(
     }
     mirror.save_state(&state).map_err(|e| e.to_string())?;
     Ok(report)
+}
+
+/// 跟随一个已镜像过的会话文件：只列它自己并按计划拉取。
+/// 还没做过全量同步（不知道远端数据根）时不动作。
+pub fn follow_once(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    mirror: &Mirror,
+    rel: &str,
+) -> Result<Follow, String> {
+    if !valid_rel(rel) {
+        return Err("invalid_session_path".into());
+    }
+    let mut state = mirror.load_state();
+    let Some(remote_root) = state.remote_root.clone() else {
+        return Ok(Follow::Unchanged);
+    };
+    let listed = list_files(executor, target, &stat_script(&remote_root, rel))?;
+    let outcome = match listed.into_iter().find(|file| file.rel == rel) {
+        Some(file) => {
+            let file_plan = plan(&file, state.files.get(rel));
+            let updated = file_plan != FetchPlan::Skip
+                && fetch_file(
+                    executor,
+                    target,
+                    &remote_root,
+                    mirror,
+                    &mut state.files,
+                    &file,
+                    file_plan,
+                    false,
+                )
+                .is_ok_and(|(_, grew)| grew);
+            if updated {
+                Follow::Updated
+            } else {
+                Follow::Unchanged
+            }
+        }
+        None => match state.files.get_mut(rel) {
+            Some(file_state) if !file_state.missing => {
+                file_state.missing = true;
+                Follow::Gone
+            }
+            _ => Follow::Unchanged,
+        },
+    };
+    if outcome != Follow::Unchanged {
+        mirror.save_state(&state).map_err(|e| e.to_string())?;
+    }
+    Ok(outcome)
+}
+
+/// 拉取一个会话的子 Agent 文件（打开会话时按需）。返回有变化的文件数；
+/// 远端已删除的子 Agent 文件保留镜像。还没做过全量同步时不动作。
+pub fn sync_subagents(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    mirror: &Mirror,
+    project: &str,
+    session: &str,
+) -> Result<usize, String> {
+    if !valid_rel(&format!("{project}/{session}.jsonl")) {
+        return Err("invalid_session_path".into());
+    }
+    let mut state = mirror.load_state();
+    let Some(remote_root) = state.remote_root.clone() else {
+        return Ok(0);
+    };
+    let base = format!("{project}/{session}");
+    let listed = list_files_with(
+        executor,
+        target,
+        &subagent_list_script(&remote_root, &base),
+        valid_subagent_rel,
+    )?;
+    let mut changed = 0;
+    for file in listed {
+        let file = RemoteFile {
+            rel: format!("{base}/subagents/{}", file.rel),
+            ..file
+        };
+        let whole = file.rel.ends_with(".json");
+        let local = state.subagents.get(&file.rel);
+        let file_plan = if whole {
+            plan_whole(&file, local)
+        } else {
+            plan(&file, local)
+        };
+        if file_plan == FetchPlan::Skip {
+            continue;
+        }
+        if fetch_file(
+            executor,
+            target,
+            &remote_root,
+            mirror,
+            &mut state.subagents,
+            &file,
+            file_plan,
+            whole,
+        )
+        .is_ok_and(|(_, grew)| grew)
+        {
+            changed += 1;
+        }
+    }
+    if changed > 0 {
+        mirror.save_state(&state).map_err(|e| e.to_string())?;
+    }
+    Ok(changed)
 }
 
 /// 实例镜像根：`data_dir()/remote/<实例 id>/`（实例 id 以 `ssh-` 开头，不会与 `ssh/`、`hosts.json` 冲突）
@@ -378,6 +623,160 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.base);
         }
+    }
+
+    fn follow(fixture: &Fixture, rel: &str) -> Follow {
+        follow_once(&LocalShellExecutor, &target(), &fixture.mirror, rel).unwrap()
+    }
+
+    #[test]
+    fn report_lists_changed_files_and_remembers_the_remote_root() {
+        let fixture = Fixture::new("changed");
+        fixture.write_remote("-home-alice-foo/a.jsonl", "{\"n\":1}\n");
+        fixture.write_remote("-home-alice-foo/b.jsonl", "{\"n\":2}\n");
+        let mut first = fixture.sync();
+        first.changed.sort();
+        assert_eq!(
+            first.changed,
+            vec!["-home-alice-foo/a.jsonl", "-home-alice-foo/b.jsonl"]
+        );
+        assert_eq!(
+            fixture.mirror.load_state().remote_root.as_deref(),
+            fixture.remote.to_str()
+        );
+
+        fixture.append_remote("-home-alice-foo/a.jsonl", "{\"n\":3}\n");
+        std::fs::remove_file(fixture.remote.join("projects/-home-alice-foo/b.jsonl")).unwrap();
+        let mut second = fixture.sync();
+        assert_eq!(second.newly_missing, 1);
+        second.changed.sort();
+        assert_eq!(
+            second.changed,
+            vec!["-home-alice-foo/a.jsonl", "-home-alice-foo/b.jsonl"]
+        );
+        assert!(fixture.sync().changed.is_empty());
+    }
+
+    #[test]
+    fn follow_waits_for_a_full_sync_then_tracks_one_file() {
+        let fixture = Fixture::new("follow");
+        let rel = "-home-alice-foo/a.jsonl";
+        fixture.write_remote(rel, "{\"n\":1}\n");
+        assert_eq!(
+            follow(&fixture, rel),
+            Follow::Unchanged,
+            "no remote root before the first full sync"
+        );
+
+        fixture.sync();
+        assert_eq!(follow(&fixture, rel), Follow::Unchanged);
+        fixture.append_remote(rel, "{\"n\":2}\n{\"half\"");
+        assert_eq!(follow(&fixture, rel), Follow::Updated);
+        assert_eq!(fixture.mirrored(rel), "{\"n\":1}\n{\"n\":2}\n");
+        assert_eq!(
+            follow(&fixture, rel),
+            Follow::Unchanged,
+            "a still-partial line is not a change"
+        );
+
+        std::fs::remove_file(fixture.remote.join("projects").join(rel)).unwrap();
+        assert_eq!(follow(&fixture, rel), Follow::Gone);
+        assert!(fixture.mirror.load_state().files[rel].missing);
+        assert_eq!(follow(&fixture, rel), Follow::Unchanged);
+        assert!(follow_once(
+            &LocalShellExecutor,
+            &target(),
+            &fixture.mirror,
+            "../x.jsonl"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn subagent_paths_allow_direct_and_workflow_files_only() {
+        for rel in [
+            "agent-a.jsonl",
+            "agent-a.meta.json",
+            "workflows/w1/agent-b.jsonl",
+            "workflows/w1/journal.jsonl",
+        ] {
+            assert!(valid_subagent_rel(rel), "{rel:?}");
+        }
+        for rel in [
+            ".jsonl",
+            "agent-a.txt",
+            "../agent.jsonl",
+            "workflows/../agent.jsonl",
+            "workflows/.w/agent.jsonl",
+            "other/w1/agent.jsonl",
+            "workflows/w1/x/agent.jsonl",
+        ] {
+            assert!(!valid_subagent_rel(rel), "{rel:?}");
+        }
+    }
+
+    #[test]
+    fn subagents_are_fetched_on_demand_and_kept_out_of_the_index() {
+        let fixture = Fixture::new("subagents");
+        let session = "-home-alice-foo/s1.jsonl";
+        let base = "-home-alice-foo/s1/subagents";
+        fixture.write_remote(session, "{\"n\":1}\n");
+        fixture.write_remote(&format!("{base}/agent-a.jsonl"), "{\"a\":1}\n{\"half\"");
+        fixture.write_remote(
+            &format!("{base}/agent-a.meta.json"),
+            "{\"agentType\":\"x\"}",
+        );
+        fixture.write_remote(&format!("{base}/workflows/w1/agent-b.jsonl"), "{\"b\":1}\n");
+        let fetch = || {
+            sync_subagents(
+                &LocalShellExecutor,
+                &target(),
+                &fixture.mirror,
+                "-home-alice-foo",
+                "s1",
+            )
+            .unwrap()
+        };
+        assert_eq!(fetch(), 0, "no remote root before the first full sync");
+
+        let report = fixture.sync();
+        assert_eq!(report.listed, 1, "the index lists main session files only");
+        assert_eq!(fetch(), 3);
+        assert_eq!(
+            fixture.mirrored(&format!("{base}/agent-a.jsonl")),
+            "{\"a\":1}\n"
+        );
+        assert_eq!(
+            fixture.mirrored(&format!("{base}/agent-a.meta.json")),
+            "{\"agentType\":\"x\"}",
+            "metadata is written whole, not cut at the last newline"
+        );
+        assert_eq!(
+            fixture.mirrored(&format!("{base}/workflows/w1/agent-b.jsonl")),
+            "{\"b\":1}\n"
+        );
+        assert_eq!(fetch(), 0, "a still-partial line is not a change");
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fixture.write_remote(
+            &format!("{base}/agent-a.meta.json"),
+            "{\"agentType\":\"y\"}",
+        );
+        assert_eq!(fetch(), 1, "only the rewritten metadata changed");
+        assert_eq!(
+            fixture.mirrored(&format!("{base}/agent-a.meta.json")),
+            "{\"agentType\":\"y\"}"
+        );
+        let state = fixture.mirror.load_state();
+        assert!(state.files.keys().all(|rel| valid_rel(rel)));
+        assert!(!fixture
+            .sync()
+            .changed
+            .iter()
+            .any(|rel| rel.contains("subagents")));
+        assert!(
+            sync_subagents(&LocalShellExecutor, &target(), &fixture.mirror, "..", "s1").is_err()
+        );
     }
 
     #[test]
@@ -561,6 +960,8 @@ mod tests {
     fn sync_scripts_only_read_the_remote() {
         let scripts = [
             list_script("/r"),
+            stat_script("/r", "p/a.jsonl"),
+            subagent_list_script("/r", "p/s"),
             fetch_script("/r", "p/a.jsonl", 0),
             fetch_script("/r", "p/a.jsonl", 9),
         ];
@@ -568,7 +969,9 @@ mod tests {
             for forbidden in [" rm ", "mv ", "cp ", "touch", "mkdir", "tee ", "chmod"] {
                 assert!(!script.contains(forbidden), "{forbidden} in {script}");
             }
-            let redirects = script.matches('>').count() - script.matches("2>/dev/null").count();
+            let redirects = script.matches('>').count()
+                - script.matches("2>/dev/null").count()
+                - script.matches("1>/dev/null").count();
             assert_eq!(redirects, 0, "{script}");
         }
         assert_eq!(

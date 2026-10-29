@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +15,8 @@ pub struct ClaudeSource {
     mirror_root: Option<PathBuf>,
     change_sinks: Arc<Mutex<Vec<SourceChangeSink>>>,
     projects_cache: Mutex<Option<Vec<crate::models::Project>>>,
+    /// 镜像里远端已删除的会话（`<项目目录>/<会话 id>.jsonl`），与项目快照同生命周期
+    missing_cache: Mutex<Option<Arc<HashSet<String>>>>,
 }
 
 impl ClaudeSource {
@@ -24,6 +26,7 @@ impl ClaudeSource {
             mirror_root: None,
             change_sinks: Arc::new(Mutex::new(Vec::new())),
             projects_cache: Mutex::new(None),
+            missing_cache: Mutex::new(None),
         })
     }
 
@@ -34,6 +37,7 @@ impl ClaudeSource {
             mirror_root: Some(projects_dir),
             change_sinks: Arc::new(Mutex::new(Vec::new())),
             projects_cache: Mutex::new(None),
+            missing_cache: Mutex::new(None),
         }
     }
 
@@ -46,6 +50,10 @@ impl ClaudeSource {
     pub fn publish_change(&self, change: SourceChange) {
         *self
             .projects_cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
+        *self
+            .missing_cache
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = None;
         let sinks = self
@@ -78,6 +86,31 @@ impl ClaudeSource {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         cache.get_or_insert_with(|| discovered.clone()).clone()
+    }
+
+    /// 远端已删除的会话；本机数据根恒为空
+    fn remote_missing(&self) -> Arc<HashSet<String>> {
+        let Some(projects_dir) = &self.mirror_root else {
+            return Arc::default();
+        };
+        let mut cache = self
+            .missing_cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        cache
+            .get_or_insert_with(|| {
+                let root = projects_dir.parent().unwrap_or(projects_dir).to_path_buf();
+                let state = super::remote::sync::Mirror::new(root).load_state();
+                Arc::new(
+                    state
+                        .files
+                        .into_iter()
+                        .filter(|(_, file)| file.missing)
+                        .map(|(rel, _)| rel)
+                        .collect(),
+                )
+            })
+            .clone()
     }
 
     fn owns_project(&self, project: &ProjectRef) -> EngineResult<()> {
@@ -147,6 +180,7 @@ impl ClaudeSource {
         &self,
         project: ProjectRef,
         summary: crate::models::SessionSummary,
+        remote_missing: bool,
     ) -> EngineResult<CoreSessionSummary> {
         let usage = map_usage(&summary.total_tokens);
         let subagent_tokens = json!({
@@ -187,6 +221,8 @@ impl ClaudeSource {
                     summary.version.map(Value::String).unwrap_or(Value::Null),
                 ),
                 ("subagentTokens".into(), subagent_tokens),
+                // 镜像保留、远端已删除：只读查阅，不能续聊
+                ("remoteMissing".into(), Value::Bool(remote_missing)),
             ]))?,
         })
     }
@@ -235,9 +271,11 @@ impl SessionSource for ClaudeSource {
                 .ok_or_else(|| {
                     EngineError::new(EngineErrorKind::NotFound, "Claude project was not found")
                 })?;
+            let missing = self.remote_missing();
             let mut sessions = Vec::with_capacity(source_project.sessions.len());
             for summary in source_project.sessions {
-                sessions.push(self.map_summary(project.clone(), summary)?);
+                let gone = missing.contains(&format!("{native_project}/{}.jsonl", summary.id));
+                sessions.push(self.map_summary(project.clone(), summary, gone)?);
             }
             let (sessions, next_cursor) = paginate(sessions, query.cursor, query.limit);
             Ok(SessionPage {

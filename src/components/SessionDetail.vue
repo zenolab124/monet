@@ -328,7 +328,7 @@ const {
   closeTab: closeSubAgentTab,
   closeAllTabs: closeAllSubAgents,
   isAgentOpen,
-} = createSubAgentContext()
+} = createSubAgentContext(recordArgs)
 
 // 账本：从 records + 流式增量实时推导所有异步任务（发现不再依赖磁盘轮询）；
 // workflow 子 agent 清单由磁盘扫描按 runId 关联进条目。
@@ -1009,6 +1009,8 @@ function remoteRecordInstance(): EngineInstanceId | null {
   const instance = claudeEngineInstance.value
   return sameInstance(instance, LOCAL_CLAUDE_INSTANCE) ? null : instance
 }
+/** 远端已删除、只剩 Monet 镜像副本的会话 */
+const remoteMissing = computed(() => currentSession.value?.summary.source_meta?.remoteMissing === true)
 /** 记录读取参数：远端会话的界面 id 是结构化 id，镜像按原生目录名与会话 uuid 读取 */
 function recordArgs(projectId: string, sessionId: string): SessionRecordArgs {
   const instance = remoteRecordInstance()
@@ -3352,16 +3354,55 @@ onUnmounted(stopExternalFollow)
 // 仅本会话入选变更集（或 full 全量刷新）才重启——其他会话写盘不改变本会话的
 // 外部进程状态，无差别重启会让多实例探测在任何会话活跃期间永不停歇
 let unlistenProjectsChanged: (() => void) | null = null
-listen<{ full: boolean; changes: { projectId: string; sessionId: string }[] }>('projects-changed', (event) => {
-  if (externalTimer !== null) return
+listen<{ full: boolean; changes: { projectId: string; sessionId: string }[]; instance?: EngineInstanceId }>('projects-changed', (event) => {
   const cs = currentSession.value
-  if (!cs || stream.value.streaming) return
+  if (!cs) return
+  // 远端镜像会话：本实例的镜像有变化（定时索引或下方跟随）时静默重载；没有本机进程可探测
+  const remote = remoteRecordInstance()
+  const fromRemote = !!event.payload?.instance && !sameInstance(event.payload.instance, LOCAL_CLAUDE_INSTANCE)
+  if (remote || fromRemote) {
+    if (!remote || !event.payload?.instance || !sameInstance(event.payload.instance, remote)) return
+    const nativeId = cs.summary.native_id ?? cs.summary.id
+    if (event.payload.full || event.payload.changes?.some(c => c.sessionId === nativeId)) void silentReloadRecords()
+    return
+  }
+  if (externalTimer !== null) return
+  if (stream.value.streaming) return
   const touched = event.payload?.full
     || event.payload?.changes?.some(c => c.sessionId === cs.summary.id)
   if (!touched) return
   startExternalFollow()
 }).then(fn => { unlistenProjectsChanged = fn })
 onUnmounted(() => unlistenProjectsChanged?.())
+
+// 工作台里打开的远端会话每 2 秒同步它自己的文件；有变化时后端发 projects-changed，由上方监听重载。
+// 窗口不可见或上一次还没返回时跳过本拍
+const REMOTE_FOLLOW_MS = 2000
+let remoteFollowTimer: number | null = null
+let remoteFollowBusy = false
+const remoteFollowKey = computed(() => {
+  const cs = currentSession.value
+  if (props.mode !== 'workbench' || !cs) return ''
+  const args = recordArgs(cs.projectId, cs.summary.id)
+  return args.instance ? JSON.stringify(args) : ''
+})
+function stopRemoteFollow() {
+  if (remoteFollowTimer !== null) window.clearInterval(remoteFollowTimer)
+  remoteFollowTimer = null
+}
+watch(remoteFollowKey, key => {
+  stopRemoteFollow()
+  if (!key) return
+  const args = JSON.parse(key) as SessionRecordArgs
+  remoteFollowTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible' || remoteFollowBusy) return
+    remoteFollowBusy = true
+    invoke('follow_remote_session', args)
+      .catch(() => { /* 断线时等下一拍或下一轮全量索引 */ })
+      .finally(() => { remoteFollowBusy = false })
+  }, REMOTE_FOLLOW_MS)
+}, { immediate: true })
+onUnmounted(stopRemoteFollow)
 
 /**
  * 搜索命中定位(档案馆实例专属;工作台列不消费,防止同会话开列时抢走目标):
@@ -3864,9 +3905,9 @@ async function onReload() {
     </SessionInteractionPanel>
 
     <p
-      v-if="mode === 'workbench' && remoteRecordInstance()"
+      v-if="remoteRecordInstance() && (mode === 'workbench' || remoteMissing)"
       class="mx-4 mb-3 rounded border border-border px-3 py-2 text-xs text-muted-foreground"
-    >{{ $t('remote.sessionReadOnly') }}</p>
+    >{{ $t(remoteMissing ? 'remote.sessionMissing' : 'remote.sessionReadOnly') }}</p>
 
     <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染;赛马模式由共享输入替代) -->
     <SessionComposer

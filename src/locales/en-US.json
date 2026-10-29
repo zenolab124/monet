@@ -199,6 +199,8 @@
     "netcheckRunning": "Checking…"
   },
   "archive": {
+    "remoteSyncing": "{alias} syncing {done} / {total}",
+    "remoteListing": "{alias} listing remote sessions…",
     "projects": "Projects",
     "loadingProjects": "Loading projects...",
     "noProjects": "No projects found",
@@ -2013,6 +2015,9 @@
     "unavailable": "File reference unavailable. Check it and retry: {reason}"
   },
   "remote": {
+    "syncProgress": "Syncing {done} / {total}",
+    "cancelSync": "Cancel",
+    "syncCancelled": "Cancelled: {fetched} fetched this time. The next sync resumes where it stopped.",
     "title": "Remote hosts (SSH)",
     "intro": "Connect to another macOS / Linux computer through your own SSH configuration to view and continue the Claude Code sessions on it. Only key or ssh-agent logins without a password prompt are supported; Monet stores no credentials.",
     "empty": "No directly connectable Host was found in ~/.ssh/config. You can add one manually below.",
@@ -2058,6 +2063,7 @@
     "cliMissingUser": "the path you entered doesn’t exist or isn’t executable",
     "restartHint": "After enabling or disabling a host, restart Monet for it to appear in or leave the engine list.",
     "sessionReadOnly": "This session is on a remote host and is read-only for now; continuing it from Monet isn't available yet.",
+    "sessionMissing": "This session no longer exists on the remote host. You are viewing the copy Monet kept, read-only.",
     "syncNow": "Sync now",
     "syncing": "Syncing…",
     "syncDone": "Synced: {listed} sessions on the remote host, {fetched} fetched this time.",

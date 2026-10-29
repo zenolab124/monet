@@ -71,18 +71,18 @@ async function loadProjects() {
     watcherSetup = true
     listen<ProjectsChangedPayload>('projects-changed', (event) => {
       const payload = event.payload
-      if (!payload || payload.full || !Array.isArray(payload.changes) || payload.changes.length === 0) {
+      const remote = payload?.instance && !sameInstance(payload.instance, LOCAL_CLAUDE_INSTANCE)
+      if (remote && payload.full) {
+        void reloadInstanceSilently(payload.instance!)
+      } else if (!payload || payload.full || !Array.isArray(payload.changes) || payload.changes.length === 0) {
         reloadProjectsSilently()
       } else {
         applySessionChanges(payload.changes, resolveNativeInstance(payload.instance))
       }
     })
-    // 本机原生实例由 projects-changed 增量刷新；其余实例（含远端镜像）靠历史源变更事件
+    // 原生控制器的实例（本机与远端镜像）由 projects-changed 刷新；其余实例靠历史源变更事件
     listen<SourceChangeEnvelope>('engine-source-change', event => {
-      const instance = event.payload.instance
-      if (!usesNativeSessionSurface(instance) || !sameInstance(instance, LOCAL_CLAUDE_INSTANCE)) {
-        reloadProjectsSilently()
-      }
+      if (!usesNativeSessionSurface(event.payload.instance)) reloadProjectsSilently()
     })
   }
   if (!workspaceFocusSetup) {
@@ -258,8 +258,34 @@ async function reloadProjectsSilently() {
   }
 }
 
+/** 只重载一个实例的项目（远端主机大批量变化时），其余实例保持不动 */
+async function reloadInstanceSilently(instance: EngineInstanceId) {
+  try {
+    const descriptor = (await listEngines()).find(item => item.enabled && sameInstance(item.instance, instance))
+    if (!descriptor) {
+      reloadProjectsSilently()
+      return
+    }
+    const loaded = await loadEngineInstanceProjects(descriptor)
+    dataGen++
+    const next = projects.value
+      .filter(project => !(project.engine && sameInstance(project.engine, instance)))
+      .concat(loaded)
+      .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
+    indexEngineSessions(next)
+    projects.value = next
+    projectsRevision.value++
+    scheduleWorkspaceRefresh()
+  } catch (_) {
+    // 静默失败，等下一轮
+  }
+}
+
 /** 按会话增量更新项目树；遇到未知项目（新建项目目录）回退全量 */
 async function applySessionChanges(changes: SessionChange[], instance: EngineInstanceId) {
+  const remote = !sameInstance(instance, LOCAL_CLAUDE_INSTANCE)
+  // 远端实例遇到未知项目时只重载它自己，不牵动本机近万会话的全量扫描
+  const reloadFallback = () => remote ? void reloadInstanceSilently(instance) : reloadProjectsSilently()
   for (const { projectId, sessionId } of changes) {
     // 无引擎字段的旧项目只属于本机实例;同路径项目在不同实例间各自独立
     const proj = projects.value.find(p =>
@@ -268,13 +294,14 @@ async function applySessionChanges(changes: SessionChange[], instance: EngineIns
         ? sameInstance(p.engine, instance) && usesNativeSessionSurface(p.engine)
         : sameInstance(instance, LOCAL_CLAUDE_INSTANCE)))
     if (!proj) {
-      reloadProjectsSilently()
+      reloadFallback()
       return
     }
     try {
       const summary = await invoke<SessionSummary | null>('get_session_summary', {
         projectId,
         sessionId,
+        ...(remote ? { instance } : {}),
       })
       dataGen++
       const idx = proj.sessions.findIndex(s => (s.native_id ?? s.id) === sessionId)
@@ -290,6 +317,10 @@ async function applySessionChanges(changes: SessionChange[], instance: EngineIns
       } else if (idx >= 0) {
         proj.sessions[idx] = {
           ...summary,
+          // 摘要里的 id 是原生 id；界面 id 沿用已有的（远端实例为结构化 id）
+          id: proj.sessions[idx].id,
+          // 旧摘要命令不带引擎元数据，沿用已有的（含远端删除标记）
+          source_meta: proj.sessions[idx].source_meta,
           reference: proj.sessions[idx].reference,
           project_reference: proj.sessions[idx].project_reference,
           engine: proj.sessions[idx].engine,
@@ -300,12 +331,14 @@ async function applySessionChanges(changes: SessionChange[], instance: EngineIns
         const engine = proj.engine
         const projectReference = proj.reference
         if (!engine || !projectReference) {
-          reloadProjectsSilently()
+          reloadFallback()
           return
         }
+        const reference = { engine, nativeId: summary.id }
         proj.sessions.push({
           ...summary,
-          reference: { engine, nativeId: summary.id },
+          id: sessionUiId(reference),
+          reference,
           project_reference: projectReference,
           engine,
           engine_name: proj.engine_name,

@@ -136,11 +136,19 @@ fn spawn_reader(mut stream: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8
     rx
 }
 
-fn drain(rx: &mpsc::Receiver<Vec<u8>>, buf: &mut Vec<u8>) {
-    while let Ok(chunk) = rx.try_recv() {
-        buf.extend_from_slice(&chunk);
+/// 收下已到达的数据；返回写端是否已关闭（读到 EOF）
+fn drain(rx: &mpsc::Receiver<Vec<u8>>, buf: &mut Vec<u8>) -> bool {
+    loop {
+        match rx.try_recv() {
+            Ok(chunk) => buf.extend_from_slice(&chunk),
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => return true,
+        }
     }
 }
+
+/// 轮询子进程的间隔：同步一轮要跑成千上万条短命令，间隔直接决定每个文件的固定开销
+const POLL: Duration = Duration::from_millis(5);
 
 /// 运行已配置好的子进程并在时限内收集输出；超时即击杀并回收
 fn collect(mut command: Command, timeout: Duration) -> std::io::Result<RawOutput> {
@@ -165,13 +173,17 @@ fn collect(mut command: Command, timeout: Duration) -> std::io::Result<RawOutput
             let _ = child.wait();
             break None;
         }
-        std::thread::sleep(Duration::from_millis(30));
+        std::thread::sleep(POLL);
     };
+    // 两路都读到 EOF 即收齐；写端被后台主进程继承时 EOF 不会来，最多再等 100ms
     let settle = Instant::now() + Duration::from_millis(100);
-    while Instant::now() < settle {
-        drain(&out_rx, &mut stdout);
-        drain(&err_rx, &mut stderr);
-        std::thread::sleep(Duration::from_millis(20));
+    loop {
+        let out_closed = drain(&out_rx, &mut stdout);
+        let err_closed = drain(&err_rx, &mut stderr);
+        if (out_closed && err_closed) || Instant::now() >= settle {
+            break;
+        }
+        std::thread::sleep(POLL);
     }
     Ok(RawOutput {
         code: status.and_then(|s| s.code()),

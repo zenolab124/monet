@@ -1301,6 +1301,17 @@ fn session_path_for(
         .unwrap_or_else(|| root.join("invalid-session-path"))
 }
 
+/// 会话的子 Agent 目录：`<项目目录>/<会话 id>/subagents`，按实例取本机数据根或镜像
+fn subagents_dir_for(
+    instance: Option<&crate::engines::core::EngineInstanceId>,
+    project_id: &str,
+    session_id: &str,
+) -> PathBuf {
+    session_path_for(instance, project_id, session_id)
+        .with_extension("")
+        .join("subagents")
+}
+
 // ---------- 子 Agent ----------
 
 #[derive(serde::Serialize)]
@@ -1313,11 +1324,12 @@ pub struct SubAgentMeta {
 }
 
 #[tauri::command]
-pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMeta> {
-    let dir = crate::config::projects_dir()
-        .join(&project_id)
-        .join(&session_id)
-        .join("subagents");
+pub fn list_subagents(
+    project_id: String,
+    session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+) -> Vec<SubAgentMeta> {
+    let dir = subagents_dir_for(instance.as_ref(), &project_id, &session_id);
     let mut result = Vec::new();
 
     // Helper: parse agent-*.meta.json entries from a directory, tagging with workflow_id
@@ -1417,11 +1429,9 @@ pub fn get_subagent_records(
     project_id: String,
     session_id: String,
     agent_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
 ) -> Vec<SessionRecord> {
-    let subagents_dir = crate::config::projects_dir()
-        .join(&project_id)
-        .join(&session_id)
-        .join("subagents");
+    let subagents_dir = subagents_dir_for(instance.as_ref(), &project_id, &session_id);
     let filename = format!("agent-{}.jsonl", agent_id);
 
     // 1) Try direct path: subagents/agent-{id}.jsonl
@@ -1551,5 +1561,20 @@ mod session_path_tests {
             assert!(path.starts_with(&root), "{project}/{session}");
             assert!(!path.starts_with(root.join("projects")), "{project}/{session}");
         }
+    }
+
+    #[test]
+    fn subagent_dir_follows_the_session_file() {
+        let remote = EngineInstanceId::new("claude-code", "ssh-devbox-abc123").unwrap();
+        let root = crate::engines::claude::remote::sync::mirror_root_for("ssh-devbox-abc123");
+        assert_eq!(
+            subagents_dir_for(Some(&remote), "-home-alice-foo", "s1"),
+            root.join("projects/-home-alice-foo/s1/subagents")
+        );
+        assert_eq!(
+            subagents_dir_for(None, "-p", "s1"),
+            crate::config::projects_dir().join("-p").join("s1").join("subagents")
+        );
+        assert!(!subagents_dir_for(Some(&remote), "..", "s1").starts_with(root.join("projects")));
     }
 }

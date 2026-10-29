@@ -199,6 +199,8 @@
     "netcheckRunning": "检测中…"
   },
   "archive": {
+    "remoteSyncing": "{alias} 同步中 {done} / {total}",
+    "remoteListing": "{alias} 正在列出远端会话…",
     "projects": "项目",
     "loadingProjects": "正在加载项目...",
     "noProjects": "未发现任何项目",
@@ -2013,6 +2015,9 @@
     "unavailable": "文件引用不可用，请检查后重试：{reason}"
   },
   "remote": {
+    "syncProgress": "同步中 {done} / {total}",
+    "cancelSync": "取消",
+    "syncCancelled": "已取消：本次拉取 {fetched} 个，下次同步从断点继续。",
     "title": "远端主机（SSH）",
     "intro": "通过你自己的 SSH 配置连接另一台 macOS / Linux 电脑，查看并继续那台机器上的 Claude Code 会话。只支持密钥或 ssh-agent 免密登录，Monet 不保存任何凭据。",
     "empty": "~/.ssh/config 中没有可直接连接的 Host，可以在下方手动添加。",
@@ -2058,6 +2063,7 @@
     "cliMissingUser": "填写的路径不存在或不可执行",
     "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。",
     "sessionReadOnly": "这是远端主机上的会话，目前只能查看；在 Monet 里继续对话的功能尚未接入。",
+    "sessionMissing": "远端主机上已经没有这个会话了，这里显示的是 Monet 保留的镜像副本，只能查看。",
     "syncNow": "立即同步",
     "syncing": "同步中…",
     "syncDone": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个。",

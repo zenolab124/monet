@@ -2,8 +2,10 @@
 import { onMounted, reactive, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
+import { useRemoteSync } from '@/composables/useRemoteSync'
 
 const { t } = useI18n()
+const remoteSync = useRemoteSync()
 
 interface RemoteHost {
   alias: string
@@ -30,26 +32,28 @@ const reports = reactive<Record<string, HealthReport>>({})
 const checking = reactive<Record<string, boolean>>({})
 const pathDrafts = reactive<Record<string, string>>({})
 const rowErrors = reactive<Record<string, string>>({})
-const syncing = reactive<Record<string, boolean>>({})
 const syncNotes = reactive<Record<string, string>>({})
 const newConnection = ref('')
 
-interface SyncReport { listed: number; fetched: number; missing: number; errors: string[] }
-
+/** 手动同步；定时索引正在跑这台主机时按钮显示进度并可取消 */
 async function syncHost(alias: string) {
-  syncing[alias] = true
   delete syncNotes[alias]
   delete rowErrors[alias]
   try {
-    const report = await invoke<SyncReport>('sync_remote_host', { alias })
-    syncNotes[alias] = report.errors.length
-      ? t('remote.syncPartial', { listed: report.listed, fetched: report.fetched, failed: report.errors.length })
-      : t('remote.syncDone', { listed: report.listed, fetched: report.fetched })
+    const report = await remoteSync.syncHost(alias)
+    syncNotes[alias] = report.cancelled
+      ? t('remote.syncCancelled', { fetched: report.fetched })
+      : report.errors.length
+        ? t('remote.syncPartial', { listed: report.listed, fetched: report.fetched, failed: report.errors.length })
+        : t('remote.syncDone', { listed: report.listed, fetched: report.fetched })
   } catch (error) {
     rowErrors[alias] = errorText(error)
-  } finally {
-    syncing[alias] = false
   }
+}
+
+function progressText(alias: string): string {
+  const current = remoteSync.progress[alias]
+  return current?.total ? t('remote.syncProgress', { done: current.done, total: current.total }) : t('remote.syncing')
 }
 const addError = ref<string | null>(null)
 
@@ -173,13 +177,21 @@ onMounted(async () => {
             :disabled="checking[host.alias]"
             @click="runCheck(host.alias)"
           >{{ checking[host.alias] ? t('remote.checking') : t('remote.recheck') }}</button>
-          <button
-            v-if="host.enabled"
-            type="button"
-            class="host-action"
-            :disabled="syncing[host.alias]"
-            @click="syncHost(host.alias)"
-          >{{ syncing[host.alias] ? t('remote.syncing') : t('remote.syncNow') }}</button>
+          <template v-if="host.enabled">
+            <span v-if="remoteSync.progress[host.alias]" class="text-[10.5px] text-muted-foreground tabular-nums">{{ progressText(host.alias) }}</span>
+            <button
+              v-if="remoteSync.progress[host.alias]"
+              type="button"
+              class="host-action"
+              @click="remoteSync.cancelSync(host.alias)"
+            >{{ t('remote.cancelSync') }}</button>
+            <button
+              v-else
+              type="button"
+              class="host-action"
+              @click="syncHost(host.alias)"
+            >{{ t('remote.syncNow') }}</button>
+          </template>
           <button
             v-if="host.source === 'manual'"
             type="button"
