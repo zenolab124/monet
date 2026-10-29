@@ -1091,10 +1091,14 @@ fn open_session(
                         if let Some(version) = catalog.cli_version.as_deref() {
                             diagnostics::note_cli_version(version);
                         }
-                        diagnostics::store_models(&catalog.models);
+                        // 进程级运行时只服务本机实例
+                        let instance = crate::engines::claude::default_instance().ok();
+                        if let Some(instance) = instance.as_ref() {
+                            diagnostics::store_models(instance, &catalog.models);
+                        }
                         let _ = app.emit(
                             "session-catalog",
-                            json!({ "session_id": session_id, "catalog": catalog }),
+                            json!({ "session_id": session_id, "engine": instance, "catalog": catalog }),
                         );
                     } else {
                         eprintln!("[long-lived] 握手响应结构不符，回退本地命令与模型列表");

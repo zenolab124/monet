@@ -72,8 +72,8 @@ describe('standard-engine workbench drafts', () => {
   })
 
   it('promotes Claude in place and replaces Codex in the same workbench column', () => {
-    expect(picker).toContain("type TargetEngineId = 'claude-code' | 'codex'")
-    expect(picker).toContain('promotePendingTaskToDraft(props.sessionId)')
+    expect(picker).toContain('buildEngineChoices({')
+    expect(picker).toContain('promotePendingTaskToDraft(props.sessionId, choice.descriptor.instance)')
     expect(picker).toContain('stageEngineDraft(replacementSessionId')
     expect(picker).toContain('replaceWorkbenchSession(props.sessionId, replacementSessionId)')
     expect(picker).toContain('discardStagedSession(replacementSessionId)')

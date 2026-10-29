@@ -17,6 +17,7 @@ import { useUiState } from '@/composables/useUiState'
 import { inferModel, effortCapabilities, type ModelInfo } from '@/utils/modelContext'
 import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 import type { EngineCapsuleConfig } from '@/engines/runConfig'
+import type { EngineInstanceId } from '@/engines/types'
 
 /**
  * 运行配置胶囊(二期,原型冻结基准 docs/prototypes/run-config-capsule.html):
@@ -30,6 +31,8 @@ const props = defineProps<{
   /** 会话覆盖原值(重置钮显隐/顾问开关状态判定) */
   settings?: Pick<SessionSettings, 'modelId' | 'effort' | 'fastMode' | 'channelId' | 'chrome' | 'extraArgs'>
   runConfig?: ResolvedRunConfig
+  /** 原生会话所属实例;缺省为本机实例(设置页等独立用法) */
+  nativeInstance?: EngineInstanceId
   cwd?: string | null
   /** 标准引擎会话使用同一胶囊，仅由引擎 adapter 提供候选和值。 */
   engineConfig?: EngineCapsuleConfig
@@ -238,7 +241,7 @@ function pickChannel(id: string) {
 // ---- 模型列 ----
 
 const channelRef = computed<string | null>(() => props.defaultConfig?.channelId ?? props.runConfig?.channelId ?? null)
-const { items: claudeModelItems } = useModelOptions(channelRef)
+const { items: claudeModelItems } = useModelOptions(channelRef, () => props.nativeInstance)
 const standaloneModelItems = computed<ModelInfo[]>(() => {
   const id = props.defaultConfig?.channelId
   if (!id || id === OFFICIAL_CHANNEL_ID || id === OFFICIAL_DIRECT_CHANNEL_ID) {

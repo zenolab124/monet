@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::protocol::{shape_of, ReportedModel, VERIFIED_CLI_VERSION};
+use crate::engines::core::EngineInstanceId;
 
 const SAMPLE_LIMIT: usize = 500;
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -48,10 +49,19 @@ fn samples_path() -> PathBuf {
         .join("claude-protocol-samples.json")
 }
 
-fn models_path() -> PathBuf {
+fn models_path(instance: &EngineInstanceId) -> PathBuf {
     crate::config::data_dir()
         .join("cache")
-        .join("claude-models.json")
+        .join(models_file_name(instance))
+}
+
+/// 本机实例沿用历史文件名；其他实例按实例 key（base64url，文件名安全）分文件。
+fn models_file_name(instance: &EngineInstanceId) -> String {
+    if instance.engine_id() == super::ENGINE_ID && instance.instance_id() == super::DEFAULT_INSTANCE_ID {
+        "claude-models.json".into()
+    } else {
+        format!("claude-models.{}.json", instance.storage_key())
+    }
 }
 
 fn now_ms() -> i64 {
@@ -189,8 +199,8 @@ pub struct CachedModel {
     pub description: Option<String>,
 }
 
-/// 握手成功报出模型列表时覆盖缓存；空列表不覆盖。
-pub fn store_models(models: &[ReportedModel]) {
+/// 握手成功报出模型列表时覆盖该实例的缓存；空列表不覆盖。
+pub fn store_models(instance: &EngineInstanceId, models: &[ReportedModel]) {
     if models.is_empty() {
         return;
     }
@@ -207,15 +217,37 @@ pub fn store_models(models: &[ReportedModel]) {
         updated_at: now_ms(),
     };
     if let Ok(text) = serde_json::to_string_pretty(&cache) {
-        if let Err(error) = crate::config::atomic_write(&models_path(), &text) {
+        if let Err(error) = crate::config::atomic_write(&models_path(instance), &text) {
             eprintln!("[claude-protocol] 模型缓存写入失败: {error}");
         }
     }
 }
 
-pub fn cached_models() -> Option<ModelCache> {
-    std::fs::read_to_string(models_path())
+pub fn cached_models(instance: &EngineInstanceId) -> Option<ModelCache> {
+    std::fs::read_to_string(models_path(instance))
         .ok()
         .and_then(|text| serde_json::from_str::<ModelCache>(&text).ok())
         .filter(|cache| !cache.models.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_instance_keeps_legacy_model_cache_file() {
+        let local = super::super::default_instance().unwrap();
+        assert_eq!(models_file_name(&local), "claude-models.json");
+    }
+
+    #[test]
+    fn other_instances_get_separate_file_safe_model_caches() {
+        let second = EngineInstanceId::new("claude-code", "second-a").unwrap();
+        let other = EngineInstanceId::new("claude-code", "second-b").unwrap();
+        let name = models_file_name(&second);
+
+        assert_eq!(name, format!("claude-models.{}.json", second.storage_key()));
+        assert_ne!(name, models_file_name(&other));
+        assert!(!name.contains('/') && !name.contains('\\'));
+    }
 }
