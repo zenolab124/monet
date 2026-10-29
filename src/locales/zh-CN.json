@@ -134,7 +134,7 @@
     "replacementDark": "深色槽替代主题",
     "shareTitle": "分享主题给社区",
     "shareHint": "投稿会先创建公开 Issue，经维护者批准后才由自动化生成 PR，并随后续版本内置。",
-    "submitAsGithub": "以 @{name} 提交",
+    "submitAsGithub": "以 {'@'}{name} 提交",
     "submitAnonymously": "匿名提交（由 Monet 中继服务代建 Issue）",
     "publicName": "公开昵称（可选）",
     "publicNamePlaceholder": "Anonymous Monet user",

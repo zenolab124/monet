@@ -134,7 +134,7 @@
     "replacementDark": "Dark slot replacement",
     "shareTitle": "Share Theme with the Community",
     "shareHint": "Submission creates a public Issue first. Automation opens a PR only after maintainer approval, and accepted themes ship in a later release.",
-    "submitAsGithub": "Submit as @{name}",
+    "submitAsGithub": "Submit as {'@'}{name}",
     "submitAnonymously": "Submit anonymously through the Monet relay",
     "publicName": "Public nickname (optional)",
     "publicNamePlaceholder": "Anonymous Monet user",
