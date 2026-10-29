@@ -67,11 +67,13 @@ import SlashCommandPanel from '@/components/SlashCommandPanel.vue'
 import SlashHelpCard from '@/components/SlashHelpCard.vue'
 import { useComposerCommands } from '@/composables/useComposerCommands'
 import {
+  argumentCompletion,
   composerPrefix,
   formatCommandInvocation,
   getAllCommands,
   parseCommand,
   shouldTriggerPanel,
+  type CommandArgOption,
   type SlashCommand,
 } from '@/composables/useSlashCommands'
 import { useSessionFindNavigation } from '@/composables/useSessionFindNavigation'
@@ -295,6 +297,12 @@ const commandCwd = computed(() => workspaceCwd(props.session) ?? engineDraft(pro
 const commandCatalogContext = computed(() => ({
   engineId: sessionEngineId.value,
   cwd: commandCwd.value,
+  // /model 参数候选:引擎自报的模型目录(与运行配置胶囊同源)
+  argOptions: {
+    model: models.value
+      .filter(model => !model.hidden)
+      .map(model => ({ value: model.model, label: model.displayName })),
+  },
 }))
 const {
   skills: composerSkills,
@@ -307,7 +315,16 @@ const allComposerCommands = computed(() => getAllCommands(
   composerCommands.value,
   commandCatalogContext.value,
 ))
-const commandPanelVisible = computed(() => shouldTriggerPanel(input.value, cursorPos.value))
+const commandArgCompletion = computed(() => argumentCompletion(
+  input.value,
+  cursorPos.value,
+  composerSkills.value,
+  composerCommands.value,
+  commandCatalogContext.value,
+))
+const commandPanelVisible = computed(() =>
+  shouldTriggerPanel(input.value, cursorPos.value) || !!commandArgCompletion.value,
+)
 const timelineProvider = computed(() => engineProviderIdFromSource(
   props.session.source_meta,
   sessionEngineId.value,
@@ -1543,6 +1560,13 @@ function onCommandSelect(command: SlashCommand) {
   nextTick(() => { void send() })
 }
 
+function onCommandArgSelect(command: SlashCommand, option: CommandArgOption) {
+  const prefix = composerPrefix(input.value) ?? command.wirePrefix
+  input.value = `${prefix}${command.name} ${option.value}`
+  cursorPos.value = 0
+  nextTick(() => { void send() })
+}
+
 function handleNativeCommand(command: SlashCommand) {
   switch (command.name) {
     case 'help':
@@ -2549,8 +2573,10 @@ onUnmounted(() => {
             :skills="composerSkills"
             :commands="composerCommands"
             :context="commandCatalogContext"
+            :arg-completion="commandArgCompletion"
             class="absolute bottom-full left-4 mb-1"
             @select="onCommandSelect"
+            @select-arg="onCommandArgSelect"
             @close="commandError = null"
           />
         </template>

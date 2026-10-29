@@ -28,6 +28,23 @@ export interface CommandCatalogContext {
   cwd?: string | null
   /** 引擎在握手时自报的命令（含插件命令与新内置命令） */
   reported?: ReadonlyArray<{ name: string; description: string; argument_hint: string | null }>
+  /** 有候选参数的命令（命令名小写 → 候选），由会话视图按当前引擎与渠道提供 */
+  argOptions?: Readonly<Record<string, ReadonlyArray<CommandArgOption>>>
+}
+
+export interface CommandArgOption {
+  /** 填入命令的参数值 */
+  value: string
+  label: string
+  /** 次要候选（钉版本、旧版本）：与主区之间以分割线隔开 */
+  secondary?: boolean
+}
+
+export interface ArgumentCompletion {
+  command: SlashCommand
+  prefix: ComposerPrefix
+  query: string
+  options: CommandArgOption[]
 }
 
 function commonCommands(): SlashCommand[] {
@@ -201,6 +218,48 @@ export function shouldTriggerPanel(input: string, cursorPos: number): boolean {
   return TRIGGER_RE.test(input.slice(0, cursorPos))
 }
 
+/** 命令名后恰好一个空格、光标在末尾、参数不含空白时进入参数候选 */
+const ARG_TRIGGER_RE = /^([/$])([\p{L}\p{N}_:./-]+) (\S*)$/u
+
+/** 前缀命中优先，其次包含命中；值与标签都参与匹配，保持候选原有顺序 */
+export function filterArgOptions(options: ReadonlyArray<CommandArgOption>, query: string): CommandArgOption[] {
+  const needle = query.trim().toLocaleLowerCase()
+  if (!needle) return [...options]
+  const leading: CommandArgOption[] = []
+  const inner: CommandArgOption[] = []
+  for (const option of options) {
+    const value = option.value.toLocaleLowerCase()
+    const label = option.label.toLocaleLowerCase()
+    if (value.startsWith(needle) || label.startsWith(needle)) leading.push(option)
+    else if (value.includes(needle) || label.includes(needle)) inner.push(option)
+  }
+  return [...leading, ...inner]
+}
+
+export function argumentCompletion(
+  input: string,
+  cursorPos: number,
+  skills?: WorkshopSkill[],
+  commands?: WorkshopCommand[],
+  context: CommandCatalogContext = {},
+): ArgumentCompletion | null {
+  if (cursorPos !== input.length) return null
+  const match = ARG_TRIGGER_RE.exec(input)
+  if (!match) return null
+  const name = normalizedName(match[2])
+  const options = context.argOptions?.[name]
+  if (!options?.length) return null
+  const command = getAllCommands(skills, commands, context)
+    .find(candidate => normalizedName(candidate.name) === name)
+  if (!command?.hasArg) return null
+  return {
+    command,
+    prefix: match[1] as ComposerPrefix,
+    query: match[3],
+    options: filterArgOptions(options, match[3]),
+  }
+}
+
 export function filterCommands(
   input: string,
   skills?: WorkshopSkill[],
@@ -246,6 +305,9 @@ export function parseCommand(
     }
     if ((context.engineId ?? 'claude-code') === 'claude-code') {
       const normalized = arg.toLowerCase()
+      // 当前渠道的下拉候选按原样(保留大小写)生效,第三方渠道的模型 ID 也走这里
+      const offered = context.argOptions?.model?.find(option => option.value.toLowerCase() === normalized)
+      if (offered) return { kind: 'pass', cmd: command, arg: offered.value, prefix }
       if (!currentKnownClaudeModelIds().has(normalized)) {
         return { kind: 'invalid', cmd: command, reason: i18n.global.t('slash.errorModelUnknown'), prefix }
       }

@@ -3,6 +3,8 @@ import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import {
   composerPrefix,
   filterCommands,
+  type ArgumentCompletion,
+  type CommandArgOption,
   type CommandCatalogContext,
   type SlashCommand,
   type SlashCommandCategory,
@@ -17,10 +19,13 @@ const props = defineProps<{
   skills?: WorkshopSkill[]
   commands?: WorkshopCommand[]
   context?: CommandCatalogContext
+  /** 非空时进入参数候选模式（命令名已输完、正在输参数） */
+  argCompletion?: ArgumentCompletion | null
 }>()
 
 const emit = defineEmits<{
   (e: 'select', command: SlashCommand): void
+  (e: 'select-arg', command: SlashCommand, option: CommandArgOption): void
   (e: 'close'): void
 }>()
 
@@ -32,6 +37,10 @@ const filtered = computed<SlashCommand[]>(() =>
 
 const displayPrefix = computed(() => composerPrefix(props.query) ?? '/')
 
+const argOptions = computed<CommandArgOption[] | null>(() => props.argCompletion?.options ?? null)
+/** 当前模式下可选条目数（命令或参数） */
+const itemCount = computed(() => argOptions.value?.length ?? filtered.value.length)
+
 const activeIndex = ref(0)
 
 watch(
@@ -39,13 +48,19 @@ watch(
   () => { activeIndex.value = 0 },
 )
 
-watch(filtered, (list) => {
-  if (activeIndex.value >= list.length) {
-    activeIndex.value = Math.max(0, list.length - 1)
+watch(itemCount, (count) => {
+  if (activeIndex.value >= count) {
+    activeIndex.value = Math.max(0, count - 1)
   }
 })
 
 function selectAt(index: number) {
+  const completion = props.argCompletion
+  if (completion) {
+    const option = completion.options[index]
+    if (option) emit('select-arg', completion.command, option)
+    return
+  }
   const list = filtered.value
   if (index < 0 || index >= list.length) return
   emit('select', list[index])
@@ -62,7 +77,7 @@ function onKeydown(e: KeyboardEvent) {
       return
     }
 
-    if (filtered.value.length === 0) {
+    if (itemCount.value === 0) {
       if (key === 'ArrowUp' || key === 'ArrowDown') {
         e.preventDefault()
         e.stopPropagation()
@@ -74,10 +89,10 @@ function onKeydown(e: KeyboardEvent) {
     e.stopPropagation()
 
     if (key === 'ArrowDown') {
-      const len = filtered.value.length
+      const len = itemCount.value
       activeIndex.value = (activeIndex.value + 1) % len
     } else if (key === 'ArrowUp') {
-      const len = filtered.value.length
+      const len = itemCount.value
       activeIndex.value = (activeIndex.value - 1 + len) % len
     } else if (key === 'Enter') {
       selectAt(activeIndex.value)
@@ -127,11 +142,31 @@ function badgeFor(cat: SlashCommandCategory): string | null {
     :aria-label="$t('slash.panel')"
   >
     <div
-      v-if="filtered.length === 0"
+      v-if="itemCount === 0"
       class="px-3 py-2 text-xs text-muted-foreground"
     >
       {{ $t('slash.noMatch') }}
     </div>
+
+    <ul v-else-if="argOptions && argCompletion" class="py-1 max-h-80 overflow-y-auto">
+      <template v-for="(option, i) in argOptions" :key="option.value">
+        <li v-if="i > 0 && !!option.secondary !== !!argOptions[i - 1].secondary" class="my-1 border-t border-border" role="separator" />
+        <li
+          role="option"
+          :aria-selected="i === activeIndex"
+          class="px-3 py-1.5 cursor-pointer flex items-baseline gap-2 transition-colors"
+          :class="i === activeIndex ? 'bg-primary/10' : 'hover:bg-muted'"
+          @mouseenter="activeIndex = i"
+          @click="selectAt(i)"
+        >
+          <span class="text-sm shrink-0" :class="option.secondary ? 'text-muted-foreground' : 'text-foreground'">{{ option.label }}</span>
+          <span
+            v-if="option.value.toLocaleLowerCase() !== option.label.toLocaleLowerCase()"
+            class="text-xs text-muted-foreground font-mono truncate"
+          >{{ option.value }}</span>
+        </li>
+      </template>
+    </ul>
 
     <ul v-else class="py-1 max-h-80 overflow-y-auto">
       <li
@@ -160,7 +195,7 @@ function badgeFor(cat: SlashCommandCategory): string | null {
     </ul>
 
     <div
-      v-if="filtered.length > 0"
+      v-if="itemCount > 0"
       class="px-3 py-1 border-t border-border text-2xs text-muted-foreground flex items-center gap-3"
     >
       <span><kbd class="kbd">↑↓</kbd> {{ $t('slash.move') }}</span>

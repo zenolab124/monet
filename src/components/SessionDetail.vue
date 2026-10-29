@@ -33,13 +33,16 @@ import {
 import { useWorkbench } from '@/composables/useWorkbench'
 import { useNotifications } from '@/composables/useNotifications'
 import {
+  argumentCompletion,
   composerPrefix,
   formatCommandInvocation,
   shouldTriggerPanel,
   parseCommand,
   getAllCommands,
+  type CommandArgOption,
   type SlashCommand,
 } from '@/composables/useSlashCommands'
+import { useModelOptions } from '@/composables/useModelOptions'
 import { useComposerCommands } from '@/composables/useComposerCommands'
 import { useSessionSignals } from '@/composables/useSessionSignals'
 import { useSessionMeta } from '@/composables/useSessionMeta'
@@ -644,8 +647,11 @@ const showHelpCard = ref(false)
 /** /clear 时设置:仅前端层面隐藏历史消息,刷新或切换会话恢复 */
 const hideHistory = ref(false)
 
+const slashArgCompletion = computed(() =>
+  argumentCompletion(inputText.value, cursorPos.value, composerSkills.value, composerCommands.value, composerCommandContext.value),
+)
 const slashPanelVisible = computed(() =>
-  shouldTriggerPanel(inputText.value, cursorPos.value),
+  shouldTriggerPanel(inputText.value, cursorPos.value) || !!slashArgCompletion.value,
 )
 
 const allSlashCommands = computed(() =>
@@ -990,10 +996,18 @@ const claudeEngineInstance = computed(() => ({ engineId: 'claude-code', instance
 const composerCwd = computed(() => currentSession.value
   ? workspaceCwd(currentSession.value.summary)
   : null)
+// /model 与 /effort 的参数候选:与运行配置胶囊同源(当前渠道的模型列表、CLI 接受的强度档)
+const { items: composerModelItems } = useModelOptions(resolvedChannelId)
+const CLAUDE_EFFORT_ARGS: CommandArgOption[] = ['low', 'medium', 'high', 'xhigh', 'max']
+  .map(value => ({ value, label: value === 'xhigh' ? 'xHigh' : `${value.charAt(0).toUpperCase()}${value.slice(1)}` }))
 const composerCommandContext = computed(() => ({
   engineId: 'claude-code',
   cwd: composerCwd.value,
   reported: sessionSignals.value?.catalog?.commands,
+  argOptions: {
+    model: composerModelItems.value.map(model => ({ value: model.id, label: model.label, secondary: !!model.legacy })),
+    effort: CLAUDE_EFFORT_ARGS,
+  },
 }))
 const {
   skills: composerSkills,
@@ -2120,6 +2134,13 @@ function onSlashSelect(cmd: SlashCommand) {
     cursorPos.value = 0
     nextTick(() => handleSend())
   }
+}
+
+function onSlashArgSelect(cmd: SlashCommand, option: CommandArgOption) {
+  const prefix = composerPrefix(inputText.value) ?? cmd.wirePrefix
+  inputText.value = `${prefix}${cmd.name} ${option.value}`
+  cursorPos.value = 0
+  nextTick(() => handleSend())
 }
 
 function onSlashClose() {
@@ -3879,8 +3900,10 @@ async function onReload() {
           :skills="composerSkills"
           :commands="composerCommands"
           :context="composerCommandContext"
+          :arg-completion="slashArgCompletion"
           class="absolute bottom-full left-4 mb-1"
           @select="onSlashSelect"
+          @select-arg="onSlashArgSelect"
           @close="onSlashClose"
         />
       </template>
