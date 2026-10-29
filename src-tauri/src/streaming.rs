@@ -49,6 +49,13 @@ struct SessionProcess {
     pending_permission: HashMap<String, PendingPermission>,
     /// 本进程是否已上报过 system/init 中的插件/MCP 加载问题（每进程只提示一次）
     init_reported: bool,
+    /// 运行中插入、尚未到达终态的用户消息（uuid → 状态）
+    pending_injections: HashMap<String, PendingInjection>,
+}
+
+struct PendingInjection {
+    /// 已收到 CLI 的 command_lifecycle 回报（任意状态）
+    acknowledged: bool,
 }
 
 struct PendingPermission {
@@ -59,6 +66,9 @@ struct PendingPermission {
 
 /// 权限模式切换等待 CLI 判决的时限
 const PERMISSION_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 运行中插入的消息等待 CLI 回报 queued 的时限
+const INJECTION_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 仅用于 SessionProcess 尚未接管 Child 的启动阶段错误路径。
 fn terminate_and_reap_startup_child(child: &mut Child) {
@@ -1147,6 +1157,7 @@ fn open_session(
         started_at_ms,
         pending_permission: HashMap::new(),
         init_reported: false,
+        pending_injections: HashMap::new(),
     }));
     ACTIVE_PROCESSES
         .lock()
@@ -1629,6 +1640,85 @@ fn settle_permission_response(
     }
 }
 
+/// 把一条用户消息插入正在运行的轮次，返回关联 uuid。
+///
+/// CLI 在下一个工具间隙并入当前轮次；轮次先结束则另起一轮处理。命运经
+/// `session-injection` 事件回报（queued / started / 终态 / timeout）。
+/// 5 秒内没有任何回报视为未送达：撤回该消息，避免迟到执行与用户重发重复。
+pub fn inject_message(
+    app: &AppHandle,
+    session_id: &str,
+    message: &str,
+    images: Option<&[serde_json::Value]>,
+) -> Result<String, String> {
+    let process = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned())
+        .ok_or("会话进程不存在")?;
+
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let mut content: Vec<serde_json::Value> = images.map(<[_]>::to_vec).unwrap_or_default();
+    content.push(json!({"type": "text", "text": message}));
+    {
+        let mut sp = process.lock().unwrap();
+        write_stdin(
+            &mut sp.stdin,
+            &protocol::mid_turn_user_message(&uuid, content),
+        )?;
+        sp.pending_injections.insert(
+            uuid.clone(),
+            PendingInjection {
+                acknowledged: false,
+            },
+        );
+    }
+
+    let app = app.clone();
+    let process = Arc::downgrade(&process);
+    let sid = session_id.to_string();
+    let message_uuid = uuid.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(INJECTION_ACK_TIMEOUT);
+        let Some(process) = process.upgrade() else {
+            return;
+        };
+        {
+            let mut sp = process.lock().unwrap();
+            let awaiting = sp
+                .pending_injections
+                .get(&message_uuid)
+                .is_some_and(|pending| !pending.acknowledged);
+            if !awaiting {
+                return;
+            }
+            sp.request_counter += 1;
+            let req_id = format!(
+                "{}{}",
+                protocol::CANCEL_INJECTION_PREFIX,
+                sp.request_counter
+            );
+            if let Err(error) = write_stdin(
+                &mut sp.stdin,
+                &protocol::cancel_async_message_request(&req_id, &message_uuid),
+            ) {
+                eprintln!("[long-lived] 撤回插入消息失败: {error}");
+            }
+        }
+        emit_injection_state(&app, &sid, &message_uuid, "timeout");
+    });
+    Ok(uuid)
+}
+
+fn emit_injection_state(app: &AppHandle, session_id: &str, uuid: &str, state: &str) {
+    dispatch_stream_signal(
+        app,
+        "session-injection",
+        json!({ "session_id": session_id, "uuid": uuid, "state": state }),
+    );
+}
+
 /// 关闭会话进程（SIGTERM → 5s → SIGKILL）
 pub fn close_session(session_id: &str) {
     let process_arc = ACTIVE_PROCESSES
@@ -2100,6 +2190,32 @@ fn route_protocol_signals(
     if let Some((request_id, outcome, _)) = protocol::control_response(value) {
         if request_id.starts_with(protocol::PERMISSION_REQUEST_PREFIX) {
             settle_permission_response(app, process, session_id, &request_id, &outcome);
+        }
+        return;
+    }
+
+    if let Some(lifecycle) = protocol::parse_command_lifecycle(value) {
+        // 只转发 Monet 自己插入的消息；超时后迟到的回报照常转发，前端据此认领
+        let tracked = {
+            let mut sp = process.lock().unwrap();
+            if lifecycle.state.is_terminal() {
+                sp.pending_injections
+                    .remove(&lifecycle.command_uuid)
+                    .is_some()
+            } else if let Some(pending) = sp.pending_injections.get_mut(&lifecycle.command_uuid) {
+                pending.acknowledged = true;
+                true
+            } else {
+                false
+            }
+        };
+        if tracked {
+            emit_injection_state(
+                app,
+                session_id,
+                &lifecycle.command_uuid,
+                lifecycle.state.as_str(),
+            );
         }
         return;
     }

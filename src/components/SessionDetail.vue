@@ -104,6 +104,7 @@ import AsyncTaskPanel from './AsyncTaskPanel.vue'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
 import { renderMarkdownDeferred } from '@/composables/useMarkdown'
 import { persistKeyOf } from '@/lib/stream-markdown/constants'
+import { canSendToCurrentTurn } from '@/lib/midTurnInputPolicy'
 import { useFileLedger } from '@/composables/useFileLedger'
 import FileLedgerPanel from './FileLedgerPanel.vue'
 import ArtifactPreviewList from './artifacts/ArtifactPreviewList.vue'
@@ -194,6 +195,7 @@ const {
   prioritizePendingQueueItem,
   failPendingQueueItem,
   consumePendingQueue,
+  sendQueuedItemToCurrentTurn,
   removeLandedTurns,
   demoteUnlandedTurns,
 } = useStreaming()
@@ -1116,7 +1118,20 @@ const imageDropArea = computed<HTMLElement | null | undefined>(() =>
 const imageInput = useImageInput({ pasteTarget: textareaRef, dropTarget: imageDropArea })
 onMounted(() => imageInput.attach())
 function pendingQueueDetail(item: PendingQueueItem): string {
+  if (item.injection === 'started') return t('session.queueInjectionStarted')
+  if (item.injection === 'sending' || item.injection === 'queued') return t('session.queueInjectionWaiting')
   return [item.opts.model, item.opts.effort, item.opts.channel].filter(Boolean).join(' · ')
+}
+
+/** 配置与当前进程一致的纯文本项可直接插入在跑的轮次，不需要中断 */
+function canSendQueuedToCurrentTurn(item: PendingQueueItem): boolean {
+  return canSendToCurrentTurn({
+    ownProcessBusy: ownProcessBusy.value,
+    externalRunning: externalRunning.value,
+    processAlive: stream.value.processAlive,
+    cliVersion: sessionSignals.value?.catalog?.cli_version ?? null,
+    activeConfig: stream.value.lastSent?.opts ?? null,
+  }, item.opts)
 }
 
 const composerQueueItems = computed<ComposerQueueItem[]>(() => stream.value.pendingQueue.map(item => ({
@@ -1127,9 +1142,11 @@ const composerQueueItems = computed<ComposerQueueItem[]>(() => stream.value.pend
   status: item.status,
   actionLabel: item.status === 'failed' && !externalRunning.value && !ownProcessBusy.value
     ? t('common.retry')
-    : externalRunning.value || ownProcessBusy.value
-      ? t('session.queueInterruptAndSend')
-      : t('session.queueSendNow'),
+    : canSendQueuedToCurrentTurn(item)
+      ? t('session.queueSendCurrent')
+      : externalRunning.value || ownProcessBusy.value
+        ? t('session.queueInterruptAndSend')
+        : t('session.queueSendNow'),
   actionTitle: permissionRequest.value ? t('session.queueResolveApprovalFirst') : undefined,
   actionDisabled: !!permissionRequest.value || stopping.value,
 })))
@@ -1147,6 +1164,13 @@ function updateComposerQueueItem(id: string, text: string) {
 async function processComposerQueueItem(id: string) {
   const sid = effectiveSessionId.value
   if (!sid || permissionRequest.value) return
+  const queued = stream.value.pendingQueue.find(item => item.id === id)
+  const cwd = currentSession.value ? workspaceCwd(currentSession.value.summary) : null
+  // 插入当前轮次与中断发送互不降级：插入失败只退回队列，由用户再决定
+  if (queued && cwd && canSendQueuedToCurrentTurn(queued)) {
+    await sendQueuedItemToCurrentTurn(sid, id, cwd)
+    return
+  }
   const busy = externalRunning.value || ownProcessBusy.value
   if (busy) {
     const approved = await confirmDialog(
@@ -3040,6 +3064,11 @@ function maybeConsumeQueue() {
 // 的路径统一走这个沿——ownProcessBusy 闸门拦下的消息在此发出
 watch(ownProcessBusy, (busy) => {
   if (!busy) maybeConsumeQueue()
+})
+
+// 插入当前轮次的消息落定后补发：落定前队列闸门拦下了空闲沿
+watch(() => stream.value.pendingQueue.some(item => item.injection && item.injection !== 'timed_out'), (active) => {
+  if (!active) maybeConsumeQueue()
 })
 
 // 自发轮落账:CLI 被 task-notification 唤醒的后台任务收尾轮结束(stream-done

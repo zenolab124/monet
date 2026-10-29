@@ -410,6 +410,94 @@ pub fn parse_live_signal(value: &Value) -> Option<LiveSignal> {
 }
 
 // ---------------------------------------------------------------------------
+// 轮次进行中插入输入
+// ---------------------------------------------------------------------------
+
+/// 插入消息的 request_id 前缀（撤回用的 cancel_async_message）。
+pub const CANCEL_INJECTION_PREFIX: &str = "cancel-inject-";
+
+/// 运行中插入的用户消息。`priority: "next"` 让 CLI 在下一个工具间隙把它并入
+/// 当前轮次、不打断执行；`"now"` 会中止正在跑的工具并另起一轮（2.1.306 实测），
+/// 不使用。uuid 是 command_lifecycle 回报的关联键。
+pub fn mid_turn_user_message(uuid: &str, content: Vec<Value>) -> Value {
+    json!({
+        "type": "user",
+        "session_id": "",
+        "uuid": uuid,
+        "priority": "next",
+        "message": {"role": "user", "content": content},
+        "parent_tool_use_id": null
+    })
+}
+
+/// 撤回尚未被 CLI 处理的插入消息（确认超时后防止迟到的执行与重发重复）。
+pub fn cancel_async_message_request(request_id: &str, message_uuid: &str) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {"subtype": "cancel_async_message", "message_uuid": message_uuid}
+    })
+}
+
+/// 排队命令的命运：queued → started → 恰好一个终态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandState {
+    Queued,
+    Started,
+    Completed,
+    Cancelled,
+    Discarded,
+    Refused,
+}
+
+impl CommandState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Discarded => "discarded",
+            Self::Refused => "refused",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, Self::Queued | Self::Started)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandLifecycle {
+    pub command_uuid: String,
+    pub state: CommandState,
+}
+
+pub fn parse_command_lifecycle(value: &Value) -> Option<CommandLifecycle> {
+    if value.get("type").and_then(Value::as_str) != Some("command_lifecycle") {
+        return None;
+    }
+    let command_uuid = value
+        .get("command_uuid")
+        .and_then(Value::as_str)
+        .filter(|uuid| !uuid.is_empty())?
+        .to_string();
+    let state = match value.get("state").and_then(Value::as_str)? {
+        "queued" => CommandState::Queued,
+        "started" => CommandState::Started,
+        "completed" => CommandState::Completed,
+        "cancelled" => CommandState::Cancelled,
+        "discarded" => CommandState::Discarded,
+        "refused" => CommandState::Refused,
+        _ => return None,
+    };
+    Some(CommandLifecycle {
+        command_uuid,
+        state,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // 未知协议面采样
 // ---------------------------------------------------------------------------
 
@@ -461,7 +549,7 @@ pub fn is_known_event(value: &Value) -> bool {
     let subtype = value.get("subtype").and_then(Value::as_str).unwrap_or("");
     match kind {
         "stream_event" | "assistant" | "user" | "result" | "control_response"
-        | "rate_limit_event" | "keep_alive" => true,
+        | "rate_limit_event" | "keep_alive" | "command_lifecycle" => true,
         "system" => matches!(
             subtype,
             "init"
@@ -682,6 +770,46 @@ mod tests {
         let local =
             json!({"type": "system", "subtype": "model_refusal_fallback", "scope": "local"});
         assert_eq!(parse_live_signal(&local), None);
+    }
+
+    #[test]
+    fn mid_turn_message_folds_into_current_turn() {
+        let message = mid_turn_user_message("m-1", vec![json!({"type": "text", "text": "hi"})]);
+        assert_eq!(message["priority"], "next");
+        assert_eq!(message["uuid"], "m-1");
+        assert_eq!(message["message"]["content"][0]["text"], "hi");
+        let cancel = cancel_async_message_request("cancel-inject-1", "m-1");
+        assert_eq!(cancel["request"]["subtype"], "cancel_async_message");
+        assert_eq!(cancel["request"]["message_uuid"], "m-1");
+    }
+
+    #[test]
+    fn command_lifecycle_parses_known_states() {
+        let event = json!({"type": "command_lifecycle", "command_uuid": "m-1", "state": "started", "uuid": "x"});
+        let parsed = parse_command_lifecycle(&event).unwrap();
+        assert_eq!(parsed.command_uuid, "m-1");
+        assert_eq!(parsed.state, CommandState::Started);
+        assert!(!parsed.state.is_terminal());
+        let refused =
+            json!({"type": "command_lifecycle", "command_uuid": "m-2", "state": "refused"});
+        assert!(parse_command_lifecycle(&refused)
+            .unwrap()
+            .state
+            .is_terminal());
+        assert!(is_known_event(&event));
+    }
+
+    #[test]
+    fn command_lifecycle_rejects_malformed_input() {
+        for event in [
+            json!({"type": "command_lifecycle", "state": "queued"}),
+            json!({"type": "command_lifecycle", "command_uuid": "", "state": "queued"}),
+            json!({"type": "command_lifecycle", "command_uuid": "m", "state": "exploded"}),
+            json!({"type": "command_lifecycle", "command_uuid": 3, "state": "queued"}),
+            json!({"type": "result", "command_uuid": "m", "state": "queued"}),
+        ] {
+            assert!(parse_command_lifecycle(&event).is_none(), "{event}");
+        }
     }
 
     #[test]
