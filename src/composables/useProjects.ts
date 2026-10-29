@@ -4,10 +4,16 @@ import { listen } from '@tauri-apps/api/event'
 import type { Project, SessionSummary } from '@/types'
 import { tokenTotal } from '@/types'
 import { listEngines, listProjects, listSessions } from '@/engines/client'
-import { projectUiId, sessionUiId } from '@/engines/integration'
-import type { EngineDescriptor, EngineProject, EngineSessionSummary } from '@/engines/types'
+import {
+  LOCAL_CLAUDE_INSTANCE,
+  projectUiId,
+  resolveNativeInstance,
+  sessionUiId,
+  usesNativeSessionSurface,
+} from '@/engines/integration'
+import { sameInstance } from '@/engines/identity'
+import type { EngineDescriptor, EngineInstanceId, EngineProject, EngineSessionSummary } from '@/engines/types'
 import { indexEngineSessions } from '@/engines/directory'
-import { usesNativeSessionSurface } from '@/engines/integration'
 import type { SourceChangeEnvelope } from '@/engines/events'
 import { useWorkspaceContexts } from '@/composables/useWorkspaceContexts'
 
@@ -40,6 +46,8 @@ interface SessionChange {
 interface ProjectsChangedPayload {
   full: boolean
   changes: SessionChange[]
+  /** 变更所属实例;旧负载缺省时视为本机实例 */
+  instance?: EngineInstanceId
 }
 
 /** 加载所有项目 */
@@ -66,7 +74,7 @@ async function loadProjects() {
       if (!payload || payload.full || !Array.isArray(payload.changes) || payload.changes.length === 0) {
         reloadProjectsSilently()
       } else {
-        applySessionChanges(payload.changes)
+        applySessionChanges(payload.changes, resolveNativeInstance(payload.instance))
       }
     })
     listen<SourceChangeEnvelope>('engine-source-change', event => {
@@ -247,11 +255,14 @@ async function reloadProjectsSilently() {
 }
 
 /** 按会话增量更新项目树；遇到未知项目（新建项目目录）回退全量 */
-async function applySessionChanges(changes: SessionChange[]) {
+async function applySessionChanges(changes: SessionChange[], instance: EngineInstanceId) {
   for (const { projectId, sessionId } of changes) {
+    // 无引擎字段的旧项目只属于本机实例;同路径项目在不同实例间各自独立
     const proj = projects.value.find(p =>
       (p.native_id ?? p.id) === projectId
-      && (!p.engine || usesNativeSessionSurface(p.engine)))
+      && (p.engine
+        ? sameInstance(p.engine, instance) && usesNativeSessionSurface(p.engine)
+        : sameInstance(instance, LOCAL_CLAUDE_INSTANCE)))
     if (!proj) {
       reloadProjectsSilently()
       return
@@ -268,7 +279,7 @@ async function applySessionChanges(changes: SessionChange[]) {
         if (idx >= 0) proj.sessions.splice(idx, 1)
         if (proj.sessions.length === 0) {
           // 与全量扫描一致：零会话项目不展示
-          const pIdx = projects.value.findIndex(p => p.id === projectId)
+          const pIdx = projects.value.indexOf(proj)
           if (pIdx >= 0) projects.value.splice(pIdx, 1)
           continue
         }

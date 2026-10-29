@@ -7,7 +7,8 @@ import { useEngineNotices } from '@/composables/useEngineNotices'
 import { useProjects } from '@/composables/useProjects'
 import { useWorkbench } from '@/composables/useWorkbench'
 import { createSession } from '@/engines/client'
-import { instanceKey, sameInstance } from '@/engines/identity'
+import { sameInstance } from '@/engines/identity'
+import { buildEngineChoices } from '@/engines/engineChoices'
 import { sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
 import { useEngines } from '@/engines/useEngines'
 import type { EngineDescriptor, ProjectRef } from '@/engines/types'
@@ -18,8 +19,6 @@ const props = defineProps<{
   sessionId: string
   cwd: string
 }>()
-
-type TargetEngineId = 'claude-code' | 'codex'
 
 const { t } = useI18n()
 const { projects } = useProjects()
@@ -33,31 +32,21 @@ const {
 } = useWorkbench()
 const { notifyTransient } = useNotifications()
 const { codexCreateDelayRisk } = useEngineNotices()
-const selectingEngine = ref<TargetEngineId | null>(null)
+const selectingEngine = ref<string | null>(null)
 const selectingHint = ref<string | null>(null)
 const error = ref<string | null>(null)
 let slowHintTimer: ReturnType<typeof setTimeout> | null = null
 
-const targets: Array<{ id: TargetEngineId; icon: string; accent: 'claude' | 'codex' }> = [
-  { id: 'claude-code', icon: 'i-simple-anthropic', accent: 'claude' },
-  { id: 'codex', icon: 'i-simple-openai', accent: 'codex' },
-]
-
-const choices = computed(() => targets.map(target => {
-  const descriptor = engines.value.find(item => item.instance.engineId === target.id) ?? null
-  const runtimeHealth = descriptor ? health.value[instanceKey(descriptor.instance)]?.runtime : null
-  const healthFailed = descriptor ? !!errors.value[instanceKey(descriptor.instance)] : false
-  return {
-    ...target,
-    label: target.id === 'claude-code' ? 'Claude Code' : 'Codex',
-    description: t(`workbench.enginePicker.${target.id === 'claude-code' ? 'claudeDescription' : 'codexDescription'}`),
-    descriptor,
-    available: !!descriptor?.enabled
-      && descriptor.capabilities.runtime?.create === true
-      && runtimeHealth?.available === true,
-    checking: loading.value || (!!descriptor && !runtimeHealth && !healthFailed),
-  }
-}))
+// 每个引擎实例一个选项;选项 id 是实例 key,原生实例的草稿据此记录归属
+const choices = computed(() => buildEngineChoices({
+  engines: engines.value,
+  health: health.value,
+  errors: errors.value,
+  loading: loading.value,
+}).map(choice => ({
+  ...choice,
+  description: t(`workbench.enginePicker.${choice.engineId === 'claude-code' ? 'claudeDescription' : 'codexDescription'}`),
+})))
 
 function projectCwd(project: Project): string | null {
   return project.sessions.find(session => session.cwd)?.cwd ?? project.source_path ?? null
@@ -88,20 +77,20 @@ function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-async function selectEngine(engineId: string) {
-  const choice = choices.value.find(item => item.id === engineId)
+async function selectEngine(choiceId: string) {
+  const choice = choices.value.find(item => item.id === choiceId)
   if (!choice) return
   if (!choice.available || !choice.descriptor || selectingEngine.value) return
   selectingEngine.value = choice.id
   error.value = null
   try {
     if (usesNativeSessionSurface(choice.descriptor.instance)) {
-      if (!promotePendingTaskToDraft(props.sessionId)) throw new Error(t('workbench.enginePicker.expired'))
+      if (!promotePendingTaskToDraft(props.sessionId, choice.descriptor.instance)) throw new Error(t('workbench.enginePicker.expired'))
     } else {
       await refreshChannels()
       const attachedChannel = defaultChannelForEngine(choice.descriptor)
       const project = projectReference(choice.descriptor)
-      if (choice.id === 'codex') {
+      if (choice.engineId === 'codex') {
         slowHintTimer = setTimeout(() => {
           selectingHint.value = t(codexCreateDelayRisk.value
             ? 'workbench.enginePicker.codexVersionRefresh'

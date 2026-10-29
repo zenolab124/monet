@@ -43,6 +43,8 @@ import {
   type SlashCommand,
 } from '@/composables/useSlashCommands'
 import { useModelOptions } from '@/composables/useModelOptions'
+import { resolveNativeInstance } from '@/engines/integration'
+import type { EngineInstanceId } from '@/engines/types'
 import { useComposerCommands } from '@/composables/useComposerCommands'
 import { useSessionSignals } from '@/composables/useSessionSignals'
 import { useSessionMeta } from '@/composables/useSessionMeta'
@@ -147,6 +149,8 @@ import type { SessionFindRequest, SessionFindStatus } from '@/utils/sessionFind'
 const props = defineProps<{
   /** 直接指定会话(工作台列);优先于全局选中 */
   sessionId?: string | null
+  /** 会话所属引擎实例;缺省时按会话摘要、原生草稿记录推断,最终回退本机实例 */
+  engine?: EngineInstanceId | null
   mode?: 'archive' | 'workbench'
   /** 赛马模式:隐藏列内输入框(共享输入在底部) */
   hideInput?: boolean
@@ -169,7 +173,7 @@ const interactive = computed(() => props.mode === 'workbench'
 const { projects, loadProjects } = useProjects()
 const { selectedSessionId, selectSession } = useSessions()
 const { pendingScrollTarget } = useSearch()
-const { findSession, removeSession, draftCwd, forkSourceOf } = useWorkbench()
+const { findSession, removeSession, draftCwd, nativeDraftInstance, forkSourceOf } = useWorkbench()
 const { notifyTransient } = useNotifications()
 
 // 每个实例独立的 detail 数据
@@ -992,16 +996,21 @@ const cwdUnavailableReason = computed(() => currentSession.value && workspaceUna
   ? t('worktreeSession.cwdUnavailable')
   : '')
 
-const claudeEngineInstance = computed(() => ({ engineId: 'claude-code', instanceId: 'default' }))
+const claudeEngineInstance = computed(() => resolveNativeInstance(
+  props.engine,
+  currentSession.value?.summary?.engine,
+  effectiveSessionId.value ? nativeDraftInstance(effectiveSessionId.value) : null,
+))
 const composerCwd = computed(() => currentSession.value
   ? workspaceCwd(currentSession.value.summary)
   : null)
 // /model 与 /effort 的参数候选:与运行配置胶囊同源(当前渠道的模型列表、CLI 接受的强度档)
-const { items: composerModelItems } = useModelOptions(resolvedChannelId)
+const { items: composerModelItems } = useModelOptions(resolvedChannelId, claudeEngineInstance)
 const CLAUDE_EFFORT_ARGS: CommandArgOption[] = ['low', 'medium', 'high', 'xhigh', 'max']
   .map(value => ({ value, label: value === 'xhigh' ? 'xHigh' : `${value.charAt(0).toUpperCase()}${value.slice(1)}` }))
 const composerCommandContext = computed(() => ({
   engineId: 'claude-code',
+  instance: claudeEngineInstance.value,
   cwd: composerCwd.value,
   reported: sessionSignals.value?.catalog?.commands,
   argOptions: {
@@ -3493,6 +3502,7 @@ async function onReload() {
       :models-refreshing="modelsRefreshing"
       :selected-channel-id="settings.channelId"
       :resolved-channel-id="resolvedChannelId"
+      :native-instance="claudeEngineInstance"
       :run-config="runConfig"
       :selected-advisor="settings.advisor"
       :selected-chrome="settings.chrome"

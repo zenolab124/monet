@@ -35,6 +35,7 @@ const nativeSurface = computed(() =>
     v-if="nativeSurface"
     :mode="mode"
     :session-id="sessionId || session?.id"
+    :engine="session?.engine ?? null"
     :hide-input="hideInput"
     :find-request="findRequest"
     @find-status="emit('findStatus', $event)"

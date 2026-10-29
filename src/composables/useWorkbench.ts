@@ -10,7 +10,9 @@ import {
 } from '@/utils/workbenchColumnLayout'
 import { readMigratedStorage } from '../utils/storageMigrate'
 import { resolveSessionRef } from '@/engines/directory'
-import type { ProjectRef, SessionRef } from '@/engines/types'
+import type { EngineInstanceId, ProjectRef, SessionRef } from '@/engines/types'
+import { sameInstance } from '@/engines/identity'
+import { LOCAL_CLAUDE_INSTANCE } from '@/engines/integration'
 import { clearEngineRunConfig, evictEngineRunConfig } from '@/engines/runConfig'
 import { clearRuntimeOptimisticInputs } from '@/engines/runtimeOptimisticInput'
 import { reorderWorkbenchTabs } from '@/utils/workbenchTabs'
@@ -99,6 +101,11 @@ interface WorkbenchState {
    * 落盘后随 pruneDrafts 一并收割
    */
   forkIntents: Record<string, string>
+  /**
+   * 原生草稿所属的引擎实例(sessionId → 实例)。只记录非本机实例;
+   * 缺省即本机实例,与草稿同生命周期收割。
+   */
+  nativeDraftInstances: Record<string, EngineInstanceId>
 }
 
 const STORAGE_KEY = 'monet-workbench'
@@ -173,6 +180,7 @@ function createInitialState(): WorkbenchState {
     drafts: {},
     engineDrafts: {},
     forkIntents: {},
+    nativeDraftInstances: {},
   }
 }
 
@@ -310,6 +318,16 @@ function loadState(): WorkbenchState | null {
         if (typeof v === 'string' && v) forkIntents[k] = v
       }
     }
+    const nativeDraftInstances: Record<string, EngineInstanceId> = {}
+    if (parsed.nativeDraftInstances && typeof parsed.nativeDraftInstances === 'object'
+      && !Array.isArray(parsed.nativeDraftInstances)) {
+      for (const [k, v] of Object.entries(parsed.nativeDraftInstances)) {
+        const instance = v as Partial<EngineInstanceId> | null
+        if (drafts[k] && instance && typeof instance.engineId === 'string' && typeof instance.instanceId === 'string') {
+          nativeDraftInstances[k] = { engineId: instance.engineId, instanceId: instance.instanceId }
+        }
+      }
+    }
     return {
       tabs,
       activeTabId,
@@ -320,6 +338,7 @@ function loadState(): WorkbenchState | null {
       drafts,
       engineDrafts,
       forkIntents,
+      nativeDraftInstances,
     }
   } catch (_) {
     return null
@@ -549,6 +568,7 @@ function replaceWorkbenchSession(sessionId: string, replacementSessionId: string
   delete state.value.pendingTasks[sessionId]
   delete state.value.drafts[sessionId]
   delete state.value.forkIntents[sessionId]
+  delete state.value.nativeDraftInstances[sessionId]
   return true
 }
 
@@ -682,9 +702,10 @@ function openSessionInTab(sessionId: string, targetTabId?: string): OpenResult {
  * 加入当前激活 tab 并展开。首条消息由 Rust 端以 --session-id 新建落盘,
  * 之后 watcher 刷新 projects,草稿被 pruneDrafts 收割,显示自动切换真实数据。
  */
-function createDraftSession(cwd: string): string {
+function createDraftSession(cwd: string, instance?: EngineInstanceId | null): string {
   const sessionId = crypto.randomUUID()
   state.value.drafts[sessionId] = cwd
+  rememberNativeDraftInstance(sessionId, instance)
   openSession(sessionId)
   return sessionId
 }
@@ -697,11 +718,21 @@ function createPendingTask(cwd: string): string {
   return sessionId
 }
 
-/** 将中立占位原位升级为 Claude Code 原生草稿，保留列与 sessionId。 */
-function promotePendingTaskToDraft(sessionId: string): boolean {
+/** 记录原生草稿所属实例;本机实例不落字段,保持旧数据形状。 */
+function rememberNativeDraftInstance(sessionId: string, instance: EngineInstanceId | null | undefined) {
+  if (instance && !sameInstance(instance, LOCAL_CLAUDE_INSTANCE)) {
+    state.value.nativeDraftInstances[sessionId] = { engineId: instance.engineId, instanceId: instance.instanceId }
+  } else {
+    delete state.value.nativeDraftInstances[sessionId]
+  }
+}
+
+/** 将中立占位原位升级为原生草稿，保留列与 sessionId。 */
+function promotePendingTaskToDraft(sessionId: string, instance?: EngineInstanceId | null): boolean {
   const cwd = state.value.pendingTasks[sessionId]
   if (!cwd) return false
   state.value.drafts[sessionId] = cwd
+  rememberNativeDraftInstance(sessionId, instance)
   delete state.value.pendingTasks[sessionId]
   return true
 }
@@ -711,8 +742,13 @@ function pendingTaskCwd(sessionId: string): string | null {
 }
 
 /** 登记原生引擎空白草稿但不改变 Tab；赛马切换会原位接管列归属。 */
-function stageDraftSession(cwd: string, sessionId = crypto.randomUUID()): string {
+function stageDraftSession(
+  cwd: string,
+  sessionId = crypto.randomUUID(),
+  instance?: EngineInstanceId | null,
+): string {
   state.value.drafts[sessionId] = cwd
+  rememberNativeDraftInstance(sessionId, instance)
   return sessionId
 }
 
@@ -722,6 +758,7 @@ function discardStagedSession(sessionId: string) {
   clearEngineRunConfig(sessionId)
   delete state.value.drafts[sessionId]
   delete state.value.forkIntents[sessionId]
+  delete state.value.nativeDraftInstances[sessionId]
   localStorage.removeItem(`monet:session-settings:${sessionId}`)
 }
 
@@ -744,13 +781,19 @@ function draftCwd(sessionId: string): string | null {
   return state.value.drafts[sessionId] ?? null
 }
 
+/** 原生草稿所属实例;未记录(含本机草稿)时为 null,由调用方回退本机实例。 */
+function nativeDraftInstance(sessionId: string): EngineInstanceId | null {
+  return state.value.nativeDraftInstances[sessionId] ?? null
+}
+
 /**
  * 登记分叉:草稿(cwd 占位) + 意图(源 sessionId)。不复制文件,
  * 落盘由首条消息时 CLI 原生 --fork-session 完成
  */
-function registerFork(forkedId: string, sourceId: string, cwd: string) {
+function registerFork(forkedId: string, sourceId: string, cwd: string, instance?: EngineInstanceId | null) {
   state.value.drafts[forkedId] = cwd
   state.value.forkIntents[forkedId] = sourceId
+  rememberNativeDraftInstance(forkedId, instance)
 }
 
 /** 分叉意图的源会话 id(非分叉草稿返回 null)。发送链路与垫底渲染据此取源 */
@@ -770,6 +813,9 @@ function pruneDrafts(isPersisted: (sessionId: string) => boolean) {
     if (isPersisted(sid) || !findSession(sid)) {
       delete state.value.drafts[sid]
     }
+  }
+  for (const sid of Object.keys(state.value.nativeDraftInstances)) {
+    if (!state.value.drafts[sid]) delete state.value.nativeDraftInstances[sid]
   }
   for (const [sid, draft] of Object.entries(state.value.engineDrafts)) {
     if (isPersisted(sid) || !findSession(sid)) {
@@ -957,6 +1003,7 @@ export function useWorkbench() {
     stageEngineDraft,
     engineDraft,
     draftCwd,
+    nativeDraftInstance,
     registerFork,
     forkSourceOf,
     pruneDrafts,

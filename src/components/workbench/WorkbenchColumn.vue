@@ -17,10 +17,10 @@ import { displayTitle } from '@/types'
 import { fileName } from '@/utils/path'
 import { collectSessionCapabilities } from '@/features'
 import { useSessionMeta } from '@/composables/useSessionMeta'
-import { sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
+import { resolveNativeInstance, sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
 import { resolveEnginePresentation } from '@/engines/presentation'
 import { createSession, forkSession } from '@/engines/client'
-import { sameInstance } from '@/engines/identity'
+import { instanceKey, sameInstance } from '@/engines/identity'
 import { useEngines } from '@/engines/useEngines'
 import { resolveWorkbenchEngineActions } from '@/engines/workbenchActions'
 import { engineRuntimeChannel, engineRuntimeOptions, inheritEngineRunConfig } from '@/engines/runConfig'
@@ -47,12 +47,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'startRace'): void
   (e: 'toggleRaceEnginePicker', sessionId: string): void
-  (e: 'selectRaceEngine', sessionId: string, engineId: string): void
+  (e: 'selectRaceEngine', sessionId: string, instanceKey: string): void
 }>()
 
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, removeRaceLane, pendingTaskCwd, draftCwd, engineDraft, findLane, state, openSession, createDraftSession, registerEngineDraft, registerFork, forkSourceOf } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, pendingTaskCwd, draftCwd, nativeDraftInstance, engineDraft, findLane, state, openSession, createDraftSession, registerEngineDraft, registerFork, forkSourceOf } = useWorkbench()
 const { engines } = useEngines()
 
 provide('columnIndex', computed(() => props.index))
@@ -119,6 +119,15 @@ const canCreate = computed(() => workbenchActions.value.create)
 const canFork = computed(() => workbenchActions.value.fork)
 const canRace = computed(() => workbenchActions.value.race)
 const engineId = computed(() => sessionSummary.value?.engine?.engineId ?? (useNativeDetail.value ? 'claude-code' : ''))
+/** 原生列所属实例:新建、分叉的草稿沿用它 */
+const nativeInstance = computed(() => resolveNativeInstance(
+  sessionSummary.value?.engine,
+  nativeDraftInstance(props.column.sessionId),
+))
+const currentInstanceKey = computed(() => {
+  const instance = sessionSummary.value?.engine ?? (useNativeDetail.value ? nativeInstance.value : null)
+  return instance ? instanceKey(instance) : ''
+})
 const enginePresentation = computed(() => resolveEnginePresentation(
   useNativeDetail.value ? 'claude' : sessionSummary.value?.engine?.engineId,
   sessionSummary.value?.engine_name ?? (useNativeDetail.value ? 'Claude Code' : null),
@@ -235,7 +244,7 @@ async function onFork() {
     }
     // 懒分叉:只登记意图,落盘由首条消息时 CLI 原生 --fork-session 完成
     const newSessionId = crypto.randomUUID()
-    registerFork(newSessionId, props.column.sessionId, session.cwd)
+    registerFork(newSessionId, props.column.sessionId, session.cwd, nativeInstance.value)
     inheritRunSettings(props.column.sessionId, newSessionId)
     openSession(newSessionId)
     notifyTransient(t('workbench.column.forkCreated'))
@@ -286,7 +295,7 @@ async function onNewSession() {
       notifyTransient(t('workbench.rail.newSessionReady'), t('workbench.rail.newSessionHint'))
       return
     }
-    const newSessionId = createDraftSession(cwd)
+    const newSessionId = createDraftSession(cwd, nativeInstance.value)
     // 同项目新建延续当前会话的模型选择(渠道/模型/effort/顾问)
     inheritRunSettings(props.column.sessionId, newSessionId)
   } catch (cause) {
@@ -558,7 +567,7 @@ function onFindStatus(status: SessionFindStatus) {
       />
       <RaceEnginePicker
         v-else-if="isRace && enginePickerOpen"
-        :current-engine-id="engineId"
+        :current-instance-key="currentInstanceKey"
         :selecting-engine-id="selectingEngineId ?? null"
         @select="emit('selectRaceEngine', column.sessionId, $event)"
       />
