@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -11,6 +11,8 @@ use super::default_instance;
 
 pub struct ClaudeSource {
     instance: EngineInstanceId,
+    /// 远端镜像的 projects 目录；None 为本机数据根（`config::projects_dir()`）
+    mirror_root: Option<PathBuf>,
     change_sinks: Arc<Mutex<Vec<SourceChangeSink>>>,
     projects_cache: Mutex<Option<Vec<crate::models::Project>>>,
 }
@@ -19,9 +21,26 @@ impl ClaudeSource {
     pub fn new() -> EngineResult<Self> {
         Ok(Self {
             instance: default_instance()?,
+            mirror_root: None,
             change_sinks: Arc::new(Mutex::new(Vec::new())),
             projects_cache: Mutex::new(None),
         })
+    }
+
+    /// 远端主机的只读镜像：会话来自 `projects_dir`，操作类动作在远端运行时接入前不可用
+    pub fn mirror(instance: EngineInstanceId, projects_dir: PathBuf) -> Self {
+        Self {
+            instance,
+            mirror_root: Some(projects_dir),
+            change_sinks: Arc::new(Mutex::new(Vec::new())),
+            projects_cache: Mutex::new(None),
+        }
+    }
+
+    fn projects_dir(&self) -> PathBuf {
+        self.mirror_root
+            .clone()
+            .unwrap_or_else(crate::config::projects_dir)
     }
 
     pub fn publish_change(&self, change: SourceChange) {
@@ -50,7 +69,10 @@ impl ClaudeSource {
             return projects;
         }
 
-        let discovered = crate::discovery::discover_all();
+        let discovered = match &self.mirror_root {
+            Some(root) => crate::discovery::discover_all_in(root),
+            None => crate::discovery::discover_all(),
+        };
         let mut cache = self
             .projects_cache
             .lock()
@@ -172,7 +194,8 @@ impl ClaudeSource {
     fn timeline_records(&self, session: &SessionRef) -> EngineResult<Vec<ConversationRecord>> {
         self.owns_session(session)?;
         let (project_id, _) = self.find_session(session.native_id())?;
-        let path = crate::config::projects_dir()
+        let path = self
+            .projects_dir()
             .join(project_id)
             .join(format!("{}.jsonl", session.native_id()));
         let mut records = Vec::new();
@@ -288,6 +311,12 @@ impl SessionSource for ClaudeSource {
                     "invalid Claude asset index",
                 )
             })?;
+            if self.mirror_root.is_some() {
+                return Err(EngineError::new(
+                    EngineErrorKind::Unsupported,
+                    "remote session images are not supported",
+                ));
+            }
             let (project_id, _) = self.find_session(asset.session.native_id())?;
             let (media_type, bytes) = crate::image_protocol::resolve_engine_image(
                 &project_id,
@@ -306,6 +335,9 @@ impl SessionSource for ClaudeSource {
         Box::pin(async move {
             self.owns_session(&session)?;
             let (_, summary) = self.find_session(session.native_id())?;
+            if self.mirror_root.is_some() {
+                return Ok(remote_mirror_actions());
+            }
             let runtime_available = crate::claude_locator::locate_lightweight().is_ok();
             let cwd_available = summary
                 .cwd
@@ -333,6 +365,19 @@ impl SessionSource for ClaudeSource {
                 },
             })
         })
+    }
+}
+
+/// 远端镜像会话：运行时接入前只能查看；cwd 在远端机器上，本机无法打开
+fn remote_mirror_actions() -> SessionActions {
+    let pending = ActionAvailability::unavailable("engine.remote.runtimePending");
+    SessionActions {
+        resume: pending.clone(),
+        fork: pending.clone(),
+        send: pending.clone(),
+        send_while_running: pending.clone(),
+        interrupt: pending,
+        open_cwd: ActionAvailability::unavailable("engine.remote.localOnly"),
     }
 }
 

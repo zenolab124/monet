@@ -440,6 +440,7 @@ pub fn run() {
             engines::claude::remote::update_remote_host,
             engines::claude::remote::remove_remote_host,
             engines::claude::remote::check_remote_host,
+            engines::claude::remote::sync_remote_host,
             engines::commands::engine_health,
             engines::commands::engine_set_enabled,
             engines::commands::engine_open_configuration,

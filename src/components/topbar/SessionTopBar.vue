@@ -76,6 +76,8 @@ const props = defineProps<{
   totalTokens: TokenUsage
   /** 其中子 Agent/工作流分项(totalTokens 已含) */
   subagentTokens: TokenUsage
+  /** 远端主机的只读镜像会话:没有运行时,不提供运行配置、本机打开与删除 */
+  mirrorOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -244,6 +246,7 @@ function onPermissionModeChange(mode: PermissionMode | null) {
     <template #controls="{ containerWidth }">
       <!-- 运行配置胶囊:渠道·模型·强度三段一枚(点哪段开哪层渐进面板);窄列收渠道段 -->
       <RunConfigCapsule
+        v-if="!mirrorOnly"
         :settings="capsuleSettings"
         :run-config="runConfig"
         :native-instance="nativeInstance"
@@ -262,7 +265,7 @@ function onPermissionModeChange(mode: PermissionMode | null) {
       />
 
       <PermissionModeDropdown
-        v-if="containerWidth >= 520"
+        v-if="!mirrorOnly && containerWidth >= 520"
         :selected="selectedPermissionMode"
         :effective="runConfig.display.permissionMode"
         @select="onPermissionModeChange"
@@ -276,7 +279,7 @@ function onPermissionModeChange(mode: PermissionMode | null) {
 
     <template #menu="{ containerWidth }">
       <!-- 窄列收纳项 -->
-      <div v-if="containerWidth < 520" class="py-0.5 border-b border-border">
+      <div v-if="!mirrorOnly && containerWidth < 520" class="py-0.5 border-b border-border">
           <PermissionModeDropdown
             variant="submenu"
             :selected="selectedPermissionMode"
@@ -311,16 +314,16 @@ function onPermissionModeChange(mode: PermissionMode | null) {
           <button class="menu-item" @click="onReload">
             <span class="i-carbon-renew w-3.5 h-3.5" />{{ $t('topbar.refreshSession') }}
           </button>
-          <button v-if="cwd" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInFinder">
+          <button v-if="cwd && !mirrorOnly" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInFinder">
             <span class="i-carbon-folder w-3.5 h-3.5" />{{ $t('topbar.openInFinder') }}
           </button>
-          <button v-if="cwd" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInTerminal">
+          <button v-if="cwd && !mirrorOnly" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInTerminal">
             <span class="i-carbon-terminal w-3.5 h-3.5" />{{ $t('topbar.openInTerminal') }}
           </button>
-          <button v-if="cwd" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInVscode">
+          <button v-if="cwd && !mirrorOnly" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInVscode">
             <span class="i-carbon-code w-3.5 h-3.5" />{{ $t('topbar.openInVscode') }}
           </button>
-          <button class="menu-item text-destructive! hover:bg-destructive/10" @click="onDelete">
+          <button v-if="!mirrorOnly" class="menu-item text-destructive! hover:bg-destructive/10" @click="onDelete">
             <span class="i-carbon-trash-can w-3.5 h-3.5" />{{ $t('topbar.deleteSession') }}
           </button>
         </div>

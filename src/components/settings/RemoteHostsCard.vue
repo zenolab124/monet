@@ -30,7 +30,27 @@ const reports = reactive<Record<string, HealthReport>>({})
 const checking = reactive<Record<string, boolean>>({})
 const pathDrafts = reactive<Record<string, string>>({})
 const rowErrors = reactive<Record<string, string>>({})
+const syncing = reactive<Record<string, boolean>>({})
+const syncNotes = reactive<Record<string, string>>({})
 const newConnection = ref('')
+
+interface SyncReport { listed: number; fetched: number; missing: number; errors: string[] }
+
+async function syncHost(alias: string) {
+  syncing[alias] = true
+  delete syncNotes[alias]
+  delete rowErrors[alias]
+  try {
+    const report = await invoke<SyncReport>('sync_remote_host', { alias })
+    syncNotes[alias] = report.errors.length
+      ? t('remote.syncPartial', { listed: report.listed, fetched: report.fetched, failed: report.errors.length })
+      : t('remote.syncDone', { listed: report.listed, fetched: report.fetched })
+  } catch (error) {
+    rowErrors[alias] = errorText(error)
+  } finally {
+    syncing[alias] = false
+  }
+}
 const addError = ref<string | null>(null)
 
 const STATE_ICON: Record<CheckState, string> = {
@@ -154,6 +174,13 @@ onMounted(async () => {
             @click="runCheck(host.alias)"
           >{{ checking[host.alias] ? t('remote.checking') : t('remote.recheck') }}</button>
           <button
+            v-if="host.enabled"
+            type="button"
+            class="host-action"
+            :disabled="syncing[host.alias]"
+            @click="syncHost(host.alias)"
+          >{{ syncing[host.alias] ? t('remote.syncing') : t('remote.syncNow') }}</button>
+          <button
             v-if="host.source === 'manual'"
             type="button"
             class="host-action"
@@ -200,6 +227,7 @@ onMounted(async () => {
           </p>
           <pre v-if="reports[host.alias]?.stderrTail" class="stderr-tail">{{ reports[host.alias].stderrTail }}</pre>
         </template>
+        <p v-if="syncNotes[host.alias]" class="mt-1 text-[10.5px] text-muted-foreground">{{ syncNotes[host.alias] }}</p>
         <p v-if="rowErrors[host.alias]" class="mt-1 text-[10.5px] text-destructive">{{ rowErrors[host.alias] }}</p>
       </li>
     </ul>

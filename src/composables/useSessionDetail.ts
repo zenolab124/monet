@@ -1,10 +1,18 @@
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { SessionRecord } from '@/types'
+import type { EngineInstanceId } from '@/engines/types'
 import { probeSessionLoad } from '@/utils/perfProbe'
 
-/** 每次调用创建独立实例，支持工作台多列场景 */
-export function createSessionDetail() {
+/**
+ * 每次调用创建独立实例，支持工作台多列场景。
+ * recordArgs：把界面 id 换成记录读取参数；远端实例换成原生 id 并带上实例（读它的只读镜像）。
+ */
+export type SessionRecordArgs = { projectId: string; sessionId: string; instance?: EngineInstanceId }
+
+export function createSessionDetail(
+  recordArgs: (projectId: string, sessionId: string) => SessionRecordArgs = (projectId, sessionId) => ({ projectId, sessionId }),
+) {
   const records = ref<SessionRecord[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -29,18 +37,12 @@ export function createSessionDetail() {
 
     const probe = probeSessionLoad(sessionId)
     try {
-      records.value = await invoke<SessionRecord[]>('get_session_records', {
-        projectId,
-        sessionId,
-      })
+      records.value = await invoke<SessionRecord[]>('get_session_records', recordArgs(projectId, sessionId))
       // 分叉垫底:自有 jsonl 未落盘(CLI 首条消息才写)时以源会话历史垫底显示,
       // 落盘后 records 非空自然走自有数据
       if (!records.value.length && fallbackSessionId) {
         try {
-          records.value = await invoke<SessionRecord[]>('get_session_records', {
-            projectId,
-            sessionId: fallbackSessionId,
-          })
+          records.value = await invoke<SessionRecord[]>('get_session_records', recordArgs(projectId, fallbackSessionId))
         } catch (_) { /* 源会话读取失败保持空态,不算错误 */ }
       }
       probe?.afterInvoke(records.value.length)

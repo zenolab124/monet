@@ -300,10 +300,9 @@ pub fn sync_once(
     Ok(report)
 }
 
-pub fn mirror_root_for(instance_storage_key: &str) -> PathBuf {
-    crate::config::data_dir()
-        .join("remote")
-        .join(instance_storage_key)
+/// 实例镜像根：`data_dir()/remote/<实例 id>/`（实例 id 以 `ssh-` 开头，不会与 `ssh/`、`hosts.json` 冲突）
+pub fn mirror_root_for(instance_id: &str) -> PathBuf {
+    crate::config::data_dir().join("remote").join(instance_id)
 }
 
 /// 便于外部读取镜像目录的会话文件（供后续历史源使用）

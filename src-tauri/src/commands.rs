@@ -25,8 +25,12 @@ pub async fn get_perf_stats() -> crate::perf::PerfStats {
 
 /// 获取会话消息记录（仅 user/assistant，跳过 snapshot 等大型记录）。async 同上
 #[tauri::command]
-pub async fn get_session_records(project_id: String, session_id: String) -> Vec<SessionRecord> {
-    let path = session_path(&project_id, &session_id);
+pub async fn get_session_records(
+    project_id: String,
+    session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+) -> Vec<SessionRecord> {
+    let path = session_path_for(instance.as_ref(), &project_id, &session_id);
     let t0 = std::time::Instant::now();
     let records = parser::parse_messages(&path);
     if cfg!(debug_assertions) {
@@ -47,8 +51,9 @@ pub async fn get_session_records(project_id: String, session_id: String) -> Vec<
 pub async fn get_session_summary(
     project_id: String,
     session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
 ) -> Option<SessionSummary> {
-    let path = session_path(&project_id, &session_id);
+    let path = session_path_for(instance.as_ref(), &project_id, &session_id);
     crate::cache::get_summary(&path)
 }
 
@@ -1276,6 +1281,26 @@ fn session_path(project_id: &str, session_id: &str) -> PathBuf {
         .join(format!("{}.jsonl", session_id))
 }
 
+/// 按实例定位会话文件：缺省或本机实例读本机数据根；远端实例读它的只读镜像。
+/// 镜像路径只接受 `<项目目录>/<会话 id>.jsonl`，不合规时返回不存在的路径（读到空）
+fn session_path_for(
+    instance: Option<&crate::engines::core::EngineInstanceId>,
+    project_id: &str,
+    session_id: &str,
+) -> PathBuf {
+    let remote = instance.filter(|instance| {
+        instance.engine_id() == crate::engines::claude::ENGINE_ID
+            && instance.instance_id() != crate::engines::claude::DEFAULT_INSTANCE_ID
+    });
+    let Some(instance) = remote else {
+        return session_path(project_id, session_id);
+    };
+    let rel = format!("{project_id}/{session_id}.jsonl");
+    let root = crate::engines::claude::remote::sync::mirror_root_for(instance.instance_id());
+    crate::engines::claude::remote::sync::mirrored_path(&root, &rel)
+        .unwrap_or_else(|| root.join("invalid-session-path"))
+}
+
 // ---------- 子 Agent ----------
 
 #[derive(serde::Serialize)]
@@ -1498,4 +1523,33 @@ pub fn get_app_setting(key: String) -> Option<serde_json::Value> {
 #[tauri::command]
 pub fn set_app_setting(key: String, value: serde_json::Value) {
     crate::config::write_app_setting(&key, value);
+}
+
+#[cfg(test)]
+mod session_path_tests {
+    use super::*;
+    use crate::engines::core::EngineInstanceId;
+
+    #[test]
+    fn local_or_missing_instance_reads_the_local_data_root() {
+        let local = EngineInstanceId::new("claude-code", "default").unwrap();
+        let expected = session_path("-p", "s1");
+        assert_eq!(session_path_for(None, "-p", "s1"), expected);
+        assert_eq!(session_path_for(Some(&local), "-p", "s1"), expected);
+    }
+
+    #[test]
+    fn remote_instance_reads_its_mirror_and_rejects_traversal() {
+        let remote = EngineInstanceId::new("claude-code", "ssh-devbox-abc123").unwrap();
+        let root = crate::engines::claude::remote::sync::mirror_root_for("ssh-devbox-abc123");
+        assert_eq!(
+            session_path_for(Some(&remote), "-home-alice-foo", "s1"),
+            root.join("projects/-home-alice-foo/s1.jsonl")
+        );
+        for (project, session) in [("..", "s1"), ("-p", "../x"), ("a/b", "s1"), (".hidden", "s1")] {
+            let path = session_path_for(Some(&remote), project, session);
+            assert!(path.starts_with(&root), "{project}/{session}");
+            assert!(!path.starts_with(root.join("projects")), "{project}/{session}");
+        }
+    }
 }

@@ -1890,7 +1890,8 @@
       "unsupportedOs": "远端系统不受支持",
       "cliNotFound": "远端未找到 Claude Code CLI",
       "dataRootMissing": "远端没有 Claude Code 数据目录",
-      "timeout": "远端体检超时"
+      "timeout": "远端体检超时",
+      "localOnly": "远端会话的目录在另一台电脑上，无法在本机打开"
     }
   },
   "diff": {
@@ -2049,10 +2050,17 @@
       "duplicate_host": "这台主机已经添加过了。",
       "invalid_claude_path": "CLI 路径必须是绝对路径，且不能包含空格或引号。",
       "unknown_host": "找不到这台主机，请刷新后重试。",
-      "not_manual_host": "只能移除手动添加的主机；ssh config 中的主机请在配置文件里修改。"
+      "not_manual_host": "只能移除手动添加的主机；ssh config 中的主机请在配置文件里修改。",
+      "sync_in_progress": "这台主机正在同步，请稍候。",
+      "projects_missing": "远端还没有 Claude Code 会话目录。"
     },
     "cliMissingAuto": "未在 PATH 或登录 shell 中找到",
     "cliMissingUser": "填写的路径不存在或不可执行",
-    "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。"
+    "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。",
+    "sessionReadOnly": "这是远端主机上的会话，目前只能查看；在 Monet 里继续对话的功能尚未接入。",
+    "syncNow": "立即同步",
+    "syncing": "同步中…",
+    "syncDone": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个。",
+    "syncPartial": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个，{failed} 个失败，下次同步会重试。"
   }
 }

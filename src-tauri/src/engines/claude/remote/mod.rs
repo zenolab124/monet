@@ -99,3 +99,88 @@ pub async fn check_remote_host(alias: String) -> Result<HealthReport, String> {
     .await
     .map_err(|e| e.to_string())
 }
+
+/// 调试版本机验收：设置 `MONET_REMOTE_LOOPBACK_ROOT` 后，同步改用本机 shell 读取该目录，
+/// 把它当作远端的 Claude 数据根。发布版恒为 None。
+fn loopback_root() -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var("MONET_REMOTE_LOOPBACK_ROOT")
+            .ok()
+            .filter(|value| !value.is_empty())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
+static SYNCING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// 立即同步一台主机的会话镜像；同一主机同一时间只跑一轮
+#[tauri::command]
+pub async fn sync_remote_host(alias: String) -> Result<sync::SyncReport, String> {
+    let host = hosts::list_hosts()
+        .into_iter()
+        .find(|h| h.alias == alias)
+        .ok_or("unknown_host")?;
+    let target = hosts::target_for(&host.alias, host.source == hosts::HostSource::Manual)
+        .ok_or("invalid_connection")?;
+    {
+        let mut running = SYNCING.lock().map_err(|e| e.to_string())?;
+        if running.contains(&alias) {
+            return Err("sync_in_progress".into());
+        }
+        running.push(alias.clone());
+    }
+    let instance_id = host.instance_id.clone();
+    let claude_path = host.claude_path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mirror = sync::Mirror::new(sync::mirror_root_for(&instance_id));
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        #[cfg(debug_assertions)]
+        if let Some(root) = loopback_root() {
+            return sync::sync_once(
+                &executor::LocalShellExecutor,
+                &target,
+                &root,
+                &mirror,
+                &cancel,
+                |_, _| {},
+            );
+        }
+        let _ = loopback_root();
+        let report = health::check(&SshExecutor, &target, claude_path.as_deref());
+        let root = report
+            .data_root
+            .filter(|_| report.usable || report.failure == Some(health::FailureKind::CliNotFound))
+            .ok_or_else(|| format!("health_{:?}", report.failure).to_lowercase())?;
+        sync::sync_once(&SshExecutor, &target, &root, &mirror, &cancel, |_, _| {})
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|result| result);
+    if let Ok(mut running) = SYNCING.lock() {
+        running.retain(|a| a != &alias);
+    }
+    let report = result?;
+    notify_mirror_changed(&host.instance_id);
+    Ok(report)
+}
+
+fn notify_mirror_changed(instance_id: &str) {
+    use crate::engines::core::{EngineInstanceId, SourceChange, SourceChangeKind};
+    let Ok(instance) = EngineInstanceId::new(super::ENGINE_ID, instance_id) else {
+        return;
+    };
+    let Ok(system) = crate::engines::system::get() else {
+        return;
+    };
+    if let Ok(adapter) = system.registry().adapter_arc(&instance) {
+        adapter.notify_source_change(SourceChange {
+            kind: SourceChangeKind::FullRefresh,
+            project: None,
+            session: None,
+        });
+    }
+}

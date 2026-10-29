@@ -77,8 +77,12 @@ async function loadProjects() {
         applySessionChanges(payload.changes, resolveNativeInstance(payload.instance))
       }
     })
+    // 本机原生实例由 projects-changed 增量刷新；其余实例（含远端镜像）靠历史源变更事件
     listen<SourceChangeEnvelope>('engine-source-change', event => {
-      if (!usesNativeSessionSurface(event.payload.instance)) reloadProjectsSilently()
+      const instance = event.payload.instance
+      if (!usesNativeSessionSurface(instance) || !sameInstance(instance, LOCAL_CLAUDE_INSTANCE)) {
+        reloadProjectsSilently()
+      }
     })
   }
   if (!workspaceFocusSetup) {

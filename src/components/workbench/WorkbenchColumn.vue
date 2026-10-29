@@ -110,7 +110,11 @@ const engineDescriptor = computed(() => {
   const instance = sessionSummary.value?.engine
   return instance ? engines.value.find(item => sameInstance(item.instance, instance)) ?? null : null
 })
-const runtimeCapabilities = computed(() => engineDescriptor.value?.capabilities.runtime ?? null)
+const runtimeCapabilities = computed(() => engineDescriptor.value
+  ? engineDescriptor.value.capabilities.runtime ?? null
+  : undefined)
+/** 原生列且有运行时：远端镜像会话不提供 RC / Chrome 这类运行期开关 */
+const nativeRuntime = computed(() => useNativeDetail.value && runtimeCapabilities.value !== null)
 const workbenchActions = computed(() => resolveWorkbenchEngineActions(
   runtimeCapabilities.value,
   useNativeDetail.value,
@@ -449,7 +453,7 @@ function onFindStatus(status: SessionFindStatus) {
       <div class="workbench-column-actions">
         <div v-if="!isRace" class="workbench-column-optional-actions">
           <button
-            v-if="useNativeDetail"
+            v-if="nativeRuntime"
             :disabled="rcLoading"
             class="icon-btn icon-btn-sm disabled:opacity-40"
             :class="stream.rcActive ? 'border-primary! text-primary!' : ''"
@@ -460,7 +464,7 @@ function onFindStatus(status: SessionFindStatus) {
             <span class="i-carbon-remote-connection w-3 h-3" />
           </button>
           <button
-            v-if="useNativeDetail"
+            v-if="nativeRuntime"
             class="icon-btn icon-btn-sm"
             :class="settings.chrome ? 'border-primary! text-primary!' : ''"
             v-tooltip="settings.chrome ? $t('workbench.column.chromeEnabled') : $t('workbench.column.chromeEnable')"

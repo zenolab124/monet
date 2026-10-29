@@ -1,9 +1,10 @@
 //! 远端主机的 Claude Code 引擎实例。
 //!
-//! 本阶段只负责注册与健康状态：历史源尚未接入只读镜像，运行时尚未接入远端进程，
+//! 历史源读取 Monet 数据目录里的只读镜像（由 `sync` 维护）；运行时尚未接入远端进程，
 //! 因此描述符不声明运行时能力——新建任务等入口据此把它显示为不可选，
 //! 不会误用本机进程。
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,8 @@ const HEALTH_CACHE_TTL: Duration = Duration::from_secs(60);
 
 pub struct RemoteClaudeEngine {
     descriptor: EngineDescriptor,
+    source: crate::engines::claude::ClaudeSource,
+    mirror_projects: PathBuf,
     target: SshTarget,
     claude_path: Option<String>,
     cached: Mutex<Option<(Instant, HealthReport)>>,
@@ -60,8 +63,17 @@ impl RemoteClaudeEngine {
                     "invalid remote host alias",
                 )
             })?;
+        let descriptor = Self::descriptor_for(host)?;
+        let mirror_projects =
+            super::sync::Mirror::new(super::sync::mirror_root_for(&host.instance_id))
+                .projects_dir();
         Ok(Arc::new(Self {
-            descriptor: Self::descriptor_for(host)?,
+            source: crate::engines::claude::ClaudeSource::mirror(
+                descriptor.instance.clone(),
+                mirror_projects.clone(),
+            ),
+            mirror_projects,
+            descriptor,
             target,
             claude_path: host.claude_path.clone(),
             cached: Mutex::new(None),
@@ -89,8 +101,12 @@ fn failure_code(kind: FailureKind) -> &'static str {
     }
 }
 
-/// 体检报告 → 引擎健康状态（纯函数）
-pub fn health_from_report(instance: EngineInstanceId, report: &HealthReport) -> EngineHealth {
+/// 体检报告 → 引擎健康状态（纯函数）；`mirrored` 表示本机已有该主机的镜像
+pub fn health_from_report(
+    instance: EngineInstanceId,
+    report: &HealthReport,
+    mirrored: bool,
+) -> EngineHealth {
     let ssh_failed = report
         .items
         .iter()
@@ -111,9 +127,11 @@ pub fn health_from_report(instance: EngineInstanceId, report: &HealthReport) -> 
             CheckState::Warn => Some(false),
             _ => None,
         });
-    let source = match report.failure {
-        Some(kind) => CapabilityHealth::unavailable(failure_code(kind)),
-        None => CapabilityHealth::unavailable("engine.remote.mirrorPending"),
+    // 镜像已存在时离线也能查阅历史；否则说明为什么还没有
+    let source = match (mirrored, report.failure) {
+        (true, _) => CapabilityHealth::available(),
+        (false, Some(kind)) => CapabilityHealth::unavailable(failure_code(kind)),
+        (false, None) => CapabilityHealth::unavailable("engine.remote.mirrorPending"),
     };
     let diagnostics = report
         .failure
@@ -139,66 +157,6 @@ pub fn health_from_report(instance: EngineInstanceId, report: &HealthReport) -> 
         diagnostics,
     }
 }
-
-/// 尚未接入镜像的空历史源
-struct EmptySource;
-
-fn not_found() -> EngineError {
-    EngineError::new(
-        EngineErrorKind::NotFound,
-        "remote session history is not available yet",
-    )
-}
-
-impl SessionSource for EmptySource {
-    fn list_projects(&self, _query: ProjectQuery) -> EngineFuture<'_, ProjectPage> {
-        Box::pin(async {
-            Ok(ProjectPage {
-                projects: Vec::new(),
-                next_cursor: None,
-            })
-        })
-    }
-
-    fn list_sessions(
-        &self,
-        _project: ProjectRef,
-        _query: SessionQuery,
-    ) -> EngineFuture<'_, SessionPage> {
-        Box::pin(async {
-            Ok(SessionPage {
-                sessions: Vec::new(),
-                next_cursor: None,
-            })
-        })
-    }
-
-    fn load_timeline(
-        &self,
-        _session: SessionRef,
-        _page: TimelinePage,
-    ) -> EngineFuture<'_, ConversationPage> {
-        Box::pin(async { Err(not_found()) })
-    }
-
-    fn subscribe_changes(&self, _sink: SourceChangeSink) -> EngineResult<SubscriptionHandle> {
-        Ok(Box::new(()))
-    }
-
-    fn build_search_document(&self, _session: SessionRef) -> EngineFuture<'_, SearchDocument> {
-        Box::pin(async { Err(not_found()) })
-    }
-
-    fn resolve_asset(&self, _asset: AssetRef) -> EngineFuture<'_, ResolvedAsset> {
-        Box::pin(async { Err(not_found()) })
-    }
-
-    fn session_actions(&self, _session: SessionRef) -> EngineFuture<'_, SessionActions> {
-        Box::pin(async { Err(not_found()) })
-    }
-}
-
-static EMPTY_SOURCE: EmptySource = EmptySource;
 
 impl EngineAdapter for RemoteClaudeEngine {
     fn descriptor(&self) -> EngineDescriptor {
@@ -228,12 +186,17 @@ impl EngineAdapter for RemoteClaudeEngine {
             Ok(health_from_report(
                 self.descriptor.instance.clone(),
                 &report,
+                self.mirror_projects.is_dir(),
             ))
         })
     }
 
     fn session_source(&self) -> &dyn SessionSource {
-        &EMPTY_SOURCE
+        &self.source
+    }
+
+    fn notify_source_change(&self, change: SourceChange) {
+        self.source.publish_change(change);
     }
 
     fn runtime(&self) -> Option<&dyn AgentRuntime> {
@@ -289,10 +252,7 @@ mod tests {
 
     #[test]
     fn ready_host_is_available_with_runtime_pending() {
-        let health = health_from_report(
-            instance(),
-            &report("os=Linux\nclaude=/usr/local/bin/claude\nversion=2.1.306\nroot=/home/a/.claude\nroot_exists=yes\nprojects=yes\n", Some(0), ""),
-        );
+        let health = health_from_report(instance(), &report("os=Linux\nclaude=/usr/local/bin/claude\nversion=2.1.306\nroot=/home/a/.claude\nroot_exists=yes\nprojects=yes\n", Some(0), ""), false);
         assert_eq!(health.status, EngineHealthStatus::Available);
         assert!(health.installed);
         assert_eq!(health.version_supported, Some(true));
@@ -316,6 +276,7 @@ mod tests {
                 Some(255),
                 "ssh: connect to host h port 22: Connection refused",
             ),
+            false,
         );
         assert_eq!(health.status, EngineHealthStatus::Unavailable);
         assert_eq!(
@@ -327,8 +288,20 @@ mod tests {
     }
 
     #[test]
+    fn existing_mirror_keeps_history_available_while_offline() {
+        let health = health_from_report(
+            instance(),
+            &report("", Some(255), "Connection timed out"),
+            true,
+        );
+        assert_eq!(health.status, EngineHealthStatus::Unavailable);
+        assert!(health.source.available);
+        assert!(!health.runtime.available);
+    }
+
+    #[test]
     fn missing_cli_is_degraded() {
-        let health = health_from_report(instance(), &report("os=Darwin\nclaude_missing=auto\nroot=/Users/a/.claude\nroot_exists=yes\nprojects=no\n", Some(0), ""));
+        let health = health_from_report(instance(), &report("os=Darwin\nclaude_missing=auto\nroot=/Users/a/.claude\nroot_exists=yes\nprojects=no\n", Some(0), ""), false);
         assert_eq!(health.status, EngineHealthStatus::Degraded);
         assert!(!health.installed);
         assert_eq!(

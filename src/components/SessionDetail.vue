@@ -7,7 +7,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { useSearch } from '@/composables/useSearch'
-import { createSessionDetail } from '@/composables/useSessionDetail'
+import { createSessionDetail, type SessionRecordArgs } from '@/composables/useSessionDetail'
 import {
   useStreaming,
   useSessionStream,
@@ -43,7 +43,8 @@ import {
   type SlashCommand,
 } from '@/composables/useSlashCommands'
 import { useModelOptions } from '@/composables/useModelOptions'
-import { resolveNativeInstance } from '@/engines/integration'
+import { LOCAL_CLAUDE_INSTANCE, resolveNativeInstance } from '@/engines/integration'
+import { sameInstance } from '@/engines/identity'
 import type { EngineInstanceId } from '@/engines/types'
 import { useComposerCommands } from '@/composables/useComposerCommands'
 import { useSessionSignals } from '@/composables/useSessionSignals'
@@ -167,7 +168,9 @@ const { t, locale } = useI18n()
 const { confirm: confirmDialog } = useConfirm()
 
 /** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
+// 远端实例的会话在远端运行时接入前只读（输入、回退文件等交互全部关闭），避免误用本机进程
 const interactive = computed(() => props.mode === 'workbench'
+  && !remoteRecordInstance()
   && (!currentSession.value || !workspaceUnavailable(currentSession.value.summary)))
 
 const { projects, loadProjects } = useProjects()
@@ -177,7 +180,7 @@ const { findSession, removeSession, draftCwd, nativeDraftInstance, forkSourceOf 
 const { notifyTransient } = useNotifications()
 
 // 每个实例独立的 detail 数据
-const detail = createSessionDetail()
+const detail = createSessionDetail(recordArgs)
 const {
   records,
   loading,
@@ -1001,6 +1004,23 @@ const claudeEngineInstance = computed(() => resolveNativeInstance(
   currentSession.value?.summary?.engine,
   effectiveSessionId.value ? nativeDraftInstance(effectiveSessionId.value) : null,
 ))
+/** 会话记录读取用：远端实例读它的只读镜像，本机实例不传（保持原有调用形态） */
+function remoteRecordInstance(): EngineInstanceId | null {
+  const instance = claudeEngineInstance.value
+  return sameInstance(instance, LOCAL_CLAUDE_INSTANCE) ? null : instance
+}
+/** 记录读取参数：远端会话的界面 id 是结构化 id，镜像按原生目录名与会话 uuid 读取 */
+function recordArgs(projectId: string, sessionId: string): SessionRecordArgs {
+  const instance = remoteRecordInstance()
+  if (!instance) return { projectId, sessionId }
+  const project = projects.value.find(p => p.id === projectId)
+  const session = project?.sessions.find(s => s.id === sessionId)
+  return {
+    projectId: project?.native_id ?? projectId,
+    sessionId: session?.native_id ?? sessionId,
+    instance,
+  }
+}
 const composerCwd = computed(() => currentSession.value
   ? workspaceCwd(currentSession.value.summary)
   : null)
@@ -2338,10 +2358,7 @@ async function sendComposerDraft() {
       deferredRecords = null
     } else {
       try {
-        const fresh = await invoke<SessionRecord[]>('get_session_records', {
-          projectId: cs.projectId,
-          sessionId: cs.summary.id,
-        })
+        const fresh = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, cs.summary.id))
         if (effectiveSessionId.value === cs.summary.id && fresh.length >= records.value.length) {
           devObserveSwap('send-swap')
           records.value = fresh
@@ -3091,10 +3108,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     for (const delay of [300, 400, 800]) {
       await new Promise(r => setTimeout(r, delay))
       try {
-        newRecords = await invoke<SessionRecord[]>('get_session_records', {
-          projectId: cs.projectId,
-          sessionId: sid,
-        })
+        newRecords = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, sid))
       } catch { /* 下一轮重试 */ }
       if (allLanded(newRecords) && pendingLanded(newRecords)) break
       if (emptyButGrown(newRecords)) break
@@ -3183,18 +3197,12 @@ watch(autoTurnLanded, async () => {
   await new Promise(r => setTimeout(r, 300))
   let fresh: SessionRecord[] | null = null
   try {
-    fresh = await invoke<SessionRecord[]>('get_session_records', {
-      projectId: cs.projectId,
-      sessionId: sid,
-    })
+    fresh = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, sid))
   } catch { /* 失败留给 finishedDirty 下次加载兜底 */ }
   if (!fresh || fresh.length <= records.value.length) {
     await new Promise(r => setTimeout(r, 400))
     try {
-      fresh = await invoke<SessionRecord[]>('get_session_records', {
-        projectId: cs.projectId,
-        sessionId: sid,
-      })
+      fresh = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, sid))
     } catch { /* 同上 */ }
   }
   if (effectiveSessionId.value !== sid || !fresh) return
@@ -3253,10 +3261,7 @@ async function silentReloadRecords() {
   const cs = currentSession.value
   if (!cs) return
   try {
-    const fresh = await invoke<SessionRecord[]>('get_session_records', {
-      projectId: cs.projectId,
-      sessionId: cs.summary.id,
-    })
+    const fresh = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, cs.summary.id))
     // 异步窗口内可能已切会话
     if (effectiveSessionId.value !== cs.summary.id) return
     if (fresh.length > records.value.length) {
@@ -3476,7 +3481,7 @@ async function onReload() {
     <ArchiveSessionIdentityBar
       v-if="mode === 'archive'"
       :session="currentSession.summary"
-      engine-name="Claude Code"
+      :engine-name="currentSession.summary.engine_name ?? 'Claude Code'"
       :title="archiveTitle"
       accent="claude"
     />
@@ -3508,6 +3513,7 @@ async function onReload() {
       :selected-chrome="settings.chrome"
       :selected-extra-args="settings.extraArgs"
       :selected-permission-mode="settings.permissionMode"
+      :mirror-only="!!remoteRecordInstance()"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @fast-mode-change="onFastModeChange"
@@ -3856,6 +3862,11 @@ async function onReload() {
         @decide="onPermissionDecide"
       />
     </SessionInteractionPanel>
+
+    <p
+      v-if="mode === 'workbench' && remoteRecordInstance()"
+      class="mx-4 mb-3 rounded border border-border px-3 py-2 text-xs text-muted-foreground"
+    >{{ $t('remote.sessionReadOnly') }}</p>
 
     <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染;赛马模式由共享输入替代) -->
     <SessionComposer
