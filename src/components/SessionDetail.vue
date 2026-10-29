@@ -104,6 +104,7 @@ import AsyncTaskPanel from './AsyncTaskPanel.vue'
 import { IMAGE_LOCATOR, type ImageLocator } from '@/utils/ccimg'
 import { renderMarkdownDeferred } from '@/composables/useMarkdown'
 import { persistKeyOf } from '@/lib/stream-markdown/constants'
+import { canSendToCurrentTurn } from '@/lib/midTurnInputPolicy'
 import { useFileLedger } from '@/composables/useFileLedger'
 import FileLedgerPanel from './FileLedgerPanel.vue'
 import ArtifactPreviewList from './artifacts/ArtifactPreviewList.vue'
@@ -194,6 +195,7 @@ const {
   prioritizePendingQueueItem,
   failPendingQueueItem,
   consumePendingQueue,
+  sendQueuedItemToCurrentTurn,
   removeLandedTurns,
   demoteUnlandedTurns,
 } = useStreaming()
@@ -1116,7 +1118,20 @@ const imageDropArea = computed<HTMLElement | null | undefined>(() =>
 const imageInput = useImageInput({ pasteTarget: textareaRef, dropTarget: imageDropArea })
 onMounted(() => imageInput.attach())
 function pendingQueueDetail(item: PendingQueueItem): string {
+  if (item.injection === 'started') return t('session.queueInjectionStarted')
+  if (item.injection === 'sending' || item.injection === 'queued') return t('session.queueInjectionWaiting')
   return [item.opts.model, item.opts.effort, item.opts.channel].filter(Boolean).join(' · ')
+}
+
+/** 配置与当前进程一致的纯文本项可直接插入在跑的轮次，不需要中断 */
+function canSendQueuedToCurrentTurn(item: PendingQueueItem): boolean {
+  return canSendToCurrentTurn({
+    ownProcessBusy: ownProcessBusy.value,
+    externalRunning: externalRunning.value,
+    processAlive: stream.value.processAlive,
+    cliVersion: sessionSignals.value?.catalog?.cli_version ?? null,
+    activeConfig: stream.value.lastSent?.opts ?? null,
+  }, item.opts)
 }
 
 const composerQueueItems = computed<ComposerQueueItem[]>(() => stream.value.pendingQueue.map(item => ({
@@ -1127,9 +1142,11 @@ const composerQueueItems = computed<ComposerQueueItem[]>(() => stream.value.pend
   status: item.status,
   actionLabel: item.status === 'failed' && !externalRunning.value && !ownProcessBusy.value
     ? t('common.retry')
-    : externalRunning.value || ownProcessBusy.value
-      ? t('session.queueInterruptAndSend')
-      : t('session.queueSendNow'),
+    : canSendQueuedToCurrentTurn(item)
+      ? t('session.queueSendCurrent')
+      : externalRunning.value || ownProcessBusy.value
+        ? t('session.queueInterruptAndSend')
+        : t('session.queueSendNow'),
   actionTitle: permissionRequest.value ? t('session.queueResolveApprovalFirst') : undefined,
   actionDisabled: !!permissionRequest.value || stopping.value,
 })))
@@ -1147,6 +1164,13 @@ function updateComposerQueueItem(id: string, text: string) {
 async function processComposerQueueItem(id: string) {
   const sid = effectiveSessionId.value
   if (!sid || permissionRequest.value) return
+  const queued = stream.value.pendingQueue.find(item => item.id === id)
+  const cwd = currentSession.value ? workspaceCwd(currentSession.value.summary) : null
+  // 插入当前轮次与中断发送互不降级：插入失败只退回队列，由用户再决定
+  if (queued && cwd && canSendQueuedToCurrentTurn(queued)) {
+    await sendQueuedItemToCurrentTurn(sid, id, cwd)
+    return
+  }
   const busy = externalRunning.value || ownProcessBusy.value
   if (busy) {
     const approved = await confirmDialog(
@@ -1162,6 +1186,74 @@ async function processComposerQueueItem(id: string) {
   }
   const stopped = await onStop({ skipConfirm: true })
   if (!stopped) failPendingQueueItem(sid, id, t('session.queueInterruptFailed'))
+}
+
+// ---- 文件回退：CLI 按文件快照恢复某条用户消息之后的改动，Monet 不直接写文件 ----
+interface RewindFilesResult {
+  can_rewind: boolean
+  error: string | null
+  files_changed: string[]
+  insertions: number | null
+  deletions: number | null
+}
+
+/** 只对本窗口在跑的会话进程提供；运行中置灰，避免与正在执行的工具互相覆盖 */
+const rewindState = computed<'available' | 'busy' | null>(() => {
+  if (!interactive.value || !stream.value.processAlive) return null
+  return stream.value.streaming || ownProcessBusy.value || externalRunning.value ? 'busy' : 'available'
+})
+const rewinding = ref(false)
+
+function rewindFileLabel(path: string, cwd: string | null): string {
+  if (!cwd) return path
+  const root = cwd.replace(/[/\\]+$/, '')
+  return path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? path.slice(root.length + 1) : path
+}
+
+async function requestRewind(sessionId: string, userMessageId: string, dryRun: boolean): Promise<RewindFilesResult | null> {
+  try {
+    return await invoke<RewindFilesResult>('rewind_files', { sessionId, userMessageId, dryRun })
+  } catch (error) {
+    notifyTransient(t('session.rewind.failed'), String(error))
+    return null
+  }
+}
+
+async function onRewindFiles(userMessageId: string) {
+  const sid = effectiveSessionId.value
+  if (!sid || rewinding.value || rewindState.value !== 'available') return
+  rewinding.value = true
+  try {
+    const preview = await requestRewind(sid, userMessageId, true)
+    if (!preview) return
+    if (!preview.can_rewind) {
+      notifyTransient(t('session.rewind.unavailable'), preview.error ?? undefined)
+      return
+    }
+    if (!preview.files_changed.length) {
+      notifyTransient(t('session.rewind.noFiles'))
+      return
+    }
+    const cwd = currentSession.value ? workspaceCwd(currentSession.value.summary) : null
+    const files = preview.files_changed.map(path => `· ${rewindFileLabel(path, cwd)}`).join('\n')
+    const approved = await confirmDialog(t('session.rewind.confirm', {
+      count: preview.files_changed.length,
+      insertions: preview.insertions ?? 0,
+      deletions: preview.deletions ?? 0,
+      files,
+    }), t('session.rewind.confirmOk'))
+    if (!approved) return
+    if (rewindState.value !== 'available') {
+      notifyTransient(t('session.rewind.busy'))
+      return
+    }
+    const result = await requestRewind(sid, userMessageId, false)
+    if (!result) return
+    if (!result.can_rewind) notifyTransient(t('session.rewind.failed'), result.error ?? undefined)
+    else notifyTransient(t('session.rewind.done', { count: preview.files_changed.length }))
+  } finally {
+    rewinding.value = false
+  }
 }
 
 // 会话级图片定位上下文(主会话,无 agentId);历史区图片按此拼 ccimg 协议 URL
@@ -3042,6 +3134,11 @@ watch(ownProcessBusy, (busy) => {
   if (!busy) maybeConsumeQueue()
 })
 
+// 插入当前轮次的消息落定后补发：落定前队列闸门拦下了空闲沿
+watch(() => stream.value.pendingQueue.some(item => item.injection && item.injection !== 'timed_out'), (active) => {
+  if (!active) maybeConsumeQueue()
+})
+
 // 自发轮落账:CLI 被 task-notification 唤醒的后台任务收尾轮结束(stream-done
 // initiator=auto)时静默 reload,把已落账 turn 摘除——与历史区同 batch 原子切换。
 // 不动 streaming/pending:那是用户轮的领地;pendingLandedUuid 若在本次 reload
@@ -3573,6 +3670,8 @@ async function onReload() {
               :user-has-visible-content="userHasVisibleContent"
               :content-blocks="contentBlocks"
               :channel-mark-label="channelMarkLabel"
+              :rewind-state="rewindState"
+              @rewind-files="onRewindFiles"
             />
           </div>
         </div>
@@ -3602,6 +3701,8 @@ async function onReload() {
               :user-has-visible-content="userHasVisibleContent"
               :content-blocks="contentBlocks"
               :channel-mark-label="channelMarkLabel"
+              :rewind-state="rewindState"
+              @rewind-files="onRewindFiles"
             />
           </div>
         </template>
@@ -3630,6 +3731,8 @@ async function onReload() {
             :user-has-visible-content="userHasVisibleContent"
             :content-blocks="contentBlocks"
             :channel-mark-label="channelMarkLabel"
+              :rewind-state="rewindState"
+              @rewind-files="onRewindFiles"
             auto-open-artifact
             granular-visibility
           />

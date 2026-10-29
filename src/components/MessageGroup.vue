@@ -42,6 +42,8 @@ const props = defineProps<{
   /** 末组保持整体挂载时，对其中已落账响应启用细粒度按需渲染。 */
   granularVisibility?: boolean
   autoOpenArtifact?: boolean
+  /** 文件回退入口：available 可用，busy 运行中置灰；缺省不显示 */
+  rewindState?: 'available' | 'busy' | null
 }>()
 
 const { t: _t } = useI18n() // 保持导入以便模板 $t 可用
@@ -56,6 +58,11 @@ const normalUserVisible = computed(() => {
     && !props.isModelCommandRecord(user)
     && !props.isSystemOnlyUser(user)
     && props.userHasVisibleContent(user)
+})
+const emit = defineEmits<{ 'rewind-files': [userMessageId: string] }>()
+const rewindTarget = computed(() => {
+  const user = props.group.user
+  return props.rewindState && normalUserVisible.value && user?.type === 'user' && user.uuid ? user.uuid : null
 })
 const turnView = computed<ConversationTurnView>(() => ({
   dayLabel: props.dayLabel ?? null,
@@ -134,6 +141,19 @@ const responseEntries = computed<ResponseEntry[]>(() => props.group.responses.ma
           :record-uuid="group.user.uuid"
         />
       </div>
+    </template>
+
+    <template v-if="rewindTarget" #user-actions>
+      <button
+        type="button"
+        class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+        :disabled="rewindState === 'busy'"
+        :title="rewindState === 'busy' ? $t('session.rewind.busy') : $t('session.rewind.hint')"
+        @click="emit('rewind-files', rewindTarget)"
+      >
+        <span class="i-ph-arrow-counter-clockwise" aria-hidden="true" />
+        {{ $t('session.rewind.action') }}
+      </button>
     </template>
 
     <template #user>

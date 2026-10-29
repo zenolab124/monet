@@ -410,6 +410,150 @@ pub fn parse_live_signal(value: &Value) -> Option<LiveSignal> {
 }
 
 // ---------------------------------------------------------------------------
+// 轮次进行中插入输入
+// ---------------------------------------------------------------------------
+
+/// 插入消息的 request_id 前缀（撤回用的 cancel_async_message）。
+pub const CANCEL_INJECTION_PREFIX: &str = "cancel-inject-";
+
+/// 运行中插入的用户消息。`priority: "next"` 让 CLI 在下一个工具间隙把它并入
+/// 当前轮次、不打断执行；`"now"` 会中止正在跑的工具并另起一轮（2.1.306 实测），
+/// 不使用。uuid 是 command_lifecycle 回报的关联键。
+pub fn mid_turn_user_message(uuid: &str, content: Vec<Value>) -> Value {
+    json!({
+        "type": "user",
+        "session_id": "",
+        "uuid": uuid,
+        "priority": "next",
+        "message": {"role": "user", "content": content},
+        "parent_tool_use_id": null
+    })
+}
+
+/// 撤回尚未被 CLI 处理的插入消息（确认超时后防止迟到的执行与重发重复）。
+pub fn cancel_async_message_request(request_id: &str, message_uuid: &str) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {"subtype": "cancel_async_message", "message_uuid": message_uuid}
+    })
+}
+
+/// 排队命令的命运：queued → started → 恰好一个终态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandState {
+    Queued,
+    Started,
+    Completed,
+    Cancelled,
+    Discarded,
+    Refused,
+}
+
+impl CommandState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Discarded => "discarded",
+            Self::Refused => "refused",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, Self::Queued | Self::Started)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandLifecycle {
+    pub command_uuid: String,
+    pub state: CommandState,
+}
+
+pub fn parse_command_lifecycle(value: &Value) -> Option<CommandLifecycle> {
+    if value.get("type").and_then(Value::as_str) != Some("command_lifecycle") {
+        return None;
+    }
+    let command_uuid = value
+        .get("command_uuid")
+        .and_then(Value::as_str)
+        .filter(|uuid| !uuid.is_empty())?
+        .to_string();
+    let state = match value.get("state").and_then(Value::as_str)? {
+        "queued" => CommandState::Queued,
+        "started" => CommandState::Started,
+        "completed" => CommandState::Completed,
+        "cancelled" => CommandState::Cancelled,
+        "discarded" => CommandState::Discarded,
+        "refused" => CommandState::Refused,
+        _ => return None,
+    };
+    Some(CommandLifecycle {
+        command_uuid,
+        state,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 文件回退
+// ---------------------------------------------------------------------------
+
+/// 启用用户消息处文件快照的环境变量；stream-json 模式默认不建快照。
+pub const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
+
+/// 文件回退请求的 request_id 前缀。
+pub const REWIND_FILES_REQUEST_PREFIX: &str = "rewind-files-";
+
+pub fn rewind_files_request(request_id: &str, user_message_id: &str, dry_run: bool) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {
+            "subtype": "rewind_files",
+            "user_message_id": user_message_id,
+            "dry_run": dry_run
+        }
+    })
+}
+
+/// rewind_files 的判决。`can_rewind: false` 时 `error` 带 CLI 原文
+/// （例如该消息没有文件快照）；dry_run 时 `files_changed` 是将被恢复的绝对路径。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RewindFilesResult {
+    pub can_rewind: bool,
+    pub error: Option<String>,
+    pub files_changed: Vec<String>,
+    pub insertions: Option<u64>,
+    pub deletions: Option<u64>,
+}
+
+pub fn parse_rewind_files_result(body: &Value) -> RewindFilesResult {
+    RewindFilesResult {
+        can_rewind: body
+            .get("canRewind")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        error: body.get("error").and_then(Value::as_str).map(String::from),
+        files_changed: body
+            .get("filesChanged")
+            .and_then(Value::as_array)
+            .map(|files| {
+                files
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        insertions: body.get("insertions").and_then(Value::as_u64),
+        deletions: body.get("deletions").and_then(Value::as_u64),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 未知协议面采样
 // ---------------------------------------------------------------------------
 
@@ -461,7 +605,7 @@ pub fn is_known_event(value: &Value) -> bool {
     let subtype = value.get("subtype").and_then(Value::as_str).unwrap_or("");
     match kind {
         "stream_event" | "assistant" | "user" | "result" | "control_response"
-        | "rate_limit_event" | "keep_alive" => true,
+        | "rate_limit_event" | "keep_alive" | "command_lifecycle" => true,
         "system" => matches!(
             subtype,
             "init"
@@ -682,6 +826,85 @@ mod tests {
         let local =
             json!({"type": "system", "subtype": "model_refusal_fallback", "scope": "local"});
         assert_eq!(parse_live_signal(&local), None);
+    }
+
+    #[test]
+    fn mid_turn_message_folds_into_current_turn() {
+        let message = mid_turn_user_message("m-1", vec![json!({"type": "text", "text": "hi"})]);
+        assert_eq!(message["priority"], "next");
+        assert_eq!(message["uuid"], "m-1");
+        assert_eq!(message["message"]["content"][0]["text"], "hi");
+        let cancel = cancel_async_message_request("cancel-inject-1", "m-1");
+        assert_eq!(cancel["request"]["subtype"], "cancel_async_message");
+        assert_eq!(cancel["request"]["message_uuid"], "m-1");
+    }
+
+    #[test]
+    fn command_lifecycle_parses_known_states() {
+        let event = json!({"type": "command_lifecycle", "command_uuid": "m-1", "state": "started", "uuid": "x"});
+        let parsed = parse_command_lifecycle(&event).unwrap();
+        assert_eq!(parsed.command_uuid, "m-1");
+        assert_eq!(parsed.state, CommandState::Started);
+        assert!(!parsed.state.is_terminal());
+        let refused =
+            json!({"type": "command_lifecycle", "command_uuid": "m-2", "state": "refused"});
+        assert!(parse_command_lifecycle(&refused)
+            .unwrap()
+            .state
+            .is_terminal());
+        assert!(is_known_event(&event));
+    }
+
+    #[test]
+    fn command_lifecycle_rejects_malformed_input() {
+        for event in [
+            json!({"type": "command_lifecycle", "state": "queued"}),
+            json!({"type": "command_lifecycle", "command_uuid": "", "state": "queued"}),
+            json!({"type": "command_lifecycle", "command_uuid": "m", "state": "exploded"}),
+            json!({"type": "command_lifecycle", "command_uuid": 3, "state": "queued"}),
+            json!({"type": "result", "command_uuid": "m", "state": "queued"}),
+        ] {
+            assert!(parse_command_lifecycle(&event).is_none(), "{event}");
+        }
+    }
+
+    #[test]
+    fn rewind_files_request_and_preview() {
+        let request = rewind_files_request("rewind-files-3", "u-1", true);
+        assert_eq!(request["request"]["subtype"], "rewind_files");
+        assert_eq!(request["request"]["user_message_id"], "u-1");
+        assert_eq!(request["request"]["dry_run"], true);
+
+        let preview = parse_rewind_files_result(&json!({
+            "canRewind": true,
+            "filesChanged": ["/w/a.txt", "/w/b.txt"],
+            "insertions": 1,
+            "deletions": 2
+        }));
+        assert!(preview.can_rewind);
+        assert_eq!(preview.files_changed, vec!["/w/a.txt", "/w/b.txt"]);
+        assert_eq!((preview.insertions, preview.deletions), (Some(1), Some(2)));
+    }
+
+    #[test]
+    fn rewind_files_result_tolerates_missing_and_wrong_fields() {
+        let refused = parse_rewind_files_result(&json!({
+            "canRewind": false,
+            "error": "No file checkpoint found for this message."
+        }));
+        assert!(!refused.can_rewind);
+        assert!(refused.error.unwrap().contains("checkpoint"));
+        assert!(refused.files_changed.is_empty());
+
+        let malformed = parse_rewind_files_result(&json!({
+            "canRewind": "yes",
+            "filesChanged": "a.txt",
+            "insertions": -1
+        }));
+        assert!(!malformed.can_rewind);
+        assert!(malformed.files_changed.is_empty());
+        assert_eq!(malformed.insertions, None);
+        assert!(!parse_rewind_files_result(&Value::Null).can_rewind);
     }
 
     #[test]

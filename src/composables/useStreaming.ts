@@ -10,6 +10,7 @@ import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/pe
 import { useConfirm } from './useConfirm'
 import { initSessionSignalListeners } from './useSessionSignals'
 import i18n from '../locales'
+import { injectionTransition, type QueueInjectionState } from '@/lib/midTurnInputPolicy'
 import {
   resolveStreamRenderPriority,
   smoothTakeForElapsed,
@@ -80,6 +81,8 @@ export interface PendingQueueItem {
   opts: SendOptions
   status: 'pending' | 'processing' | 'failed'
   error?: string
+  injection?: QueueInjectionState
+  injectionUuid?: string
 }
 
 export interface SessionStreamState {
@@ -1051,6 +1054,11 @@ export async function initStreamListeners(): Promise<void> {
     if (s) {
       processEpoch.set(sid, (processEpoch.get(sid) ?? 0) + 1)
       s.processAlive = false
+      // 插入当前轮次的消息随进程失效：已并入的已在对话里，未并入的退回队列
+      for (const item of [...s.pendingQueue]) {
+        if (item.injection === 'started') s.pendingQueue.splice(s.pendingQueue.indexOf(item), 1)
+        else if (item.injection === 'sending' || item.injection === 'queued') failInjection(item)
+      }
       // live 失效保险:进程已死必无在传 turn,且其记录永无落盘可能——不清则
       // typing-dots 常驻/状态永不 idle/渲染卡 plain(回归审查 R2,已证实)
       let hadLive = false
@@ -1073,6 +1081,11 @@ export async function initStreamListeners(): Promise<void> {
   // toast 由 useNotifications 监听同一事件负责(它反向依赖本模块,不能在此 import)
   await listen<{ session_id: string; active: boolean }>('rc-status', (event) => {
     getStream(event.payload.session_id).rcActive = event.payload.active
+  })
+
+  await listen<{ session_id: string; uuid: string; state: string }>('session-injection', (event) => {
+    const state = streams.get(event.payload?.session_id)
+    if (state && event.payload.uuid) applyInjectionState(state, event.payload.uuid, event.payload.state)
   })
 }
 
@@ -1412,6 +1425,8 @@ function failPendingQueueItem(sessionId: string, id: string, error: string) {
 async function consumePendingQueue(sessionId: string, cwd: string) {
   const state = streams.get(sessionId)
   if (!state || state.streaming || state.pendingQueue.length === 0) return
+  // 插入的消息落定前不发下一条：CLI 可能正要为它另起一轮，抢发会让轮次归属错位
+  if (hasActiveInjection(state)) return
   const priorityId = state.priorityPendingQueueItemId
   const index = priorityId
     ? state.pendingQueue.findIndex(item => item.id === priorityId)
@@ -1430,6 +1445,52 @@ async function consumePendingQueue(sessionId: string, cwd: string) {
     next.error = state.streamError ?? i18n.global.t('session.queueSendFailed')
     if (state.priorityPendingQueueItemId === next.id) state.priorityPendingQueueItemId = null
   }
+}
+
+function hasActiveInjection(state: SessionStreamState): boolean {
+  return state.pendingQueue.some(item => item.injection && item.injection !== 'timed_out')
+}
+
+/** 把队列项插入正在运行的轮次（不中断）；命运由 session-injection 事件推进 */
+async function sendQueuedItemToCurrentTurn(sessionId: string, id: string, cwd: string): Promise<boolean> {
+  const state = streams.get(sessionId)
+  const item = state?.pendingQueue.find(candidate => candidate.id === id)
+  if (!state || !item || item.status === 'processing') return false
+  item.status = 'processing'
+  item.injection = 'sending'
+  delete item.error
+  delete item.injectionUuid
+  try {
+    const message = await prepareReferencedMessage(item.message, cwd)
+    item.injectionUuid = await invoke<string>('inject_streaming_message', {
+      sessionId,
+      message,
+      images: item.opts.images?.length ? item.opts.images : null,
+    })
+    return true
+  } catch {
+    failInjection(item)
+    return false
+  }
+}
+
+function failInjection(item: PendingQueueItem, injection?: QueueInjectionState) {
+  item.status = 'failed'
+  item.error = i18n.global.t('session.queueSendCurrentFailed')
+  if (injection) item.injection = injection
+  else delete item.injection
+}
+
+/** CLI 对插入消息的回报（规则见 injectionTransition） */
+function applyInjectionState(state: SessionStreamState, uuid: string, event: string) {
+  const index = state.pendingQueue.findIndex(item => item.injectionUuid === uuid)
+  if (index < 0) return
+  const item = state.pendingQueue[index]
+  const transition = injectionTransition(item.injection, event)
+  if (transition.kind === 'remove') state.pendingQueue.splice(index, 1)
+  else if (transition.kind === 'set') item.injection = transition.injection
+  else if (transition.kind === 'fail') failInjection(item, transition.injection)
+  else if (transition.kind === 'clear') delete item.injection
 }
 
 /** 中断当前回复（先分离异步任务，再发 interrupt，不杀进程；
@@ -1495,6 +1556,7 @@ export function useStreaming() {
     prioritizePendingQueueItem,
     failPendingQueueItem,
     consumePendingQueue,
+    sendQueuedItemToCurrentTurn,
     removeLandedTurns,
     demoteUnlandedTurns,
   }

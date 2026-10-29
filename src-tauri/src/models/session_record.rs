@@ -225,6 +225,49 @@ pub struct FileHistorySnapshotRecord {
     pub snapshot: Option<Value>,
 }
 
+/// 轮次进行中插入的用户输入：CLI 落盘为 `attachment`（`queued_command`，
+/// `commandMode: "prompt"`），夹在工具结果之后。还原成普通用户消息，
+/// 时间线才能在原位置显示它；uuid / parentUuid 沿用原记录，分支选择不受影响。
+const QUEUED_PROMPT_ORIGIN: &str = "queued_prompt";
+
+fn queued_prompt_record(value: &Value) -> Option<UserRecord> {
+    let attachment = value.get("attachment")?;
+    if attachment.get("type").and_then(Value::as_str) != Some("queued_command") {
+        return None;
+    }
+    if attachment
+        .get("commandMode")
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode != "prompt")
+    {
+        return None;
+    }
+    let content = match attachment.get("prompt")? {
+        Value::String(text) if !text.trim().is_empty() => MessageContent::Text(text.clone()),
+        blocks @ Value::Array(_) => serde_json::from_value(blocks.clone()).ok()?,
+        _ => return None,
+    };
+    let string = |key: &str| value.get(key).and_then(Value::as_str).map(String::from);
+    Some(UserRecord {
+        uuid: string("uuid"),
+        parent_uuid: string("parentUuid"),
+        session_id: string("sessionId"),
+        timestamp: string("timestamp"),
+        cwd: string("cwd"),
+        version: string("version"),
+        git_branch: string("gitBranch"),
+        is_sidechain: value.get("isSidechain").and_then(Value::as_bool),
+        user_type: string("userType"),
+        permission_mode: None,
+        message: Some(UserMessage {
+            role: Some("user".to_string()),
+            content,
+        }),
+        async_meta: None,
+        origin_kind: Some(QUEUED_PROMPT_ORIGIN.to_string()),
+    })
+}
+
 /// 手动反序列化 SessionRecord，因为 JSONL 中的 type 字段值与 Rust 枚举变体不一致
 impl SessionRecord {
     /// 取所有权版本，避免 Value::clone 开销
@@ -312,6 +355,7 @@ impl SessionRecord {
                         content: content.to_string(),
                     })
                 })
+                .or_else(|| queued_prompt_record(&value).map(SessionRecord::User))
                 .or_else(|| {
                     Some(SessionRecord::Unknown {
                         raw_type: "attachment".to_string(),
@@ -411,6 +455,46 @@ mod async_meta_tests {
                 assert!(n.content.contains("<task-id>agent-2</task-id>"));
             }
             other => panic!("expected task notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restores_mid_turn_prompt_as_user_message() {
+        let record = SessionRecord::from_json_owned(
+            serde_json::from_str(
+                r#"{"type":"attachment","uuid":"u-2","parentUuid":"u-1","timestamp":"2026-08-02T10:03:00Z","attachment":{"type":"queued_command","commandMode":"prompt","prompt":"also check the tests","source_uuid":"s-1"}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        match record {
+            SessionRecord::User(user) => {
+                assert_eq!(user.uuid.as_deref(), Some("u-2"));
+                assert_eq!(user.parent_uuid.as_deref(), Some("u-1"));
+                assert_eq!(user.origin_kind.as_deref(), Some("queued_prompt"));
+                match user.message.unwrap().content {
+                    MessageContent::Text(text) => assert_eq!(text, "also check the tests"),
+                    other => panic!("expected text content, got {other:?}"),
+                }
+            }
+            other => panic!("expected user record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_other_queued_commands_unknown() {
+        for raw in [
+            r#"{"type":"attachment","attachment":{"type":"queued_command","commandMode":"bash","prompt":"ls"}}"#,
+            r#"{"type":"attachment","attachment":{"type":"queued_command","commandMode":"prompt","prompt":"   "}}"#,
+            r#"{"type":"attachment","attachment":{"type":"queued_command","commandMode":"prompt","prompt":42}}"#,
+            r#"{"type":"attachment","attachment":{"type":"output_style","prompt":"text"}}"#,
+        ] {
+            let record =
+                SessionRecord::from_json_owned(serde_json::from_str(raw).unwrap()).unwrap();
+            assert!(
+                matches!(record, SessionRecord::Unknown { .. }),
+                "{raw} should stay unknown"
+            );
         }
     }
 

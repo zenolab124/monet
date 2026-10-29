@@ -773,8 +773,11 @@ pub fn load_auto_resume_state() -> Option<String> {
 #[tauri::command]
 pub fn save_auto_resume_state(content: String) -> Result<(), String> {
     serde_json::from_str::<serde_json::Value>(&content).map_err(|e| e.to_string())?;
-    crate::config::atomic_write(&crate::config::data_dir().join("auto-resume.json"), &content)
-        .map_err(|e| e.to_string())
+    crate::config::atomic_write(
+        &crate::config::data_dir().join("auto-resume.json"),
+        &content,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Claude 协议诊断：本机 CLI 版本、已验证版本与未识别协议消息的结构采样
@@ -787,6 +790,31 @@ pub fn get_claude_protocol_diagnostics() -> crate::engines::claude::diagnostics:
 #[tauri::command]
 pub fn set_permission_mode(app: tauri::AppHandle, session_id: String, mode: String) -> Result<(), String> {
     streaming::set_permission_mode(&app, &session_id, &mode)
+}
+
+/// 把消息插入正在运行的轮次（不中断），返回用于关联回报的 uuid
+#[tauri::command]
+pub fn inject_streaming_message(
+    app: tauri::AppHandle,
+    session_id: String,
+    message: String,
+    images: Option<Vec<serde_json::Value>>,
+) -> Result<String, String> {
+    streaming::inject_message(&app, &session_id, &message, images.as_deref())
+}
+
+/// 回退某条用户消息之后的文件改动（dry_run 只预览）
+#[tauri::command]
+pub async fn rewind_files(
+    session_id: String,
+    user_message_id: String,
+    dry_run: bool,
+) -> Result<crate::engines::claude::protocol::RewindFilesResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        streaming::rewind_files(&session_id, &user_message_id, dry_run)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 开关 Remote Control（进程未启动时自动连接）
