@@ -2014,7 +2014,7 @@
     "claudePathPlaceholder": "Leave empty to locate automatically, e.g. /Users/alice/.local/bin/claude",
     "cliTooOld": "The remote CLI is older than 2.1.306, so features that rely on the newer protocol are unavailable.",
     "noSessions": "Connected. There are no Claude Code sessions on this host yet.",
-    "addPlaceholder": "user@host or user@host:port",
+    "addPlaceholder": "user{'@'}host or user{'@'}host:port",
     "add": "Add",
     "check": {
       "ssh": "SSH connection",
@@ -2030,14 +2030,17 @@
       "unsupported_os": "The remote system isn't supported. Only macOS and Linux are supported.",
       "cli_not_found": "claude wasn't found on the remote host. Enter its absolute path above.",
       "data_root_missing": "There's no Claude Code data directory on the remote host. Run claude on that computer once first.",
-      "timeout": "The check timed out after 30 seconds. Check the network and try again."
+      "timeout": "The check timed out after 30 seconds. Check the network and try again.",
+      "cli_path_invalid": "The CLI path you entered doesn’t exist or isn’t executable. Check it, or clear it to let Monet locate claude automatically."
     },
     "error": {
-      "invalid_connection": "Invalid connection string. Use user@host or user@host:port.",
+      "invalid_connection": "Invalid connection string. Use user{'@'}host or user{'@'}host:port.",
       "duplicate_host": "This host has already been added.",
       "invalid_claude_path": "The CLI path must be absolute and can't contain spaces or quotes.",
       "unknown_host": "This host wasn't found. Refresh and try again.",
       "not_manual_host": "Only manually added hosts can be removed. Edit ssh config to change hosts listed there."
-    }
+    },
+    "cliMissingAuto": "not found in PATH or the login shell",
+    "cliMissingUser": "the path you entered doesn’t exist or isn’t executable"
   }
 }

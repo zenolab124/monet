@@ -2014,7 +2014,7 @@
     "claudePathPlaceholder": "留空自动定位，例如 /Users/alice/.local/bin/claude",
     "cliTooOld": "远端 CLI 版本低于 2.1.306，依赖新协议的功能将不可用。",
     "noSessions": "连接正常，这台主机上还没有 Claude Code 会话。",
-    "addPlaceholder": "user@host 或 user@host:port",
+    "addPlaceholder": "user{'@'}host 或 user{'@'}host:port",
     "add": "添加",
     "check": {
       "ssh": "SSH 连接",
@@ -2030,14 +2030,17 @@
       "unsupported_os": "远端系统不受支持，目前只支持 macOS 和 Linux。",
       "cli_not_found": "在远端找不到 claude，请在上方填写它的绝对路径。",
       "data_root_missing": "远端没有 Claude Code 数据目录，请先在那台电脑上运行一次 claude。",
-      "timeout": "检测超时（30 秒），请检查网络后重试。"
+      "timeout": "检测超时（30 秒），请检查网络后重试。",
+      "cli_path_invalid": "填写的 CLI 路径不存在或不可执行，请检查后重新填写，或清空让 Monet 自动定位。"
     },
     "error": {
-      "invalid_connection": "连接串格式无效，请使用 user@host 或 user@host:port。",
+      "invalid_connection": "连接串格式无效，请使用 user{'@'}host 或 user{'@'}host:port。",
       "duplicate_host": "这台主机已经添加过了。",
       "invalid_claude_path": "CLI 路径必须是绝对路径，且不能包含空格或引号。",
       "unknown_host": "找不到这台主机，请刷新后重试。",
       "not_manual_host": "只能移除手动添加的主机；ssh config 中的主机请在配置文件里修改。"
-    }
+    },
+    "cliMissingAuto": "未在 PATH 或登录 shell 中找到",
+    "cliMissingUser": "填写的路径不存在或不可执行"
   }
 }

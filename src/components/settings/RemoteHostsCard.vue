@@ -47,6 +47,14 @@ function errorText(error: unknown): string {
   return text === key ? code : text
 }
 
+/** 用户填写的路径无效时给出不同于“自动定位失败”的提示 */
+function failureKey(report: HealthReport): string {
+  const userPathInvalid = report.items.some(item => item.id === 'cli_path' && item.detail === 'user')
+  return report.failure === 'cli_not_found' && userPathInvalid
+    ? 'remote.failure.cli_path_invalid'
+    : `remote.failure.${report.failure}`
+}
+
 async function loadHosts() {
   hosts.value = await invoke<RemoteHost[]>('list_remote_hosts')
   for (const host of hosts.value) pathDrafts[host.alias] = host.claudePath ?? ''
@@ -175,11 +183,12 @@ onMounted(async () => {
             <li v-for="check in reports[host.alias].items" :key="check.id" class="flex items-start gap-1.5 text-[10.5px]">
               <span :class="[STATE_ICON[check.state], 'w-3 h-3 mt-0.5 shrink-0']" aria-hidden="true" />
               <span class="shrink-0">{{ t(`remote.check.${check.id}`) }}</span>
-              <span v-if="check.detail && check.id !== 'ssh'" class="env-path truncate">{{ check.detail }}</span>
+              <span v-if="check.id === 'cli_path' && check.state === 'fail'" class="text-muted-foreground">{{ t(check.detail === 'user' ? 'remote.cliMissingUser' : 'remote.cliMissingAuto') }}</span>
+              <span v-else-if="check.detail && check.id !== 'ssh'" class="env-path truncate">{{ check.detail }}</span>
             </li>
           </ul>
           <p v-if="reports[host.alias]?.failure" class="mt-1 text-[10.5px] text-destructive leading-snug">
-            {{ t(`remote.failure.${reports[host.alias].failure}`, { alias: host.alias }) }}
+            {{ t(failureKey(reports[host.alias]), { alias: host.alias }) }}
           </p>
           <p v-else-if="reports[host.alias]?.items.some(item => item.state === 'warn')" class="mt-1 text-[10.5px] text-accent leading-snug">
             {{ t('remote.cliTooOld') }}
