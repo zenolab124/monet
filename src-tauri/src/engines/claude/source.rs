@@ -372,9 +372,12 @@ impl SessionSource for ClaudeSource {
     fn session_actions(&self, session: SessionRef) -> EngineFuture<'_, SessionActions> {
         Box::pin(async move {
             self.owns_session(&session)?;
-            let (_, summary) = self.find_session(session.native_id())?;
+            let (project_id, summary) = self.find_session(session.native_id())?;
             if self.mirror_root.is_some() {
-                return Ok(remote_mirror_actions());
+                let gone = self
+                    .remote_missing()
+                    .contains(&format!("{project_id}/{}.jsonl", session.native_id()));
+                return Ok(remote_session_actions(gone));
             }
             let runtime_available = crate::claude_locator::locate_lightweight().is_ok();
             let cwd_available = summary
@@ -406,15 +409,22 @@ impl SessionSource for ClaudeSource {
     }
 }
 
-/// 远端镜像会话：运行时接入前只能查看；cwd 在远端机器上，本机无法打开
-fn remote_mirror_actions() -> SessionActions {
-    let pending = ActionAvailability::unavailable("engine.remote.runtimePending");
+/// 远端会话：在远端启动 CLI 续聊；远端已删除的只剩镜像副本，不能续聊。
+/// 分叉一期不做；cwd 在远端机器上，本机无法打开
+fn remote_session_actions(gone: bool) -> SessionActions {
+    let resume = if gone {
+        ActionAvailability::unavailable("engine.remote.sessionMissing")
+    } else {
+        ActionAvailability::available()
+    };
     SessionActions {
-        resume: pending.clone(),
-        fork: pending.clone(),
-        send: pending.clone(),
-        send_while_running: pending.clone(),
-        interrupt: pending,
+        resume: resume.clone(),
+        fork: ActionAvailability::unavailable("engine.remote.forkUnsupported"),
+        send: resume,
+        send_while_running: ActionAvailability::unavailable(
+            "engine.claude.sendWhileRunningUnavailable",
+        ),
+        interrupt: ActionAvailability::available(),
         open_cwd: ActionAvailability::unavailable("engine.remote.localOnly"),
     }
 }

@@ -30,7 +30,8 @@ describe('native controller instance pass-through', () => {
     const race = source('../../src/composables/useRaceInput.ts')
     const workbench = source('../../src/composables/useWorkbench.ts')
 
-    expect(picker).toContain('promotePendingTaskToDraft(props.sessionId, choice.descriptor.instance)')
+    expect(picker).toContain('promotePendingTaskToDraft(props.sessionId, instance)')
+    expect(picker).toContain('stageDraftSession(props.cwd, nativeSessionId, instance)')
     expect(column).toContain('registerFork(newSessionId, props.column.sessionId, session.cwd, nativeInstance.value)')
     expect(column).toContain('createDraftSession(cwd, nativeInstance.value)')
     expect(column).toContain(':current-instance-key="currentInstanceKey"')

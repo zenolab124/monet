@@ -24,6 +24,7 @@ import {
 import { respondInteraction as respondEngineInteraction } from '@/engines/client'
 import { sessionUiId } from '@/engines/integration'
 import type { InteractionRef, InteractionRequest, RuntimeEventEnvelope } from '@/engines/types'
+import { describeStreamError } from '@/utils/streamErrorText'
 
 /**
  * 应用内通知层(FR-006/007/008/010)
@@ -340,7 +341,8 @@ export async function initNotificationLayer(): Promise<void> {
   onStreamFinished((sessionId, hasError) => {
     const title = sessionTitle(sessionId)
     if (hasError) {
-      const err = getStream(sessionId).streamError ?? i18n.global.t('notification.streamError')
+      const streamError = getStream(sessionId).streamError
+      const err = streamError ? describeStreamError(streamError) : i18n.global.t('notification.streamError')
       upsertErrorEvent(sessionId, err, 'stream')
       void maybeNotifySystem(i18n.global.t('notification.errorStopped'), `${title} · ${err.slice(0, 60)}`)
     } else {

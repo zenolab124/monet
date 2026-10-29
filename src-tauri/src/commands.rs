@@ -699,10 +699,21 @@ pub async fn start_streaming(
     permission_mode: Option<String>,
     session_capabilities: Option<Vec<crate::session_capabilities::SessionCapabilityId>>,
     force_new: Option<bool>,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+    native_session_id: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let session_capabilities = session_capabilities.unwrap_or_default();
         let force_new = force_new.unwrap_or(false);
+        // 远端实例：进程键仍是界面会话 id（事件按它投递），CLI 会话 id 用原生 uuid
+        let remote = match instance.filter(is_remote_claude) {
+            Some(instance) => Some(crate::engines::claude::remote::launch::resolve(
+                &instance,
+                native_session_id.as_deref().unwrap_or(&session_id),
+                &cwd,
+            )?),
+            None => None,
+        };
         let first = streaming::send_message(
             &app,
             &session_id,
@@ -720,6 +731,7 @@ pub async fn start_streaming(
             permission_mode.as_deref(),
             session_capabilities.clone(),
             force_new,
+            remote.as_ref(),
         );
         match first {
             Err(error_message)
@@ -748,6 +760,7 @@ pub async fn start_streaming(
                     permission_mode.as_deref(),
                     session_capabilities,
                     force_new,
+                    remote.as_ref(),
                 )
             }
             result => result,
@@ -914,7 +927,7 @@ pub struct ExternalSessionInfo {
 /// 2. session_id 以独立 token 出现（而非 `<sid>.jsonl` 之类的子串）
 ///
 /// 因此 `tail -f ~/.claude/projects/x/<sid>.jsonl`、`vim <sid>.jsonl`、`grep <sid> ~/.claude/…` 均不命中。
-fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
+pub(crate) fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
     let tokens: Vec<&str> = cmd.split_whitespace().collect();
     let has_claude_bin = tokens.iter().any(|t| t.rsplit('/').next().unwrap_or(t) == "claude");
     if !has_claude_bin {
@@ -987,8 +1000,37 @@ pub fn has_own_process(session_id: String) -> Option<i64> {
 
 /// 检测某会话是否有**外部** claude CLI 进程在运行，并解析归属方。
 /// 排除 Monet 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
+/// 远端实例读远端进程列表（同一主机 5 秒内共用一次），owner 为主机名；读不到时按未运行处理。
 #[tauri::command]
-pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
+pub async fn check_session_running(
+    session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+    native_session_id: Option<String>,
+) -> ExternalSessionInfo {
+    if let Some(instance) = instance.filter(is_remote_claude) {
+        let own = crate::streaming::get_own_remote_pid(&session_id);
+        let cli_session_id = native_session_id.unwrap_or(session_id);
+        return tauri::async_runtime::spawn_blocking(move || {
+            let pid = crate::engines::claude::remote::launch::external_session_pid(
+                &instance,
+                &cli_session_id,
+                own,
+            )
+            .ok()
+            .flatten();
+            ExternalSessionInfo {
+                running: pid.is_some(),
+                pid,
+                owner: pid.and(crate::engines::claude::remote::launch::alias_for(&instance)),
+            }
+        })
+        .await
+        .unwrap_or(ExternalSessionInfo {
+            running: false,
+            pid: None,
+            owner: None,
+        });
+    }
     match scan_external_claude(&session_id, false).first() {
         Some(&pid) => {
             let owner = resolve_owner(pid, &crate::proc_scan::process_table_cached());
@@ -1281,6 +1323,12 @@ fn session_path(project_id: &str, session_id: &str) -> PathBuf {
         .join(format!("{}.jsonl", session_id))
 }
 
+/// Claude Code 的非本机实例（远端主机）
+fn is_remote_claude(instance: &crate::engines::core::EngineInstanceId) -> bool {
+    instance.engine_id() == crate::engines::claude::ENGINE_ID
+        && instance.instance_id() != crate::engines::claude::DEFAULT_INSTANCE_ID
+}
+
 /// 按实例定位会话文件：缺省或本机实例读本机数据根；远端实例读它的只读镜像。
 /// 镜像路径只接受 `<项目目录>/<会话 id>.jsonl`，不合规时返回不存在的路径（读到空）
 fn session_path_for(
@@ -1288,11 +1336,7 @@ fn session_path_for(
     project_id: &str,
     session_id: &str,
 ) -> PathBuf {
-    let remote = instance.filter(|instance| {
-        instance.engine_id() == crate::engines::claude::ENGINE_ID
-            && instance.instance_id() != crate::engines::claude::DEFAULT_INSTANCE_ID
-    });
-    let Some(instance) = remote else {
+    let Some(instance) = instance.filter(|instance| is_remote_claude(instance)) else {
         return session_path(project_id, session_id);
     };
     let rel = format!("{project_id}/{session_id}.jsonl");
@@ -1573,7 +1617,10 @@ mod session_path_tests {
         );
         assert_eq!(
             subagents_dir_for(None, "-p", "s1"),
-            crate::config::projects_dir().join("-p").join("s1").join("subagents")
+            crate::config::projects_dir()
+                .join("-p")
+                .join("s1")
+                .join("subagents")
         );
         assert!(!subagents_dir_for(Some(&remote), "..", "s1").starts_with(root.join("projects")));
     }

@@ -246,6 +246,44 @@ impl PermissionService {
         }
     }
 
+    /// stdio 权限通道（远端会话）：CLI 以 `can_use_tool` 控制请求发来，决策由 `reply` 写回同一 stdin。
+    /// 与 monet-mcp 通道共用待决表、前端事件和停止语义。会话没有登记权限服务时返回 false。
+    pub fn request_via_stdio(
+        app: &AppHandle,
+        session_id: &str,
+        tool_name: String,
+        input: Value,
+        reply: impl FnOnce(Value) + Send + 'static,
+    ) -> bool {
+        let service = SERVICES
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|m| m.get(session_id).cloned());
+        let Some(service) = service else {
+            return false;
+        };
+        let app = app.clone();
+        let sid = session_id.to_string();
+        thread::spawn(move || {
+            let original = input.clone();
+            let mut resp = await_decision(
+                &app,
+                &sid,
+                &service.pending,
+                &service.stop_flag,
+                tool_name,
+                input,
+            );
+            // stdio 通道放行时必须带 updatedInput；缺省回填原始输入（与 monet-mcp 一致）
+            if resp["behavior"] == "allow" && resp.get("updatedInput").is_none() {
+                resp["updatedInput"] = original;
+            }
+            reply(resp);
+        });
+        true
+    }
+
     /// 内部：置停止位 + 踢醒 accept 线程 + deny 全部 pending
     fn shutdown(&self) {
         self.stop_flag.store(true, Ordering::SeqCst);
@@ -367,6 +405,26 @@ fn handle_connection(
         .to_string();
     let input = req.get("input").cloned().unwrap_or_else(|| json!({}));
 
+    let resp = await_decision(&app, &session_id, &pending, &stop_flag, tool_name, input);
+    let mut out = stream;
+    let line = serde_json::to_string(&resp).map_err(|e| e.to_string())?;
+    out.write_all(line.as_bytes())
+        .map_err(|e| format!("写响应失败：{}", e))?;
+    out.write_all(b"\n").map_err(|e| e.to_string())?;
+    out.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 登记一次待决权限请求、通知前端并阻塞等待决定，返回给 CLI 的应答体。
+/// monet-mcp 连接与 stdio 控制请求两条通道共用：前端事件、观察者通知和中断时自动拒绝的语义一致。
+fn await_decision(
+    app: &AppHandle,
+    session_id: &str,
+    pending: &Arc<Mutex<HashMap<String, Arc<PendingRequest>>>>,
+    stop_flag: &Arc<std::sync::atomic::AtomicBool>,
+    tool_name: String,
+    input: Value,
+) -> Value {
     let request_id = format!("perm-{}", REQ_COUNTER.fetch_add(1, Ordering::Relaxed));
     let pending_req = Arc::new(PendingRequest {
         decision: Mutex::new(None),
@@ -381,7 +439,7 @@ fn handle_connection(
     // emit 给前端
     let payload = PermissionRequestPayload {
         request_id: request_id.clone(),
-        session_id: session_id.clone(),
+        session_id: session_id.to_string(),
         tool_name: tool_name.clone(),
         input: input.clone(),
         timestamp: SystemTime::now()
@@ -392,13 +450,13 @@ fn handle_connection(
     let _ = app.emit("permission-request", &payload);
     notify_observers(PermissionObserverEvent::Requested {
         request_id: request_id.clone(),
-        session_id: session_id.clone(),
+        session_id: session_id.to_string(),
         tool_name,
         input,
     });
 
     // 永不超时:阻塞等用户响应或服务停止(中断收尾会唤醒并按 deny 写回)
-    let final_decision = wait_decision(&pending_req, &stop_flag);
+    let final_decision = wait_decision(&pending_req, stop_flag);
 
     // 移除 pending
     pending.lock().unwrap().remove(&request_id);
@@ -406,11 +464,11 @@ fn handle_connection(
     // 终结通知:用户决策、中断自动拒绝、服务停止三条路径都经此处,不持锁
     notify_observers(PermissionObserverEvent::Resolved {
         request_id: request_id.clone(),
-        session_id,
+        session_id: session_id.to_string(),
     });
 
     // 写回响应
-    let resp = match final_decision {
+    match final_decision {
         Decision::Allow(updated_input, updated_permissions) => {
             let mut o = json!({ "behavior": "allow" });
             if let Some(u) = updated_input {
@@ -422,14 +480,7 @@ fn handle_connection(
             o
         }
         Decision::Deny(msg) => json!({ "behavior": "deny", "message": msg }),
-    };
-    let mut out = stream;
-    let line = serde_json::to_string(&resp).map_err(|e| e.to_string())?;
-    out.write_all(line.as_bytes())
-        .map_err(|e| format!("写响应失败：{}", e))?;
-    out.write_all(b"\n").map_err(|e| e.to_string())?;
-    out.flush().map_err(|e| e.to_string())?;
-    Ok(())
+    }
 }
 
 /// 阻塞等待决策（condvar 挂起，永不超时）：命中用户响应或服务停止两者之一返回。

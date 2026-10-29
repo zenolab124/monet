@@ -2,7 +2,13 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Project, SessionSummary, WorkspaceContext } from '@/types'
 import type { SessionRef } from '@/engines/types'
-import { sessionUiId } from '@/engines/integration'
+import { LOCAL_CLAUDE_INSTANCE, sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
+import { sameInstance } from '@/engines/identity'
+
+/** 工作区解析读本机文件系统；远端主机的会话目录在另一台电脑上，不参与 */
+function resolvesLocally(reference: SessionRef): boolean {
+  return !usesNativeSessionSurface(reference.engine) || sameInstance(reference.engine, LOCAL_CLAUDE_INSTANCE)
+}
 
 interface WorkspaceResolveResult {
   session: SessionRef
@@ -22,7 +28,7 @@ function applyKnownContexts(projects: Project[]) {
 async function refreshWorkspaceContexts(projects: Project[]): Promise<void> {
   applyKnownContexts(projects)
   const requests = projects.flatMap(project => project.sessions
-    .filter((session): session is SessionSummary & { reference: SessionRef } => !!session.reference)
+    .filter((session): session is SessionSummary & { reference: SessionRef } => !!session.reference && resolvesLocally(session.reference))
     .map(session => ({
       session: session.reference,
       cwd: session.cwd,

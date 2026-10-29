@@ -1884,8 +1884,10 @@
       "exited": "已退出"
     },
     "remote": {
-      "runtimePending": "远端续聊尚未接入",
-      "mirrorPending": "远端会话同步尚未接入",
+      "cliTooOld": "远端 CLI 版本过低，无法在远端续聊",
+      "sessionMissing": "远端主机上已没有这个会话，只能查看镜像副本",
+      "forkUnsupported": "远端会话暂不支持分叉",
+      "mirrorPending": "远端会话还没有同步过",
       "unreachable": "无法连接到远端主机",
       "authFailed": "SSH 认证失败",
       "hostKeyUntrusted": "远端主机密钥未被信任",
@@ -2062,7 +2064,19 @@
     "cliMissingAuto": "未在 PATH 或登录 shell 中找到",
     "cliMissingUser": "填写的路径不存在或不可执行",
     "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。",
-    "sessionReadOnly": "这是远端主机上的会话，目前只能查看；在 Monet 里继续对话的功能尚未接入。",
+    "sessionReadOnly": "远端 CLI 暂不可用（离线、未找到或版本过低），这个会话目前只能查看。",
+    "runningOnHost": "会话正在 {alias} 上运行，实时跟随中（远端进程结束后可继续输入）",
+    "disconnected": "与 {alias} 的连接已断开。已收到的内容已保留，排队的消息暂停发送；重新发送会从远端已保存的位置继续。",
+    "cwdNotOnHost": "这个目录不是 {host} 上已有的项目，远端新建只能选该主机已有项目的目录。",
+    "launchError": {
+      "REMOTE_CWD_MISSING": "远端目录不存在，消息已放回输入框。",
+      "REMOTE_UNKNOWN_HOST": "找不到这台远端主机，可能已在设置里移除。",
+      "REMOTE_INVALID_CONNECTION": "远端主机的连接配置无效。",
+      "REMOTE_INVALID_SESSION": "会话 id 无效，无法在远端启动。",
+      "REMOTE_CLI_UNAVAILABLE": "远端 CLI 不可用，请在设置里重新检测这台主机。{detail}",
+      "REMOTE_PID_INVALID": "远端启动脚本返回了无法识别的进程号。",
+      "REMOTE_SESSION_NOT_LOCAL": "这是远端主机的会话，不能在本机启动。"
+    },
     "sessionMissing": "远端主机上已经没有这个会话了，这里显示的是 Monet 保留的镜像副本，只能查看。",
     "syncNow": "立即同步",
     "syncing": "同步中…",

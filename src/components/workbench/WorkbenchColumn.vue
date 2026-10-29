@@ -107,14 +107,17 @@ const sessionSummary = computed<SessionSummary | null>(() => {
 const useNativeDetail = computed(() => !pendingTask.value
   && (!sessionSummary.value?.engine || usesNativeSessionSurface(sessionSummary.value.engine)))
 const engineDescriptor = computed(() => {
-  const instance = sessionSummary.value?.engine
+  // 未落盘的原生草稿没有摘要，按草稿登记的实例取能力（远端主机的新会话也不提供本机开关）
+  const instance = sessionSummary.value?.engine ?? nativeDraftInstance(props.column.sessionId)
   return instance ? engines.value.find(item => sameInstance(item.instance, instance)) ?? null : null
 })
 const runtimeCapabilities = computed(() => engineDescriptor.value
   ? engineDescriptor.value.capabilities.runtime ?? null
   : undefined)
-/** 原生列且有运行时：远端镜像会话不提供 RC / Chrome 这类运行期开关 */
-const nativeRuntime = computed(() => useNativeDetail.value && runtimeCapabilities.value !== null)
+/** 原生列、有运行时且用本机配置：RC / Chrome 这类开关只对本机实例有意义（远端主机用它自己的设置） */
+const nativeRuntime = computed(() => useNativeDetail.value
+  && runtimeCapabilities.value !== null
+  && engineDescriptor.value?.capabilities.facets.configuration !== false)
 const workbenchActions = computed(() => resolveWorkbenchEngineActions(
   runtimeCapabilities.value,
   useNativeDetail.value,

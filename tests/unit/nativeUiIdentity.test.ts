@@ -7,7 +7,7 @@ import {
   sessionUiId,
   usesNativeSessionSurface,
 } from '../../src/engines/integration'
-import { projectKey, sessionKey } from '../../src/engines/identity'
+import { parseSessionKey, projectKey, sessionKey } from '../../src/engines/identity'
 import type { EngineDescriptor, EngineInstanceId } from '../../src/engines/types'
 
 const second: EngineInstanceId = { engineId: 'claude-code', instanceId: 'second-a' }
@@ -52,5 +52,15 @@ describe('native UI identity across instances', () => {
     expect(projectUiId(mirrored)).toBe(projectKey(mirrored))
     expect(sessionUiId(mirrored)).not.toBe(sessionUiId(local))
     expect(usesNativeSessionSurface(second)).toBe(true)
+  })
+})
+
+describe('structured session ids', () => {
+  it('round-trips through parseSessionKey and rejects anything else', () => {
+    const reference = { engine: second, nativeId: '0b5c7e2a-1111-4222-8333-444455556666' }
+    expect(parseSessionKey(sessionKey(reference))).toEqual(reference)
+    expect(parseSessionKey('0b5c7e2a-1111-4222-8333-444455556666')).toBeNull()
+    expect(parseSessionKey(projectKey(reference))).toBeNull()
+    expect(parseSessionKey('sr1.!!.x.y')).toBeNull()
   })
 })

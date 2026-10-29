@@ -116,6 +116,62 @@ pub fn remote_sh_command(script: &str) -> String {
     format!("exec /bin/sh -c {}", sh_quote(script))
 }
 
+/// 长活会话（远端 claude 进程）的 ssh 参数，与一次性命令有两处不同：
+/// - 只复用已有的连接复用主进程，自己不当主进程：后台主进程会继承管道写端，
+///   会话结束后 stdout 迟迟等不到 EOF；
+/// - 开启心跳：连接中断 45 秒内 ssh 以 255 退出，会话据此显示断线。
+pub fn session_ssh_args(
+    target: &SshTarget,
+    control_path: Option<&str>,
+    remote_command: &str,
+) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-T",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    if let Some(path) = control_path {
+        args.push("-o".into());
+        args.push("ControlMaster=no".into());
+        args.push("-o".into());
+        args.push(format!("ControlPath={path}"));
+    }
+    if let Some(port) = target.port {
+        args.push("-p".into());
+        args.push(port.to_string());
+    }
+    args.push("--".into());
+    args.push(target.destination.clone());
+    args.push(remote_command.to_string());
+    args
+}
+
+/// 构造运行远端会话脚本的本机进程：通常是 ssh；调试版回环时直接用本机 `/bin/sh`
+pub fn session_command(target: &SshTarget, script: &str, loopback: bool) -> Command {
+    if loopback && cfg!(debug_assertions) {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(script);
+        return command;
+    }
+    let control = control_path();
+    let mut command = Command::new(SSH_BIN);
+    command.args(session_ssh_args(
+        target,
+        control.as_deref(),
+        &remote_sh_command(script),
+    ));
+    command
+}
+
 pub struct SshExecutor;
 
 fn spawn_reader(mut stream: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
@@ -233,6 +289,21 @@ impl RemoteExecutor for LocalShellExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_ssh_args_never_become_the_control_master() {
+        let target = SshTarget {
+            destination: "devbox".into(),
+            port: None,
+        };
+        let args = session_ssh_args(&target, Some("/tmp/c/%C"), "exec /bin/sh -c 'x'");
+        assert!(args.contains(&"ControlMaster=no".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("ControlPersist")));
+        assert!(args.contains(&"ServerAliveInterval=15".to_string()));
+        assert!(args.contains(&"BatchMode=yes".to_string()));
+        let dash = args.iter().position(|a| a == "--").unwrap();
+        assert_eq!(args.len(), dash + 3);
+    }
 
     #[test]
     fn sh_quote_escapes_single_quotes() {

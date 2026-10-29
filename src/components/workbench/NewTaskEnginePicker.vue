@@ -26,6 +26,7 @@ const { engines, health, loading, errors, refreshEngines } = useEngines()
 const { channels, defaultSessionChannels } = useChannels()
 const {
   promotePendingTaskToDraft,
+  stageDraftSession,
   stageEngineDraft,
   replaceWorkbenchSession,
   discardStagedSession,
@@ -84,8 +85,23 @@ async function selectEngine(choiceId: string) {
   selectingEngine.value = choice.id
   error.value = null
   try {
-    if (usesNativeSessionSurface(choice.descriptor.instance)) {
-      if (!promotePendingTaskToDraft(props.sessionId, choice.descriptor.instance)) throw new Error(t('workbench.enginePicker.expired'))
+    const instance = choice.descriptor.instance
+    const nativeId = crypto.randomUUID()
+    const nativeSessionId = sessionUiId({ engine: instance, nativeId })
+    if (usesNativeSessionSurface(instance) && nativeSessionId !== nativeId) {
+      // 结构化身份的原生实例（远端主机）：目录必须是该实例已有的项目（不浏览远端文件夹），
+      // 草稿 id 用结构化 id 包住新 uuid，会话落盘后界面 id 不变
+      const known = projects.value.some(project => project.engine
+        && sameInstance(project.engine, instance)
+        && projectCwd(project) === props.cwd)
+      if (!known) throw new Error(t('remote.cwdNotOnHost', { host: choice.descriptor.displayName }))
+      const replacementSessionId = stageDraftSession(props.cwd, nativeSessionId, instance)
+      if (!replaceWorkbenchSession(props.sessionId, replacementSessionId)) {
+        discardStagedSession(replacementSessionId)
+        throw new Error(t('workbench.enginePicker.expired'))
+      }
+    } else if (usesNativeSessionSurface(instance)) {
+      if (!promotePendingTaskToDraft(props.sessionId, instance)) throw new Error(t('workbench.enginePicker.expired'))
     } else {
       await refreshChannels()
       const attachedChannel = defaultChannelForEngine(choice.descriptor)

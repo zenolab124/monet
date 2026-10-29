@@ -6,6 +6,8 @@ import { hasReportedUsage, shouldReplaceUsage, type ContentBlock } from '@/types
 import { triggerMetaGeneration } from './useSessionMeta'
 import { collectSessionCapabilities } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
+import type { EngineInstanceId } from '@/engines/types'
+import { REMOTE_DISCONNECTED_PREFIX } from '@/utils/streamErrorText'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import { useConfirm } from './useConfirm'
 import { initSessionSignalListeners } from './useSessionSignals'
@@ -45,7 +47,10 @@ export interface SendOptions {
   permissionMode?: string
   /** 跳过断链校验，强制以新会话语义打开（用户确认"仍新建"后重发时置 true） */
   forceNew?: boolean
+  /** 远端主机的会话：CLI 在远端启动。进程键仍是界面会话 id（事件按它投递），CLI 会话 id 用原生 uuid */
+  remote?: { instance: EngineInstanceId; nativeSessionId: string }
 }
+
 
 export interface StreamingTurn {
   messageId: string
@@ -1303,7 +1308,8 @@ async function sendMessage(
   state.tail = []
   state.lastSent = { cwd, message, opts }
   try {
-    const preparedMessage = await prepareReferencedMessage(message, cwd)
+    // @ 文件引用读的是本机文件；远端会话的目录在另一台电脑上，原样发送
+    const preparedMessage = opts.remote ? message : await prepareReferencedMessage(message, cwd)
     await invoke('start_streaming', {
       sessionId,
       cwd,
@@ -1318,8 +1324,10 @@ async function sendMessage(
       extraArgs: opts.extraArgs || null,
       images: opts.images?.length ? opts.images : null,
       permissionMode: opts.permissionMode ?? null,
-      sessionCapabilities: collectSessionCapabilities(),
+      sessionCapabilities: opts.remote ? [] : collectSessionCapabilities(),
       forceNew: opts.forceNew ?? false,
+      instance: opts.remote?.instance ?? null,
+      nativeSessionId: opts.remote?.nativeSessionId ?? null,
     })
   } catch (e) {
     const err = String(e)
@@ -1425,6 +1433,7 @@ function failPendingQueueItem(sessionId: string, id: string, error: string) {
 async function consumePendingQueue(sessionId: string, cwd: string) {
   const state = streams.get(sessionId)
   if (!state || state.streaming || state.pendingQueue.length === 0) return
+  if (state.streamError?.startsWith(REMOTE_DISCONNECTED_PREFIX)) return
   // 插入的消息落定前不发下一条：CLI 可能正要为它另起一轮，抢发会让轮次归属错位
   if (hasActiveInjection(state)) return
   const priorityId = state.priorityPendingQueueItemId

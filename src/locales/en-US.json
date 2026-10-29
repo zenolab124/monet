@@ -1884,8 +1884,10 @@
       "exited": "Exited"
     },
     "remote": {
-      "runtimePending": "Continuing remote sessions isn't available yet",
-      "mirrorPending": "Remote session sync isn't available yet",
+      "cliTooOld": "The remote CLI is too old to continue sessions there",
+      "sessionMissing": "This session no longer exists on the remote host; only the mirrored copy can be viewed",
+      "forkUnsupported": "Forking remote sessions isn't supported yet",
+      "mirrorPending": "Remote sessions haven't been synced yet",
       "unreachable": "Can't connect to the remote host",
       "authFailed": "SSH authentication failed",
       "hostKeyUntrusted": "The remote host key isn't trusted",
@@ -2062,7 +2064,19 @@
     "cliMissingAuto": "not found in PATH or the login shell",
     "cliMissingUser": "the path you entered doesn’t exist or isn’t executable",
     "restartHint": "After enabling or disabling a host, restart Monet for it to appear in or leave the engine list.",
-    "sessionReadOnly": "This session is on a remote host and is read-only for now; continuing it from Monet isn't available yet.",
+    "sessionReadOnly": "The remote CLI is unavailable (offline, not found, or too old), so this session is read-only for now.",
+    "runningOnHost": "Session running on {alias}, following in real time (you can type after the remote process ends)",
+    "disconnected": "Lost the connection to {alias}. Output received so far is kept and queued messages are paused; sending again continues from what the remote host saved.",
+    "cwdNotOnHost": "This folder isn't an existing project on {host}. New remote sessions can only use folders of that host's existing projects.",
+    "launchError": {
+      "REMOTE_CWD_MISSING": "The folder doesn't exist on the remote host. Your message is back in the input box.",
+      "REMOTE_UNKNOWN_HOST": "This remote host can't be found; it may have been removed in Settings.",
+      "REMOTE_INVALID_CONNECTION": "The connection settings for this remote host are invalid.",
+      "REMOTE_INVALID_SESSION": "The session id is invalid, so it can't be started on the remote host.",
+      "REMOTE_CLI_UNAVAILABLE": "The remote CLI is unavailable. Re-check this host in Settings. {detail}",
+      "REMOTE_PID_INVALID": "The remote launch script reported an unrecognised process id.",
+      "REMOTE_SESSION_NOT_LOCAL": "This session belongs to a remote host and can't be started on this Mac."
+    },
     "sessionMissing": "This session no longer exists on the remote host. You are viewing the copy Monet kept, read-only.",
     "syncNow": "Sync now",
     "syncing": "Syncing…",

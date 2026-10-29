@@ -12,7 +12,7 @@ import { readMigratedStorage } from '../utils/storageMigrate'
 import { resolveSessionRef } from '@/engines/directory'
 import type { EngineInstanceId, ProjectRef, SessionRef } from '@/engines/types'
 import { sameInstance } from '@/engines/identity'
-import { LOCAL_CLAUDE_INSTANCE } from '@/engines/integration'
+import { LOCAL_CLAUDE_INSTANCE, sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
 import { clearEngineRunConfig, evictEngineRunConfig } from '@/engines/runConfig'
 import { clearRuntimeOptimisticInputs } from '@/engines/runtimeOptimisticInput'
 import { reorderWorkbenchTabs } from '@/utils/workbenchTabs'
@@ -703,7 +703,7 @@ function openSessionInTab(sessionId: string, targetTabId?: string): OpenResult {
  * 之后 watcher 刷新 projects,草稿被 pruneDrafts 收割,显示自动切换真实数据。
  */
 function createDraftSession(cwd: string, instance?: EngineInstanceId | null): string {
-  const sessionId = crypto.randomUUID()
+  const sessionId = nativeDraftId(instance)
   state.value.drafts[sessionId] = cwd
   rememberNativeDraftInstance(sessionId, instance)
   openSession(sessionId)
@@ -716,6 +716,17 @@ function createPendingTask(cwd: string): string {
   state.value.pendingTasks[sessionId] = cwd
   openSession(sessionId)
   return sessionId
+}
+
+/**
+ * 原生草稿的界面 id：本机实例就是 CLI 会话 uuid；其他实例（远端主机）用结构化 id 包住新 uuid，
+ * 会话落盘后列表里的界面 id 与草稿一致，流式状态与列不必换 id。
+ */
+function nativeDraftId(instance?: EngineInstanceId | null): string {
+  const nativeId = crypto.randomUUID()
+  return instance && !sameInstance(instance, LOCAL_CLAUDE_INSTANCE)
+    ? sessionUiId({ engine: instance, nativeId })
+    : nativeId
 }
 
 /** 记录原生草稿所属实例;本机实例不落字段,保持旧数据形状。 */
@@ -744,7 +755,7 @@ function pendingTaskCwd(sessionId: string): string | null {
 /** 登记原生引擎空白草稿但不改变 Tab；赛马切换会原位接管列归属。 */
 function stageDraftSession(
   cwd: string,
-  sessionId = crypto.randomUUID(),
+  sessionId: string = crypto.randomUUID(),
   instance?: EngineInstanceId | null,
 ): string {
   state.value.drafts[sessionId] = cwd
@@ -942,7 +953,11 @@ function teardownSession(sessionId: string) {
   if (!stillReferenced) {
     const pendingTask = state.value.pendingTasks[sessionId]
     const engineSession = resolveSessionRef(sessionId) ?? state.value.engineDrafts[sessionId]?.reference
-    if (engineSession) invoke('engine_close_session', { session: engineSession }).catch(() => {})
+    // 远端主机的会话由原生控制器的长活进程承载（没有中立运行时），按进程键关闭并清理远端进程
+    const remoteNative = !!engineSession
+      && usesNativeSessionSurface(engineSession.engine)
+      && !sameInstance(engineSession.engine, LOCAL_CLAUDE_INSTANCE)
+    if (engineSession && !remoteNative) invoke('engine_close_session', { session: engineSession }).catch(() => {})
     else if (!pendingTask) invoke('close_session', { sessionId }).catch(() => {})
     // 会话彻底离开工作台 = 关闭语义:其挂载的运行命令一并停止(切走/收起不触发)
     useRunners().stopAllForSession(sessionId).catch(() => {})

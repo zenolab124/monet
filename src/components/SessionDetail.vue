@@ -21,6 +21,7 @@ import {
   sessionRenderCadence,
   type PendingQueueItem,
 } from '@/composables/useStreaming'
+import { describeStreamError } from '@/utils/streamErrorText'
 import { useSessionSettings, type ChannelMark } from '@/composables/useSessionSettings'
 import { useStickyUserPrompt } from '@/composables/useStickyUserPrompt'
 import { useRunConfig } from '@/composables/useRunConfig'
@@ -44,6 +45,8 @@ import {
 } from '@/composables/useSlashCommands'
 import { useModelOptions } from '@/composables/useModelOptions'
 import { LOCAL_CLAUDE_INSTANCE, resolveNativeInstance } from '@/engines/integration'
+import { instanceKey, parseSessionKey } from '@/engines/identity'
+import { useEngines } from '@/engines/useEngines'
 import { sameInstance } from '@/engines/identity'
 import type { EngineInstanceId } from '@/engines/types'
 import { useComposerCommands } from '@/composables/useComposerCommands'
@@ -168,9 +171,9 @@ const { t, locale } = useI18n()
 const { confirm: confirmDialog } = useConfirm()
 
 /** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
-// 远端实例的会话在远端运行时接入前只读（输入、回退文件等交互全部关闭），避免误用本机进程
+// 远端会话在远端已删除或远端 CLI 不可用时只读（输入、回退文件等交互全部关闭）
 const interactive = computed(() => props.mode === 'workbench'
-  && !remoteRecordInstance()
+  && !remoteReadOnly.value
   && (!currentSession.value || !workspaceUnavailable(currentSession.value.summary)))
 
 const { projects, loadProjects } = useProjects()
@@ -746,6 +749,8 @@ async function onStop(options: { skipConfirm?: boolean } = {}): Promise<boolean>
   if (!sid) return false
   // 与按钮文案同判据:自家流式优先走温和停止,仅纯外部运行才走终止链路
   if (externalRunning.value && !stream.value.streaming) {
+    // 远端外部进程不由 Monet 终止（一期只查看；终止属于后续能力）
+    if (remoteRecordInstance()) return false
     if (stopping.value) return false
     // 外部进程不是我们 spawn 的:终止前确认,并说明归属方(可能正在生成,杀了会丢那一轮)
     const owner = externalOwner.value
@@ -1009,8 +1014,26 @@ function remoteRecordInstance(): EngineInstanceId | null {
   const instance = claudeEngineInstance.value
   return sameInstance(instance, LOCAL_CLAUDE_INSTANCE) ? null : instance
 }
+const streamErrorText = computed(() => describeStreamError(stream.value.streamError ?? ''))
 /** 远端已删除、只剩 Monet 镜像副本的会话 */
 const remoteMissing = computed(() => currentSession.value?.summary.source_meta?.remoteMissing === true)
+const { health: engineHealth } = useEngines()
+/** 远端 CLI 不可用（离线、缺 CLI、版本过低）；健康状态未知时不拦 */
+const remoteRuntimeUnavailable = computed(() => {
+  const instance = remoteRecordInstance()
+  return !!instance && engineHealth.value[instanceKey(instance)]?.runtime.available === false
+})
+const remoteReadOnly = computed(() => !!remoteRecordInstance() && (remoteMissing.value || remoteRuntimeUnavailable.value))
+/** 远端会话的 CLI 会话 id：已落盘取原生 id，草稿从结构化 id 里解出 */
+function remoteNativeSessionId(sessionId: string): string {
+  const session = projects.value.flatMap(p => p.sessions).find(s => s.id === sessionId)
+  return session?.native_id ?? parseSessionKey(sessionId)?.nativeId ?? sessionId
+}
+/** 发送与探测用的远端目标；本机会话为 undefined */
+function remoteTarget(sessionId: string): { instance: EngineInstanceId; nativeSessionId: string } | undefined {
+  const instance = remoteRecordInstance()
+  return instance ? { instance, nativeSessionId: remoteNativeSessionId(sessionId) } : undefined
+}
 /** 记录读取参数：远端会话的界面 id 是结构化 id，镜像按原生目录名与会话 uuid 读取 */
 function recordArgs(projectId: string, sessionId: string): SessionRecordArgs {
   const instance = remoteRecordInstance()
@@ -1019,7 +1042,7 @@ function recordArgs(projectId: string, sessionId: string): SessionRecordArgs {
   const session = project?.sessions.find(s => s.id === sessionId)
   return {
     projectId: project?.native_id ?? projectId,
-    sessionId: session?.native_id ?? sessionId,
+    sessionId: session?.native_id ?? parseSessionKey(sessionId)?.nativeId ?? sessionId,
     instance,
   }
 }
@@ -2338,11 +2361,14 @@ async function sendComposerDraft() {
     text = formatCommandInvocation(parsed.cmd, parsed.arg)
   }
 
-  try {
-    await resolveProjectReferences(text, cwd)
-  } catch (cause) {
-    slashError.value = String(cause)
-    return
+  // @ 文件引用读本机文件；远端会话的目录在另一台电脑上，原样发送
+  if (!remoteRecordInstance()) {
+    try {
+      await resolveProjectReferences(text, cwd)
+    } catch (cause) {
+      slashError.value = String(cause)
+      return
+    }
   }
   if (currentSession.value?.summary.id !== cs.summary.id || composerCwd.value !== cwd) return
 
@@ -2385,12 +2411,15 @@ async function sendComposerDraft() {
     extraArgs: settings.value.extraArgs || undefined,
     images,
     permissionMode: rc.launch.permissionMode ?? undefined,
+    remote: remoteTarget(cs.summary.id),
   }
   if (externalRunning.value || ownProcessBusy.value) {
     enqueuePendingQueueItem(cs.summary.id, text, opts)
     return
   }
   await sendMessage(cs.summary.id, cwd, text, opts)
+  // 远端启动失败（目录不存在、连不上、缺 CLI）时消息留在输入框，不重试
+  if (opts.remote && stream.value.streamError?.startsWith('REMOTE_') && !inputText.value) inputText.value = text
   scrollToBottom(sendFollowToken)
 }
 
@@ -3109,6 +3138,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
     let newRecords: SessionRecord[] | null = null
     for (const delay of [300, 400, 800]) {
       await new Promise(r => setTimeout(r, delay))
+      await syncRemoteMirror(cs.projectId, sid)
       try {
         newRecords = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, sid))
       } catch { /* 下一轮重试 */ }
@@ -3197,6 +3227,7 @@ watch(autoTurnLanded, async () => {
   const sid = cs.summary.id
   autoLandedSessions.delete(sid)
   await new Promise(r => setTimeout(r, 300))
+  await syncRemoteMirror(cs.projectId, sid)
   let fresh: SessionRecord[] | null = null
   try {
     fresh = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, sid))
@@ -3288,7 +3319,12 @@ async function probeExternal() {
     }
     let running = false
     try {
-      const info = await invoke<ExternalSessionInfo>('check_session_running', { sessionId: cs.summary.id })
+      const target = remoteTarget(cs.summary.id)
+      const info = await invoke<ExternalSessionInfo>('check_session_running', {
+        sessionId: cs.summary.id,
+        instance: target?.instance ?? null,
+        nativeSessionId: target?.nativeSessionId ?? null,
+      })
       running = info.running
       externalOwner.value = info.owner
     } catch {
@@ -3362,6 +3398,8 @@ listen<{ full: boolean; changes: { projectId: string; sessionId: string }[]; ins
   const fromRemote = !!event.payload?.instance && !sameInstance(event.payload.instance, LOCAL_CLAUDE_INSTANCE)
   if (remote || fromRemote) {
     if (!remote || !event.payload?.instance || !sameInstance(event.payload.instance, remote)) return
+    // 自己的远端进程在流式中：落账由轮次结束的收尾重读负责，与本机一致
+    if (stream.value.streaming) return
     const nativeId = cs.summary.native_id ?? cs.summary.id
     if (event.payload.full || event.payload.changes?.some(c => c.sessionId === nativeId)) void silentReloadRecords()
     return
@@ -3376,10 +3414,22 @@ listen<{ full: boolean; changes: { projectId: string; sessionId: string }[]; ins
 onUnmounted(() => unlistenProjectsChanged?.())
 
 // 工作台里打开的远端会话每 2 秒同步它自己的文件；有变化时后端发 projects-changed，由上方监听重载。
+// 另每 5 秒查一次远端进程列表：会话在远端终端里运行时只能查看（复用外部运行的横幅与禁用逻辑）。
 // 窗口不可见或上一次还没返回时跳过本拍
 const REMOTE_FOLLOW_MS = 2000
+const REMOTE_PROBE_MS = 5000
 let remoteFollowTimer: number | null = null
+let remoteProbeTimer: number | null = null
 let remoteFollowBusy = false
+
+/** 远端会话落账前先同步一次它的镜像文件（定时跟随最多晚 2 秒） */
+async function syncRemoteMirror(projectId: string, sessionId: string) {
+  const args = recordArgs(projectId, sessionId)
+  if (!args.instance) return
+  try {
+    await invoke('follow_remote_session', args)
+  } catch { /* 断线时读到的是已有镜像 */ }
+}
 const remoteFollowKey = computed(() => {
   const cs = currentSession.value
   if (props.mode !== 'workbench' || !cs) return ''
@@ -3388,7 +3438,9 @@ const remoteFollowKey = computed(() => {
 })
 function stopRemoteFollow() {
   if (remoteFollowTimer !== null) window.clearInterval(remoteFollowTimer)
+  if (remoteProbeTimer !== null) window.clearInterval(remoteProbeTimer)
   remoteFollowTimer = null
+  remoteProbeTimer = null
 }
 watch(remoteFollowKey, key => {
   stopRemoteFollow()
@@ -3401,6 +3453,10 @@ watch(remoteFollowKey, key => {
       .catch(() => { /* 断线时等下一拍或下一轮全量索引 */ })
       .finally(() => { remoteFollowBusy = false })
   }, REMOTE_FOLLOW_MS)
+  remoteProbeTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void probeExternal()
+  }, REMOTE_PROBE_MS)
+  void probeExternal()
 }, { immediate: true })
 onUnmounted(stopRemoteFollow)
 
@@ -3554,7 +3610,8 @@ async function onReload() {
       :selected-chrome="settings.chrome"
       :selected-extra-args="settings.extraArgs"
       :selected-permission-mode="settings.permissionMode"
-      :mirror-only="!!remoteRecordInstance()"
+      :mirror-only="remoteReadOnly"
+      :remote-host="!!remoteRecordInstance()"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @fast-mode-change="onFastModeChange"
@@ -3874,7 +3931,7 @@ async function onReload() {
       <SessionTypingIndicator :active="typingActive" />
 
       <div v-if="stream.streamError" class="px-3 py-2 rounded-md bg-destructive/10 text-destructive text-xs">
-        {{ stream.streamError }}
+        {{ streamErrorText }}
         <template v-if="stream.streamError.includes('EPERM')">
           <div class="mt-1.5 text-foreground/80">{{ t('session.epermHint') }}</div>
           <button
@@ -3905,7 +3962,7 @@ async function onReload() {
     </SessionInteractionPanel>
 
     <p
-      v-if="remoteRecordInstance() && (mode === 'workbench' || remoteMissing)"
+      v-if="remoteReadOnly && (mode === 'workbench' || remoteMissing)"
       class="mx-4 mb-3 rounded border border-border px-3 py-2 text-xs text-muted-foreground"
     >{{ $t(remoteMissing ? 'remote.sessionMissing' : 'remote.sessionReadOnly') }}</p>
 
@@ -3917,7 +3974,7 @@ async function onReload() {
       :has-content="!!inputText.trim() || !!imageInput.images.value.length"
       can-send-while-busy
       :send-disabled="preparingMessage"
-      :stop-disabled="stopping"
+      :stop-disabled="stopping || (externalRunning && !stream.streaming && !!remoteRecordInstance())"
       :stop-loading="stopping"
       :stop-variant="externalRunning && !stream.streaming ? 'danger' : 'accent'"
       :stop-label="externalRunning && !stream.streaming
@@ -3951,7 +4008,9 @@ async function onReload() {
         <!-- 外部运行跟随提示（能解析出归属方时点名是谁在跑） -->
         <div v-if="externalRunning" class="mb-1 text-xs text-muted-foreground flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full bg-claude animate-pulse shrink-0" />
-          {{ externalOwner ? $t('session.externalRunningBy', { owner: externalOwner }) : $t('session.externalRunning') }}
+          {{ remoteRecordInstance() && externalOwner
+            ? $t('remote.runningOnHost', { alias: externalOwner })
+            : externalOwner ? $t('session.externalRunningBy', { owner: externalOwner }) : $t('session.externalRunning') }}
         </div>
       </template>
 
