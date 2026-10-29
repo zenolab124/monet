@@ -6,6 +6,7 @@ pub mod adapter;
 pub mod executor;
 pub mod health;
 pub mod hosts;
+pub mod sync;
 
 use executor::SshExecutor;
 use health::HealthReport;

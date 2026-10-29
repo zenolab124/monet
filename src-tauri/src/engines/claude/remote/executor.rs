@@ -26,13 +26,37 @@ pub struct ExecOutput {
     pub timed_out: bool,
 }
 
+/// 原始输出：会话文件需要逐字节镜像，stdout 不做文本转换
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawOutput {
+    pub code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: String,
+    pub timed_out: bool,
+}
+
 pub trait RemoteExecutor: Send + Sync {
+    fn run_raw(
+        &self,
+        target: &SshTarget,
+        script: &str,
+        timeout: Duration,
+    ) -> std::io::Result<RawOutput>;
+
     fn run(
         &self,
         target: &SshTarget,
         script: &str,
         timeout: Duration,
-    ) -> std::io::Result<ExecOutput>;
+    ) -> std::io::Result<ExecOutput> {
+        let raw = self.run_raw(target, script, timeout)?;
+        Ok(ExecOutput {
+            code: raw.code,
+            stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
+            stderr: raw.stderr,
+            timed_out: raw.timed_out,
+        })
+    }
 }
 
 /// 把任意字符串转成单引号包裹的 POSIX shell 字面量
@@ -118,55 +142,79 @@ fn drain(rx: &mpsc::Receiver<Vec<u8>>, buf: &mut Vec<u8>) {
     }
 }
 
+/// 运行已配置好的子进程并在时限内收集输出；超时即击杀并回收
+fn collect(mut command: Command, timeout: Duration) -> std::io::Result<RawOutput> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    // 连接复用的后台主进程可能继承管道写端：不等 EOF，子进程退出后只收已到达的数据
+    let out_rx = spawn_reader(child.stdout.take().expect("piped stdout"));
+    let err_rx = spawn_reader(child.stderr.take().expect("piped stderr"));
+    let deadline = Instant::now() + timeout;
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let status = loop {
+        drain(&out_rx, &mut stdout);
+        drain(&err_rx, &mut stderr);
+        if let Some(status) = child.try_wait()? {
+            break Some(status);
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    };
+    let settle = Instant::now() + Duration::from_millis(100);
+    while Instant::now() < settle {
+        drain(&out_rx, &mut stdout);
+        drain(&err_rx, &mut stderr);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Ok(RawOutput {
+        code: status.and_then(|s| s.code()),
+        stdout,
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        timed_out: status.is_none(),
+    })
+}
+
 impl RemoteExecutor for SshExecutor {
-    fn run(
+    fn run_raw(
         &self,
         target: &SshTarget,
         script: &str,
         timeout: Duration,
-    ) -> std::io::Result<ExecOutput> {
+    ) -> std::io::Result<RawOutput> {
         let control = control_path();
         let mut command = Command::new(SSH_BIN);
-        command
-            .args(ssh_args(
-                target,
-                control.as_deref(),
-                &remote_sh_command(script),
-            ))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn()?;
-        // 连接复用的后台主进程可能继承管道写端：不等 EOF，子进程退出后只收已到达的数据
-        let out_rx = spawn_reader(child.stdout.take().expect("piped stdout"));
-        let err_rx = spawn_reader(child.stderr.take().expect("piped stderr"));
-        let deadline = Instant::now() + timeout;
-        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
-        let status = loop {
-            drain(&out_rx, &mut stdout);
-            drain(&err_rx, &mut stderr);
-            if let Some(status) = child.try_wait()? {
-                break Some(status);
-            }
-            if Instant::now() > deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(30));
-        };
-        let settle = Instant::now() + Duration::from_millis(100);
-        while Instant::now() < settle {
-            drain(&out_rx, &mut stdout);
-            drain(&err_rx, &mut stderr);
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        Ok(ExecOutput {
-            code: status.and_then(|s| s.code()),
-            stdout: String::from_utf8_lossy(&stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-            timed_out: status.is_none(),
-        })
+        command.args(ssh_args(
+            target,
+            control.as_deref(),
+            &remote_sh_command(script),
+        ));
+        collect(command, timeout)
+    }
+}
+
+/// 本机回环执行器：直接用本机 `/bin/sh` 执行远端脚本，忽略 ssh 目标。
+/// 只用于单测与调试版的本机验收，发布版不编译。
+#[cfg(any(test, debug_assertions))]
+pub struct LocalShellExecutor;
+
+#[cfg(any(test, debug_assertions))]
+impl RemoteExecutor for LocalShellExecutor {
+    fn run_raw(
+        &self,
+        _target: &SshTarget,
+        script: &str,
+        timeout: Duration,
+    ) -> std::io::Result<RawOutput> {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(script);
+        collect(command, timeout)
     }
 }
 
