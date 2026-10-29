@@ -1999,5 +1999,45 @@
     "refine": "仅显示部分结果，请输入更完整的路径",
     "keys": "↑↓ 选择 · Enter / Tab 插入 · Esc 关闭",
     "unavailable": "文件引用不可用，请检查后重试：{reason}"
+  },
+  "remote": {
+    "title": "远端主机（SSH）",
+    "intro": "通过你自己的 SSH 配置连接另一台 macOS / Linux 电脑，查看并继续那台机器上的 Claude Code 会话。只支持密钥或 ssh-agent 免密登录，Monet 不保存任何凭据。",
+    "empty": "~/.ssh/config 中没有可直接连接的 Host，可以在下方手动添加。",
+    "sourceConfig": "ssh config",
+    "sourceManual": "手动添加",
+    "enable": "启用",
+    "checking": "检测中…",
+    "recheck": "重新检测",
+    "remove": "移除",
+    "claudePath": "远端 CLI 路径",
+    "claudePathPlaceholder": "留空自动定位，例如 /Users/alice/.local/bin/claude",
+    "cliTooOld": "远端 CLI 版本低于 2.1.306，依赖新协议的功能将不可用。",
+    "noSessions": "连接正常，这台主机上还没有 Claude Code 会话。",
+    "addPlaceholder": "user@host 或 user@host:port",
+    "add": "添加",
+    "check": {
+      "ssh": "SSH 连接",
+      "os": "远端系统",
+      "cli_path": "CLI 路径",
+      "cli_version": "CLI 版本",
+      "data_root": "数据目录"
+    },
+    "failure": {
+      "unreachable": "无法连接到 {alias}。若它在局域网内，请确认已在「设置 → 权限」中允许 Monet 访问本地网络。",
+      "auth_failed": "认证失败：请先配置密钥或 ssh-agent，确认在终端里执行 ssh {alias} 不需要输入密码。",
+      "host_key_untrusted": "主机密钥未被信任：请先在终端里执行一次 ssh {alias} 并确认主机指纹。",
+      "unsupported_os": "远端系统不受支持，目前只支持 macOS 和 Linux。",
+      "cli_not_found": "在远端找不到 claude，请在上方填写它的绝对路径。",
+      "data_root_missing": "远端没有 Claude Code 数据目录，请先在那台电脑上运行一次 claude。",
+      "timeout": "检测超时（30 秒），请检查网络后重试。"
+    },
+    "error": {
+      "invalid_connection": "连接串格式无效，请使用 user@host 或 user@host:port。",
+      "duplicate_host": "这台主机已经添加过了。",
+      "invalid_claude_path": "CLI 路径必须是绝对路径，且不能包含空格或引号。",
+      "unknown_host": "找不到这台主机，请刷新后重试。",
+      "not_manual_host": "只能移除手动添加的主机；ssh config 中的主机请在配置文件里修改。"
+    }
   }
 }

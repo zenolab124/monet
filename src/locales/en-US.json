@@ -1999,5 +1999,45 @@
     "refine": "Partial results. Type a more specific path.",
     "keys": "↑↓ Navigate · Enter / Tab Insert · Esc Close",
     "unavailable": "File reference unavailable. Check it and retry: {reason}"
+  },
+  "remote": {
+    "title": "Remote hosts (SSH)",
+    "intro": "Connect to another macOS / Linux computer through your own SSH configuration to view and continue the Claude Code sessions on it. Only key or ssh-agent logins without a password prompt are supported; Monet stores no credentials.",
+    "empty": "No directly connectable Host was found in ~/.ssh/config. You can add one manually below.",
+    "sourceConfig": "ssh config",
+    "sourceManual": "Manual",
+    "enable": "Enable",
+    "checking": "Checking…",
+    "recheck": "Check again",
+    "remove": "Remove",
+    "claudePath": "Remote CLI path",
+    "claudePathPlaceholder": "Leave empty to locate automatically, e.g. /Users/alice/.local/bin/claude",
+    "cliTooOld": "The remote CLI is older than 2.1.306, so features that rely on the newer protocol are unavailable.",
+    "noSessions": "Connected. There are no Claude Code sessions on this host yet.",
+    "addPlaceholder": "user@host or user@host:port",
+    "add": "Add",
+    "check": {
+      "ssh": "SSH connection",
+      "os": "Remote system",
+      "cli_path": "CLI path",
+      "cli_version": "CLI version",
+      "data_root": "Data directory"
+    },
+    "failure": {
+      "unreachable": "Couldn't connect to {alias}. If it's on your local network, make sure Monet is allowed local network access under Settings → Permissions.",
+      "auth_failed": "Authentication failed. Set up a key or ssh-agent so that running ssh {alias} in a terminal doesn't ask for a password.",
+      "host_key_untrusted": "The host key isn't trusted yet. Run ssh {alias} once in a terminal and confirm the host fingerprint.",
+      "unsupported_os": "The remote system isn't supported. Only macOS and Linux are supported.",
+      "cli_not_found": "claude wasn't found on the remote host. Enter its absolute path above.",
+      "data_root_missing": "There's no Claude Code data directory on the remote host. Run claude on that computer once first.",
+      "timeout": "The check timed out after 30 seconds. Check the network and try again."
+    },
+    "error": {
+      "invalid_connection": "Invalid connection string. Use user@host or user@host:port.",
+      "duplicate_host": "This host has already been added.",
+      "invalid_claude_path": "The CLI path must be absolute and can't contain spaces or quotes.",
+      "unknown_host": "This host wasn't found. Refresh and try again.",
+      "not_manual_host": "Only manually added hosts can be removed. Edit ssh config to change hosts listed there."
+    }
   }
 }

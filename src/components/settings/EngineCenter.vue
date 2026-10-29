@@ -14,6 +14,7 @@ import type { EngineDescriptor } from '@/engines/types'
 import ClaudeEnvCard from './ClaudeEnvCard.vue'
 import ClaudeDataDirCard from './ClaudeDataDirCard.vue'
 import ClaudeProtocolCard from './ClaudeProtocolCard.vue'
+import RemoteHostsCard from './RemoteHostsCard.vue'
 import CodexEnvCard from './CodexEnvCard.vue'
 
 const { t } = useI18n()
@@ -175,6 +176,7 @@ function showConfigurationMenu(event: MouseEvent, engine: EngineDescriptor) {
               <ClaudeEnvCard />
               <ClaudeDataDirCard />
               <ClaudeProtocolCard />
+              <RemoteHostsCard v-if="engine.instance.instanceId === 'default'" />
             </template>
             <CodexEnvCard v-else />
           </div>

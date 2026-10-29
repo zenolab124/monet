@@ -1,6 +1,7 @@
 mod adapter;
 pub mod diagnostics;
 pub mod protocol;
+pub mod remote;
 mod runtime;
 mod source;
 
