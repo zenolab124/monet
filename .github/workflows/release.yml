@@ -97,8 +97,21 @@ jobs:
     runs-on: macos-latest
     env:
       SIGN_ID: ${{ vars.MACOS_SIGNING_IDENTITY || 'Monet Signing' }}
+    outputs:
+      notary_preflight_reason: ${{ steps.notary_preflight.outputs.reason }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # 构建前用公证 API key 预检账号状态，协议过期 / key 失效时立即失败
+      - name: Notary preflight
+        id: notary_preflight
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_API_KEY: ${{ vars.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          exec src-widget/build.sh --notary-preflight
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -228,3 +241,26 @@ jobs:
             --generate-notes \
             --notes "$USER_NOTES" \
             "${ASSETS[@]}"
+
+  # 任一 job 失败时开 / 追加 ci-failure Issue，完整成功后自动关闭。
+  # 告警是旁路：job 级 continue-on-error，自身失败不改变本次运行的结论。
+  report-ci-status:
+    needs: [validate-release-notes, build-windows, build-macos]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: scripts
+
+      - name: Report CI status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          ALERT_JOB_NAME: report-ci-status
+        run: node scripts/ci-failure-alert.mjs

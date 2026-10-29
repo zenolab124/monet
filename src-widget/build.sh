@@ -1,5 +1,6 @@
 #!/bin/bash
 # 构建 Widget Extension + widget-updater，嵌入 Tauri .app bundle，签名，打 DMG
+# 用法：build.sh [Configuration] [App 路径]；build.sh --notary-preflight 只做公证凭据预检
 set -euo pipefail
 
 # 长期私钥只保留为当前 shell 的非导出变量。后续 xcodebuild、cargo、codesign、
@@ -17,6 +18,196 @@ export -n UPDATER_SIGNING_PRIVATE_KEY UPDATER_SIGNING_PASSWORD
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# --notary-preflight：只用公证 API key 查询一次提交历史，在任何构建开始前
+# 识别协议过期、key 失效等账号层面故障；不构建、不签名、不提交产物。
+MODE="package"
+if [ "${1:-}" = "--notary-preflight" ]; then
+    MODE="notary-preflight"
+    shift
+fi
+
+# 预检与正式公证共用同一份凭据校验、密钥落地与清理逻辑。
+ENTITLEMENTS_DIR=""
+NOTARY_KEY_FILE=""
+NOTARY_ACTIVE_KEY_PATH=""
+release_notary_key() {
+    if [ -n "$NOTARY_KEY_FILE" ]; then
+        rm -f "$NOTARY_KEY_FILE"
+        NOTARY_KEY_FILE=""
+    fi
+    NOTARY_ACTIVE_KEY_PATH=""
+}
+cleanup_sensitive_files() {
+    release_notary_key
+    if [ -n "$ENTITLEMENTS_DIR" ]; then
+        rm -rf "$ENTITLEMENTS_DIR"
+    fi
+}
+trap cleanup_sensitive_files EXIT
+
+# 私钥只在调用 notarytool 的这一刻写入 0600 临时文件，调用结束立即删除。
+materialize_notary_key() {
+    NOTARY_ACTIVE_KEY_PATH="$NOTARY_EXTERNAL_KEY_PATH"
+    if [ -n "$NOTARY_PRIVATE_KEY" ]; then
+        NOTARY_KEY_FILE=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/monet-notary-key.XXXXXX")
+        chmod 600 "$NOTARY_KEY_FILE"
+        printf '%s' "$NOTARY_PRIVATE_KEY" > "$NOTARY_KEY_FILE"
+        NOTARY_ACTIVE_KEY_PATH="$NOTARY_KEY_FILE"
+    fi
+}
+
+NOTARY_KEY_SOURCE="${NOTARY_PRIVATE_KEY:-$NOTARY_EXTERNAL_KEY_PATH}"
+NOTARY_ENV_COUNT=0
+for VALUE in "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID" "$NOTARY_KEY_SOURCE"; do
+    [ -n "$VALUE" ] && NOTARY_ENV_COUNT=$((NOTARY_ENV_COUNT + 1))
+done
+
+NOTARY_AGREEMENT_REASON="Apple Developer agreement is missing or expired. Sign it at https://developer.apple.com/account as the Account Holder, then re-run this job."
+NOTARY_KEY_REASON="Notary API key is invalid or revoked. Check APPLE_API_PRIVATE_KEY / APPLE_API_KEY / APPLE_API_ISSUER."
+
+# 识别规则：协议缺失或 HTTP 403 → agreement；HTTP 401 → key 失效；
+# 其余（超时、网络、未知错误）不在此定论，交给正式公证步骤给出最终结果。
+classify_notary_preflight() {
+    local status="$1"
+    local output="$2"
+    if [ "$status" -eq 0 ]; then
+        echo "ok"
+    elif grep -qiE 'agreement' <<< "$output" || grep -qE '(^|[^0-9])403([^0-9]|$)' <<< "$output"; then
+        echo "agreement"
+    elif grep -qE '(^|[^0-9])401([^0-9]|$)' <<< "$output"; then
+        echo "invalid-key"
+    else
+        echo "inconclusive"
+    fi
+}
+
+# GitHub Actions 中输出注解；本地只输出纯文本。
+preflight_annotate() {
+    local level="$1"
+    local message="$2"
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+        echo "::$level title=Notary preflight::$message"
+    else
+        echo "$message"
+    fi
+}
+
+print_preflight_output() {
+    local output="$1"
+    [ -n "$output" ] || return 0
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+        echo "::group::notarytool output"
+        sed -n '1,40p' <<< "$output"
+        echo "::endgroup::"
+    else
+        sed -n '1,40p' <<< "$output"
+    fi
+}
+
+run_notary_preflight() {
+    # 三项任一为空即跳过，与未配置时的打包行为保持一致；
+    # 部分配置仍由打包步骤的完整性校验拒绝。
+    if [ "$NOTARY_ENV_COUNT" -eq 0 ]; then
+        preflight_annotate notice "Notary credentials are not configured; skipping notary preflight."
+        return 0
+    fi
+    if [ "$NOTARY_ENV_COUNT" -ne 3 ]; then
+        preflight_annotate notice "Notary credentials are incomplete ($NOTARY_ENV_COUNT of 3 set); skipping notary preflight."
+        return 0
+    fi
+
+    local timeout_seconds="${NOTARY_PREFLIGHT_TIMEOUT:-25}"
+    local output_file status=0 output verdict pid deadline
+    output_file=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/monet-notary-preflight.XXXXXX")
+
+    materialize_notary_key
+    xcrun notarytool history \
+        --key "$NOTARY_ACTIVE_KEY_PATH" \
+        --key-id "$NOTARY_KEY_ID" \
+        --issuer "$NOTARY_ISSUER_ID" > "$output_file" 2>&1 &
+    pid=$!
+    # 轮询而非后台 sleep 看门狗：超时后不留下孤儿进程拖住 job 日志流。
+    deadline=$((SECONDS + timeout_seconds))
+    while kill -0 "$pid" 2>/dev/null; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            kill -TERM "$pid" 2>/dev/null || true
+            echo "notarytool history timed out after ${timeout_seconds}s" >> "$output_file"
+            break
+        fi
+        sleep 0.2
+    done
+    wait "$pid" || status=$?
+    release_notary_key
+
+    output=$(cat "$output_file")
+    rm -f "$output_file"
+    verdict=$(classify_notary_preflight "$status" "$output")
+
+    local reason=""
+    case "$verdict" in
+        ok)
+            echo "Notary preflight passed."
+            return 0
+            ;;
+        agreement) reason="$NOTARY_AGREEMENT_REASON" ;;
+        invalid-key) reason="$NOTARY_KEY_REASON" ;;
+        *)
+            preflight_annotate warning "Notary preflight was inconclusive (exit $status); continuing, notarization will report the final result."
+            print_preflight_output "$output"
+            return 0
+            ;;
+    esac
+
+    # 首行必须是原因句；随后才是注解与原始输出。
+    echo "$reason"
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+        echo "::error title=Notary preflight::$reason"
+    fi
+    if [ -n "${GITHUB_OUTPUT:-}" ]; then
+        echo "reason=$reason" >> "$GITHUB_OUTPUT"
+    fi
+    print_preflight_output "$output"
+    return 1
+}
+
+if [ "$MODE" = "notary-preflight" ]; then
+    run_notary_preflight
+    exit $?
+fi
+
+# 公证必须发生在 Widget、helper 与主 App 全部完成最终签名之后。若只提供了
+# 部分凭据，宁可停止构建，也不能静默发布一个仅签名、未公证的安装包。
+if [ -n "$NOTARY_PRIVATE_KEY" ] && [ -n "$NOTARY_EXTERNAL_KEY_PATH" ]; then
+    echo "Error: provide APPLE_API_PRIVATE_KEY or APPLE_API_KEY_PATH, not both" >&2
+    exit 1
+fi
+if [ "$NOTARY_ENV_COUNT" -ne 0 ] && [ "$NOTARY_ENV_COUNT" -ne 3 ]; then
+    echo "Error: incomplete App Store Connect notarization credentials" >&2
+    exit 1
+fi
+NOTARIZE=0
+if [ "$NOTARY_ENV_COUNT" -eq 3 ]; then
+    if [ -n "$NOTARY_EXTERNAL_KEY_PATH" ] && [ ! -f "$NOTARY_EXTERNAL_KEY_PATH" ]; then
+        echo "Error: APPLE_API_KEY_PATH does not exist" >&2
+        exit 1
+    fi
+    NOTARIZE=1
+fi
+
+submit_for_notarization() {
+    local artifact="$1"
+    local submit_status=0
+
+    materialize_notary_key
+    xcrun notarytool submit "$artifact" \
+        --key "$NOTARY_ACTIVE_KEY_PATH" \
+        --key-id "$NOTARY_KEY_ID" \
+        --issuer "$NOTARY_ISSUER_ID" \
+        --wait || submit_status=$?
+    release_notary_key
+    return "$submit_status"
+}
 
 # --- 参数 ---
 SIGN_ID="${SIGN_ID:-Monet Signing}"
@@ -53,30 +244,6 @@ if [[ "$SIGNING_IDENTITY_NAME" == "Developer ID Application:"* ]]; then
     CODESIGN_ARGS+=(--timestamp)
 fi
 
-# 公证必须发生在 Widget、helper 与主 App 全部完成最终签名之后。若只提供了
-# 部分凭据，宁可停止构建，也不能静默发布一个仅签名、未公证的安装包。
-if [ -n "$NOTARY_PRIVATE_KEY" ] && [ -n "$NOTARY_EXTERNAL_KEY_PATH" ]; then
-    echo "Error: provide APPLE_API_PRIVATE_KEY or APPLE_API_KEY_PATH, not both" >&2
-    exit 1
-fi
-NOTARY_KEY_SOURCE="${NOTARY_PRIVATE_KEY:-$NOTARY_EXTERNAL_KEY_PATH}"
-NOTARY_ENV_COUNT=0
-for VALUE in "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID" "$NOTARY_KEY_SOURCE"; do
-    [ -n "$VALUE" ] && NOTARY_ENV_COUNT=$((NOTARY_ENV_COUNT + 1))
-done
-if [ "$NOTARY_ENV_COUNT" -ne 0 ] && [ "$NOTARY_ENV_COUNT" -ne 3 ]; then
-    echo "Error: incomplete App Store Connect notarization credentials" >&2
-    exit 1
-fi
-NOTARIZE=0
-if [ "$NOTARY_ENV_COUNT" -eq 3 ]; then
-    if [ -n "$NOTARY_EXTERNAL_KEY_PATH" ] && [ ! -f "$NOTARY_EXTERNAL_KEY_PATH" ]; then
-        echo "Error: APPLE_API_KEY_PATH does not exist" >&2
-        exit 1
-    fi
-    NOTARIZE=1
-fi
-
 # macOS 支持 Team ID 前缀的 App Group，无需注册 group.* 标识符或嵌入
 # provisioning profile。Developer ID / Apple Development 身份均可从名称末尾提取 Team ID；
 # 自签身份没有 Apple Team ID，因此安全地关闭共享写入，避免再次触发容器授权弹窗。
@@ -100,39 +267,6 @@ if [ -n "$APP_GROUP_ID" ] && \
 fi
 
 ENTITLEMENTS_DIR=$(mktemp -d)
-NOTARY_KEY_FILE=""
-cleanup_sensitive_files() {
-    if [ -n "$NOTARY_KEY_FILE" ]; then
-        rm -f "$NOTARY_KEY_FILE"
-    fi
-    rm -rf "$ENTITLEMENTS_DIR"
-}
-trap cleanup_sensitive_files EXIT
-
-submit_for_notarization() {
-    local artifact="$1"
-    local key_path="$NOTARY_EXTERNAL_KEY_PATH"
-    local submit_status=0
-
-    if [ -n "$NOTARY_PRIVATE_KEY" ]; then
-        NOTARY_KEY_FILE=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/monet-notary-key.XXXXXX")
-        chmod 600 "$NOTARY_KEY_FILE"
-        printf '%s' "$NOTARY_PRIVATE_KEY" > "$NOTARY_KEY_FILE"
-        key_path="$NOTARY_KEY_FILE"
-    fi
-
-    xcrun notarytool submit "$artifact" \
-        --key "$key_path" \
-        --key-id "$NOTARY_KEY_ID" \
-        --issuer "$NOTARY_ISSUER_ID" \
-        --wait || submit_status=$?
-
-    if [ -n "$NOTARY_KEY_FILE" ]; then
-        rm -f "$NOTARY_KEY_FILE"
-        NOTARY_KEY_FILE=""
-    fi
-    return "$submit_status"
-}
 prepare_entitlements() {
     local source="$1"
     local destination="$2"

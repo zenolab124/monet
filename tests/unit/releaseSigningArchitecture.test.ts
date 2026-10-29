@@ -45,18 +45,47 @@ describe('macOS release signing architecture', () => {
     const secretScrub = build.indexOf('unset APPLE_API_PRIVATE_KEY APPLE_API_KEY_PATH')
     const firstBuildTool = build.indexOf('xcodegen generate')
     const keyMaterialization = build.indexOf('printf \'%s\' "$NOTARY_PRIVATE_KEY"')
-    const notaryInvocation = build.indexOf('xcrun notarytool submit "$artifact"')
-    const keyRemoval = build.indexOf('rm -f "$NOTARY_KEY_FILE"', notaryInvocation)
     const signerInjection = build.indexOf('TAURI_SIGNING_PRIVATE_KEY="$UPDATER_SIGNING_PRIVATE_KEY"')
+    const releaseFn = build.slice(build.indexOf('release_notary_key() {'))
+    const releaseBody = releaseFn.slice(0, releaseFn.indexOf('\n}'))
+    const cleanupFn = build.slice(build.indexOf('cleanup_sensitive_files() {'))
+    const cleanupBody = cleanupFn.slice(0, cleanupFn.indexOf('\n}'))
 
     expect(secretCapture).toBeGreaterThan(-1)
     expect(secretScrub).toBeGreaterThan(secretCapture)
     expect(firstBuildTool).toBeGreaterThan(secretScrub)
     expect(keyMaterialization).toBeGreaterThan(secretScrub)
-    expect(notaryInvocation).toBeGreaterThan(keyMaterialization)
-    expect(keyRemoval).toBeGreaterThan(notaryInvocation)
+    // 私钥只有一个落地点，由正式公证与预检共用
+    expect(build.match(/printf '%s' "\$NOTARY_PRIVATE_KEY"/g)).toHaveLength(1)
+    expect(keyMaterialization).toBeGreaterThan(build.indexOf('materialize_notary_key() {'))
+    expect(releaseBody).toContain('rm -f "$NOTARY_KEY_FILE"')
+    expect(cleanupBody).toContain('release_notary_key')
+    expect(build.indexOf('trap cleanup_sensitive_files EXIT')).toBeLessThan(keyMaterialization)
+
+    // 每次 notarytool 调用都夹在密钥落地与立即清理之间
+    const invocations = [...build.matchAll(/xcrun notarytool (\w+)/g)]
+    expect(invocations.map(match => match[1]).sort()).toEqual(['history', 'submit'])
+    for (const invocation of invocations) {
+      const at = invocation.index!
+      const materialize = build.lastIndexOf('    materialize_notary_key\n', at)
+      const release = build.indexOf('    release_notary_key\n', at)
+      expect(materialize).toBeGreaterThan(-1)
+      expect(build.slice(materialize, at)).not.toContain('release_notary_key')
+      expect(release).toBeGreaterThan(at)
+      expect(build.slice(at, release)).not.toContain('materialize_notary_key')
+      expect(build.slice(at, release)).not.toMatch(/^\}/m)
+    }
     expect(signerInjection).toBeGreaterThan(build.indexOf('echo "=> Creating updater artifacts..."'))
     expect(build).not.toContain('--key "$APPLE_API_KEY_PATH"')
+
+    // 预检入口在解析签名身份与任何构建工具之前退出，不构建也不提交产物
+    const preflightExit = build.indexOf('    run_notary_preflight\n    exit $?')
+    expect(preflightExit).toBeGreaterThan(keyMaterialization)
+    expect(preflightExit).toBeLessThan(build.indexOf('IDENTITIES=$(security find-identity'))
+    expect(preflightExit).toBeLessThan(build.indexOf('_RAW_BUNDLE='))
+    expect(preflightExit).toBeLessThan(firstBuildTool)
+    const preflightFn = build.slice(build.indexOf('run_notary_preflight() {'), preflightExit)
+    expect(preflightFn).not.toContain('notarytool submit')
 
     for (const workflowPath of [
       '../../.github/workflows/nightly.yml',
@@ -75,7 +104,49 @@ describe('macOS release signing architecture', () => {
       expect(workflow).not.toContain('AuthKey_${APPLE_API_KEY}.p8')
       expect(workflow).toContain("trap 'rm -f \"$CERT_FILE\"' EXIT")
       expect(workflow).toContain('unset CERT_P12 CERT_PASSWORD')
+
+      // 预检在 macOS job 的第一个构建步骤之前运行，且只经 build.sh 落地密钥
+      const macosJob = workflow.indexOf('\n  build-macos:')
+      const preflight = workflow.indexOf('name: Notary preflight')
+      const preflightEnd = workflow.indexOf('\n      - ', preflight)
+      const preflightStep = workflow.slice(preflight, preflightEnd)
+      expect(preflight).toBeGreaterThan(macosJob)
+      expect(preflight).toBeLessThan(workflow.indexOf('name: Install dependencies', macosJob))
+      expect(preflight).toBeLessThan(workflow.indexOf('name: Import signing certificate', macosJob))
+      expect(preflight).toBeLessThan(buildApp)
+      expect(preflightStep).toContain('exec src-widget/build.sh --notary-preflight')
+      expect(preflightStep).toContain('APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}')
+      expect(preflightStep).not.toContain('TAURI_SIGNING_PRIVATE_KEY')
+      expect(workflow).not.toContain('notarytool')
+      expect(workflow).toContain('notary_preflight_reason: ${{ steps.notary_preflight.outputs.reason }}')
     }
+  })
+
+  it('reports Release and Nightly failures through a non-blocking issue alert', () => {
+    for (const [workflowPath, needs] of [
+      ['../../.github/workflows/nightly.yml', '[prepare, build-windows, build-macos]'],
+      ['../../.github/workflows/release.yml', '[validate-release-notes, build-windows, build-macos]'],
+    ]) {
+      const workflow = source(workflowPath)
+      const job = workflow.slice(workflow.indexOf('\n  report-ci-status:'))
+
+      // 工作流级权限不变，issues: write 只授予告警 job
+      expect(workflow).toMatch(/^permissions:\n {2}contents: write\n\n/m)
+      expect(job).toContain(`needs: ${needs}`)
+      expect(job).toContain('if: ${{ !cancelled() }}')
+      expect(job).toContain('continue-on-error: true')
+      expect(job).toContain('issues: write')
+      expect(job).toContain('NEEDS_JSON: ${{ toJSON(needs) }}')
+      expect(job).toContain('run: node scripts/ci-failure-alert.mjs')
+    }
+  })
+
+  it('skips scheduled Nightly runs only when HEAD is already published', () => {
+    const workflow = source('../../.github/workflows/nightly.yml')
+    expect(workflow).not.toContain("--since='24 hours ago' --oneline")
+    const check = workflow.indexOf('id: check')
+    expect(workflow.slice(check, workflow.indexOf('\n      - ', check))).toContain('run: node scripts/nightly-skip-decision.mjs')
+    expect(workflow.indexOf('name: Setup Node.js')).toBeLessThan(check)
   })
 
   it('pins every workflow action to an immutable commit SHA', () => {
