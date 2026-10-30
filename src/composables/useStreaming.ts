@@ -7,7 +7,7 @@ import { triggerMetaGeneration } from './useSessionMeta'
 import { collectSessionCapabilities } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
 import type { EngineInstanceId } from '@/engines/types'
-import { REMOTE_DISCONNECTED_PREFIX } from '@/utils/streamErrorText'
+import { isRemoteDisconnected } from '@/utils/streamErrorText'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import { useConfirm } from './useConfirm'
 import { initSessionSignalListeners } from './useSessionSignals'
@@ -1379,7 +1379,7 @@ function clearStreamingTurns(sessionId: string, opts?: { keepPending?: boolean; 
     state.pendingImages = null
     state.pendingSentAt = null
   }
-  state.streamError = null
+  if (!isRemoteDisconnected(state.streamError)) state.streamError = null
   markTailDirty(sessionId)
 }
 
@@ -1433,7 +1433,7 @@ function failPendingQueueItem(sessionId: string, id: string, error: string) {
 async function consumePendingQueue(sessionId: string, cwd: string) {
   const state = streams.get(sessionId)
   if (!state || state.streaming || state.pendingQueue.length === 0) return
-  if (state.streamError?.startsWith(REMOTE_DISCONNECTED_PREFIX)) return
+  if (isRemoteDisconnected(state.streamError)) return
   // 插入的消息落定前不发下一条：CLI 可能正要为它另起一轮，抢发会让轮次归属错位
   if (hasActiveInjection(state)) return
   const priorityId = state.priorityPendingQueueItemId

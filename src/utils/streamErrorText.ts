@@ -3,6 +3,14 @@ import i18n from '../locales'
 /** 远端连接断开后的错误前缀：队列暂停自动发送，等用户手动重发（断线不自动重连） */
 export const REMOTE_DISCONNECTED_PREFIX = 'REMOTE_DISCONNECTED:'
 
+/**
+ * 远端断线错误：空闲时断线走「自发轮收尾 → 落账重载」，重载会清空流式区，
+ * 这类错误必须保留到用户重发或重试，否则断线提示一闪即逝、队列暂停也失效
+ */
+export function isRemoteDisconnected(error: string | null | undefined): boolean {
+  return !!error?.startsWith(REMOTE_DISCONNECTED_PREFIX)
+}
+
 /** 流式错误的展示文案：远端启动与断线的错误码换成本地化文案，其余原样返回 */
 export function describeStreamError(error: string): string {
   const t = i18n.global.t
