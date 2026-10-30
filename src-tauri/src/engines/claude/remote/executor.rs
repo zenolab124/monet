@@ -104,16 +104,28 @@ fn control_path() -> Option<String> {
     Some(template)
 }
 
-/// ssh 参数：免交互、限时连接、可选连接复用；destination 之前以 `--` 结束选项
+/// ssh 参数：免交互、限时连接、心跳、可选连接复用；destination 之前以 `--` 结束选项。
+/// 这里起的连接会成为复用主进程，长活会话也挂在它上面；心跳由主进程负责
+/// （复用客户端自己的 ServerAlive 不生效），所以主进程必须带心跳，断网后才能及时退出
 pub fn ssh_args(
     target: &SshTarget,
     control_path: Option<&str>,
     remote_command: &str,
 ) -> Vec<String> {
-    let mut args: Vec<String> = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let mut args: Vec<String> = [
+        "-T",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
     if let Some(path) = control_path {
         for option in ["ControlMaster=auto", "ControlPersist=120"] {
             args.push("-o".into());
@@ -180,7 +192,8 @@ pub fn fits_windows_command(script: &str) -> bool {
 /// 长活会话（远端 claude 进程）的 ssh 参数，与一次性命令有两处不同：
 /// - 只复用已有的连接复用主进程，自己不当主进程：后台主进程会继承管道写端，
 ///   会话结束后 stdout 迟迟等不到 EOF；
-/// - 开启心跳：连接中断 45 秒内 ssh 以 255 退出，会话据此显示断线。
+/// - 开启心跳：连接中断 45 秒内 ssh 以 255 退出，会话据此显示断线。复用已有主进程时
+///   心跳实际由主进程负责（见 `ssh_args`），主进程断开后本进程同样以 255 退出。
 pub fn session_ssh_args(
     target: &SshTarget,
     control_path: Option<&str>,
@@ -429,6 +442,9 @@ mod tests {
         assert!(args.contains(&"BatchMode=yes".to_string()));
         assert!(args.contains(&"ControlPath=/tmp/c/%C".to_string()));
         assert!(args.windows(2).any(|w| w == ["-p", "2222"]));
+        // 复用主进程负责整条连接的心跳
+        assert!(args.contains(&"ServerAliveInterval=15".to_string()));
+        assert!(args.contains(&"ServerAliveCountMax=3".to_string()));
     }
 
     #[test]
