@@ -155,7 +155,7 @@ fn cached_cli(instance_id: &str) -> Option<String> {
         .map(|(_, _, path)| path.clone())
 }
 
-// ---------- 远端 pid 登记：Monet 异常退出后，下次连接该主机时据此清理 ----------
+// ---------- 远端 pid 登记：Monet 异常退出或断线后，下一轮同步或重开该会话时据此清理 ----------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RecordedPid {
@@ -185,7 +185,27 @@ fn update_pids(instance_id: &str, change: impl FnOnce(&mut Vec<RecordedPid>)) {
     }
 }
 
+/// 本次运行中 ssh 仍连着的远端进程（实例 id, pid）：清理时一律跳过。
+/// 先登记这里再写 pids.json，清理读文件后再查这里，避免把刚启动的会话当成遗留。
+static LIVE_PIDS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
+
+fn live_pids_for(instance_id: &str) -> Vec<u32> {
+    LIVE_PIDS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(id, _)| id == instance_id)
+        .map(|(_, pid)| *pid)
+        .collect()
+}
+
 pub fn record_pid(instance_id: &str, pid: u32, cli_session_id: &str) {
+    {
+        let mut live = LIVE_PIDS.lock().unwrap_or_else(|e| e.into_inner());
+        if !live.iter().any(|(id, p)| id == instance_id && *p == pid) {
+            live.push((instance_id.to_string(), pid));
+        }
+    }
     update_pids(instance_id, |pids| {
         pids.retain(|p| p.pid != pid);
         pids.push(RecordedPid {
@@ -195,7 +215,16 @@ pub fn record_pid(instance_id: &str, pid: u32, cli_session_id: &str) {
     });
 }
 
+/// 本机这一侧的 ssh 已退出：远端进程不再算存活。断线时远端可能还在跑，记录留给下一轮清理
+pub fn mark_exited(instance_id: &str, pid: u32) {
+    LIVE_PIDS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(id, p)| !(id == instance_id && *p == pid));
+}
+
 pub fn forget_pid(instance_id: &str, pid: u32) {
+    mark_exited(instance_id, pid);
     update_pids(instance_id, |pids| pids.retain(|p| p.pid != pid));
 }
 
@@ -216,20 +245,35 @@ pub fn kill_if_ours(launch: &RemoteLaunch, pid: u32) {
     forget_pid(launch.instance.instance_id(), pid);
 }
 
-/// 上次运行遗留的远端进程：每台主机每次运行 Monet 只清一次（此时还没有本次启动的远端会话）
-pub fn cleanup_stale_pids(executor: &dyn RemoteExecutor, target: &SshTarget, instance_id: &str) {
-    static CLEANED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    {
-        let mut cleaned = CLEANED.lock().unwrap_or_else(|e| e.into_inner());
-        if cleaned.iter().any(|id| id == instance_id) {
-            return;
-        }
-        cleaned.push(instance_id.to_string());
+/// 已登记但 ssh 不再连着的条目：Monet 异常退出或断线后留在远端的进程
+fn stale_entries(
+    recorded: Vec<RecordedPid>,
+    live: &[u32],
+    keep: impl Fn(&RecordedPid) -> bool,
+) -> Vec<RecordedPid> {
+    recorded
+        .into_iter()
+        .filter(|entry| !live.contains(&entry.pid) && keep(entry))
+        .collect()
+}
+
+fn kill_stale(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    instance_id: &str,
+    keep: impl Fn(&RecordedPid) -> bool,
+) {
+    let recorded: Vec<RecordedPid> = {
+        let _guard = PIDS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::fs::read_to_string(pids_path(instance_id))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    };
+    let stale = stale_entries(recorded, &live_pids_for(instance_id), keep);
+    if stale.is_empty() {
+        return;
     }
-    let stale: Vec<RecordedPid> = std::fs::read_to_string(pids_path(instance_id))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
     for entry in &stale {
         let _ = executor.run(
             target,
@@ -237,11 +281,22 @@ pub fn cleanup_stale_pids(executor: &dyn RemoteExecutor, target: &SshTarget, ins
             KILL_TIMEOUT,
         );
     }
-    if !stale.is_empty() {
-        update_pids(instance_id, |pids| {
-            pids.retain(|p| !stale.contains(p));
-        });
-    }
+    update_pids(instance_id, |pids| pids.retain(|p| !stale.contains(p)));
+}
+
+/// 每轮同步都清一次遗留进程；没有遗留条目时不发任何远端命令
+pub fn cleanup_stale_pids(executor: &dyn RemoteExecutor, target: &SshTarget, instance_id: &str) {
+    kill_stale(executor, target, instance_id, |_| true);
+}
+
+/// 启动前先结束同一会话的遗留进程：断线后立即重开时，避免两个 CLI 同时续写同一份会话文件
+pub fn cleanup_session_leftovers(launch: &RemoteLaunch) {
+    kill_stale(
+        executor_for(launch.loopback),
+        &launch.target,
+        launch.instance.instance_id(),
+        |entry| entry.session == launch.cli_session_id,
+    );
 }
 
 fn executor_for(loopback: bool) -> &'static dyn RemoteExecutor {
@@ -381,6 +436,38 @@ mod tests {
         let reported = parse_marker(lines.next().unwrap()).unwrap().unwrap();
         let actual: u32 = lines.last().unwrap().trim().parse().unwrap();
         assert_eq!(reported, actual);
+    }
+
+    fn entry(pid: u32, session: &str) -> RecordedPid {
+        RecordedPid {
+            pid,
+            session: session.into(),
+        }
+    }
+
+    #[test]
+    fn live_processes_are_never_treated_as_leftovers() {
+        let recorded = vec![entry(10, "a"), entry(11, "b"), entry(12, "a")];
+        let stale = stale_entries(recorded, &[11], |_| true);
+        assert_eq!(stale, vec![entry(10, "a"), entry(12, "a")]);
+    }
+
+    #[test]
+    fn session_leftovers_only_cover_the_same_session() {
+        let recorded = vec![entry(10, "a"), entry(11, "b"), entry(12, "a")];
+        let stale = stale_entries(recorded, &[12], |e| e.session == "a");
+        assert_eq!(stale, vec![entry(10, "a")]);
+    }
+
+    #[test]
+    fn exited_processes_become_leftovers_until_forgotten() {
+        let id = "ssh-test-live-1";
+        LIVE_PIDS.lock().unwrap().push((id.to_string(), 4242));
+        assert_eq!(live_pids_for(id), vec![4242]);
+        mark_exited(id, 4242);
+        assert!(live_pids_for(id).is_empty());
+        let stale = stale_entries(vec![entry(4242, "s")], &live_pids_for(id), |_| true);
+        assert_eq!(stale, vec![entry(4242, "s")]);
     }
 
     #[test]

@@ -222,7 +222,7 @@ pub async fn sync_remote_host(app: AppHandle, alias: String) -> Result<sync::Syn
         let (app, host, slot) = (app.clone(), host.clone(), slot.clone());
         tauri::async_runtime::spawn_blocking(move || {
             let root = remote_root(&target, &host)?;
-            // 上次运行遗留的远端进程（Monet 异常退出、断线）：每次运行每台主机清一次
+            // 遗留的远端进程（Monet 异常退出、断线）：跳过本次仍连着的会话
             launch::cleanup_stale_pids(remote_executor(), &target, &host.instance_id);
             let _io = slot.io.lock().unwrap_or_else(|e| e.into_inner());
             let mirror = sync::Mirror::new(sync::mirror_root_for(&host.instance_id));

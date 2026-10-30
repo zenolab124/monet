@@ -915,6 +915,7 @@ fn open_session(
         if let Some(raw) = extra_args.filter(|s| !s.trim().is_empty()) {
             args.extend(parse_extra_args(raw));
         }
+        remote_launch::cleanup_session_leftovers(launch);
         let script = remote_launch::launch_script(&launch.cwd, &launch.claude, &args);
         let mut command = crate::engines::claude::remote::executor::session_command(
             &launch.target,
@@ -2309,7 +2310,7 @@ fn read_stream(
         let mut sp = process.lock().unwrap();
         (sp.child.wait().ok(), sp.remote.clone())
     };
-    // ssh 以 255 退出 = 连接中断，远端进程可能还活着：保留 pid 记录，下次连接时清理
+    // ssh 以 255 退出 = 连接中断，远端进程可能还活着：保留 pid 记录，下一轮同步或重开该会话时清理
     let disconnected = remote.is_some()
         && exit_status.is_some_and(|status| status.code() == Some(SSH_CONNECTION_LOST));
     if let Some(RemoteProcess {
@@ -2317,7 +2318,9 @@ fn read_stream(
         pid: Some(pid),
     }) = &remote
     {
-        if !disconnected {
+        if disconnected {
+            remote_launch::mark_exited(launch.instance.instance_id(), *pid);
+        } else {
             remote_launch::forget_pid(launch.instance.instance_id(), *pid);
         }
     }
