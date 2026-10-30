@@ -278,6 +278,7 @@ pub fn run() {
             commands::check_session_running,
             commands::has_own_process,
             commands::kill_external_session,
+            commands::kill_remote_external_session,
             commands::list_subagents,
             commands::get_subagent_records,
             commands::read_task_output,

@@ -325,6 +325,56 @@ pub fn parse_ps(stdout: &str) -> ProcessList {
         .collect()
 }
 
+/// 进程已不在或已不是这条会话时脚本输出这一行（不 kill）
+pub const GONE_MARKER: &str = "MONET_REMOTE_GONE";
+
+/// 终止远端外部进程：kill 前再核对一次命令行；kill 失败时以非零退出并带 stderr
+pub fn external_kill_script(pid: u32, cli_session_id: &str) -> String {
+    format!(
+        r#"c=$(ps -o command= -p {pid} 2>/dev/null) || {{ echo {GONE_MARKER}; exit 0; }}
+case "$c" in *claude*{sid}*) exec kill {pid} ;; *) echo {GONE_MARKER} ;; esac
+"#,
+        sid = sh_quote(cli_session_id),
+    )
+}
+
+fn forget_ps_cache(instance_id: &str) {
+    PS_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(id, _, _)| id != instance_id);
+}
+
+/// 终止远端一个不是 Monet 启动的会话进程：先绕过缓存重新扫描。
+/// 返回 true 已 kill，false 进程已退出（没有执行 kill）
+pub fn kill_external_session(
+    instance: &EngineInstanceId,
+    cli_session_id: &str,
+    own_pid: Option<u32>,
+) -> Result<bool, String> {
+    forget_ps_cache(instance.instance_id());
+    let Some(pid) = external_session_pid(instance, cli_session_id, own_pid)? else {
+        return Ok(false);
+    };
+    let (_, target) = host_for(instance)?;
+    let out = executor_for(super::loopback_root().is_some())
+        .run(
+            &target,
+            &external_kill_script(pid, cli_session_id),
+            KILL_TIMEOUT,
+        )
+        .map_err(|e| e.to_string());
+    forget_ps_cache(instance.instance_id());
+    let out = out?;
+    if out.timed_out {
+        return Err("REMOTE_KILL_FAILED:timeout".into());
+    }
+    if out.code != Some(0) {
+        return Err(format!("REMOTE_KILL_FAILED:{}", out.stderr.trim()));
+    }
+    Ok(!out.stdout.contains(GONE_MARKER))
+}
+
 /// 远端是否有不是 Monet 启动的 claude 进程在跑这个会话；返回其 pid
 pub fn external_session_pid(
     instance: &EngineInstanceId,
@@ -468,6 +518,39 @@ mod tests {
         assert!(live_pids_for(id).is_empty());
         let stale = stale_entries(vec![entry(4242, "s")], &live_pids_for(id), |_| true);
         assert_eq!(stale, vec![entry(4242, "s")]);
+    }
+
+    #[test]
+    fn external_kill_rechecks_the_command_and_reports_kill_failures() {
+        let script = external_kill_script(4242, "s-1");
+        assert!(script.contains("-p 4242"));
+        assert!(script.contains("*claude*'s-1'*) exec kill 4242"));
+        assert!(script.contains(GONE_MARKER));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_kill_script_runs_in_sh() {
+        use super::super::executor::LocalShellExecutor;
+        let target = SshTarget {
+            destination: "local".into(),
+            port: None,
+        };
+        // 不存在的 pid：报告已退出，不 kill
+        let out = LocalShellExecutor
+            .run(&target, &external_kill_script(999_999, "s-1"), KILL_TIMEOUT)
+            .unwrap();
+        assert_eq!(out.code, Some(0));
+        assert!(out.stdout.contains(GONE_MARKER));
+        // 命令行不匹配（本 shell 自身）：同样不 kill
+        let out = LocalShellExecutor
+            .run(
+                &target,
+                &external_kill_script(std::process::id(), "s-1"),
+                KILL_TIMEOUT,
+            )
+            .unwrap();
+        assert!(out.stdout.contains(GONE_MARKER));
     }
 
     #[test]

@@ -1895,7 +1895,9 @@
       "cliNotFound": "远端未找到 Claude Code CLI",
       "dataRootMissing": "远端没有 Claude Code 数据目录",
       "timeout": "远端体检超时",
-      "localOnly": "远端会话的目录在另一台电脑上，无法在本机打开"
+      "externalGone": "进程已经退出，没有执行终止",
+    "killFailed": "终止远端进程失败",
+    "localOnly": "远端会话的目录在另一台电脑上，无法在本机打开"
     }
   },
   "diff": {

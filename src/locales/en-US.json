@@ -1895,7 +1895,9 @@
       "cliNotFound": "Claude Code CLI not found on the remote host",
       "dataRootMissing": "No Claude Code data directory on the remote host",
       "timeout": "The remote check timed out",
-      "localOnly": "The remote session's folder is on another computer and can't be opened here"
+      "externalGone": "The process has already exited; nothing was terminated",
+    "killFailed": "Failed to terminate the remote process",
+    "localOnly": "The remote session's folder is on another computer and can't be opened here"
     }
   },
   "diff": {

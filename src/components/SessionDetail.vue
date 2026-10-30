@@ -749,8 +749,6 @@ async function onStop(options: { skipConfirm?: boolean } = {}): Promise<boolean>
   if (!sid) return false
   // 与按钮文案同判据:自家流式优先走温和停止,仅纯外部运行才走终止链路
   if (externalRunning.value && !stream.value.streaming) {
-    // 远端外部进程不由 Monet 终止（一期只查看；终止属于后续能力）
-    if (remoteRecordInstance()) return false
     if (stopping.value) return false
     // 外部进程不是我们 spawn 的:终止前确认,并说明归属方(可能正在生成,杀了会丢那一轮)
     const owner = externalOwner.value
@@ -764,13 +762,28 @@ async function onStop(options: { skipConfirm?: boolean } = {}): Promise<boolean>
       stopping.value = false
       stoppingTimeout = null
     }, 12000)
+    const remote = remoteTarget(sid)
     try {
-      await invoke('kill_external_session', { sessionId: sid })
-    } catch {
+      if (!remote) {
+        await invoke('kill_external_session', { sessionId: sid })
+        return true
+      }
+      // 远端：执行前重新扫描核对；确认期间进程已退出则不 kill
+      const killed = await invoke<boolean>('kill_remote_external_session', {
+        sessionId: sid,
+        instance: remote.instance,
+        nativeSessionId: remote.nativeSessionId,
+      })
+      if (!killed) {
+        stopping.value = false
+        notifyTransient(t('remote.externalGone'))
+      }
+      return killed
+    } catch (cause) {
       stopping.value = false
+      if (remote) notifyTransient(t('remote.killFailed'), String(cause).replace(/^REMOTE_KILL_FAILED:/, '') || undefined)
       return false
     }
-    return true
   }
   // 自发轮(后台唤醒轮):interrupt 只打断当前在跑的这一轮,进程内已武装的
   // 定时唤醒不受影响,到点仍会再次触发——toast 说清边界,彻底断根走列头关闭
@@ -3986,7 +3999,7 @@ async function onReload() {
       :has-content="!!inputText.trim() || !!imageInput.images.value.length"
       can-send-while-busy
       :send-disabled="preparingMessage"
-      :stop-disabled="stopping || (externalRunning && !stream.streaming && !!remoteRecordInstance())"
+      :stop-disabled="stopping"
       :stop-loading="stopping"
       :stop-variant="externalRunning && !stream.streaming ? 'danger' : 'accent'"
       :stop-label="externalRunning && !stream.streaming

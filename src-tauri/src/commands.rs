@@ -1042,6 +1042,30 @@ pub async fn check_session_running(
 
 /// 终止指定会话的外部 CLI 进程（用户在 Monet 点"停止"并确认后调用）。
 /// SIGTERM 温和终止；排除 Monet 自身持有的长活进程。
+/// 终止远端主机上运行该会话的外部 claude 进程：执行前重新扫描核对。
+/// true = 已 kill；false = 进程已退出；失败返回 `REMOTE_KILL_FAILED:<stderr>`
+#[tauri::command]
+pub async fn kill_remote_external_session(
+    session_id: String,
+    instance: crate::engines::core::EngineInstanceId,
+    native_session_id: Option<String>,
+) -> Result<bool, String> {
+    if !is_remote_claude(&instance) {
+        return Err("not a remote instance".into());
+    }
+    let own = crate::streaming::get_own_remote_pid(&session_id);
+    let cli_session_id = native_session_id.unwrap_or(session_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::engines::claude::remote::launch::kill_external_session(
+            &instance,
+            &cli_session_id,
+            own,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn kill_external_session(session_id: String) -> bool {
     let pids = scan_external_claude(&session_id, true);
