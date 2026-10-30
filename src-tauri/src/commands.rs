@@ -928,9 +928,9 @@ pub struct ExternalSessionInfo {
 ///
 /// 因此 `tail -f ~/.claude/projects/x/<sid>.jsonl`、`vim <sid>.jsonl`、`grep <sid> ~/.claude/…` 均不命中。
 pub(crate) fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
-    let tokens: Vec<&str> = cmd.split_whitespace().collect();
-    let has_claude_bin = tokens.iter().any(|t| t.rsplit('/').next().unwrap_or(t) == "claude");
-    if !has_claude_bin {
+    // Windows 命令行的参数可能带引号；路径分隔符可能是反斜杠
+    let tokens: Vec<&str> = cmd.split_whitespace().map(|t| t.trim_matches('"')).collect();
+    if !tokens.iter().any(|t| is_claude_binary(t)) {
         return false;
     }
     // --fork-session 时真实身份是 --session-id 的值，--resume 的值是源会话不算归属
@@ -939,6 +939,14 @@ pub(crate) fn command_matches_claude_session(cmd: &str, session_id: &str) -> boo
     } else {
         tokens.contains(&session_id)
     }
+}
+
+/// claude 本体：`claude` / `claude.exe`，或 npm 安装在 Windows 上由 node 运行的 `claude-code/cli.js`
+fn is_claude_binary(token: &str) -> bool {
+    let name = token.rsplit(['/', '\\']).next().unwrap_or(token).to_ascii_lowercase();
+    name == "claude"
+        || name == "claude.exe"
+        || (name == "cli.js" && token.to_ascii_lowercase().contains("claude-code"))
 }
 
 /// 扫描外部 claude 进程：命中匹配且非 Monet 自持进程的 pid 列表。
@@ -1092,6 +1100,22 @@ mod external_session_tests {
         // node 包装：第二个 token 是 claude 本体
         assert!(command_matches_claude_session(
             &format!("node /usr/local/bin/claude --session-id {SID}"),
+            SID
+        ));
+    }
+
+    #[test]
+    fn matches_windows_invocations() {
+        assert!(command_matches_claude_session(
+            &format!(r#""C:\Users\a\.local\bin\claude.exe" --output-format stream-json --resume {SID}"#),
+            SID
+        ));
+        assert!(command_matches_claude_session(
+            &format!(r#""C:\Program Files\nodejs\node.exe" "C:\Users\a\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js" --session-id {SID}"#),
+            SID
+        ));
+        assert!(!command_matches_claude_session(
+            &format!(r#""C:\Windows\notepad.exe" C:\Users\a\.claude\projects\p\{SID}.jsonl"#),
             SID
         ));
     }

@@ -916,7 +916,7 @@ fn open_session(
             args.extend(parse_extra_args(raw));
         }
         remote_launch::cleanup_session_leftovers(launch);
-        let script = remote_launch::launch_script(&launch.cwd, &launch.claude, &args);
+        let script = remote_launch::launch_script_for(launch, &args)?;
         let mut command = crate::engines::claude::remote::executor::session_command(
             &launch.target,
             &script,

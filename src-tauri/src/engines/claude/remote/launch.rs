@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::executor::{sh_quote, RemoteExecutor, RemotePlatform};
 use super::hosts::{self, RemoteHost, SshTarget};
-use super::{health, sync};
+use super::{health, sync, windows};
 use crate::engines::core::EngineInstanceId;
 
 /// 启动脚本输出的第一行：远端 claude 的 pid（exec 前后 pid 不变）
@@ -64,6 +64,22 @@ exec "$login_sh" -lc 'exec "$0" "$@"' {claude} {args}
         claude = sh_quote(claude),
         args = quoted_args.join(" "),
     )
+}
+
+/// 按远端方言生成启动脚本
+pub fn launch_script_for(launch: &RemoteLaunch, args: &[String]) -> Result<String, String> {
+    match launch.target.platform {
+        RemotePlatform::Posix => Ok(launch_script(&launch.cwd, &launch.claude, args)),
+        RemotePlatform::Windows => windows::launch_script(
+            &launch.cwd,
+            &launch.claude,
+            args,
+            crate::engines::claude::protocol::FILE_CHECKPOINTING_ENV,
+            PID_MARKER,
+            CWD_MISSING_MARKER,
+        )
+        .map_err(String::from),
+    }
 }
 
 /// 解析启动脚本的标记行；不是标记时返回 None
@@ -245,9 +261,17 @@ case "$c" in *claude*{sid}*) kill {pid} ;; esac
     )
 }
 
+/// 按远端方言选择「核对后结束」脚本
+fn kill_script_for(platform: RemotePlatform, pid: u32, cli_session_id: &str) -> String {
+    match platform {
+        RemotePlatform::Posix => kill_script(pid, cli_session_id),
+        RemotePlatform::Windows => windows::kill_script(pid, cli_session_id, ""),
+    }
+}
+
 /// 结束远端一个 Monet 自己启动的进程（已退出或已被复用时什么也不做）
 pub fn kill_if_ours(launch: &RemoteLaunch, pid: u32) {
-    let script = kill_script(pid, &launch.cli_session_id);
+    let script = kill_script_for(launch.target.platform, pid, &launch.cli_session_id);
     let _ = executor_for(launch.loopback).run(&launch.target, &script, KILL_TIMEOUT);
     forget_pid(launch.instance.instance_id(), pid);
 }
@@ -284,7 +308,7 @@ fn kill_stale(
     for entry in &stale {
         let _ = executor.run(
             target,
-            &kill_script(entry.pid, &entry.session),
+            &kill_script_for(target.platform, entry.pid, &entry.session),
             KILL_TIMEOUT,
         );
     }
@@ -367,7 +391,10 @@ pub fn kill_external_session(
     let out = executor_for(super::loopback_root().is_some())
         .run(
             &target,
-            &external_kill_script(pid, cli_session_id),
+            &match target.platform {
+                RemotePlatform::Posix => external_kill_script(pid, cli_session_id),
+                RemotePlatform::Windows => windows::kill_script(pid, cli_session_id, GONE_MARKER),
+            },
             KILL_TIMEOUT,
         )
         .map_err(|e| e.to_string());
@@ -401,7 +428,14 @@ pub fn external_session_pid(
         Some(list) => list,
         None => {
             let out = executor_for(super::loopback_root().is_some())
-                .run(&target, "ps -axo pid=,command=", PS_TIMEOUT)
+                .run(
+                    &target,
+                    &match target.platform {
+                        RemotePlatform::Posix => "ps -axo pid=,command=".to_string(),
+                        RemotePlatform::Windows => windows::ps_script(),
+                    },
+                    PS_TIMEOUT,
+                )
                 .map_err(|e| e.to_string())?;
             if out.code != Some(0) {
                 return Err("REMOTE_PS_FAILED".into());
@@ -430,6 +464,111 @@ pub fn alias_for(instance: &EngineInstanceId) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 真实主机验收：启动器报 pid、进程列表按会话 id 命中、核对后 kill、再 kill 报已退出。
+    /// 不发消息（不产生 API 请求），`--no-session-persistence` 不落盘会话文件。
+    /// `MONET_REMOTE_TEST_TARGET=<ssh 别名> cargo test --lib live_ -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_launch_list_and_kill() {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+        let Ok(destination) = std::env::var("MONET_REMOTE_TEST_TARGET") else {
+            return;
+        };
+        let executor = super::super::executor::SshExecutor;
+        let probe = SshTarget {
+            destination,
+            port: None,
+            platform: RemotePlatform::Posix,
+        };
+        let health = health::check(&executor, &probe, None);
+        assert!(health.usable, "{health:?}");
+        let target = SshTarget {
+            platform: health.platform,
+            ..probe
+        };
+        let sid = uuid::Uuid::new_v4().to_string();
+        let root = health.data_root.clone().unwrap();
+        let home = std::path::Path::new(&root.replace('\\', "/"))
+            .parent()
+            .unwrap()
+            .to_string_lossy()
+            .replace(
+                '/',
+                if health.platform == RemotePlatform::Windows {
+                    "\\"
+                } else {
+                    "/"
+                },
+            );
+        let launch = RemoteLaunch {
+            instance: EngineInstanceId::new("claude-code", "ssh-live-000000").unwrap(),
+            alias: "live".into(),
+            target: target.clone(),
+            claude: health.cli_path.clone().unwrap(),
+            cli_session_id: sid.clone(),
+            resume: false,
+            cwd: home,
+            loopback: false,
+        };
+        let args: Vec<String> = [
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--session-id",
+            &sid,
+        ]
+        .map(String::from)
+        .to_vec();
+        let script = launch_script_for(&launch, &args).unwrap();
+        let mut child = super::super::executor::session_command(&target, &script, false)
+            .unwrap()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        let pid = parse_marker(&line).expect("pid marker").unwrap();
+        println!("remote pid {pid}");
+
+        let ps = match target.platform {
+            RemotePlatform::Posix => "ps -axo pid=,command=".to_string(),
+            RemotePlatform::Windows => windows::ps_script(),
+        };
+        std::thread::sleep(Duration::from_secs(2));
+        let listed = parse_ps(&executor.run(&target, &ps, PS_TIMEOUT).unwrap().stdout);
+        let found: Vec<u32> = listed
+            .iter()
+            .filter(|(_, cmd)| crate::commands::command_matches_claude_session(cmd, &sid))
+            .map(|(pid, _)| *pid)
+            .collect();
+        assert_eq!(found, vec![pid], "{listed:?}");
+
+        let kill = match target.platform {
+            RemotePlatform::Posix => external_kill_script(pid, &sid),
+            RemotePlatform::Windows => windows::kill_script(pid, &sid, GONE_MARKER),
+        };
+        let out = executor.run(&target, &kill, KILL_TIMEOUT).unwrap();
+        assert_eq!(out.code, Some(0), "{out:?}");
+        assert!(!out.stdout.contains(GONE_MARKER));
+        let started = Instant::now();
+        let status = child.wait().unwrap();
+        println!("ssh exited with {status:?} after {:?}", started.elapsed());
+        assert_ne!(
+            status.code(),
+            Some(255),
+            "a killed CLI must not look like a lost connection"
+        );
+        let again = executor.run(&target, &kill, KILL_TIMEOUT).unwrap();
+        assert!(again.stdout.contains(GONE_MARKER), "{again:?}");
+    }
 
     #[test]
     fn launch_script_quotes_everything_and_reports_the_pid_first() {

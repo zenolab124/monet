@@ -2078,6 +2078,7 @@
       "REMOTE_INVALID_CONNECTION": "远端主机的连接配置无效。",
       "REMOTE_INVALID_SESSION": "会话 id 无效，无法在远端启动。",
       "REMOTE_CLI_UNAVAILABLE": "远端 CLI 不可用，请在设置里重新检测这台主机。{detail}",
+      "REMOTE_UNSAFE_ARGUMENT": "远端 CLI 是批处理包装（.cmd），启动参数含不安全字符，已拒绝启动。",
       "REMOTE_PID_INVALID": "远端启动脚本返回了无法识别的进程号。",
       "REMOTE_SESSION_NOT_LOCAL": "这是远端主机的会话，不能在本机启动。",
       "REMOTE_LAUNCH_FAILED": "无法在远端启动 CLI：{detail}"

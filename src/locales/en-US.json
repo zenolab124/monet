@@ -2078,6 +2078,7 @@
       "REMOTE_INVALID_CONNECTION": "The connection settings for this remote host are invalid.",
       "REMOTE_INVALID_SESSION": "The session id is invalid, so it can't be started on the remote host.",
       "REMOTE_CLI_UNAVAILABLE": "The remote CLI is unavailable. Re-check this host in Settings. {detail}",
+      "REMOTE_UNSAFE_ARGUMENT": "The remote CLI is a batch wrapper (.cmd) and the launch arguments contain unsafe characters, so it was not started.",
       "REMOTE_PID_INVALID": "The remote launch script reported an unrecognised process id.",
       "REMOTE_SESSION_NOT_LOCAL": "This session belongs to a remote host and can't be started on this Mac.",
       "REMOTE_LAUNCH_FAILED": "Could not start the CLI on the remote host: {detail}"

@@ -109,6 +109,111 @@ exit 0
     )
 }
 
+/// 按 Windows 命令行规则（CommandLineToArgvW）引用一个参数
+pub fn win_arg_quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '\u{b}', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from('"');
+    let mut backslashes = 0;
+    for c in arg.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                out.push(c);
+            }
+        }
+    }
+    out.push_str(&"\\".repeat(backslashes * 2));
+    out.push('"');
+    out
+}
+
+/// `.cmd` / `.bat` 由 cmd.exe 二次解析，参数里的元字符可能被当成命令：只放行安全字符
+fn batch_safe(arg: &str) -> bool {
+    !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.:/=@+,".contains(c))
+}
+
+/// 远端启动器：.NET Process 继承 ssh 会话的标准输入输出启动 CLI（PowerShell 自己不经手数据），
+/// 先报告 CLI 本身的 pid，再等它退出并透传退出码。工作目录不存在时报告错误并退出。
+/// 被强制结束的进程退出码为 -1，透传会变成 ssh 的 255（被当成断线），超出 0～254 的一律记为 1
+pub fn launch_script(
+    cwd: &str,
+    claude: &str,
+    args: &[String],
+    env: &str,
+    pid_marker: &str,
+    cwd_missing_marker: &str,
+) -> Result<String, &'static str> {
+    let lower = claude.to_ascii_lowercase();
+    if (lower.ends_with(".cmd") || lower.ends_with(".bat")) && !args.iter().all(|a| batch_safe(a)) {
+        return Err("REMOTE_UNSAFE_ARGUMENT");
+    }
+    let arguments: Vec<String> = args.iter().map(|a| win_arg_quote(a)).collect();
+    Ok(format!(
+        r#"$d = {cwd}
+if (-not (Test-Path -LiteralPath $d -PathType Container)) {{ [Console]::Out.WriteLine({missing}); [Console]::Out.Flush(); exit 97 }}
+$si = New-Object System.Diagnostics.ProcessStartInfo
+$si.FileName = {claude}
+$si.Arguments = {arguments}
+$si.WorkingDirectory = $d
+$si.UseShellExecute = $false
+$si.EnvironmentVariables[{env}] = 'true'
+$c = [System.Diagnostics.Process]::Start($si)
+[Console]::Out.WriteLine({marker} + $c.Id)
+[Console]::Out.Flush()
+$c.WaitForExit()
+$code = $c.ExitCode
+if ($code -lt 0 -or $code -gt 254) {{ $code = 1 }}
+exit $code
+"#,
+        cwd = ps_quote(cwd),
+        missing = ps_quote(cwd_missing_marker),
+        claude = ps_quote(claude),
+        arguments = ps_quote(&arguments.join(" ")),
+        env = ps_quote(env),
+        marker = ps_quote(pid_marker),
+    ))
+}
+
+/// 进程列表：每行 `pid 命令行`，只列可能是 CLI 的进程
+pub fn ps_script() -> String {
+    format!(
+        r#"{WRITE_LINE}foreach ($p in Get-CimInstance Win32_Process -Filter "Name='claude.exe' OR Name='node.exe'") {{
+  if ($p.CommandLine) {{ Out-MonetLine ([string]$p.ProcessId + ' ' + $p.CommandLine) }}
+}}
+exit 0
+"#
+    )
+}
+
+/// 只在 pid 的命令行仍是这条会话的 claude 时结束它；否则输出 `gone_marker`（可为空）并正常退出。
+/// 结束失败时把原因写到 stderr（不让 PowerShell 输出 CLIXML 错误记录）并以 1 退出
+pub fn kill_script(pid: u32, cli_session_id: &str, gone_marker: &str) -> String {
+    format!(
+        r#"{WRITE_LINE}$p = Get-CimInstance Win32_Process -Filter "ProcessId={pid}"
+if (-not $p -or -not $p.CommandLine -or -not $p.CommandLine.ToLower().Contains('claude') -or -not $p.CommandLine.Contains({sid})) {{
+  if ({gone}) {{ Out-MonetLine {gone} }}
+  exit 0
+}}
+try {{ Stop-Process -Id {pid} -Force -ErrorAction Stop }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}
+exit 0
+"#,
+        sid = ps_quote(cli_session_id),
+        gone = ps_quote(gone_marker),
+    )
+}
+
 /// 解析批量拉取的输出：与请求顺序一一对应，`None` 表示远端没有这个文件。
 /// 帧数不足或格式不对时报错（整批按失败处理，下一轮重拉）
 pub fn parse_batch(stdout: &[u8], expected: usize) -> Result<Vec<Option<Vec<u8>>>, String> {
@@ -144,6 +249,64 @@ pub fn parse_batch(stdout: &[u8], expected: usize) -> Result<Vec<Option<Vec<u8>>
 mod tests {
     use super::*;
     use crate::engines::claude::remote::executor::fits_windows_command;
+
+    #[test]
+    fn windows_arguments_follow_command_line_rules() {
+        assert_eq!(win_arg_quote("--resume"), "--resume");
+        assert_eq!(win_arg_quote(""), "\"\"");
+        assert_eq!(win_arg_quote("a b"), "\"a b\"");
+        assert_eq!(win_arg_quote(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(
+            win_arg_quote(r"C:\dir with space\"),
+            r#""C:\dir with space\\""#
+        );
+        assert_eq!(win_arg_quote(r"C:\no\space"), r"C:\no\space");
+    }
+
+    #[test]
+    fn launcher_reports_the_cli_pid_and_refuses_unsafe_batch_arguments() {
+        let args = vec!["--resume".to_string(), "s-1".to_string(), "x y".to_string()];
+        let script = launch_script(
+            r"C:\work\it's",
+            r"C:\bin\claude.exe",
+            &args,
+            "E",
+            "PID ",
+            "MISSING",
+        )
+        .unwrap();
+        assert!(script.contains(r"$d = 'C:\work\it''s'"));
+        assert!(script.contains(r#"$si.Arguments = '--resume s-1 "x y"'"#));
+        assert!(script.contains("[Console]::Out.WriteLine('PID ' + $c.Id)"));
+        assert!(script.contains("exit 97"));
+        assert!(launch_script(
+            "C:\\w",
+            r"C:\npm\claude.cmd",
+            &["a&calc".to_string()],
+            "E",
+            "P",
+            "M"
+        )
+        .is_err());
+        assert!(launch_script(
+            "C:\\w",
+            r"C:\npm\claude.cmd",
+            &["--model".to_string(), "claude-haiku-4-5".to_string()],
+            "E",
+            "P",
+            "M"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn kill_script_rechecks_the_command_line() {
+        let script = kill_script(4242, "s-1", "GONE");
+        assert!(script.contains("ProcessId=4242"));
+        assert!(script.contains("Contains('s-1')"));
+        assert!(script.contains("Stop-Process -Id 4242 -Force"));
+        assert!(script.contains("Out-MonetLine 'GONE'"));
+    }
 
     #[test]
     fn batch_frames_round_trip_including_missing_files() {
