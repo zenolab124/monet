@@ -56,6 +56,7 @@ impl CodexEngine {
                     configuration: false,
                     quota: true,
                     runtime_commands: false,
+                    remote_workspace: false,
                 },
             },
             ui: EngineUiIntegration {

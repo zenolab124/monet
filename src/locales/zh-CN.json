@@ -2065,6 +2065,7 @@
     "cliMissingUser": "填写的路径不存在或不可执行",
     "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。",
     "sessionReadOnly": "主机 {alias} 暂不可用（离线、未找到 CLI 或版本过低），这个会话目前只能查看。",
+    "localOnly": "远端会话不支持",
     "hostBadgeTitle": "包含远端主机 {alias} 上的会话",
     "runningOnHost": "会话正在 {alias} 上运行，实时跟随中（远端进程结束后可继续输入）",
     "disconnected": "与 {alias} 的连接已断开。已收到的内容已保留，排队的消息暂停发送；重新发送会从远端已保存的位置继续。",

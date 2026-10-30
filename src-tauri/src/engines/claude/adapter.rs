@@ -53,6 +53,7 @@ impl ClaudeEngine {
                     configuration: true,
                     quota: true,
                     runtime_commands: true,
+                    remote_workspace: false,
                 },
             },
             ui: EngineUiIntegration {

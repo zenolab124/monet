@@ -62,6 +62,7 @@ impl RemoteClaudeEngine {
                     configuration: false,
                     quota: false,
                     runtime_commands: false,
+                    remote_workspace: true,
                 },
             },
             ui: EngineUiIntegration {
@@ -270,6 +271,7 @@ mod tests {
         assert_eq!(descriptor.instance.engine_id(), "claude-code");
         assert!(descriptor.instance.instance_id().starts_with("ssh-devbox-"));
         assert_eq!(descriptor.display_name, "Claude Code · DevBox");
+        assert!(descriptor.capabilities.facets.remote_workspace);
         let runtime = descriptor.capabilities.runtime.unwrap();
         assert!(runtime.create && runtime.resume && runtime.interrupt);
         assert!(!runtime.fork);

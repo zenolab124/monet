@@ -1017,7 +1017,12 @@ function remoteRecordInstance(): EngineInstanceId | null {
 const streamErrorText = computed(() => describeStreamError(stream.value.streamError ?? ''))
 /** 远端已删除、只剩 Monet 镜像副本的会话 */
 const remoteMissing = computed(() => currentSession.value?.summary.source_meta?.remoteMissing === true)
-const { health: engineHealth } = useEngines()
+const { health: engineHealth, engines } = useEngines()
+/** 实例声明工作目录不在本机：本机路径类入口（打开、git 快照、@ 文件展开）不可用 */
+const remoteWorkspace = computed(() => {
+  const instance = claudeEngineInstance.value
+  return engines.value.find(item => sameInstance(item.instance, instance))?.capabilities.facets.remoteWorkspace === true
+})
 /** 远端 CLI 不可用（离线、缺 CLI、版本过低）；健康状态未知时不拦 */
 const remoteRuntimeUnavailable = computed(() => {
   const instance = remoteRecordInstance()
@@ -2366,8 +2371,8 @@ async function sendComposerDraft() {
     text = formatCommandInvocation(parsed.cmd, parsed.arg)
   }
 
-  // @ 文件引用读本机文件；远端会话的目录在另一台电脑上，原样发送
-  if (!remoteRecordInstance()) {
+  // @ 文件引用读本机文件；工作目录不在本机时原样发送，由远端 CLI 自己读
+  if (!remoteWorkspace.value) {
     try {
       await resolveProjectReferences(text, cwd)
     } catch (cause) {
@@ -3617,6 +3622,7 @@ async function onReload() {
       :selected-permission-mode="settings.permissionMode"
       :mirror-only="remoteReadOnly"
       :remote-host="!!remoteRecordInstance()"
+      :remote-workspace="remoteWorkspace"
       @model-change="onModelChange"
       @effort-change="onEffortChange"
       @fast-mode-change="onFastModeChange"
@@ -3656,7 +3662,7 @@ async function onReload() {
       <span ref="runnerToggleBtnRef">
         <button
           v-if="interactive"
-          class="p-1 rounded transition-colors flex items-center gap-0.5"
+          class="p-1 rounded transition-colors flex items-center gap-0.5 disabled:opacity-40 disabled:pointer-events-none"
           :class="(runnerDockOpen || runnerFloatOpen)
             ? 'text-claude bg-claude/10'
             : sessionHasCrashed
@@ -3664,7 +3670,8 @@ async function onReload() {
               : sessionRunnersCount > 0
                 ? 'text-claude hover:bg-muted'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
-          :title="$t('runner.title')"
+          :disabled="remoteWorkspace"
+          :title="remoteWorkspace ? $t('remote.localOnly') : $t('runner.title')"
           @click="toggleRunnerPanel"
         >
           <span class="i-carbon-play w-3.5 h-3.5" />
@@ -4138,6 +4145,7 @@ async function onReload() {
         :modified="ledgerModified"
         :read-only="ledgerReadOnly"
         :cwd="composerCwd"
+        :git-snapshot="!remoteWorkspace"
         :session-id="currentSession?.summary.id ?? null"
         @close="ledgerPanelOpen = false"
         @locate="locateToolUse"

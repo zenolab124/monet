@@ -41,6 +41,8 @@ export interface EngineCapabilities {
     configuration: boolean
     quota: boolean
     runtimeCommands: boolean
+    /** 会话工作目录不在本机：本机路径类入口不可用 */
+    remoteWorkspace?: boolean
   }
 }
 

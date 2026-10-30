@@ -78,8 +78,10 @@ const props = defineProps<{
   subagentTokens: TokenUsage
   /** 远端主机的只读镜像会话(远端已删除或 CLI 不可用):连权限模式也不提供 */
   mirrorOnly?: boolean
-  /** 远端主机的会话:CLI 用远端自己的登录与设置,不提供渠道等运行配置胶囊,也不能在本机打开或删除 */
+  /** 远端主机的会话:CLI 用远端自己的登录与设置,不提供渠道等运行配置胶囊,也不能删除 */
   remoteHost?: boolean
+  /** 实例声明工作目录不在本机:在 Finder/终端/编辑器打开置灰并提示 */
+  remoteWorkspace?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -102,6 +104,10 @@ const { notifyTransient } = useNotifications()
 // --- 派生数据 ---
 
 /** 容量推断用的模型字符串:历史真值优先(容量语境),与胶囊的"下次发送"解析分离 */
+/** 本机打开入口的禁用原因：工作目录不在本机，或本机目录不可用 */
+const localOpenBlockedReason = computed(() => props.remoteWorkspace
+  ? t('remote.localOnly')
+  : props.cwdUnavailableReason ?? '')
 const effectiveModelStr = computed(() =>
   props.selectedAdvisor ? ADVISOR_MAIN_MODEL : (props.selectedModelId ?? props.modelString),
 )
@@ -171,7 +177,7 @@ function onReload() {
 
 async function openInFinder() {
   menuOpen.value = false
-  if (!props.cwd || props.cwdUnavailableReason) return
+  if (!props.cwd || localOpenBlockedReason.value) return
   try {
     await invoke('open_in_finder', { path: props.cwd })
   } catch (e) {
@@ -181,7 +187,7 @@ async function openInFinder() {
 
 async function openInTerminal() {
   menuOpen.value = false
-  if (!props.cwd || props.cwdUnavailableReason) return
+  if (!props.cwd || localOpenBlockedReason.value) return
   try {
     // 带上会话渠道(--settings <渠道文件>),终端恢复不静默回落官方
     await invoke('resume_in_terminal', {
@@ -200,7 +206,7 @@ async function openInTerminal() {
 
 async function openInVscode() {
   menuOpen.value = false
-  if (!props.cwd || props.cwdUnavailableReason) return
+  if (!props.cwd || localOpenBlockedReason.value) return
   try {
     await invoke('resume_in_vscode', { cwd: props.cwd })
   } catch (e) {
@@ -316,13 +322,13 @@ function onPermissionModeChange(mode: PermissionMode | null) {
           <button class="menu-item" @click="onReload">
             <span class="i-carbon-renew w-3.5 h-3.5" />{{ $t('topbar.refreshSession') }}
           </button>
-          <button v-if="cwd && !remoteHost" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInFinder">
+          <button v-if="cwd" class="menu-item" :disabled="!!localOpenBlockedReason" :title="localOpenBlockedReason" @click="openInFinder">
             <span class="i-carbon-folder w-3.5 h-3.5" />{{ $t('topbar.openInFinder') }}
           </button>
-          <button v-if="cwd && !remoteHost" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInTerminal">
+          <button v-if="cwd" class="menu-item" :disabled="!!localOpenBlockedReason" :title="localOpenBlockedReason" @click="openInTerminal">
             <span class="i-carbon-terminal w-3.5 h-3.5" />{{ $t('topbar.openInTerminal') }}
           </button>
-          <button v-if="cwd && !remoteHost" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInVscode">
+          <button v-if="cwd" class="menu-item" :disabled="!!localOpenBlockedReason" :title="localOpenBlockedReason" @click="openInVscode">
             <span class="i-carbon-code w-3.5 h-3.5" />{{ $t('topbar.openInVscode') }}
           </button>
           <button v-if="!remoteHost" class="menu-item text-destructive! hover:bg-destructive/10" @click="onDelete">
