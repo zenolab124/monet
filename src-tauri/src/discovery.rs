@@ -14,14 +14,33 @@ fn projects_root() -> PathBuf {
 /// 扫描所有项目，返回按最近活跃排序的项目列表
 /// 使用 rayon 并行解析 + 内存缓存，大幅降低重复加载开销
 pub fn discover_all() -> Vec<Project> {
-    let root = projects_root();
+    discover_in(&projects_root(), RootKind::Local)
+}
+
+/// 数据根的来源：本机根可以用本机文件系统辅助解码路径；镜像根的路径属于另一台机器
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RootKind {
+    Local,
+    Mirror,
+}
+
+/// 扫描指定 projects 目录（远端镜像复用）
+pub fn discover_all_in(root: &Path) -> Vec<Project> {
+    discover_in(root, RootKind::Mirror)
+}
+
+fn discover_in(root: &Path, kind: RootKind) -> Vec<Project> {
     if !root.is_dir() {
         return vec![];
     }
 
-    // 收集所有项目目录（排除内置 Agent 的工作目录，防旧版残留混入档案）
-    let agent_dirs = crate::config::agent_project_dirs();
-    let entries: Vec<(PathBuf, String)> = fs::read_dir(&root)
+    // 收集所有项目目录（排除内置 Agent 的工作目录，防旧版残留混入档案）；镜像不做此过滤
+    let agent_dirs = if kind == RootKind::Local {
+        crate::config::agent_project_dirs()
+    } else {
+        Default::default()
+    };
+    let entries: Vec<(PathBuf, String)> = fs::read_dir(root)
         .ok()
         .into_iter()
         .flatten()
@@ -41,7 +60,7 @@ pub fn discover_all() -> Vec<Project> {
     // 并行解析所有项目
     let mut projects: Vec<Project> = entries
         .par_iter()
-        .filter_map(|(path, name)| discover_project(path, name))
+        .filter_map(|(path, name)| discover_project(path, name, kind))
         .filter(|p| !p.sessions.is_empty())
         .collect();
 
@@ -59,7 +78,7 @@ pub fn discover_all() -> Vec<Project> {
 }
 
 /// 扫描单个项目目录，使用缓存避免重复解析
-fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
+fn discover_project(dir: &Path, dir_name: &str, kind: RootKind) -> Option<Project> {
     // 收集 .jsonl 文件路径
     let session_paths: Vec<PathBuf> = fs::read_dir(dir)
         .ok()?
@@ -107,7 +126,10 @@ fn discover_project(dir: &Path, dir_name: &str) -> Option<Project> {
                 .filter(|c| cwd_matches_dir(c, dir_name))
                 .map(String::from)
         })
-        .unwrap_or_else(|| cache::get_decoded_path(dir_name, decode_path));
+        .unwrap_or_else(|| match kind {
+            RootKind::Local => cache::get_decoded_path(dir_name, decode_path),
+            RootKind::Mirror => decode_path_without_probe(dir_name),
+        });
 
     Some(Project {
         id: dir_name.to_string(),
@@ -150,6 +172,14 @@ pub fn resolve_project_path(dir_name: &str) -> String {
         .filter_map(|p| cache::get_summary(&p))
         .find_map(|s| s.cwd.filter(|c| cwd_matches_dir(c, dir_name)));
     trusted.unwrap_or_else(|| cache::get_decoded_path(dir_name, decode_path))
+}
+
+/// 镜像目录名的兜底解码：路径属于远端机器，不能用本机文件系统验证，逐段还原（有损）
+fn decode_path_without_probe(encoded: &str) -> String {
+    match encoded.strip_prefix('-') {
+        Some(rest) => format!("/{}", rest.replace('-', "/")),
+        None => encoded.replace('-', "/"),
+    }
 }
 
 /// 解码项目目录名为可读路径（仅作 display_path 的无会话兜底，主路径走 JSONL cwd）
@@ -223,6 +253,35 @@ fn decode_path(encoded: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirror_decode_never_touches_the_local_filesystem() {
+        // 本机存在 /Users 也不影响：镜像解码只按规则逐段还原
+        assert_eq!(
+            decode_path_without_probe("-Users-alice-foo"),
+            "/Users/alice/foo"
+        );
+        assert_eq!(decode_path_without_probe("relative-dir"), "relative/dir");
+    }
+
+    #[test]
+    fn mirror_root_prefers_the_session_cwd() {
+        let root =
+            std::env::temp_dir().join(format!("monet-discover-mirror-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("-home-bob-my-app");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("11111111-1111-4111-8111-111111111111.jsonl"),
+            "{\"type\":\"user\",\"cwd\":\"/home/bob/my-app\",\"sessionId\":\"11111111-1111-4111-8111-111111111111\",\"uuid\":\"u1\",\"timestamp\":\"2026-10-30T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+        let projects = discover_all_in(&root);
+        fs::remove_dir_all(&root).ok();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, "-home-bob-my-app");
+        assert_eq!(projects[0].display_path, "/home/bob/my-app");
+    }
 
     #[test]
     fn decode_unix_form() {

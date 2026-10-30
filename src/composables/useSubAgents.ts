@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { SubAgentMeta, SessionRecord } from '@/types'
+import type { SessionRecordArgs } from '@/composables/useSessionDetail'
 
 // 子 Agent 转录管理：磁盘扫描（meta.json 清单）+ 详情 tab 打开/关闭。
 // 任务发现与状态判定已移交异步账本（useAsyncTasks.buildAsyncLedger，从
@@ -12,27 +13,35 @@ export interface SubAgentState {
   loading: boolean
 }
 
-export function createSubAgentContext() {
+/** recordArgs 与会话记录同源：远端实例读镜像，并在加载清单时按需拉取子 Agent 文件 */
+export function createSubAgentContext(
+  recordArgs: (projectId: string, sessionId: string) => SessionRecordArgs = (projectId, sessionId) => ({ projectId, sessionId }),
+) {
   const subAgentMap = ref(new Map<string, SubAgentMeta>())
   const allAgents = ref<SubAgentMeta[]>([])
   const openAgents = ref<SubAgentState[]>([])
   const activeTabId = ref<string | null>(null)
   const sidebarOpen = ref(false)
-  let currentProjectId = ''
-  let currentSessionId = ''
+  let currentArgs: SessionRecordArgs = { projectId: '', sessionId: '' }
 
   const activeTab = computed(() =>
     openAgents.value.find(a => a.meta.agent_id === activeTabId.value) ?? null,
   )
 
   async function loadSubAgentList(projectId: string, sessionId: string) {
-    currentProjectId = projectId
-    currentSessionId = sessionId
+    const args = recordArgs(projectId, sessionId)
+    currentArgs = args
+    await readSubAgentList(args)
+    if (!args.instance) return
+    // 远端：先显示已镜像的清单，再按需拉取；有变化且仍是当前会话时重读
+    const changed = await invoke<number>('sync_remote_subagents', args).catch(() => 0)
+    if (changed > 0 && currentArgs === args) await readSubAgentList(args)
+  }
+
+  async function readSubAgentList(args: SessionRecordArgs) {
     try {
-      const list = await invoke<SubAgentMeta[]>('list_subagents', {
-        projectId,
-        sessionId,
-      })
+      const list = await invoke<SubAgentMeta[]>('list_subagents', args)
+      if (currentArgs !== args) return
       allAgents.value = list
       const map = new Map<string, SubAgentMeta>()
       for (const item of list) {
@@ -73,8 +82,7 @@ export function createSubAgentContext() {
     activeTabId.value = meta.agent_id
     try {
       const records = await invoke<SessionRecord[]>('get_subagent_records', {
-        projectId: currentProjectId,
-        sessionId: currentSessionId,
+        ...currentArgs,
         agentId: meta.agent_id,
       })
       openAgents.value = openAgents.value.map(a =>

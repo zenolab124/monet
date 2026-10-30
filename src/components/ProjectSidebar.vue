@@ -83,6 +83,15 @@ function projectTokens(project: typeof archiveProjects.value[number]) {
               <span class="text-sm text-foreground truncate font-medium" :title="project.display_path">
                 {{ projectName(project.display_path) }}
               </span>
+              <span
+                v-for="host in project.hosts"
+                :key="host"
+                class="shrink-0 inline-flex items-center gap-0.5 px-1 rounded border border-border text-[9px] text-muted-foreground"
+                :title="$t('remote.hostBadgeTitle', { alias: host })"
+              >
+                <span class="i-carbon-cloud h-2.5 w-2.5" />
+                {{ host }}
+              </span>
             </div>
             <span v-if="project.last_active" class="text-xs text-muted-foreground shrink-0">
               {{ relativeTime(project.last_active) }}

@@ -26,6 +26,7 @@ const {
   focusColumnRequest,
   createRaceTab,
   draftCwd,
+  nativeDraftInstance,
   registerFork,
   engineDraft,
   stageEngineDraft,
@@ -94,7 +95,7 @@ async function onStartRace(sessionId: string) {
     const newSessionId = crypto.randomUUID()
     // 无条件登记分叉意图:源有无历史由 Rust 端按源 jsonl 真值判决(未落盘则退化新建)。
     // 前端 drafts 的收割是异步滞后的,不能当"源无历史"的判据
-    registerFork(newSessionId, sessionId, cwd)
+    registerFork(newSessionId, sessionId, cwd, session?.engine ?? nativeDraftInstance(sessionId))
     inheritRunSettings(sessionId, newSessionId)
     createRaceTab(sessionId, cwd, newSessionId)
   } catch (cause) {

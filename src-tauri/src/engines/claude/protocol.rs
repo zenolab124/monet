@@ -74,7 +74,8 @@ pub enum ReverseRequest {
     MissingId { subtype: String },
 }
 
-/// Monet 不在 stdio 控制通道上实现任何反向请求（权限走 MCP 权限桥），因此全部兜底拒绝。
+/// 本机会话的权限走 MCP 权限桥，stdio 控制通道上的反向请求一律兜底拒绝；
+/// 远端会话以 `--permission-prompt-tool stdio` 启动，`can_use_tool` 由 [`parse_can_use_tool`] 先行接走。
 pub fn classify_reverse_request(value: &Value) -> ReverseRequest {
     if value.get("type").and_then(Value::as_str) != Some("control_request") {
         return ReverseRequest::NotARequest;
@@ -99,6 +100,49 @@ pub fn classify_reverse_request(value: &Value) -> ReverseRequest {
         },
         _ => ReverseRequest::MissingId { subtype },
     }
+}
+
+/// stdio 通道上的工具权限请求（`--permission-prompt-tool stdio`）
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolPermissionRequest {
+    pub request_id: String,
+    pub tool_name: String,
+    pub input: Value,
+}
+
+pub fn parse_can_use_tool(value: &Value) -> Option<ToolPermissionRequest> {
+    if value.get("type").and_then(Value::as_str) != Some("control_request") {
+        return None;
+    }
+    let request = value.get("request")?;
+    if request.get("subtype").and_then(Value::as_str) != Some("can_use_tool") {
+        return None;
+    }
+    Some(ToolPermissionRequest {
+        request_id: value
+            .get("request_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())?
+            .to_string(),
+        tool_name: request
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        input: request.get("input").cloned().unwrap_or_else(|| json!({})),
+    })
+}
+
+/// 权限决定（`{"behavior":"allow"|"deny",...}`）包装成 stdio 控制应答
+pub fn tool_permission_response(request_id: &str, decision: Value) -> Value {
+    json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": decision
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -626,6 +670,28 @@ pub fn is_known_event(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn can_use_tool_is_parsed_and_answered_on_the_same_channel() {
+        let request = json!({
+            "type": "control_request",
+            "request_id": "r-1",
+            "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "ls"}}
+        });
+        let parsed = parse_can_use_tool(&request).unwrap();
+        assert_eq!(parsed.request_id, "r-1");
+        assert_eq!(parsed.tool_name, "Bash");
+        assert_eq!(parsed.input, json!({"command": "ls"}));
+        let reply = tool_permission_response("r-1", json!({"behavior": "deny", "message": "no"}));
+        assert_eq!(reply["response"]["request_id"], "r-1");
+        assert_eq!(reply["response"]["subtype"], "success");
+        assert_eq!(reply["response"]["response"]["behavior"], "deny");
+
+        let other = json!({"type": "control_request", "request_id": "r-2", "request": {"subtype": "hook_callback"}});
+        assert!(parse_can_use_tool(&other).is_none());
+        let missing_id = json!({"type": "control_request", "request": {"subtype": "can_use_tool"}});
+        assert!(parse_can_use_tool(&missing_id).is_none());
+    }
 
     #[test]
     fn permission_request_uses_mode_field() {

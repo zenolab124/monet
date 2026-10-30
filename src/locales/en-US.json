@@ -134,7 +134,7 @@
     "replacementDark": "Dark slot replacement",
     "shareTitle": "Share Theme with the Community",
     "shareHint": "Submission creates a public Issue first. Automation opens a PR only after maintainer approval, and accepted themes ship in a later release.",
-    "submitAsGithub": "Submit as @{name}",
+    "submitAsGithub": "Submit as {'@'}{name}",
     "submitAnonymously": "Submit anonymously through the Monet relay",
     "publicName": "Public nickname (optional)",
     "publicNamePlaceholder": "Anonymous Monet user",
@@ -199,6 +199,8 @@
     "netcheckRunning": "Checking…"
   },
   "archive": {
+    "remoteSyncing": "{alias} syncing {done} / {total}",
+    "remoteListing": "{alias} listing remote sessions…",
     "projects": "Projects",
     "loadingProjects": "Loading projects...",
     "noProjects": "No projects found",
@@ -1880,6 +1882,22 @@
       "awaitingInteraction": "Awaiting approval",
       "failed": "Failed",
       "exited": "Exited"
+    },
+    "remote": {
+      "cliTooOld": "The remote CLI is too old to continue sessions there",
+      "sessionMissing": "This session no longer exists on the remote host; only the mirrored copy can be viewed",
+      "forkUnsupported": "Forking remote sessions isn't supported yet",
+      "mirrorPending": "Remote sessions haven't been synced yet",
+      "unreachable": "Can't connect to the remote host",
+      "authFailed": "SSH authentication failed",
+      "hostKeyUntrusted": "The remote host key isn't trusted",
+      "unsupportedOs": "The remote system isn't supported",
+      "cliNotFound": "Claude Code CLI not found on the remote host",
+      "dataRootMissing": "No Claude Code data directory on the remote host",
+      "timeout": "The remote check timed out",
+      "externalGone": "The process has already exited; nothing was terminated",
+    "killFailed": "Failed to terminate the remote process",
+    "localOnly": "The remote session's folder is on another computer and can't be opened here"
     }
   },
   "diff": {
@@ -1999,5 +2017,76 @@
     "refine": "Partial results. Type a more specific path.",
     "keys": "↑↓ Navigate · Enter / Tab Insert · Esc Close",
     "unavailable": "File reference unavailable. Check it and retry: {reason}"
+  },
+  "remote": {
+    "syncProgress": "Syncing {done} / {total}",
+    "cancelSync": "Cancel",
+    "syncCancelled": "Cancelled: {fetched} fetched this time. The next sync resumes where it stopped.",
+    "title": "Remote hosts (SSH)",
+    "intro": "Connect to another macOS / Linux computer through your own SSH configuration to view and continue the Claude Code sessions on it. Only key or ssh-agent logins without a password prompt are supported; Monet stores no credentials.",
+    "empty": "No directly connectable Host was found in ~/.ssh/config. You can add one manually below.",
+    "sourceConfig": "ssh config",
+    "sourceManual": "Manual",
+    "enable": "Enable",
+    "checking": "Checking…",
+    "recheck": "Check again",
+    "remove": "Remove",
+    "claudePath": "Remote CLI path",
+    "claudePathPlaceholder": "Leave empty to locate automatically, e.g. /Users/alice/.local/bin/claude",
+    "cliTooOld": "The remote CLI is older than 2.1.306, so features that rely on the newer protocol are unavailable.",
+    "noSessions": "Connected. There are no Claude Code sessions on this host yet.",
+    "addPlaceholder": "user{'@'}host or user{'@'}host:port",
+    "add": "Add",
+    "check": {
+      "ssh": "SSH connection",
+      "os": "Remote system",
+      "cli_path": "CLI path",
+      "cli_version": "CLI version",
+      "data_root": "Data directory"
+    },
+    "failure": {
+      "unreachable": "Couldn't connect to {alias}. If it's on your local network, make sure Monet is allowed local network access under Settings → Permissions.",
+      "auth_failed": "Authentication failed. Set up a key or ssh-agent so that running ssh {alias} in a terminal doesn't ask for a password.",
+      "host_key_untrusted": "The host key isn't trusted yet. Run ssh {alias} once in a terminal and confirm the host fingerprint.",
+      "unsupported_os": "The remote system isn't supported. Only macOS and Linux are supported.",
+      "cli_not_found": "claude wasn't found on the remote host. Enter its absolute path above.",
+      "data_root_missing": "There's no Claude Code data directory on the remote host. Run claude on that computer once first.",
+      "timeout": "The check timed out after 30 seconds. Check the network and try again.",
+      "cli_path_invalid": "The CLI path you entered doesn’t exist or isn’t executable. Check it, or clear it to let Monet locate claude automatically."
+    },
+    "error": {
+      "invalid_connection": "Invalid connection string. Use user{'@'}host or user{'@'}host:port.",
+      "duplicate_host": "This host has already been added.",
+      "invalid_claude_path": "The CLI path must be absolute and can't contain spaces or quotes.",
+      "unknown_host": "This host wasn't found. Refresh and try again.",
+      "not_manual_host": "Only manually added hosts can be removed. Edit ssh config to change hosts listed there.",
+      "sync_in_progress": "This host is already syncing. Please wait.",
+      "projects_missing": "The remote host has no Claude Code sessions directory yet."
+    },
+    "cliMissingAuto": "not found in PATH or the login shell",
+    "cliMissingUser": "the path you entered doesn’t exist or isn’t executable",
+    "restartHint": "After enabling or disabling a host, restart Monet for it to appear in or leave the engine list.",
+    "sessionReadOnly": "Host {alias} is unavailable (offline, CLI not found, or too old), so this session is read-only for now.",
+    "localOnly": "Not available for remote sessions",
+    "hostBadgeTitle": "Includes sessions on remote host {alias}",
+    "runningOnHost": "Session running on {alias}, following in real time (you can type after the remote process ends)",
+    "disconnected": "Lost the connection to {alias}. Output received so far is kept and queued messages are paused; sending again continues from what the remote host saved.",
+    "cwdNotOnHost": "This folder isn't an existing project on {host}. New remote sessions can only use folders of that host's existing projects.",
+    "launchError": {
+      "REMOTE_CWD_MISSING": "The folder doesn't exist on the remote host. Your message is back in the input box.",
+      "REMOTE_UNKNOWN_HOST": "This remote host can't be found; it may have been removed in Settings.",
+      "REMOTE_INVALID_CONNECTION": "The connection settings for this remote host are invalid.",
+      "REMOTE_INVALID_SESSION": "The session id is invalid, so it can't be started on the remote host.",
+      "REMOTE_CLI_UNAVAILABLE": "The remote CLI is unavailable. Re-check this host in Settings. {detail}",
+      "REMOTE_UNSAFE_ARGUMENT": "The remote CLI is a batch wrapper (.cmd) and the launch arguments contain unsafe characters, so it was not started.",
+      "REMOTE_PID_INVALID": "The remote launch script reported an unrecognised process id.",
+      "REMOTE_SESSION_NOT_LOCAL": "This session belongs to a remote host and can't be started on this Mac.",
+      "REMOTE_LAUNCH_FAILED": "Could not start the CLI on the remote host: {detail}"
+    },
+    "sessionMissing": "This session no longer exists on the remote host. You are viewing the copy Monet kept, read-only.",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "syncDone": "Synced: {listed} sessions on the remote host, {fetched} fetched this time.",
+    "syncPartial": "Synced: {listed} sessions on the remote host, {fetched} fetched this time, {failed} failed and will be retried next sync."
   }
 }

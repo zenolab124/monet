@@ -14,6 +14,7 @@ import {
 } from '@/types'
 import type { SessionSummary } from '@/types'
 import { useRunners } from '@/composables/useRunners'
+import { useRemoteSync } from '@/composables/useRemoteSync'
 import { resolveEnginePresentation } from '@/engines/presentation'
 import WorkbenchTargetButton from '@/components/workbench/WorkbenchTargetButton.vue'
 import TagChip from '@/components/archive/TagChip.vue'
@@ -27,6 +28,13 @@ const { tags: registryTags, openManager } = useTagRegistry()
 const { workspaceCwd, workspaceFileRoot, workspaceForSession, workspaceUnavailable } = useWorkspaceContexts()
 
 const { filteredSessions, sessionStats, loadProjects, engineOptions, selectedEngineIds, toggleEngine } = useProjects()
+const { syncing: remoteSyncing, syncAll, cancelSync } = useRemoteSync()
+
+/** 手动刷新：重读本机列表，并让已启用的远端主机立即同步一轮（同步结果按事件增量并入） */
+function refreshList() {
+  void loadProjects()
+  void syncAll()
+}
 const {
   selectedSessionId,
   sortOrder,
@@ -317,10 +325,18 @@ async function onContextMenu(e: MouseEvent, session: SessionSummary) {
       <button
         class="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         :title="$t('archive.refreshList')"
-        @click="loadProjects"
+        @click="refreshList"
       >
-        <span class="i-carbon-renew w-3.5 h-3.5" />
+        <span class="i-carbon-renew w-3.5 h-3.5" :class="{ 'animate-spin': remoteSyncing.length > 0 }" />
       </button>
+    </div>
+    <div
+      v-for="item in remoteSyncing"
+      :key="item.alias"
+      class="px-3 pb-1 flex items-center gap-2 text-[11px] text-muted-foreground"
+    >
+      <span class="truncate tabular-nums">{{ item.total ? $t('archive.remoteSyncing', { alias: item.alias, done: item.done, total: item.total }) : $t('archive.remoteListing', { alias: item.alias }) }}</span>
+      <button class="shrink-0 hover:text-foreground transition-colors" @click="cancelSync(item.alias)">{{ $t('remote.cancelSync') }}</button>
     </div>
 
     <!-- 筛选栏 -->

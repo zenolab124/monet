@@ -21,14 +21,14 @@ import {
   startTurnWithInput,
 } from '@/engines/client'
 import { resolveSession } from '@/engines/directory'
-import { sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
+import { resolveNativeInstance, sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
 import { instanceKey, sameInstance } from '@/engines/identity'
 import { engineRuntimeSnapshot } from '@/engines/runtimeState'
 import { bindRuntimeOptimisticInput, removeRuntimeOptimisticInput, stageRuntimeOptimisticInput } from '@/engines/runtimeOptimisticInput'
 import { engineRunConfig, engineRuntimeChannel, engineRuntimeOptions, inheritEngineRunConfig, setEngineRunConfig } from '@/engines/runConfig'
 import { rebindDraftChannel, sameRuntimeChannel } from '@/engines/draftChannel'
 import { useEngines } from '@/engines/useEngines'
-import type { EngineDescriptor, ProjectRef, RuntimeInputItem, RuntimeSnapshot, SessionRef } from '@/engines/types'
+import type { EngineDescriptor, EngineInstanceId, ProjectRef, RuntimeInputItem, RuntimeSnapshot, SessionRef } from '@/engines/types'
 import type { Project } from '@/types'
 import { collectSessionCapabilityFingerprint } from '@/features'
 
@@ -53,6 +53,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
     addRaceLane,
     discardStagedSession,
     engineDraft,
+    nativeDraftInstance,
     forkSourceOf,
     lockRaceEngineSelection,
     replaceRaceLaneSession,
@@ -73,6 +74,8 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
     engineName: string
     cwd: string
     native: boolean
+    /** 原生 lane 所属实例:已落盘取会话引用,草稿取登记记录,缺省本机 */
+    nativeInstance: EngineInstanceId
     runtimeDraft: boolean
     runtimeDraftChannel: string | null | undefined
   }
@@ -92,6 +95,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
       engineName: summary?.engine_name ?? draft?.engineName ?? reference?.engine.engineId ?? 'Agent',
       cwd: summary?.cwd ?? draft?.cwd ?? tab.value.race?.cwd ?? '',
       native: !reference || usesNativeSessionSurface(reference.engine),
+      nativeInstance: resolveNativeInstance(reference?.engine, nativeDraftInstance(sessionId)),
       runtimeDraft: !!draft && !summary,
       runtimeDraftChannel: draft?.attachedChannel,
     }
@@ -188,18 +192,18 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
       return choices.find(engine => sameInstance(engine.instance, context.reference!.engine)) ?? null
     }
     if (context.native) {
-      return choices.find(engine => usesNativeSessionSurface(engine.instance)) ?? null
+      return choices.find(engine => sameInstance(engine.instance, context.nativeInstance)) ?? null
     }
     return null
   }
 
-  async function switchLaneEngine(sessionId: string, targetEngineId: string): Promise<boolean> {
+  async function switchLaneEngine(sessionId: string, targetInstanceKey: string): Promise<boolean> {
     if (raceMutationLoading.value || broadcasting.value) return false
     const race = tab.value.race
     const choices = switchableEngines.value
     if (!race || race.engineSwitchLocked || choices.length < 2) return false
     const current = currentLaneEngine(sessionId, choices)
-    const target = choices.find(engine => engine.instance.engineId === targetEngineId)
+    const target = choices.find(engine => instanceKey(engine.instance) === targetInstanceKey)
     if (!target) return false
     if (current && sameInstance(target.instance, current.instance)) return true
 
@@ -209,7 +213,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
     try {
       await refreshChannels()
       if (usesNativeSessionSurface(target.instance)) {
-        replacementSessionId = stageDraftSession(race.cwd)
+        replacementSessionId = stageDraftSession(race.cwd, undefined, target.instance)
       } else {
         const project = projectForEngine(target, race.cwd)
         const attachedChannel = defaultChannelForEngine(target)
@@ -470,7 +474,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
       const { registerFork } = useWorkbench()
       const newSessionId = crypto.randomUUID()
       // 无条件登记分叉意图:源有无历史由 Rust 端按源 jsonl 真值判决(未落盘则退化新建)
-      registerFork(newSessionId, sourceLane.sessionId, race.cwd)
+      registerFork(newSessionId, sourceLane.sessionId, race.cwd, context.nativeInstance)
       inheritRunSettings(sourceLane.sessionId, newSessionId)
       addRaceLane(tab.value.id, newSessionId)
       return newSessionId
@@ -494,7 +498,7 @@ export function useRaceInput(tab: Ref<WorkbenchTab>) {
       for (const lane of sourceLanes) {
         const context = laneContext(lane.sessionId)
         if (context.native) {
-          const sessionId = stageDraftSession(race.cwd)
+          const sessionId = stageDraftSession(race.cwd, undefined, context.nativeInstance)
           inheritRunSettings(lane.sessionId, sessionId)
           replacementSessionIds.push(sessionId)
         } else {

@@ -7,6 +7,7 @@
 
 import { currentKnownClaudeModelIds } from '@/composables/useClaudeModelCatalog'
 import type { WorkshopSkill, WorkshopCommand } from '@/types'
+import type { EngineInstanceId } from '@/engines/types'
 import i18n from '../locales'
 
 export type ComposerPrefix = '/' | '$'
@@ -25,6 +26,8 @@ export interface SlashCommand {
 
 export interface CommandCatalogContext {
   engineId?: string
+  /** 会话所属引擎实例;/model 校验按实例读取 CLI 自报模型目录,缺省本机 */
+  instance?: EngineInstanceId
   cwd?: string | null
   /** 引擎在握手时自报的命令（含插件命令与新内置命令） */
   reported?: ReadonlyArray<{ name: string; description: string; argument_hint: string | null }>
@@ -308,7 +311,7 @@ export function parseCommand(
       // 当前渠道的下拉候选按原样(保留大小写)生效,第三方渠道的模型 ID 也走这里
       const offered = context.argOptions?.model?.find(option => option.value.toLowerCase() === normalized)
       if (offered) return { kind: 'pass', cmd: command, arg: offered.value, prefix }
-      if (!currentKnownClaudeModelIds().has(normalized)) {
+      if (!currentKnownClaudeModelIds(context.instance).has(normalized)) {
         return { kind: 'invalid', cmd: command, reason: i18n.global.t('slash.errorModelUnknown'), prefix }
       }
       // 角色别名原样交给 CLI 解析到当前版本,与模型下拉的角色项一致

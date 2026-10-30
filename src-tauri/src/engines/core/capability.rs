@@ -86,6 +86,10 @@ pub struct FacetCapabilities {
     pub configuration: bool,
     pub quota: bool,
     pub runtime_commands: bool,
+    /// 会话工作目录不在本机文件系统上：依赖本机路径的入口（在编辑器/Finder/终端打开、
+    /// git 快照、@ 文件展开）一律不可用
+    #[serde(default)]
+    pub remote_workspace: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

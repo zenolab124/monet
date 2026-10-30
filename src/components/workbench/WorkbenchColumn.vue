@@ -17,10 +17,10 @@ import { displayTitle } from '@/types'
 import { fileName } from '@/utils/path'
 import { collectSessionCapabilities } from '@/features'
 import { useSessionMeta } from '@/composables/useSessionMeta'
-import { sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
+import { resolveNativeInstance, sessionUiId, usesNativeSessionSurface } from '@/engines/integration'
 import { resolveEnginePresentation } from '@/engines/presentation'
 import { createSession, forkSession } from '@/engines/client'
-import { sameInstance } from '@/engines/identity'
+import { instanceKey, sameInstance } from '@/engines/identity'
 import { useEngines } from '@/engines/useEngines'
 import { resolveWorkbenchEngineActions } from '@/engines/workbenchActions'
 import { engineRuntimeChannel, engineRuntimeOptions, inheritEngineRunConfig } from '@/engines/runConfig'
@@ -47,12 +47,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'startRace'): void
   (e: 'toggleRaceEnginePicker', sessionId: string): void
-  (e: 'selectRaceEngine', sessionId: string, engineId: string): void
+  (e: 'selectRaceEngine', sessionId: string, instanceKey: string): void
 }>()
 
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, removeRaceLane, pendingTaskCwd, draftCwd, engineDraft, findLane, state, openSession, createDraftSession, registerEngineDraft, registerFork, forkSourceOf } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, pendingTaskCwd, draftCwd, nativeDraftInstance, engineDraft, findLane, state, openSession, createDraftSession, registerEngineDraft, registerFork, forkSourceOf } = useWorkbench()
 const { engines } = useEngines()
 
 provide('columnIndex', computed(() => props.index))
@@ -107,10 +107,17 @@ const sessionSummary = computed<SessionSummary | null>(() => {
 const useNativeDetail = computed(() => !pendingTask.value
   && (!sessionSummary.value?.engine || usesNativeSessionSurface(sessionSummary.value.engine)))
 const engineDescriptor = computed(() => {
-  const instance = sessionSummary.value?.engine
+  // 未落盘的原生草稿没有摘要，按草稿登记的实例取能力（远端主机的新会话也不提供本机开关）
+  const instance = sessionSummary.value?.engine ?? nativeDraftInstance(props.column.sessionId)
   return instance ? engines.value.find(item => sameInstance(item.instance, instance)) ?? null : null
 })
-const runtimeCapabilities = computed(() => engineDescriptor.value?.capabilities.runtime ?? null)
+const runtimeCapabilities = computed(() => engineDescriptor.value
+  ? engineDescriptor.value.capabilities.runtime ?? null
+  : undefined)
+/** 原生列、有运行时且用本机配置：RC / Chrome 这类开关只对本机实例有意义（远端主机用它自己的设置） */
+const nativeRuntime = computed(() => useNativeDetail.value
+  && runtimeCapabilities.value !== null
+  && engineDescriptor.value?.capabilities.facets.configuration !== false)
 const workbenchActions = computed(() => resolveWorkbenchEngineActions(
   runtimeCapabilities.value,
   useNativeDetail.value,
@@ -119,6 +126,15 @@ const canCreate = computed(() => workbenchActions.value.create)
 const canFork = computed(() => workbenchActions.value.fork)
 const canRace = computed(() => workbenchActions.value.race)
 const engineId = computed(() => sessionSummary.value?.engine?.engineId ?? (useNativeDetail.value ? 'claude-code' : ''))
+/** 原生列所属实例:新建、分叉的草稿沿用它 */
+const nativeInstance = computed(() => resolveNativeInstance(
+  sessionSummary.value?.engine,
+  nativeDraftInstance(props.column.sessionId),
+))
+const currentInstanceKey = computed(() => {
+  const instance = sessionSummary.value?.engine ?? (useNativeDetail.value ? nativeInstance.value : null)
+  return instance ? instanceKey(instance) : ''
+})
 const enginePresentation = computed(() => resolveEnginePresentation(
   useNativeDetail.value ? 'claude' : sessionSummary.value?.engine?.engineId,
   sessionSummary.value?.engine_name ?? (useNativeDetail.value ? 'Claude Code' : null),
@@ -235,7 +251,7 @@ async function onFork() {
     }
     // 懒分叉:只登记意图,落盘由首条消息时 CLI 原生 --fork-session 完成
     const newSessionId = crypto.randomUUID()
-    registerFork(newSessionId, props.column.sessionId, session.cwd)
+    registerFork(newSessionId, props.column.sessionId, session.cwd, nativeInstance.value)
     inheritRunSettings(props.column.sessionId, newSessionId)
     openSession(newSessionId)
     notifyTransient(t('workbench.column.forkCreated'))
@@ -286,7 +302,7 @@ async function onNewSession() {
       notifyTransient(t('workbench.rail.newSessionReady'), t('workbench.rail.newSessionHint'))
       return
     }
-    const newSessionId = createDraftSession(cwd)
+    const newSessionId = createDraftSession(cwd, nativeInstance.value)
     // 同项目新建延续当前会话的模型选择(渠道/模型/effort/顾问)
     inheritRunSettings(props.column.sessionId, newSessionId)
   } catch (cause) {
@@ -440,7 +456,7 @@ function onFindStatus(status: SessionFindStatus) {
       <div class="workbench-column-actions">
         <div v-if="!isRace" class="workbench-column-optional-actions">
           <button
-            v-if="useNativeDetail"
+            v-if="nativeRuntime"
             :disabled="rcLoading"
             class="icon-btn icon-btn-sm disabled:opacity-40"
             :class="stream.rcActive ? 'border-primary! text-primary!' : ''"
@@ -451,7 +467,7 @@ function onFindStatus(status: SessionFindStatus) {
             <span class="i-carbon-remote-connection w-3 h-3" />
           </button>
           <button
-            v-if="useNativeDetail"
+            v-if="nativeRuntime"
             class="icon-btn icon-btn-sm"
             :class="settings.chrome ? 'border-primary! text-primary!' : ''"
             v-tooltip="settings.chrome ? $t('workbench.column.chromeEnabled') : $t('workbench.column.chromeEnable')"
@@ -558,7 +574,7 @@ function onFindStatus(status: SessionFindStatus) {
       />
       <RaceEnginePicker
         v-else-if="isRace && enginePickerOpen"
-        :current-engine-id="engineId"
+        :current-instance-key="currentInstanceKey"
         :selecting-engine-id="selectingEngineId ?? null"
         @select="emit('selectRaceEngine', column.sessionId, $event)"
       />

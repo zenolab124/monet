@@ -29,6 +29,7 @@ import { migrateLegacyAppDefaults } from '@/composables/useChannels'
 import { stateRepairCount, stateWasReset, useWorkbench } from '@/composables/useWorkbench'
 import { applyZoom, useZoom } from '@/composables/useZoom'
 import { useUpdater } from '@/composables/useUpdater'
+import { useRemoteSync } from '@/composables/useRemoteSync'
 import { initEngineRuntimeState } from '@/engines/runtimeState'
 import { DragDropProvider, DragOverlay } from '@dnd-kit/vue'
 
@@ -173,6 +174,8 @@ onMounted(async () => {
   // 调用前打 boot:projects-start，promise settle 后打 boot:projects-done。
   markBoot('boot:projects-start')
   loadProjects().finally(() => markBoot('boot:projects-done'))
+  // 远端主机镜像：立即一轮索引，之后前台每 60 秒一轮（未配置主机时只是一次空列表调用）
+  useRemoteSync().startScheduler()
   // 工作台持久化损坏回退提示(NFR-002);可局部修复时只提示不重置
   if (stateWasReset) {
     useNotifications().notifyTransient(t('workbench.stateReset'))

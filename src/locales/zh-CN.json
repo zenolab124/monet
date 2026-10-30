@@ -134,7 +134,7 @@
     "replacementDark": "深色槽替代主题",
     "shareTitle": "分享主题给社区",
     "shareHint": "投稿会先创建公开 Issue，经维护者批准后才由自动化生成 PR，并随后续版本内置。",
-    "submitAsGithub": "以 @{name} 提交",
+    "submitAsGithub": "以 {'@'}{name} 提交",
     "submitAnonymously": "匿名提交（由 Monet 中继服务代建 Issue）",
     "publicName": "公开昵称（可选）",
     "publicNamePlaceholder": "Anonymous Monet user",
@@ -199,6 +199,8 @@
     "netcheckRunning": "检测中…"
   },
   "archive": {
+    "remoteSyncing": "{alias} 同步中 {done} / {total}",
+    "remoteListing": "{alias} 正在列出远端会话…",
     "projects": "项目",
     "loadingProjects": "正在加载项目...",
     "noProjects": "未发现任何项目",
@@ -1880,6 +1882,22 @@
       "awaitingInteraction": "等待批准",
       "failed": "失败",
       "exited": "已退出"
+    },
+    "remote": {
+      "cliTooOld": "远端 CLI 版本过低，无法在远端续聊",
+      "sessionMissing": "远端主机上已没有这个会话，只能查看镜像副本",
+      "forkUnsupported": "远端会话暂不支持分叉",
+      "mirrorPending": "远端会话还没有同步过",
+      "unreachable": "无法连接到远端主机",
+      "authFailed": "SSH 认证失败",
+      "hostKeyUntrusted": "远端主机密钥未被信任",
+      "unsupportedOs": "远端系统不受支持",
+      "cliNotFound": "远端未找到 Claude Code CLI",
+      "dataRootMissing": "远端没有 Claude Code 数据目录",
+      "timeout": "远端体检超时",
+      "externalGone": "进程已经退出，没有执行终止",
+    "killFailed": "终止远端进程失败",
+    "localOnly": "远端会话的目录在另一台电脑上，无法在本机打开"
     }
   },
   "diff": {
@@ -1999,5 +2017,76 @@
     "refine": "仅显示部分结果，请输入更完整的路径",
     "keys": "↑↓ 选择 · Enter / Tab 插入 · Esc 关闭",
     "unavailable": "文件引用不可用，请检查后重试：{reason}"
+  },
+  "remote": {
+    "syncProgress": "同步中 {done} / {total}",
+    "cancelSync": "取消",
+    "syncCancelled": "已取消：本次拉取 {fetched} 个，下次同步从断点继续。",
+    "title": "远端主机（SSH）",
+    "intro": "通过你自己的 SSH 配置连接另一台 macOS / Linux 电脑，查看并继续那台机器上的 Claude Code 会话。只支持密钥或 ssh-agent 免密登录，Monet 不保存任何凭据。",
+    "empty": "~/.ssh/config 中没有可直接连接的 Host，可以在下方手动添加。",
+    "sourceConfig": "ssh config",
+    "sourceManual": "手动添加",
+    "enable": "启用",
+    "checking": "检测中…",
+    "recheck": "重新检测",
+    "remove": "移除",
+    "claudePath": "远端 CLI 路径",
+    "claudePathPlaceholder": "留空自动定位，例如 /Users/alice/.local/bin/claude",
+    "cliTooOld": "远端 CLI 版本低于 2.1.306，依赖新协议的功能将不可用。",
+    "noSessions": "连接正常，这台主机上还没有 Claude Code 会话。",
+    "addPlaceholder": "user{'@'}host 或 user{'@'}host:port",
+    "add": "添加",
+    "check": {
+      "ssh": "SSH 连接",
+      "os": "远端系统",
+      "cli_path": "CLI 路径",
+      "cli_version": "CLI 版本",
+      "data_root": "数据目录"
+    },
+    "failure": {
+      "unreachable": "无法连接到 {alias}。若它在局域网内，请确认已在「设置 → 权限」中允许 Monet 访问本地网络。",
+      "auth_failed": "认证失败：请先配置密钥或 ssh-agent，确认在终端里执行 ssh {alias} 不需要输入密码。",
+      "host_key_untrusted": "主机密钥未被信任：请先在终端里执行一次 ssh {alias} 并确认主机指纹。",
+      "unsupported_os": "远端系统不受支持，目前只支持 macOS 和 Linux。",
+      "cli_not_found": "在远端找不到 claude，请在上方填写它的绝对路径。",
+      "data_root_missing": "远端没有 Claude Code 数据目录，请先在那台电脑上运行一次 claude。",
+      "timeout": "检测超时（30 秒），请检查网络后重试。",
+      "cli_path_invalid": "填写的 CLI 路径不存在或不可执行，请检查后重新填写，或清空让 Monet 自动定位。"
+    },
+    "error": {
+      "invalid_connection": "连接串格式无效，请使用 user{'@'}host 或 user{'@'}host:port。",
+      "duplicate_host": "这台主机已经添加过了。",
+      "invalid_claude_path": "CLI 路径必须是绝对路径，且不能包含空格或引号。",
+      "unknown_host": "找不到这台主机，请刷新后重试。",
+      "not_manual_host": "只能移除手动添加的主机；ssh config 中的主机请在配置文件里修改。",
+      "sync_in_progress": "这台主机正在同步，请稍候。",
+      "projects_missing": "远端还没有 Claude Code 会话目录。"
+    },
+    "cliMissingAuto": "未在 PATH 或登录 shell 中找到",
+    "cliMissingUser": "填写的路径不存在或不可执行",
+    "restartHint": "启用或停用主机后，需要重启 Monet 才会在引擎列表中出现或消失。",
+    "sessionReadOnly": "主机 {alias} 暂不可用（离线、未找到 CLI 或版本过低），这个会话目前只能查看。",
+    "localOnly": "远端会话不支持",
+    "hostBadgeTitle": "包含远端主机 {alias} 上的会话",
+    "runningOnHost": "会话正在 {alias} 上运行，实时跟随中（远端进程结束后可继续输入）",
+    "disconnected": "与 {alias} 的连接已断开。已收到的内容已保留，排队的消息暂停发送；重新发送会从远端已保存的位置继续。",
+    "cwdNotOnHost": "这个目录不是 {host} 上已有的项目，远端新建只能选该主机已有项目的目录。",
+    "launchError": {
+      "REMOTE_CWD_MISSING": "远端目录不存在，消息已放回输入框。",
+      "REMOTE_UNKNOWN_HOST": "找不到这台远端主机，可能已在设置里移除。",
+      "REMOTE_INVALID_CONNECTION": "远端主机的连接配置无效。",
+      "REMOTE_INVALID_SESSION": "会话 id 无效，无法在远端启动。",
+      "REMOTE_CLI_UNAVAILABLE": "远端 CLI 不可用，请在设置里重新检测这台主机。{detail}",
+      "REMOTE_UNSAFE_ARGUMENT": "远端 CLI 是批处理包装（.cmd），启动参数含不安全字符，已拒绝启动。",
+      "REMOTE_PID_INVALID": "远端启动脚本返回了无法识别的进程号。",
+      "REMOTE_SESSION_NOT_LOCAL": "这是远端主机的会话，不能在本机启动。",
+      "REMOTE_LAUNCH_FAILED": "无法在远端启动 CLI：{detail}"
+    },
+    "sessionMissing": "远端主机上已经没有这个会话了，这里显示的是 Monet 保留的镜像副本，只能查看。",
+    "syncNow": "立即同步",
+    "syncing": "同步中…",
+    "syncDone": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个。",
+    "syncPartial": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个，{failed} 个失败，下次同步会重试。"
   }
 }

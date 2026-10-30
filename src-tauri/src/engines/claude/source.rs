@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -11,22 +11,53 @@ use super::default_instance;
 
 pub struct ClaudeSource {
     instance: EngineInstanceId,
+    /// 远端镜像的 projects 目录；None 为本机数据根（`config::projects_dir()`）
+    mirror_root: Option<PathBuf>,
+    /// 远端镜像所属主机的别名，随会话摘要下发给界面做主机徽标；本机为 None
+    host_alias: Option<String>,
     change_sinks: Arc<Mutex<Vec<SourceChangeSink>>>,
     projects_cache: Mutex<Option<Vec<crate::models::Project>>>,
+    /// 镜像里远端已删除的会话（`<项目目录>/<会话 id>.jsonl`），与项目快照同生命周期
+    missing_cache: Mutex<Option<Arc<HashSet<String>>>>,
 }
 
 impl ClaudeSource {
     pub fn new() -> EngineResult<Self> {
         Ok(Self {
             instance: default_instance()?,
+            mirror_root: None,
+            host_alias: None,
             change_sinks: Arc::new(Mutex::new(Vec::new())),
             projects_cache: Mutex::new(None),
+            missing_cache: Mutex::new(None),
         })
+    }
+
+    /// 远端主机的只读镜像：会话来自 `projects_dir`，操作类动作在远端运行时接入前不可用
+    pub fn mirror(instance: EngineInstanceId, projects_dir: PathBuf, host_alias: String) -> Self {
+        Self {
+            instance,
+            mirror_root: Some(projects_dir),
+            host_alias: Some(host_alias),
+            change_sinks: Arc::new(Mutex::new(Vec::new())),
+            projects_cache: Mutex::new(None),
+            missing_cache: Mutex::new(None),
+        }
+    }
+
+    fn projects_dir(&self) -> PathBuf {
+        self.mirror_root
+            .clone()
+            .unwrap_or_else(crate::config::projects_dir)
     }
 
     pub fn publish_change(&self, change: SourceChange) {
         *self
             .projects_cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
+        *self
+            .missing_cache
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = None;
         let sinks = self
@@ -50,12 +81,40 @@ impl ClaudeSource {
             return projects;
         }
 
-        let discovered = crate::discovery::discover_all();
+        let discovered = match &self.mirror_root {
+            Some(root) => crate::discovery::discover_all_in(root),
+            None => crate::discovery::discover_all(),
+        };
         let mut cache = self
             .projects_cache
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         cache.get_or_insert_with(|| discovered.clone()).clone()
+    }
+
+    /// 远端已删除的会话；本机数据根恒为空
+    fn remote_missing(&self) -> Arc<HashSet<String>> {
+        let Some(projects_dir) = &self.mirror_root else {
+            return Arc::default();
+        };
+        let mut cache = self
+            .missing_cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        cache
+            .get_or_insert_with(|| {
+                let root = projects_dir.parent().unwrap_or(projects_dir).to_path_buf();
+                let state = super::remote::sync::Mirror::new(root).load_state();
+                Arc::new(
+                    state
+                        .files
+                        .into_iter()
+                        .filter(|(_, file)| file.missing)
+                        .map(|(rel, _)| rel)
+                        .collect(),
+                )
+            })
+            .clone()
     }
 
     fn owns_project(&self, project: &ProjectRef) -> EngineResult<()> {
@@ -125,6 +184,7 @@ impl ClaudeSource {
         &self,
         project: ProjectRef,
         summary: crate::models::SessionSummary,
+        remote_missing: bool,
     ) -> EngineResult<CoreSessionSummary> {
         let usage = map_usage(&summary.total_tokens);
         let subagent_tokens = json!({
@@ -165,6 +225,15 @@ impl ClaudeSource {
                     summary.version.map(Value::String).unwrap_or(Value::Null),
                 ),
                 ("subagentTokens".into(), subagent_tokens),
+                // 镜像保留、远端已删除：只读查阅，不能续聊
+                ("remoteMissing".into(), Value::Bool(remote_missing)),
+                (
+                    "remoteHost".into(),
+                    self.host_alias
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                ),
             ]))?,
         })
     }
@@ -172,7 +241,8 @@ impl ClaudeSource {
     fn timeline_records(&self, session: &SessionRef) -> EngineResult<Vec<ConversationRecord>> {
         self.owns_session(session)?;
         let (project_id, _) = self.find_session(session.native_id())?;
-        let path = crate::config::projects_dir()
+        let path = self
+            .projects_dir()
             .join(project_id)
             .join(format!("{}.jsonl", session.native_id()));
         let mut records = Vec::new();
@@ -212,9 +282,11 @@ impl SessionSource for ClaudeSource {
                 .ok_or_else(|| {
                     EngineError::new(EngineErrorKind::NotFound, "Claude project was not found")
                 })?;
+            let missing = self.remote_missing();
             let mut sessions = Vec::with_capacity(source_project.sessions.len());
             for summary in source_project.sessions {
-                sessions.push(self.map_summary(project.clone(), summary)?);
+                let gone = missing.contains(&format!("{native_project}/{}.jsonl", summary.id));
+                sessions.push(self.map_summary(project.clone(), summary, gone)?);
             }
             let (sessions, next_cursor) = paginate(sessions, query.cursor, query.limit);
             Ok(SessionPage {
@@ -288,6 +360,12 @@ impl SessionSource for ClaudeSource {
                     "invalid Claude asset index",
                 )
             })?;
+            if self.mirror_root.is_some() {
+                return Err(EngineError::new(
+                    EngineErrorKind::Unsupported,
+                    "remote session images are not supported",
+                ));
+            }
             let (project_id, _) = self.find_session(asset.session.native_id())?;
             let (media_type, bytes) = crate::image_protocol::resolve_engine_image(
                 &project_id,
@@ -305,7 +383,13 @@ impl SessionSource for ClaudeSource {
     fn session_actions(&self, session: SessionRef) -> EngineFuture<'_, SessionActions> {
         Box::pin(async move {
             self.owns_session(&session)?;
-            let (_, summary) = self.find_session(session.native_id())?;
+            let (project_id, summary) = self.find_session(session.native_id())?;
+            if self.mirror_root.is_some() {
+                let gone = self
+                    .remote_missing()
+                    .contains(&format!("{project_id}/{}.jsonl", session.native_id()));
+                return Ok(remote_session_actions(gone));
+            }
             let runtime_available = crate::claude_locator::locate_lightweight().is_ok();
             let cwd_available = summary
                 .cwd
@@ -333,6 +417,26 @@ impl SessionSource for ClaudeSource {
                 },
             })
         })
+    }
+}
+
+/// 远端会话：在远端启动 CLI 续聊；远端已删除的只剩镜像副本，不能续聊。
+/// 分叉一期不做；cwd 在远端机器上，本机无法打开
+fn remote_session_actions(gone: bool) -> SessionActions {
+    let resume = if gone {
+        ActionAvailability::unavailable("engine.remote.sessionMissing")
+    } else {
+        ActionAvailability::available()
+    };
+    SessionActions {
+        resume: resume.clone(),
+        fork: ActionAvailability::unavailable("engine.remote.forkUnsupported"),
+        send: resume,
+        send_while_running: ActionAvailability::unavailable(
+            "engine.claude.sendWhileRunningUnavailable",
+        ),
+        interrupt: ActionAvailability::available(),
+        open_cwd: ActionAvailability::unavailable("engine.remote.localOnly"),
     }
 }
 
@@ -525,6 +629,49 @@ fn split_tool_result_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bare_summary() -> crate::models::SessionSummary {
+        serde_json::from_value(json!({
+            "id": "s-1",
+            "title": null,
+            "first_user_message": null,
+            "model": null,
+            "git_branch": null,
+            "cwd": null,
+            "version": null,
+            "timestamp": null,
+            "last_modified": 0.0,
+            "total_tokens": {},
+            "file_size": 0,
+            "message_count": 0,
+            "context_window": null
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn mirrored_summaries_carry_their_host_alias() {
+        let instance = EngineInstanceId::new("claude-code", "ssh-devbox-abc123").unwrap();
+        let mirror = ClaudeSource::mirror(
+            instance.clone(),
+            PathBuf::from("/nonexistent"),
+            "devbox".into(),
+        );
+        let project = ProjectRef::new(instance, "-work-foo").unwrap();
+        let summary = mirror.map_summary(project, bare_summary(), false).unwrap();
+        assert_eq!(
+            summary.source_meta.values().get("remoteHost"),
+            Some(&json!("devbox"))
+        );
+
+        let local = ClaudeSource::new().unwrap();
+        let project = ProjectRef::new(local.instance.clone(), "-work-foo").unwrap();
+        let summary = local.map_summary(project, bare_summary(), false).unwrap();
+        assert_eq!(
+            summary.source_meta.values().get("remoteHost"),
+            Some(&Value::Null)
+        );
+    }
 
     #[test]
     fn pagination_returns_stable_cursor() {

@@ -14,6 +14,7 @@ import type { EngineDescriptor } from '@/engines/types'
 import ClaudeEnvCard from './ClaudeEnvCard.vue'
 import ClaudeDataDirCard from './ClaudeDataDirCard.vue'
 import ClaudeProtocolCard from './ClaudeProtocolCard.vue'
+import RemoteHostsCard from './RemoteHostsCard.vue'
 import CodexEnvCard from './CodexEnvCard.vue'
 
 const { t } = useI18n()
@@ -169,12 +170,13 @@ function showConfigurationMenu(event: MouseEvent, engine: EngineDescriptor) {
             <span v-if="engine.capabilities.facets.automation" class="rounded bg-secondary px-1.5 py-0.5 text-[10px]">{{ t('engineSettings.capability.automation') }}</span>
           </div>
 
-          <div v-if="engine.instance.engineId === 'claude-code' || engine.instance.engineId === 'codex'" class="mt-3 border-t border-border pt-2">
+          <div v-if="engine.instance.instanceId === 'default' && (engine.instance.engineId === 'claude-code' || engine.instance.engineId === 'codex')" class="mt-3 border-t border-border pt-2">
             <p class="mb-2 text-[10px] font-medium text-muted-foreground">{{ t('engineSettings.engineCapabilities') }}</p>
             <template v-if="engine.instance.engineId === 'claude-code'">
               <ClaudeEnvCard />
               <ClaudeDataDirCard />
               <ClaudeProtocolCard />
+              <RemoteHostsCard />
             </template>
             <CodexEnvCard v-else />
           </div>

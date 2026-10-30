@@ -25,8 +25,12 @@ pub async fn get_perf_stats() -> crate::perf::PerfStats {
 
 /// 获取会话消息记录（仅 user/assistant，跳过 snapshot 等大型记录）。async 同上
 #[tauri::command]
-pub async fn get_session_records(project_id: String, session_id: String) -> Vec<SessionRecord> {
-    let path = session_path(&project_id, &session_id);
+pub async fn get_session_records(
+    project_id: String,
+    session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+) -> Vec<SessionRecord> {
+    let path = session_path_for(instance.as_ref(), &project_id, &session_id);
     let t0 = std::time::Instant::now();
     let records = parser::parse_messages(&path);
     if cfg!(debug_assertions) {
@@ -47,8 +51,9 @@ pub async fn get_session_records(project_id: String, session_id: String) -> Vec<
 pub async fn get_session_summary(
     project_id: String,
     session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
 ) -> Option<SessionSummary> {
-    let path = session_path(&project_id, &session_id);
+    let path = session_path_for(instance.as_ref(), &project_id, &session_id);
     crate::cache::get_summary(&path)
 }
 
@@ -694,10 +699,21 @@ pub async fn start_streaming(
     permission_mode: Option<String>,
     session_capabilities: Option<Vec<crate::session_capabilities::SessionCapabilityId>>,
     force_new: Option<bool>,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+    native_session_id: Option<String>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let session_capabilities = session_capabilities.unwrap_or_default();
         let force_new = force_new.unwrap_or(false);
+        // 远端实例：进程键仍是界面会话 id（事件按它投递），CLI 会话 id 用原生 uuid
+        let remote = match instance.filter(is_remote_claude) {
+            Some(instance) => Some(crate::engines::claude::remote::launch::resolve(
+                &instance,
+                native_session_id.as_deref().unwrap_or(&session_id),
+                &cwd,
+            )?),
+            None => None,
+        };
         let first = streaming::send_message(
             &app,
             &session_id,
@@ -715,6 +731,7 @@ pub async fn start_streaming(
             permission_mode.as_deref(),
             session_capabilities.clone(),
             force_new,
+            remote.as_ref(),
         );
         match first {
             Err(error_message)
@@ -743,6 +760,7 @@ pub async fn start_streaming(
                     permission_mode.as_deref(),
                     session_capabilities,
                     force_new,
+                    remote.as_ref(),
                 )
             }
             result => result,
@@ -909,10 +927,10 @@ pub struct ExternalSessionInfo {
 /// 2. session_id 以独立 token 出现（而非 `<sid>.jsonl` 之类的子串）
 ///
 /// 因此 `tail -f ~/.claude/projects/x/<sid>.jsonl`、`vim <sid>.jsonl`、`grep <sid> ~/.claude/…` 均不命中。
-fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
-    let tokens: Vec<&str> = cmd.split_whitespace().collect();
-    let has_claude_bin = tokens.iter().any(|t| t.rsplit('/').next().unwrap_or(t) == "claude");
-    if !has_claude_bin {
+pub(crate) fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
+    // Windows 命令行的参数可能带引号；路径分隔符可能是反斜杠
+    let tokens: Vec<&str> = cmd.split_whitespace().map(|t| t.trim_matches('"')).collect();
+    if !tokens.iter().any(|t| is_claude_binary(t)) {
         return false;
     }
     // --fork-session 时真实身份是 --session-id 的值，--resume 的值是源会话不算归属
@@ -921,6 +939,14 @@ fn command_matches_claude_session(cmd: &str, session_id: &str) -> bool {
     } else {
         tokens.contains(&session_id)
     }
+}
+
+/// claude 本体：`claude` / `claude.exe`，或 npm 安装在 Windows 上由 node 运行的 `claude-code/cli.js`
+fn is_claude_binary(token: &str) -> bool {
+    let name = token.rsplit(['/', '\\']).next().unwrap_or(token).to_ascii_lowercase();
+    name == "claude"
+        || name == "claude.exe"
+        || (name == "cli.js" && token.to_ascii_lowercase().contains("claude-code"))
 }
 
 /// 扫描外部 claude 进程：命中匹配且非 Monet 自持进程的 pid 列表。
@@ -982,8 +1008,37 @@ pub fn has_own_process(session_id: String) -> Option<i64> {
 
 /// 检测某会话是否有**外部** claude CLI 进程在运行，并解析归属方。
 /// 排除 Monet 自身持有的长活进程，只报告终端 / VS Code / 其他会话管理器等外部进程。
+/// 远端实例读远端进程列表（同一主机 5 秒内共用一次），owner 为主机名；读不到时按未运行处理。
 #[tauri::command]
-pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
+pub async fn check_session_running(
+    session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+    native_session_id: Option<String>,
+) -> ExternalSessionInfo {
+    if let Some(instance) = instance.filter(is_remote_claude) {
+        let own = crate::streaming::get_own_remote_pid(&session_id);
+        let cli_session_id = native_session_id.unwrap_or(session_id);
+        return tauri::async_runtime::spawn_blocking(move || {
+            let pid = crate::engines::claude::remote::launch::external_session_pid(
+                &instance,
+                &cli_session_id,
+                own,
+            )
+            .ok()
+            .flatten();
+            ExternalSessionInfo {
+                running: pid.is_some(),
+                pid,
+                owner: pid.and(crate::engines::claude::remote::launch::alias_for(&instance)),
+            }
+        })
+        .await
+        .unwrap_or(ExternalSessionInfo {
+            running: false,
+            pid: None,
+            owner: None,
+        });
+    }
     match scan_external_claude(&session_id, false).first() {
         Some(&pid) => {
             let owner = resolve_owner(pid, &crate::proc_scan::process_table_cached());
@@ -995,6 +1050,30 @@ pub fn check_session_running(session_id: String) -> ExternalSessionInfo {
 
 /// 终止指定会话的外部 CLI 进程（用户在 Monet 点"停止"并确认后调用）。
 /// SIGTERM 温和终止；排除 Monet 自身持有的长活进程。
+/// 终止远端主机上运行该会话的外部 claude 进程：执行前重新扫描核对。
+/// true = 已 kill；false = 进程已退出；失败返回 `REMOTE_KILL_FAILED:<stderr>`
+#[tauri::command]
+pub async fn kill_remote_external_session(
+    session_id: String,
+    instance: crate::engines::core::EngineInstanceId,
+    native_session_id: Option<String>,
+) -> Result<bool, String> {
+    if !is_remote_claude(&instance) {
+        return Err("not a remote instance".into());
+    }
+    let own = crate::streaming::get_own_remote_pid(&session_id);
+    let cli_session_id = native_session_id.unwrap_or(session_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::engines::claude::remote::launch::kill_external_session(
+            &instance,
+            &cli_session_id,
+            own,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn kill_external_session(session_id: String) -> bool {
     let pids = scan_external_claude(&session_id, true);
@@ -1021,6 +1100,22 @@ mod external_session_tests {
         // node 包装：第二个 token 是 claude 本体
         assert!(command_matches_claude_session(
             &format!("node /usr/local/bin/claude --session-id {SID}"),
+            SID
+        ));
+    }
+
+    #[test]
+    fn matches_windows_invocations() {
+        assert!(command_matches_claude_session(
+            &format!(r#""C:\Users\a\.local\bin\claude.exe" --output-format stream-json --resume {SID}"#),
+            SID
+        ));
+        assert!(command_matches_claude_session(
+            &format!(r#""C:\Program Files\nodejs\node.exe" "C:\Users\a\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js" --session-id {SID}"#),
+            SID
+        ));
+        assert!(!command_matches_claude_session(
+            &format!(r#""C:\Windows\notepad.exe" C:\Users\a\.claude\projects\p\{SID}.jsonl"#),
             SID
         ));
     }
@@ -1276,6 +1371,39 @@ fn session_path(project_id: &str, session_id: &str) -> PathBuf {
         .join(format!("{}.jsonl", session_id))
 }
 
+/// Claude Code 的非本机实例（远端主机）
+fn is_remote_claude(instance: &crate::engines::core::EngineInstanceId) -> bool {
+    instance.engine_id() == crate::engines::claude::ENGINE_ID
+        && instance.instance_id() != crate::engines::claude::DEFAULT_INSTANCE_ID
+}
+
+/// 按实例定位会话文件：缺省或本机实例读本机数据根；远端实例读它的只读镜像。
+/// 镜像路径只接受 `<项目目录>/<会话 id>.jsonl`，不合规时返回不存在的路径（读到空）
+fn session_path_for(
+    instance: Option<&crate::engines::core::EngineInstanceId>,
+    project_id: &str,
+    session_id: &str,
+) -> PathBuf {
+    let Some(instance) = instance.filter(|instance| is_remote_claude(instance)) else {
+        return session_path(project_id, session_id);
+    };
+    let rel = format!("{project_id}/{session_id}.jsonl");
+    let root = crate::engines::claude::remote::sync::mirror_root_for(instance.instance_id());
+    crate::engines::claude::remote::sync::mirrored_path(&root, &rel)
+        .unwrap_or_else(|| root.join("invalid-session-path"))
+}
+
+/// 会话的子 Agent 目录：`<项目目录>/<会话 id>/subagents`，按实例取本机数据根或镜像
+fn subagents_dir_for(
+    instance: Option<&crate::engines::core::EngineInstanceId>,
+    project_id: &str,
+    session_id: &str,
+) -> PathBuf {
+    session_path_for(instance, project_id, session_id)
+        .with_extension("")
+        .join("subagents")
+}
+
 // ---------- 子 Agent ----------
 
 #[derive(serde::Serialize)]
@@ -1288,11 +1416,12 @@ pub struct SubAgentMeta {
 }
 
 #[tauri::command]
-pub fn list_subagents(project_id: String, session_id: String) -> Vec<SubAgentMeta> {
-    let dir = crate::config::projects_dir()
-        .join(&project_id)
-        .join(&session_id)
-        .join("subagents");
+pub fn list_subagents(
+    project_id: String,
+    session_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
+) -> Vec<SubAgentMeta> {
+    let dir = subagents_dir_for(instance.as_ref(), &project_id, &session_id);
     let mut result = Vec::new();
 
     // Helper: parse agent-*.meta.json entries from a directory, tagging with workflow_id
@@ -1392,11 +1521,9 @@ pub fn get_subagent_records(
     project_id: String,
     session_id: String,
     agent_id: String,
+    instance: Option<crate::engines::core::EngineInstanceId>,
 ) -> Vec<SessionRecord> {
-    let subagents_dir = crate::config::projects_dir()
-        .join(&project_id)
-        .join(&session_id)
-        .join("subagents");
+    let subagents_dir = subagents_dir_for(instance.as_ref(), &project_id, &session_id);
     let filename = format!("agent-{}.jsonl", agent_id);
 
     // 1) Try direct path: subagents/agent-{id}.jsonl
@@ -1498,4 +1625,51 @@ pub fn get_app_setting(key: String) -> Option<serde_json::Value> {
 #[tauri::command]
 pub fn set_app_setting(key: String, value: serde_json::Value) {
     crate::config::write_app_setting(&key, value);
+}
+
+#[cfg(test)]
+mod session_path_tests {
+    use super::*;
+    use crate::engines::core::EngineInstanceId;
+
+    #[test]
+    fn local_or_missing_instance_reads_the_local_data_root() {
+        let local = EngineInstanceId::new("claude-code", "default").unwrap();
+        let expected = session_path("-p", "s1");
+        assert_eq!(session_path_for(None, "-p", "s1"), expected);
+        assert_eq!(session_path_for(Some(&local), "-p", "s1"), expected);
+    }
+
+    #[test]
+    fn remote_instance_reads_its_mirror_and_rejects_traversal() {
+        let remote = EngineInstanceId::new("claude-code", "ssh-devbox-abc123").unwrap();
+        let root = crate::engines::claude::remote::sync::mirror_root_for("ssh-devbox-abc123");
+        assert_eq!(
+            session_path_for(Some(&remote), "-home-alice-foo", "s1"),
+            root.join("projects/-home-alice-foo/s1.jsonl")
+        );
+        for (project, session) in [("..", "s1"), ("-p", "../x"), ("a/b", "s1"), (".hidden", "s1")] {
+            let path = session_path_for(Some(&remote), project, session);
+            assert!(path.starts_with(&root), "{project}/{session}");
+            assert!(!path.starts_with(root.join("projects")), "{project}/{session}");
+        }
+    }
+
+    #[test]
+    fn subagent_dir_follows_the_session_file() {
+        let remote = EngineInstanceId::new("claude-code", "ssh-devbox-abc123").unwrap();
+        let root = crate::engines::claude::remote::sync::mirror_root_for("ssh-devbox-abc123");
+        assert_eq!(
+            subagents_dir_for(Some(&remote), "-home-alice-foo", "s1"),
+            root.join("projects/-home-alice-foo/s1/subagents")
+        );
+        assert_eq!(
+            subagents_dir_for(None, "-p", "s1"),
+            crate::config::projects_dir()
+                .join("-p")
+                .join("s1")
+                .join("subagents")
+        );
+        assert!(!subagents_dir_for(Some(&remote), "..", "s1").starts_with(root.join("projects")));
+    }
 }

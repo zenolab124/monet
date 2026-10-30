@@ -56,7 +56,7 @@ watch(() => composerFieldRef.value?.element, element => { textareaRef.value = el
 const containerRef = ref<HTMLElement>()
 const showHud = ref(false)
 const enginePickerSessionId = ref<string | null>(null)
-const selectingRaceEngine = ref<{ sessionId: string; engineId: string } | null>(null)
+const selectingRaceEngine = ref<{ sessionId: string; instanceKey: string } | null>(null)
 
 function toggleRaceEnginePicker(sessionId: string) {
   if (!canSwitchRaceEngine.value || broadcasting.value || raceMutationLoading.value) return
@@ -65,15 +65,15 @@ function toggleRaceEnginePicker(sessionId: string) {
 
 function selectingEngineForLane(sessionId: string): string | null {
   return selectingRaceEngine.value?.sessionId === sessionId
-    ? selectingRaceEngine.value.engineId
+    ? selectingRaceEngine.value.instanceKey
     : null
 }
 
-async function selectRaceEngine(sessionId: string, engineId: string) {
+async function selectRaceEngine(sessionId: string, instanceKey: string) {
   if (selectingRaceEngine.value || broadcasting.value || raceMutationLoading.value) return
-  selectingRaceEngine.value = { sessionId, engineId }
+  selectingRaceEngine.value = { sessionId, instanceKey }
   try {
-    if (await switchLaneEngine(sessionId, engineId)) enginePickerSessionId.value = null
+    if (await switchLaneEngine(sessionId, instanceKey)) enginePickerSessionId.value = null
   } finally {
     selectingRaceEngine.value = null
   }

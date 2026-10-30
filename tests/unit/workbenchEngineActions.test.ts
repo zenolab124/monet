@@ -18,11 +18,19 @@ function runtime(overrides: Partial<NonNullable<EngineCapabilities['runtime']>>)
 }
 
 describe('workbench engine actions', () => {
-  it('keeps native session actions available', () => {
-    expect(resolveWorkbenchEngineActions(null, true)).toEqual({
+  it('keeps native session actions available when the descriptor is unknown', () => {
+    expect(resolveWorkbenchEngineActions(undefined, true)).toEqual({
       create: true,
       fork: true,
       race: true,
+    })
+  })
+
+  it('offers no actions for a native instance that declares no runtime', () => {
+    expect(resolveWorkbenchEngineActions(null, true)).toEqual({
+      create: false,
+      fork: false,
+      race: false,
     })
   })
 

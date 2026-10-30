@@ -4,10 +4,16 @@ import { listen } from '@tauri-apps/api/event'
 import type { Project, SessionSummary } from '@/types'
 import { tokenTotal } from '@/types'
 import { listEngines, listProjects, listSessions } from '@/engines/client'
-import { projectUiId, sessionUiId } from '@/engines/integration'
-import type { EngineDescriptor, EngineProject, EngineSessionSummary } from '@/engines/types'
+import {
+  LOCAL_CLAUDE_INSTANCE,
+  projectUiId,
+  resolveNativeInstance,
+  sessionUiId,
+  usesNativeSessionSurface,
+} from '@/engines/integration'
+import { sameInstance } from '@/engines/identity'
+import type { EngineDescriptor, EngineInstanceId, EngineProject, EngineSessionSummary } from '@/engines/types'
 import { indexEngineSessions } from '@/engines/directory'
-import { usesNativeSessionSurface } from '@/engines/integration'
 import type { SourceChangeEnvelope } from '@/engines/events'
 import { useWorkspaceContexts } from '@/composables/useWorkspaceContexts'
 
@@ -28,6 +34,8 @@ interface ArchiveProject {
   id: string
   display_path: string
   sessions: SessionSummary[]
+  /** 含有会话的远端主机别名（按出现顺序）；纯本机项目为空 */
+  hosts: string[]
   session_count: number
   last_active: number | null
 }
@@ -40,6 +48,8 @@ interface SessionChange {
 interface ProjectsChangedPayload {
   full: boolean
   changes: SessionChange[]
+  /** 变更所属实例;旧负载缺省时视为本机实例 */
+  instance?: EngineInstanceId
 }
 
 /** 加载所有项目 */
@@ -63,12 +73,16 @@ async function loadProjects() {
     watcherSetup = true
     listen<ProjectsChangedPayload>('projects-changed', (event) => {
       const payload = event.payload
-      if (!payload || payload.full || !Array.isArray(payload.changes) || payload.changes.length === 0) {
+      const remote = payload?.instance && !sameInstance(payload.instance, LOCAL_CLAUDE_INSTANCE)
+      if (remote && payload.full) {
+        void reloadInstanceSilently(payload.instance!)
+      } else if (!payload || payload.full || !Array.isArray(payload.changes) || payload.changes.length === 0) {
         reloadProjectsSilently()
       } else {
-        applySessionChanges(payload.changes)
+        applySessionChanges(payload.changes, resolveNativeInstance(payload.instance))
       }
     })
+    // 原生控制器的实例（本机与远端镜像）由 projects-changed 刷新；其余实例靠历史源变更事件
     listen<SourceChangeEnvelope>('engine-source-change', event => {
       if (!usesNativeSessionSurface(event.payload.instance)) reloadProjectsSilently()
     })
@@ -152,6 +166,12 @@ function mapSession(descriptor: EngineDescriptor, session: EngineSessionSummary)
   }
 }
 
+/** 远端镜像会话所在主机的别名；本机会话为 null */
+export function sessionHost(session: SessionSummary): string | null {
+  const host = session.source_meta?.remoteHost
+  return typeof host === 'string' && host ? host : null
+}
+
 function archiveSessionKey(project: Project, session: SessionSummary): string {
   const context = workspaceForSession(session)
   const sourcePath = context?.mainRoot?.trim() || project.source_path?.trim()
@@ -170,6 +190,8 @@ const archiveProjects = computed<ArchiveProject[]>(() => {
         current.sessions.push(session)
         current.session_count++
         current.last_active = Math.max(current.last_active ?? 0, session.last_modified ?? 0) || null
+        const host = sessionHost(session)
+        if (host && !current.hosts.includes(host)) current.hosts.push(host)
         continue
       }
 
@@ -180,6 +202,7 @@ const archiveProjects = computed<ArchiveProject[]>(() => {
           ?? project.source_path
           ?? project.display_path,
         sessions: [session],
+        hosts: sessionHost(session) ? [sessionHost(session)!] : [],
         session_count: 1,
         last_active: session.last_modified || project.last_active,
       })
@@ -246,20 +269,50 @@ async function reloadProjectsSilently() {
   }
 }
 
+/** 只重载一个实例的项目（远端主机大批量变化时），其余实例保持不动 */
+async function reloadInstanceSilently(instance: EngineInstanceId) {
+  try {
+    const descriptor = (await listEngines()).find(item => item.enabled && sameInstance(item.instance, instance))
+    if (!descriptor) {
+      reloadProjectsSilently()
+      return
+    }
+    const loaded = await loadEngineInstanceProjects(descriptor)
+    dataGen++
+    const next = projects.value
+      .filter(project => !(project.engine && sameInstance(project.engine, instance)))
+      .concat(loaded)
+      .sort((a, b) => (b.last_active ?? 0) - (a.last_active ?? 0))
+    indexEngineSessions(next)
+    projects.value = next
+    projectsRevision.value++
+    scheduleWorkspaceRefresh()
+  } catch (_) {
+    // 静默失败，等下一轮
+  }
+}
+
 /** 按会话增量更新项目树；遇到未知项目（新建项目目录）回退全量 */
-async function applySessionChanges(changes: SessionChange[]) {
+async function applySessionChanges(changes: SessionChange[], instance: EngineInstanceId) {
+  const remote = !sameInstance(instance, LOCAL_CLAUDE_INSTANCE)
+  // 远端实例遇到未知项目时只重载它自己，不牵动本机近万会话的全量扫描
+  const reloadFallback = () => remote ? void reloadInstanceSilently(instance) : reloadProjectsSilently()
   for (const { projectId, sessionId } of changes) {
+    // 无引擎字段的旧项目只属于本机实例;同路径项目在不同实例间各自独立
     const proj = projects.value.find(p =>
       (p.native_id ?? p.id) === projectId
-      && (!p.engine || usesNativeSessionSurface(p.engine)))
+      && (p.engine
+        ? sameInstance(p.engine, instance) && usesNativeSessionSurface(p.engine)
+        : sameInstance(instance, LOCAL_CLAUDE_INSTANCE)))
     if (!proj) {
-      reloadProjectsSilently()
+      reloadFallback()
       return
     }
     try {
       const summary = await invoke<SessionSummary | null>('get_session_summary', {
         projectId,
         sessionId,
+        ...(remote ? { instance } : {}),
       })
       dataGen++
       const idx = proj.sessions.findIndex(s => (s.native_id ?? s.id) === sessionId)
@@ -268,13 +321,17 @@ async function applySessionChanges(changes: SessionChange[]) {
         if (idx >= 0) proj.sessions.splice(idx, 1)
         if (proj.sessions.length === 0) {
           // 与全量扫描一致：零会话项目不展示
-          const pIdx = projects.value.findIndex(p => p.id === projectId)
+          const pIdx = projects.value.indexOf(proj)
           if (pIdx >= 0) projects.value.splice(pIdx, 1)
           continue
         }
       } else if (idx >= 0) {
         proj.sessions[idx] = {
           ...summary,
+          // 摘要里的 id 是原生 id；界面 id 沿用已有的（远端实例为结构化 id）
+          id: proj.sessions[idx].id,
+          // 旧摘要命令不带引擎元数据，沿用已有的（含远端删除标记）
+          source_meta: proj.sessions[idx].source_meta,
           reference: proj.sessions[idx].reference,
           project_reference: proj.sessions[idx].project_reference,
           engine: proj.sessions[idx].engine,
@@ -285,12 +342,14 @@ async function applySessionChanges(changes: SessionChange[]) {
         const engine = proj.engine
         const projectReference = proj.reference
         if (!engine || !projectReference) {
-          reloadProjectsSilently()
+          reloadFallback()
           return
         }
+        const reference = { engine, nativeId: summary.id }
         proj.sessions.push({
           ...summary,
-          reference: { engine, nativeId: summary.id },
+          id: sessionUiId(reference),
+          reference,
           project_reference: projectReference,
           engine,
           engine_name: proj.engine_name,

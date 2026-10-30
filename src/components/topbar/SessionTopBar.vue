@@ -8,6 +8,7 @@ import { ROLE_DISPLAY, resolveMappedRoles } from '@/utils/modelEnv'
 import { useChannels } from '@/composables/useChannels'
 import { ADVISOR_MAIN_MODEL, type EffortSetting } from '@/composables/useSessionSettings'
 import type { ResolvedRunConfig } from '@/composables/useRunConfig'
+import type { EngineInstanceId } from '@/engines/types'
 import { useConfirm } from '@/composables/useConfirm'
 import { useNotifications } from '@/composables/useNotifications'
 import { useRunners } from '@/composables/useRunners'
@@ -59,6 +60,8 @@ const props = defineProps<{
   selectedChannelId: string | null
   /** 解析后的最终注入渠道 id(null = 官方):终端恢复带渠道用 */
   resolvedChannelId: string | null
+  /** 原生会话所属实例:模型下拉按实例读取 CLI 自报目录 */
+  nativeInstance?: EngineInstanceId
   /** 运行配置同源解析结果（display 用于回显，launch 用于发送，见 useRunConfig） */
   runConfig: ResolvedRunConfig
   /** 顾问模式开关状态 */
@@ -73,6 +76,12 @@ const props = defineProps<{
   totalTokens: TokenUsage
   /** 其中子 Agent/工作流分项(totalTokens 已含) */
   subagentTokens: TokenUsage
+  /** 远端主机的只读镜像会话(远端已删除或 CLI 不可用):连权限模式也不提供 */
+  mirrorOnly?: boolean
+  /** 远端主机的会话:CLI 用远端自己的登录与设置,不提供渠道等运行配置胶囊,也不能删除 */
+  remoteHost?: boolean
+  /** 实例声明工作目录不在本机:在 Finder/终端/编辑器打开置灰并提示 */
+  remoteWorkspace?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -95,6 +104,10 @@ const { notifyTransient } = useNotifications()
 // --- 派生数据 ---
 
 /** 容量推断用的模型字符串:历史真值优先(容量语境),与胶囊的"下次发送"解析分离 */
+/** 本机打开入口的禁用原因：工作目录不在本机，或本机目录不可用 */
+const localOpenBlockedReason = computed(() => props.remoteWorkspace
+  ? t('remote.localOnly')
+  : props.cwdUnavailableReason ?? '')
 const effectiveModelStr = computed(() =>
   props.selectedAdvisor ? ADVISOR_MAIN_MODEL : (props.selectedModelId ?? props.modelString),
 )
@@ -164,7 +177,7 @@ function onReload() {
 
 async function openInFinder() {
   menuOpen.value = false
-  if (!props.cwd || props.cwdUnavailableReason) return
+  if (!props.cwd || localOpenBlockedReason.value) return
   try {
     await invoke('open_in_finder', { path: props.cwd })
   } catch (e) {
@@ -174,7 +187,7 @@ async function openInFinder() {
 
 async function openInTerminal() {
   menuOpen.value = false
-  if (!props.cwd || props.cwdUnavailableReason) return
+  if (!props.cwd || localOpenBlockedReason.value) return
   try {
     // 带上会话渠道(--settings <渠道文件>),终端恢复不静默回落官方
     await invoke('resume_in_terminal', {
@@ -193,7 +206,7 @@ async function openInTerminal() {
 
 async function openInVscode() {
   menuOpen.value = false
-  if (!props.cwd || props.cwdUnavailableReason) return
+  if (!props.cwd || localOpenBlockedReason.value) return
   try {
     await invoke('resume_in_vscode', { cwd: props.cwd })
   } catch (e) {
@@ -241,8 +254,10 @@ function onPermissionModeChange(mode: PermissionMode | null) {
     <template #controls="{ containerWidth }">
       <!-- 运行配置胶囊:渠道·模型·强度三段一枚(点哪段开哪层渐进面板);窄列收渠道段 -->
       <RunConfigCapsule
+        v-if="!remoteHost"
         :settings="capsuleSettings"
         :run-config="runConfig"
+        :native-instance="nativeInstance"
         :cwd="cwd"
         :fast-mode-notice="fastModeNotice"
         :model-refreshable="modelRefreshable"
@@ -258,7 +273,7 @@ function onPermissionModeChange(mode: PermissionMode | null) {
       />
 
       <PermissionModeDropdown
-        v-if="containerWidth >= 520"
+        v-if="!mirrorOnly && containerWidth >= 520"
         :selected="selectedPermissionMode"
         :effective="runConfig.display.permissionMode"
         @select="onPermissionModeChange"
@@ -272,7 +287,7 @@ function onPermissionModeChange(mode: PermissionMode | null) {
 
     <template #menu="{ containerWidth }">
       <!-- 窄列收纳项 -->
-      <div v-if="containerWidth < 520" class="py-0.5 border-b border-border">
+      <div v-if="!mirrorOnly && containerWidth < 520" class="py-0.5 border-b border-border">
           <PermissionModeDropdown
             variant="submenu"
             :selected="selectedPermissionMode"
@@ -307,16 +322,16 @@ function onPermissionModeChange(mode: PermissionMode | null) {
           <button class="menu-item" @click="onReload">
             <span class="i-carbon-renew w-3.5 h-3.5" />{{ $t('topbar.refreshSession') }}
           </button>
-          <button v-if="cwd" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInFinder">
+          <button v-if="cwd" class="menu-item" :disabled="!!localOpenBlockedReason" :title="localOpenBlockedReason" @click="openInFinder">
             <span class="i-carbon-folder w-3.5 h-3.5" />{{ $t('topbar.openInFinder') }}
           </button>
-          <button v-if="cwd" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInTerminal">
+          <button v-if="cwd" class="menu-item" :disabled="!!localOpenBlockedReason" :title="localOpenBlockedReason" @click="openInTerminal">
             <span class="i-carbon-terminal w-3.5 h-3.5" />{{ $t('topbar.openInTerminal') }}
           </button>
-          <button v-if="cwd" class="menu-item" :disabled="!!cwdUnavailableReason" :title="cwdUnavailableReason" @click="openInVscode">
+          <button v-if="cwd" class="menu-item" :disabled="!!localOpenBlockedReason" :title="localOpenBlockedReason" @click="openInVscode">
             <span class="i-carbon-code w-3.5 h-3.5" />{{ $t('topbar.openInVscode') }}
           </button>
-          <button class="menu-item text-destructive! hover:bg-destructive/10" @click="onDelete">
+          <button v-if="!remoteHost" class="menu-item text-destructive! hover:bg-destructive/10" @click="onDelete">
             <span class="i-carbon-trash-can w-3.5 h-3.5" />{{ $t('topbar.deleteSession') }}
           </button>
         </div>

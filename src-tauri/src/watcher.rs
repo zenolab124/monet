@@ -284,8 +284,9 @@ fn emit_pending_changes(
         .iter()
         .map(|(pid, sid)| json!({ "projectId": pid, "sessionId": sid }))
         .collect();
-    let payload = json!({ "full": *full, "changes": changes });
+    let mut payload = json!({ "full": *full, "changes": changes });
     if let Ok(instance) = crate::engines::claude::default_instance() {
+        payload["instance"] = json!(instance);
         if *full {
             crate::engines::system::notify_source_change(
                 &instance,

@@ -157,6 +157,16 @@ impl ClaudeRuntime {
     }
 
     fn handle_observer_event(&self, event: StreamingObserverEvent) {
+        // 远端主机会话的进程也经流式层上报，但不归本机实例：不能记成本机会话的运行态
+        let key = match &event {
+            StreamingObserverEvent::Stream(event) => Some(event.session_id()),
+            StreamingObserverEvent::Signal { payload, .. } => {
+                payload.get("session_id").and_then(Value::as_str)
+            }
+        };
+        if key.is_some_and(|key| !crate::streaming::is_local_session_key(key)) {
+            return;
+        }
         match event {
             StreamingObserverEvent::Stream(event) => self.handle_stream_event(event),
             StreamingObserverEvent::Signal { name, payload }
@@ -319,6 +329,13 @@ impl ClaudeRuntime {
     }
 
     fn handle_permission_event(&self, event: PermissionObserverEvent) {
+        let key = match &event {
+            PermissionObserverEvent::Requested { session_id, .. }
+            | PermissionObserverEvent::Resolved { session_id, .. } => session_id,
+        };
+        if !crate::streaming::is_local_session_key(key) {
+            return;
+        }
         match event {
             PermissionObserverEvent::Requested {
                 request_id,
@@ -493,6 +510,8 @@ impl AgentRuntime for ClaudeRuntime {
                     option_string(&options, "permissionMode").as_deref(),
                     Vec::new(),
                     option_bool(&options, "forceNew"),
+                    // 中立运行时只服务本机实例
+                    None,
                 )
             })
             .await

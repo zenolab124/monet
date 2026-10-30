@@ -9,6 +9,8 @@ const props = defineProps<{
   modified: FileEntry[]
   readOnly: FileEntry[]
   cwd: string | null
+  /** 工作目录在本机时才取 git 快照：远端会话的同名路径可能是本机另一个仓库 */
+  gitSnapshot?: boolean
   /** 会话切换归位锚点:档案馆单 SessionDetail 跨会话复用面板实例,切会话时 selected 必须归零,
    *  否则 selectedLive 的 `?? selected.value` 兜底会把旧 FileEntry 引用继续渲染成"当前详情"(镜像 AsyncTaskPanel L53-56) */
   sessionId?: string | null
@@ -68,7 +70,7 @@ const snapLoading = ref(false)
 const snapOpen = ref(false)
 
 async function refreshSnapshot() {
-  if (!props.cwd || snapLoading.value) return
+  if (!props.cwd || props.gitSnapshot === false || snapLoading.value) return
   snapLoading.value = true
   try {
     snapshot.value = await invoke<GitSnapshot>('git_worktree_snapshot', { cwd: props.cwd })

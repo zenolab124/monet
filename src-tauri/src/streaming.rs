@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::engines::claude::diagnostics;
 use crate::engines::claude::protocol::{self, ControlOutcome, LiveSignal, ReverseRequest};
+use crate::engines::claude::remote::launch::{self as remote_launch, RemoteLaunch};
 use crate::models::ContentBlock;
 use crate::permission::PermissionService;
 use crate::session_capabilities::{
@@ -53,6 +54,15 @@ struct SessionProcess {
     pending_injections: HashMap<String, PendingInjection>,
     /// 等待 CLI 回包的同步控制请求（request_id → 回包投递口）
     pending_controls: HashMap<String, std::sync::mpsc::Sender<Result<Value, String>>>,
+    /// 远端会话：本机 child 是 ssh（回环时是 sh），CLI 跑在远端主机上
+    remote: Option<RemoteProcess>,
+}
+
+#[derive(Clone)]
+struct RemoteProcess {
+    launch: RemoteLaunch,
+    /// 启动脚本报告的远端 claude pid；关闭、断线与下次连接时据此精确清理
+    pid: Option<u32>,
 }
 
 struct PendingInjection {
@@ -65,6 +75,12 @@ struct PendingPermission {
     /// 超时已向前端报失败；迟到的成功判决仍会生效并重新同步界面
     timed_out: bool,
 }
+
+/// ssh 连接失败或中断时的退出码
+const SSH_CONNECTION_LOST: i32 = 255;
+
+/// 关闭远端会话后等多久再确认远端进程已退出（关闭 stdin 后 CLI 通常 1～2 秒内退出）
+const REMOTE_EXIT_GRACE: Duration = Duration::from_secs(3);
 
 /// 权限模式切换等待 CLI 判决的时限
 const PERMISSION_CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
@@ -190,6 +206,23 @@ pub fn get_own_pid(session_id: &str) -> Option<u32> {
 }
 
 /// 自有长活进程的启动时刻(epoch ms)；无进程返回 None
+/// 进程键是否属于本机实例：本机会话的键就是 CLI 会话 uuid；远端主机会话的键是界面结构化 id
+/// （必然含 `.`，uuid 不会），这类进程不能在本机启动，也不归本机运行时跟踪
+pub fn is_local_session_key(session_id: &str) -> bool {
+    !session_id.contains('.')
+}
+
+/// Monet 为该会话在远端启动的 claude pid（远端运行态检测据此排除自己）
+pub fn get_own_remote_pid(session_id: &str) -> Option<u32> {
+    let arc = ACTIVE_PROCESSES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(session_id).cloned())?;
+    let sp = arc.lock().unwrap();
+    sp.remote.as_ref().and_then(|remote| remote.pid)
+}
+
 pub fn get_own_started_at_ms(session_id: &str) -> Option<i64> {
     ACTIVE_PROCESSES
         .lock()
@@ -757,6 +790,16 @@ mod explicit_run_args_tests {
     };
 
     #[test]
+    fn only_cli_uuids_are_local_process_keys() {
+        assert!(super::is_local_session_key(
+            "0b5c7e2a-1111-4222-8333-444455556666"
+        ));
+        assert!(!super::is_local_session_key(
+            "sr1.Y2xhdWRlLWNvZGU.c3NoLWRldmJveA.MGI1Yw"
+        ));
+    }
+
+    #[test]
     fn empty_overrides_add_no_cli_flags() {
         let mut args = vec!["--verbose".to_string()];
         append_explicit_run_args(&mut args, None, None, None);
@@ -829,8 +872,13 @@ fn open_session(
     permission_mode: Option<&str>,
     capability_bundle: &SessionCapabilityBundle,
     force_new: bool,
+    remote: Option<&RemoteLaunch>,
 ) -> Result<(), String> {
-    if !std::path::Path::new(cwd).is_dir() {
+    if remote.is_none() && !is_local_session_key(session_id) {
+        return Err("REMOTE_SESSION_NOT_LOCAL".to_string());
+    }
+    // 远端会话的工作目录在远端；不存在时由启动脚本报告
+    if remote.is_none() && !std::path::Path::new(cwd).is_dir() {
         return Err(format!("工作目录不存在: {}", cwd));
     }
 
@@ -840,174 +888,222 @@ fn open_session(
     let perm_endpoint = permission_service.endpoint().to_string();
     let perm_token = permission_service.token().to_string();
 
-    // 2. MCP 二进制
-    let mcp_binary = match find_mcp_binary() {
-        Some(p) => p,
-        None => {
-            PermissionService::stop_for(session_id);
-            return Err("未找到 monet-mcp 二进制，无法启动权限服务".to_string());
+    let (mut command, resumed, channel_injection) = if let Some(launch) = remote {
+        // 远端只带 CLI 原生参数：不注入渠道、本机 MCP 配置、--settings（顾问/快速模式/超档）、
+        // Chrome 与 Monet 能力提示；权限经 stdio 控制请求走同一条 ssh 管道
+        let mut args = if launch.resume {
+            vec!["--resume".to_string(), launch.cli_session_id.clone()]
+        } else {
+            vec!["--session-id".to_string(), launch.cli_session_id.clone()]
+        };
+        args.extend(
+            [
+                "--output-format",
+                "stream-json",
+                "--input-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--thinking-display",
+                "summarized",
+                "--permission-prompt-tool",
+                "stdio",
+            ]
+            .map(String::from),
+        );
+        append_explicit_run_args(&mut args, model, effort, permission_mode);
+        if let Some(raw) = extra_args.filter(|s| !s.trim().is_empty()) {
+            args.extend(parse_extra_args(raw));
         }
-    };
+        remote_launch::cleanup_session_leftovers(launch);
+        let script = remote_launch::launch_script_for(launch, &args)?;
+        let mut command = crate::engines::claude::remote::executor::session_command(
+            &launch.target,
+            &script,
+            launch.loopback,
+        )
+        .map_err(|e| format!("REMOTE_LAUNCH_FAILED:{e}"))?;
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        (command, launch.resume, None)
+    } else {
+        // 2. MCP 二进制
+        let mcp_binary = match find_mcp_binary() {
+            Some(p) => p,
+            None => {
+                PermissionService::stop_for(session_id);
+                return Err("未找到 monet-mcp 二进制，无法启动权限服务".to_string());
+            }
+        };
 
-    // 3. MCP 配置
-    let mcp_config = json!({
-        "mcpServers": {
-            "monet": {
-                "type": "stdio",
-                "command": mcp_binary.to_string_lossy().into_owned(),
-                "args": [],
-                "env": {
-                    "MONET_PERMISSION_ADDR": perm_endpoint.clone(),
-                    "MONET_PERMISSION_TOKEN": perm_token
+        // 3. MCP 配置
+        let mcp_config = json!({
+            "mcpServers": {
+                "monet": {
+                    "type": "stdio",
+                    "command": mcp_binary.to_string_lossy().into_owned(),
+                    "args": [],
+                    "env": {
+                        "MONET_PERMISSION_ADDR": perm_endpoint.clone(),
+                        "MONET_PERMISSION_TOKEN": perm_token
+                    }
                 }
             }
-        }
-    })
-    .to_string();
+        })
+        .to_string();
 
-    // 4. CLI 参数（不带 --print，不传消息文本；加 --input-format stream-json）
-    let (executable, prefix_args) = find_claude();
-    let mut args = prefix_args;
-    // cwd 先 canonicalize 再编码:CLI 落盘前对 cwd 做 realpath(mac 的 /tmp → /private/tmp,
-    // Windows 的 junction/subst/8.3 短名/磁盘大小写校正),用原始 cwd 编码会对着
-    // 不存在的目录做落盘判断,resume/fork 三态失灵。Windows canonicalize 产生的
-    // \\?\ verbatim 前缀由 encode_project_dir 剥离,无需分平台
-    let cwd_real = std::fs::canonicalize(cwd)
-        .ok()
-        .and_then(|p| p.to_str().map(String::from))
-        .unwrap_or_else(|| cwd.to_string());
-    // 编码必须与 CLI 同规则(非字母数字一律 →'-')：仅替换 '/' 会漏掉 '.'/'_'
-    // 以及 Windows 的 ':'/'\\'，致 resume/fork 三态对着错误目录判定
-    let project_dir = crate::config::projects_dir().join(crate::config::encode_project_dir(
-        std::path::Path::new(&cwd_real),
-    ));
-    let session_file = project_dir.join(format!("{}.jsonl", session_id));
-    // 会话身份参数三态:已落盘 → resume 自己;分叉意图且源已落盘 → CLI 原生 fork(resume 源 +
-    // --fork-session + 指定新 ID,历史行 sessionId 由 CLI 重写,替代旧 fs::copy 仿造);
-    // 否则全新会话。文件已存在时分叉意图残留无害,走正常 resume 忽略之;
-    // 源未落盘(草稿源分叉)时意图同样无害,退化走新建分支——与前者对称
-    let fork_src = fork_source
-        .filter(|s| !s.is_empty())
-        .filter(|src| project_dir.join(format!("{}.jsonl", src)).is_file());
-    let (session_args, resumed) = if session_file.is_file() {
-        (vec!["--resume".to_string(), session_id.to_string()], true)
-    } else if let Some(src) = fork_src {
-        (
-            vec![
-                "--resume".to_string(),
-                src.to_string(),
-                "--fork-session".to_string(),
-                "--session-id".to_string(),
-                session_id.to_string(),
-            ],
-            true,
-        )
-    } else {
-        if !force_new {
-            // jsonl 不在预期位置——全局探测：是迁走了还是真的新会话？
-            if let Some(actual) = find_session_elsewhere(session_id, &session_file) {
-                return Err(format!("SESSION_ELSEWHERE:{}", actual.to_string_lossy()));
+        // 4. CLI 参数（不带 --print，不传消息文本；加 --input-format stream-json）
+        let (executable, prefix_args) = find_claude();
+        let mut args = prefix_args;
+        // cwd 先 canonicalize 再编码:CLI 落盘前对 cwd 做 realpath(mac 的 /tmp → /private/tmp,
+        // Windows 的 junction/subst/8.3 短名/磁盘大小写校正),用原始 cwd 编码会对着
+        // 不存在的目录做落盘判断,resume/fork 三态失灵。Windows canonicalize 产生的
+        // \\?\ verbatim 前缀由 encode_project_dir 剥离,无需分平台
+        let cwd_real = std::fs::canonicalize(cwd)
+            .ok()
+            .and_then(|p| p.to_str().map(String::from))
+            .unwrap_or_else(|| cwd.to_string());
+        // 编码必须与 CLI 同规则(非字母数字一律 →'-')：仅替换 '/' 会漏掉 '.'/'_'
+        // 以及 Windows 的 ':'/'\\'，致 resume/fork 三态对着错误目录判定
+        let project_dir = crate::config::projects_dir().join(crate::config::encode_project_dir(
+            std::path::Path::new(&cwd_real),
+        ));
+        let session_file = project_dir.join(format!("{}.jsonl", session_id));
+        // 会话身份参数三态:已落盘 → resume 自己;分叉意图且源已落盘 → CLI 原生 fork(resume 源 +
+        // --fork-session + 指定新 ID,历史行 sessionId 由 CLI 重写,替代旧 fs::copy 仿造);
+        // 否则全新会话。文件已存在时分叉意图残留无害,走正常 resume 忽略之;
+        // 源未落盘(草稿源分叉)时意图同样无害,退化走新建分支——与前者对称
+        let fork_src = fork_source
+            .filter(|s| !s.is_empty())
+            .filter(|src| project_dir.join(format!("{}.jsonl", src)).is_file());
+        let (session_args, resumed) = if session_file.is_file() {
+            (vec!["--resume".to_string(), session_id.to_string()], true)
+        } else if let Some(src) = fork_src {
+            (
+                vec![
+                    "--resume".to_string(),
+                    src.to_string(),
+                    "--fork-session".to_string(),
+                    "--session-id".to_string(),
+                    session_id.to_string(),
+                ],
+                true,
+            )
+        } else {
+            if !force_new {
+                // jsonl 不在预期位置——全局探测：是迁走了还是真的新会话？
+                if let Some(actual) = find_session_elsewhere(session_id, &session_file) {
+                    return Err(format!("SESSION_ELSEWHERE:{}", actual.to_string_lossy()));
+                }
             }
+            (
+                vec!["--session-id".to_string(), session_id.to_string()],
+                false,
+            )
+        };
+        args.extend(session_args);
+        args.extend([
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--input-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            // 真流式:CLI 2.1.177+ 默认只发 assistant 快照(整块,可能多次),该 flag 恢复
+            // content_block_delta 字符级增量(实测 thinking/text 平均十几字符一个事件)。
+            // 首字延迟从"整条消息生成完"缩到 API 首 token;快照仍会兜底到达,
+            // 前端 feedSnapshotText 按已知长度差量对账,双路径幂等不双写
+            "--include-partial-messages".to_string(),
+            "--thinking-display".to_string(),
+            "summarized".to_string(),
+            "--mcp-config".to_string(),
+            mcp_config,
+            "--permission-prompt-tool".to_string(),
+            "mcp__monet__approve_tool_use".to_string(),
+        ]);
+
+        // Chrome 集成(Claude in Chrome 扩展 + Native Messaging):按需开启,
+        // 浏览器工具常驻吃上下文,默认不传;<2.1.211 的 CLI 在 Chrome 未运行时可能挂起
+        if chrome {
+            args.push("--chrome".to_string());
         }
-        (
-            vec!["--session-id".to_string(), session_id.to_string()],
-            false,
-        )
-    };
-    args.extend(session_args);
-    args.extend([
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--input-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        // 真流式:CLI 2.1.177+ 默认只发 assistant 快照(整块,可能多次),该 flag 恢复
-        // content_block_delta 字符级增量(实测 thinking/text 平均十几字符一个事件)。
-        // 首字延迟从"整条消息生成完"缩到 API 首 token;快照仍会兜底到达,
-        // 前端 feedSnapshotText 按已知长度差量对账,双路径幂等不双写
-        "--include-partial-messages".to_string(),
-        "--thinking-display".to_string(),
-        "summarized".to_string(),
-        "--mcp-config".to_string(),
-        mcp_config,
-        "--permission-prompt-tool".to_string(),
-        "mcp__monet__approve_tool_use".to_string(),
-    ]);
 
-    // Chrome 集成(Claude in Chrome 扩展 + Native Messaging):按需开启,
-    // 浏览器工具常驻吃上下文,默认不传;<2.1.211 的 CLI 在 Chrome 未运行时可能挂起
-    if chrome {
-        args.push("--chrome".to_string());
-    }
+        let ultracode = effort == Some("ultracode");
 
-    let ultracode = effort == Some("ultracode");
+        // 5. 渠道/ultracode/顾问/快速模式注入（合成 --settings）
+        let channel_opt = channel.filter(|s| !s.is_empty() && *s != crate::channels::OFFICIAL_ID);
+        let channel_injection = match crate::channels::prepare_injection(
+            channel_opt,
+            session_id,
+            ultracode,
+            advisor,
+            fast_mode,
+        ) {
+            Ok(Some(inj)) => {
+                args.push("--settings".to_string());
+                args.push(inj.settings_arg.clone());
+                Some(inj)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                PermissionService::stop_for(session_id);
+                return Err(format!("会话配置加载失败:{}", e));
+            }
+        };
 
-    // 5. 渠道/ultracode/顾问/快速模式注入（合成 --settings）
-    let channel_opt = channel.filter(|s| !s.is_empty() && *s != crate::channels::OFFICIAL_ID);
-    let channel_injection = match crate::channels::prepare_injection(
-        channel_opt,
-        session_id,
-        ultracode,
-        advisor,
-        fast_mode,
-    ) {
-        Ok(Some(inj)) => {
-            args.push("--settings".to_string());
-            args.push(inj.settings_arg.clone());
-            Some(inj)
+        append_explicit_run_args(&mut args, model, effort, permission_mode);
+        if let Some(prompt) = capability_bundle.append_system_prompt() {
+            args.push("--append-system-prompt".to_string());
+            args.push(prompt.to_string());
         }
-        Ok(None) => None,
-        Err(e) => {
-            PermissionService::stop_for(session_id);
-            return Err(format!("会话配置加载失败:{}", e));
+        // 用户自定义 CLI 参数(逃生舱):置于全部 Monet 参数之后,冲突项按 CLI 后者覆盖生效
+        if let Some(raw) = extra_args.filter(|s| !s.trim().is_empty()) {
+            args.extend(parse_extra_args(raw));
         }
-    };
 
-    append_explicit_run_args(&mut args, model, effort, permission_mode);
-    if let Some(prompt) = capability_bundle.append_system_prompt() {
-        args.push("--append-system-prompt".to_string());
-        args.push(prompt.to_string());
-    }
-    // 用户自定义 CLI 参数(逃生舱):置于全部 Monet 参数之后,冲突项按 CLI 后者覆盖生效
-    if let Some(raw) = extra_args.filter(|s| !s.trim().is_empty()) {
-        args.extend(parse_extra_args(raw));
-    }
-
-    // 6. Spawn（stdin/stdout/stderr 全 piped）
-    let mut command = Command::new(&executable);
-    command
-        .args(&args)
-        .current_dir(cwd)
-        .env("PATH", enhanced_path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some((k, v)) = crate::config::claude_config_dir_env() {
-        command.env(k, v);
-    }
-    // 文件快照：stream-json 模式默认不在用户消息处建快照，rewind_files 依赖它。
-    // 用户自设 CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING 时 CLI 仍以禁用为准
-    command.env(protocol::FILE_CHECKPOINTING_ENV, "true");
-    // CLI 自立进程组（组 ID = CLI PID）：MCP 子进程随组，signal_session 组信号可整树回收
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    // Windows 进程树由 taskkill /T 按父子关系回收，无需进程组；只抑制控制台闪窗
-    #[cfg(windows)]
-    {
-        use crate::proc_ext::HideConsole;
-        command.hide_console();
-    }
-    if let Some(inj) = &channel_injection {
-        for key in &inj.clear_env {
-            command.env_remove(key);
-        }
-        for (k, v) in &inj.env {
+        // 6. Spawn（stdin/stdout/stderr 全 piped）
+        let mut command = Command::new(&executable);
+        command
+            .args(&args)
+            .current_dir(cwd)
+            .env("PATH", enhanced_path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some((k, v)) = crate::config::claude_config_dir_env() {
             command.env(k, v);
         }
-    }
+        // 文件快照：stream-json 模式默认不在用户消息处建快照，rewind_files 依赖它。
+        // 用户自设 CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING 时 CLI 仍以禁用为准
+        command.env(protocol::FILE_CHECKPOINTING_ENV, "true");
+        // CLI 自立进程组（组 ID = CLI PID）：MCP 子进程随组，signal_session 组信号可整树回收
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        // Windows 进程树由 taskkill /T 按父子关系回收，无需进程组；只抑制控制台闪窗
+        #[cfg(windows)]
+        {
+            use crate::proc_ext::HideConsole;
+            command.hide_console();
+        }
+        if let Some(inj) = &channel_injection {
+            for key in &inj.clear_env {
+                command.env_remove(key);
+            }
+            for (k, v) in &inj.env {
+                command.env(k, v);
+            }
+        }
+        (command, resumed, channel_injection)
+    };
     let mut child = command.spawn().map_err(|e| {
         if let Some(inj) = &channel_injection {
             crate::channels::cleanup_runtime_file(&inj.runtime_path);
@@ -1044,6 +1140,7 @@ fn open_session(
 
     let mut reader = BufReader::new(stdout);
     let mut line_buf = String::new();
+    let mut remote_pid: Option<u32> = None;
     loop {
         line_buf.clear();
         let bytes_read = match reader.read_line(&mut line_buf) {
@@ -1080,6 +1177,21 @@ fn open_session(
                 }
             ));
         }
+        // 远端启动脚本在 exec 前报告 pid，工作目录不存在时报告错误并退出
+        if remote.is_some() {
+            match remote_launch::parse_marker(&line_buf) {
+                Some(Ok(pid)) => {
+                    remote_pid = Some(pid);
+                    continue;
+                }
+                Some(Err(code)) => {
+                    PermissionService::stop_for(session_id);
+                    terminate_and_reap_startup_child(&mut child);
+                    return Err(code.to_string());
+                }
+                None => {}
+            }
+        }
         if let Ok(v) = serde_json::from_str::<Value>(&line_buf) {
             let t = v.get("type").and_then(|t| t.as_str());
             if t == Some("control_response") {
@@ -1091,10 +1203,17 @@ fn open_session(
                         if let Some(version) = catalog.cli_version.as_deref() {
                             diagnostics::note_cli_version(version);
                         }
-                        diagnostics::store_models(&catalog.models);
+                        // 模型目录按实例存：远端会话记在远端实例名下
+                        let instance = match remote {
+                            Some(launch) => Some(launch.instance.clone()),
+                            None => crate::engines::claude::default_instance().ok(),
+                        };
+                        if let Some(instance) = instance.as_ref() {
+                            diagnostics::store_models(instance, &catalog.models);
+                        }
                         let _ = app.emit(
                             "session-catalog",
-                            json!({ "session_id": session_id, "catalog": catalog }),
+                            json!({ "session_id": session_id, "engine": instance, "catalog": catalog }),
                         );
                     } else {
                         eprintln!("[long-lived] 握手响应结构不符，回退本地命令与模型列表");
@@ -1167,7 +1286,14 @@ fn open_session(
         init_reported: false,
         pending_injections: HashMap::new(),
         pending_controls: HashMap::new(),
+        remote: remote.map(|launch| RemoteProcess {
+            launch: launch.clone(),
+            pid: remote_pid,
+        }),
     }));
+    if let (Some(launch), Some(pid)) = (remote, remote_pid) {
+        remote_launch::record_pid(launch.instance.instance_id(), pid, &launch.cli_session_id);
+    }
     ACTIVE_PROCESSES
         .lock()
         .unwrap()
@@ -1208,6 +1334,7 @@ pub fn send_message(
     permission_mode: Option<&str>,
     session_capabilities: Vec<SessionCapabilityId>,
     force_new: bool,
+    remote: Option<&RemoteLaunch>,
 ) -> Result<(), String> {
     let capability_bundle = SessionCapabilityBundle::new(session_capabilities);
     let mut exists = ACTIVE_PROCESSES
@@ -1271,6 +1398,7 @@ pub fn send_message(
             permission_mode,
             &capability_bundle,
             force_new,
+            remote,
         )?;
     }
 
@@ -1354,12 +1482,14 @@ pub fn toggle_remote_control(
             .and_then(|m| m.get(session_id).cloned())
             .is_some_and(|arc| {
                 let sp = arc.lock().unwrap();
-                sp.fast_mode != fast_mode
-                    || permission_change_requires_restart(
-                        sp.permission_mode.as_deref(),
-                        permission_mode,
-                    )
-                    || capability_needs_restart(&sp.capability_fingerprint, &capability_bundle)
+                // 远端进程不能按本机方式重启；开关直接走现有进程的控制请求
+                sp.remote.is_none()
+                    && (sp.fast_mode != fast_mode
+                        || permission_change_requires_restart(
+                            sp.permission_mode.as_deref(),
+                            permission_mode,
+                        )
+                        || capability_needs_restart(&sp.capability_fingerprint, &capability_bundle))
             });
         if needs_restart {
             eprintln!(
@@ -1387,6 +1517,7 @@ pub fn toggle_remote_control(
             permission_mode,
             &capability_bundle,
             false,
+            None,
         )?;
     }
 
@@ -1775,11 +1906,22 @@ pub fn close_session(session_id: &str) {
         .and_then(|m| m.remove(session_id));
 
     if let Some(process_arc) = process_arc {
-        let pid = {
+        let (pid, remote) = {
             let mut sp = process_arc.lock().unwrap();
             graceful_shutdown(&mut sp);
-            sp.child.id()
+            (sp.child.id(), sp.remote.clone())
         };
+        // 远端会话：结束本机 ssh 即关闭远端 stdin；宽限后远端 pid 仍是这条会话就精确 kill
+        if let Some(RemoteProcess {
+            launch,
+            pid: Some(remote_pid),
+        }) = remote
+        {
+            std::thread::spawn(move || {
+                std::thread::sleep(REMOTE_EXIT_GRACE);
+                remote_launch::kill_if_ours(&launch, remote_pid);
+            });
+        }
         signal_session(pid, "-TERM");
 
         std::thread::spawn(move || {
@@ -2165,10 +2307,24 @@ fn read_stream(
     // 所有退出路径都在 reader 线程统一 wait。close_session / 热重启会先从活跃表移除，
     // 但 `Child` Drop 本身不会回收退出状态；只在“非预期退出”分支 wait 会让预期关闭
     // 与被新代际顶替的进程短暂或永久成为 zombie。
-    let exit_status = {
+    let (exit_status, remote) = {
         let mut sp = process.lock().unwrap();
-        sp.child.wait().ok()
+        (sp.child.wait().ok(), sp.remote.clone())
     };
+    // ssh 以 255 退出 = 连接中断，远端进程可能还活着：保留 pid 记录，下一轮同步或重开该会话时清理
+    let disconnected = remote.is_some()
+        && exit_status.is_some_and(|status| status.code() == Some(SSH_CONNECTION_LOST));
+    if let Some(RemoteProcess {
+        launch,
+        pid: Some(pid),
+    }) = &remote
+    {
+        if disconnected {
+            remote_launch::mark_exited(launch.instance.instance_id(), *pid);
+        } else {
+            remote_launch::forget_pid(launch.instance.instance_id(), *pid);
+        }
+    }
 
     // 判断退出性质（close_session 会先从 map 移除再 SIGTERM）：
     // - map 中仍是本进程 = 非预期退出，需要上报错误
@@ -2202,7 +2358,15 @@ fn read_stream(
         );
     }
 
-    if was_unexpected {
+    if was_unexpected && disconnected {
+        if let Some(RemoteProcess { launch, .. }) = &remote {
+            emit_error(
+                app,
+                session_id,
+                format!("REMOTE_DISCONNECTED:{}", launch.alias),
+            );
+        }
+    } else if was_unexpected {
         if let Some(status) = exit_status {
             if !status.success() {
                 let stderr_text = stderr.map(|stderr| {
@@ -2270,6 +2434,31 @@ fn route_protocol_signals(
             );
         }
         return;
+    }
+
+    // 远端会话以 stdio 权限通道启动：审批走与本机相同的前端流程，决定写回同一条管道
+    if let Some(request) = protocol::parse_can_use_tool(value) {
+        if process.lock().unwrap().remote.is_some() {
+            let target = process.clone();
+            let request_id = request.request_id.clone();
+            let accepted = PermissionService::request_via_stdio(
+                app,
+                session_id,
+                request.tool_name,
+                request.input,
+                move |decision| {
+                    let reply = protocol::tool_permission_response(&request_id, decision);
+                    if let Ok(mut sp) = target.lock() {
+                        if let Err(error) = write_stdin(&mut sp.stdin, &reply) {
+                            eprintln!("[long-lived] 远端权限应答写入失败: {error}");
+                        }
+                    }
+                },
+            );
+            if accepted {
+                return;
+            }
+        }
     }
 
     match protocol::classify_reverse_request(value) {
