@@ -76,7 +76,7 @@ function upsertErrorEvent(sessionId: string, sub: string, source: 'stream' | 'ex
   errorEvents.value = next
 }
 
-/** 确认/解除某会话的错误事件(重试成功、去会话、手动 dismiss、会话退出工作台) */
+/** 确认/解除某会话的错误事件(重试或新一轮顺利结束、去会话、手动 dismiss、会话退出工作台) */
 function dismissError(sessionId: string) {
   if (!errorEvents.value.has(sessionId)) return
   const next = new Map(errorEvents.value)
@@ -346,6 +346,8 @@ export async function initNotificationLayer(): Promise<void> {
       upsertErrorEvent(sessionId, err, 'stream')
       void maybeNotifySystem(i18n.global.t('notification.errorStopped'), `${title} · ${err.slice(0, 60)}`)
     } else {
+      // 新一轮顺利结束 = 已从之前的错误恢复（远端断线后重发即走这里），错误事件随之解除
+      dismissError(sessionId)
       const { activeSection } = useUiState()
       const visible =
         activeSection.value === 'workbench' && isSessionVisibleInWorkbench(sessionId)
