@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter};
 use crate::engines::core::{
     EngineInstanceId, ProjectRef, SessionRef, SourceChange, SourceChangeKind,
 };
-use executor::{RemoteExecutor, SshExecutor};
+use executor::{RemoteExecutor, RemotePlatform, SshExecutor};
 use health::HealthReport;
 use hosts::{HostSettings, RemoteHost, SshTarget};
 
@@ -101,8 +101,7 @@ pub async fn check_remote_host(alias: String) -> Result<HealthReport, String> {
         .into_iter()
         .find(|h| h.alias == alias)
         .ok_or("unknown_host")?;
-    let target = hosts::target_for(&host.alias, host.source == hosts::HostSource::Manual)
-        .ok_or("invalid_connection")?;
+    let target = hosts::target_for_host(&host).ok_or("invalid_connection")?;
     tauri::async_runtime::spawn_blocking(move || {
         health::check(&SshExecutor, &target, host.claude_path.as_deref())
     })
@@ -177,8 +176,7 @@ fn host_by_alias(alias: &str) -> Result<(RemoteHost, SshTarget), String> {
         .into_iter()
         .find(|h| h.alias == alias)
         .ok_or("unknown_host")?;
-    let target = hosts::target_for(&host.alias, host.source == hosts::HostSource::Manual)
-        .ok_or("invalid_connection")?;
+    let target = hosts::target_for_host(&host).ok_or("invalid_connection")?;
     Ok((host, target))
 }
 
@@ -191,15 +189,17 @@ fn remote_executor() -> &'static dyn RemoteExecutor {
     &SshExecutor
 }
 
-/// 远端数据根：回环取环境变量，否则由体检在登录 shell 里解析
-fn remote_root(target: &SshTarget, host: &RemoteHost) -> Result<String, String> {
+/// 远端数据根与方言：回环取环境变量，否则由体检解析
+fn remote_root(target: &SshTarget, host: &RemoteHost) -> Result<(String, RemotePlatform), String> {
     if let Some(root) = loopback_root() {
-        return Ok(root);
+        return Ok((root, RemotePlatform::Posix));
     }
     let report = health::check(&SshExecutor, target, host.claude_path.as_deref());
+    let platform = report.platform;
     report
         .data_root
         .filter(|_| report.usable || report.failure == Some(health::FailureKind::CliNotFound))
+        .map(|root| (root, platform))
         .ok_or_else(|| format!("health_{:?}", report.failure).to_lowercase())
 }
 
@@ -221,7 +221,8 @@ pub async fn sync_remote_host(app: AppHandle, alias: String) -> Result<sync::Syn
     let result = {
         let (app, host, slot) = (app.clone(), host.clone(), slot.clone());
         tauri::async_runtime::spawn_blocking(move || {
-            let root = remote_root(&target, &host)?;
+            let (root, platform) = remote_root(&target, &host)?;
+            let target = SshTarget { platform, ..target };
             // 遗留的远端进程（Monet 异常退出、断线）：跳过本次仍连着的会话
             launch::cleanup_stale_pids(remote_executor(), &target, &host.instance_id);
             let _io = slot.io.lock().unwrap_or_else(|e| e.into_inner());
@@ -272,8 +273,7 @@ fn host_by_instance(instance: &EngineInstanceId) -> Result<(RemoteHost, SshTarge
         .into_iter()
         .find(|h| h.instance_id == instance.instance_id())
         .ok_or("unknown_host")?;
-    let target = hosts::target_for(&host.alias, host.source == hosts::HostSource::Manual)
-        .ok_or("invalid_connection")?;
+    let target = hosts::target_for_host(&host).ok_or("invalid_connection")?;
     Ok((host, target))
 }
 

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::executor::{sh_quote, RemoteExecutor};
+use super::executor::{sh_quote, RemoteExecutor, RemotePlatform};
 use super::hosts::{self, RemoteHost, SshTarget};
 use super::{health, sync};
 use crate::engines::core::EngineInstanceId;
@@ -27,7 +27,8 @@ const PIDS_FILE: &str = "pids.json";
 /// 远端 CLI 路径缓存：每条消息都可能重新解析启动信息，体检要一次往返
 const CLI_CACHE_TTL: Duration = Duration::from_secs(300);
 
-static CLI_CACHE: Mutex<Vec<(String, Instant, String)>> = Mutex::new(Vec::new());
+/// (实例 id, 体检时刻, CLI 路径, 远端方言)
+static CLI_CACHE: Mutex<Vec<(String, Instant, String, RemotePlatform)>> = Mutex::new(Vec::new());
 
 /// 一次远端启动所需的全部信息（启动前在后台线程解析好）
 #[derive(Debug, Clone)]
@@ -80,8 +81,7 @@ fn host_for(instance: &EngineInstanceId) -> Result<(RemoteHost, SshTarget), Stri
         .into_iter()
         .find(|h| h.instance_id == instance.instance_id())
         .ok_or("REMOTE_UNKNOWN_HOST")?;
-    let target = hosts::target_for(&host.alias, host.source == hosts::HostSource::Manual)
-        .ok_or("REMOTE_INVALID_CONNECTION")?;
+    let target = hosts::target_for_host(&host).ok_or("REMOTE_INVALID_CONNECTION")?;
     Ok((host, target))
 }
 
@@ -104,14 +104,15 @@ pub fn resolve(
     if !sync::valid_rel(&format!("p/{cli_session_id}.jsonl")) {
         return Err("REMOTE_INVALID_SESSION".into());
     }
-    let (host, target) = host_for(instance)?;
+    let (host, mut target) = host_for(instance)?;
     let loopback = super::loopback_root().is_some();
     let claude = if loopback {
         crate::claude_locator::locate_lightweight()?
             .path
             .to_string_lossy()
             .into_owned()
-    } else if let Some(path) = cached_cli(&host.instance_id) {
+    } else if let Some((path, platform)) = cached_cli(&host.instance_id) {
+        target.platform = platform;
         path
     } else {
         let report = health::check(
@@ -129,9 +130,15 @@ pub fn resolve(
             ));
         }
         let path = report.cli_path.ok_or("REMOTE_CLI_UNAVAILABLE:")?;
+        target.platform = report.platform;
         let mut cache = CLI_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        cache.retain(|(id, _, _)| id != &host.instance_id);
-        cache.push((host.instance_id.clone(), Instant::now(), path.clone()));
+        cache.retain(|(id, ..)| id != &host.instance_id);
+        cache.push((
+            host.instance_id.clone(),
+            Instant::now(),
+            path.clone(),
+            report.platform,
+        ));
         path
     };
     Ok(RemoteLaunch {
@@ -146,13 +153,13 @@ pub fn resolve(
     })
 }
 
-fn cached_cli(instance_id: &str) -> Option<String> {
+fn cached_cli(instance_id: &str) -> Option<(String, RemotePlatform)> {
     CLI_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
-        .find(|(id, at, _)| id == instance_id && at.elapsed() < CLI_CACHE_TTL)
-        .map(|(_, _, path)| path.clone())
+        .find(|(id, at, ..)| id == instance_id && at.elapsed() < CLI_CACHE_TTL)
+        .map(|(_, _, path, platform)| (path.clone(), *platform))
 }
 
 // ---------- 远端 pid 登记：Monet 异常退出或断线后，下一轮同步或重开该会话时据此清理 ----------
@@ -535,6 +542,7 @@ mod tests {
         let target = SshTarget {
             destination: "local".into(),
             port: None,
+            platform: RemotePlatform::Posix,
         };
         // 不存在的 pid：报告已退出，不 kill
         let out = LocalShellExecutor

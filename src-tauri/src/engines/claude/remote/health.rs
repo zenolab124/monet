@@ -3,12 +3,13 @@
 //! 远端脚本只读：uname、command -v、`claude --version`、目录存在判断。
 //! 非交互 ssh 的 PATH 只有系统目录，用户级 CLI 需经登录 shell 定位；
 //! claude 多为 node 脚本，版本查询同样经登录 shell 执行，保证 node 在 PATH 上。
+//! Windows 远端没有 POSIX shell：POSIX 脚本识别不出系统时改用 PowerShell 版再检一次。
 
 use std::time::Duration;
 
 use serde::Serialize;
 
-use super::executor::{sh_quote, ExecOutput, RemoteExecutor};
+use super::executor::{ps_quote, sh_quote, ExecOutput, RemoteExecutor, RemotePlatform};
 use super::hosts::SshTarget;
 
 /// 依赖新协议的功能以此为闸门（与本机 Claude 会话使用的最低协议版本一致）
@@ -58,6 +59,8 @@ pub struct HealthReport {
     pub cli_version: Option<String>,
     pub data_root: Option<String>,
     pub has_projects: bool,
+    /// 识别出的远端方言（未识别时为 POSIX）
+    pub platform: RemotePlatform,
     /// 可注册为引擎实例：SSH、系统、CLI 路径、数据根四项通过
     pub usable: bool,
 }
@@ -82,6 +85,29 @@ root="${{ccd:-$HOME/.claude}}"
 printf 'root=%s\n' "$root"
 if [ -d "$root" ]; then printf 'root_exists=yes\n'; else printf 'root_exists=no\n'; fi
 if [ -d "$root/projects" ]; then printf 'projects=yes\n'; else printf 'projects=no\n'; fi
+"#
+    )
+}
+
+/// Windows 远端体检脚本（PowerShell 5.1），输出与 POSIX 版相同的 `键=值` 行。
+/// Windows 的 ssh 会话直接带用户环境变量，不需要登录 shell
+pub fn windows_health_script(claude_path: Option<&str>) -> String {
+    let user_path = claude_path.map(ps_quote).unwrap_or_else(|| "''".into());
+    format!(
+        r#"'os=Windows'
+$u = {user_path}
+$p = $null
+if ($u) {{
+  if (Test-Path -LiteralPath $u -PathType Leaf) {{ $p = $u; "claude=$p" }} else {{ 'claude_missing=user' }}
+}} else {{
+  $c = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($c) {{ $p = $c.Source; "claude=$p" }} else {{ 'claude_missing=auto' }}
+}}
+if ($p) {{ $v = & $p --version 2>$null | Select-Object -First 1; "version=$v" }}
+$root = if ($env:CLAUDE_CONFIG_DIR) {{ $env:CLAUDE_CONFIG_DIR }} else {{ Join-Path $env:USERPROFILE '.claude' }}
+"root=$root"
+if (Test-Path -LiteralPath $root -PathType Container) {{ 'root_exists=yes' }} else {{ 'root_exists=no' }}
+if (Test-Path -LiteralPath (Join-Path $root 'projects') -PathType Container) {{ 'projects=yes' }} else {{ 'projects=no' }}
 "#
     )
 }
@@ -143,6 +169,7 @@ pub fn report_from_output(output: &ExecOutput) -> HealthReport {
         cli_version: None,
         data_root: None,
         has_projects: false,
+        platform: RemotePlatform::Posix,
         usable: false,
     };
     let rest = ["os", "cli_path", "cli_version", "data_root"];
@@ -172,6 +199,10 @@ pub fn report_from_output(output: &ExecOutput) -> HealthReport {
     report.os = os.clone();
     match os.as_deref() {
         Some("Darwin") | Some("Linux") => report.items.push(item("os", CheckState::Pass, os)),
+        Some("Windows") => {
+            report.platform = RemotePlatform::Windows;
+            report.items.push(item("os", CheckState::Pass, os));
+        }
         other => {
             report
                 .items
@@ -230,20 +261,42 @@ pub fn report_from_output(output: &ExecOutput) -> HealthReport {
     report
 }
 
+/// 先按已知方言体检；连得上却认不出系统（没有 `os=` 行）时换另一种方言再检一次。
+/// 报告的 `platform` 即后续远端命令应使用的方言
 pub fn check(
     executor: &dyn RemoteExecutor,
     target: &SshTarget,
     claude_path: Option<&str>,
 ) -> HealthReport {
-    let output = executor
-        .run(target, &health_script(claude_path), HEALTH_TIMEOUT)
-        .unwrap_or_else(|error| ExecOutput {
-            code: None,
-            stdout: String::new(),
-            stderr: error.to_string(),
-            timed_out: false,
-        });
-    report_from_output(&output)
+    let order = match target.platform {
+        RemotePlatform::Windows => [RemotePlatform::Windows, RemotePlatform::Posix],
+        RemotePlatform::Posix => [RemotePlatform::Posix, RemotePlatform::Windows],
+    };
+    let mut first = None;
+    for platform in order {
+        let attempt = SshTarget {
+            platform,
+            ..target.clone()
+        };
+        let script = match platform {
+            RemotePlatform::Posix => health_script(claude_path),
+            RemotePlatform::Windows => windows_health_script(claude_path),
+        };
+        let output = executor
+            .run(&attempt, &script, HEALTH_TIMEOUT)
+            .unwrap_or_else(|error| ExecOutput {
+                code: None,
+                stdout: String::new(),
+                stderr: error.to_string(),
+                timed_out: false,
+            });
+        let report = report_from_output(&output);
+        if report.os.is_some() || report.failure != Some(FailureKind::UnsupportedOs) {
+            return report;
+        }
+        first.get_or_insert(report);
+    }
+    first.expect("at least one attempt")
 }
 
 #[cfg(test)]
@@ -283,6 +336,78 @@ mod tests {
         let report = report_from_output(&ok("os=Linux\nclaude=/usr/local/bin/claude\nversion=2.0.9\nroot=/home/bob/.claude\nroot_exists=yes\nprojects=no\n"));
         assert!(report.usable);
         assert!(states(&report).contains(&("cli_version", CheckState::Warn)));
+    }
+
+    #[test]
+    fn windows_reports_switch_the_platform() {
+        let report = report_from_output(&ok(
+            "os=Windows\r\nclaude=C:\\Users\\a\\.local\\bin\\claude.exe\r\nversion=2.1.320 (Claude Code)\r\nroot=C:\\Users\\a\\.claude\r\nroot_exists=yes\r\nprojects=yes\r\n",
+        ));
+        assert!(report.usable);
+        assert_eq!(report.platform, RemotePlatform::Windows);
+        assert_eq!(report.data_root.as_deref(), Some(r"C:\Users\a\.claude"));
+    }
+
+    /// 按方言给出固定输出的假执行器：POSIX 方言模拟 cmd 不认识 `exec`
+    struct WindowsHost;
+    impl RemoteExecutor for WindowsHost {
+        fn run_raw(
+            &self,
+            target: &SshTarget,
+            _script: &str,
+            _timeout: Duration,
+        ) -> std::io::Result<super::super::executor::RawOutput> {
+            let (code, stdout, stderr) = match target.platform {
+                RemotePlatform::Posix => (1, "", "'exec' is not recognized"),
+                RemotePlatform::Windows => (
+                    0,
+                    "os=Windows\r\nclaude=C:\\c.exe\r\nversion=2.1.320\r\nroot=C:\\r\r\nroot_exists=yes\r\nprojects=yes\r\n",
+                    "",
+                ),
+            };
+            Ok(super::super::executor::RawOutput {
+                code: Some(code),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.into(),
+                timed_out: false,
+            })
+        }
+    }
+
+    /// 真实主机验收：`MONET_REMOTE_TEST_TARGET=<ssh 别名> cargo test --lib live_ -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_health_check() {
+        let Ok(destination) = std::env::var("MONET_REMOTE_TEST_TARGET") else {
+            return;
+        };
+        let target = SshTarget {
+            destination,
+            port: None,
+            platform: RemotePlatform::Posix,
+        };
+        let report = check(&super::super::executor::SshExecutor, &target, None);
+        println!("{report:#?}");
+        assert!(report.usable, "{report:?}");
+    }
+
+    #[test]
+    fn unidentified_posix_attempt_falls_back_to_windows() {
+        let target = SshTarget {
+            destination: "pc".into(),
+            port: None,
+            platform: RemotePlatform::Posix,
+        };
+        let report = check(&WindowsHost, &target, None);
+        assert!(report.usable);
+        assert_eq!(report.platform, RemotePlatform::Windows);
+    }
+
+    #[test]
+    fn windows_health_script_quotes_the_user_path() {
+        let script = windows_health_script(Some(r"C:\a b\it's\claude.exe"));
+        assert!(script.contains(r"$u = 'C:\a b\it''s\claude.exe'"));
+        assert!(script.starts_with("'os=Windows'"));
     }
 
     #[test]

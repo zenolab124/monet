@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::executor::{sh_quote, RemoteExecutor};
+use super::executor::{sh_quote, RemoteExecutor, RemotePlatform};
 use super::hosts::SshTarget;
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -51,6 +51,9 @@ pub struct SyncState {
     /// 不参与全量索引，也不因主列表里没有而被标记为远端已删除
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub subagents: BTreeMap<String, FileState>,
+    /// 最近一次全量同步识别出的远端方言；跟随、子 Agent 拉取与进程操作据此选脚本
+    #[serde(default)]
+    pub platform: RemotePlatform,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,6 +383,7 @@ pub fn sync_once(
     let remote = list_files(executor, target, &list_script(remote_root))?;
     let mut state = mirror.load_state();
     state.remote_root = Some(remote_root.to_string());
+    state.platform = target.platform;
     let mut report = SyncReport {
         listed: remote.len(),
         ..SyncReport::default()
@@ -545,6 +549,13 @@ pub fn sync_subagents(
     Ok(changed)
 }
 
+/// 镜像状态里记下的远端方言（还没全量同步过时按 POSIX）
+pub fn known_platform(instance_id: &str) -> RemotePlatform {
+    Mirror::new(mirror_root_for(instance_id))
+        .load_state()
+        .platform
+}
+
 /// 实例镜像根：`data_dir()/remote/<实例 id>/`（实例 id 以 `ssh-` 开头，不会与 `ssh/`、`hosts.json` 冲突）
 pub fn mirror_root_for(instance_id: &str) -> PathBuf {
     crate::config::data_dir().join("remote").join(instance_id)
@@ -564,6 +575,7 @@ mod tests {
         SshTarget {
             destination: "devbox".into(),
             port: None,
+            platform: RemotePlatform::Posix,
         }
     }
 

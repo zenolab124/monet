@@ -921,7 +921,8 @@ fn open_session(
             &launch.target,
             &script,
             launch.loopback,
-        );
+        )
+        .map_err(|e| format!("REMOTE_LAUNCH_FAILED:{e}"))?;
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

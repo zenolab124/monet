@@ -2079,7 +2079,8 @@
       "REMOTE_INVALID_SESSION": "会话 id 无效，无法在远端启动。",
       "REMOTE_CLI_UNAVAILABLE": "远端 CLI 不可用，请在设置里重新检测这台主机。{detail}",
       "REMOTE_PID_INVALID": "远端启动脚本返回了无法识别的进程号。",
-      "REMOTE_SESSION_NOT_LOCAL": "这是远端主机的会话，不能在本机启动。"
+      "REMOTE_SESSION_NOT_LOCAL": "这是远端主机的会话，不能在本机启动。",
+      "REMOTE_LAUNCH_FAILED": "无法在远端启动 CLI：{detail}"
     },
     "sessionMissing": "远端主机上已经没有这个会话了，这里显示的是 Monet 保留的镜像副本，只能查看。",
     "syncNow": "立即同步",

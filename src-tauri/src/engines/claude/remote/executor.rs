@@ -1,7 +1,9 @@
 //! 远端执行器：所有远端命令的唯一出口。
 //!
-//! 真实实现只调用系统 `/usr/bin/ssh`，参数以数组传递，不经过本机 shell；
-//! 远端脚本统一包成 `exec /bin/sh -c '<脚本>'`，不受远端登录 shell 方言影响。
+//! 真实实现只调用系统 `/usr/bin/ssh`，参数以数组传递，不经过本机 shell。
+//! macOS / Linux 远端脚本统一包成 `exec /bin/sh -c '<脚本>'`，不受远端登录 shell 方言影响；
+//! Windows 远端脚本是 PowerShell 5.1，包成 `powershell -EncodedCommand <base64>`，
+//! 远端默认 shell 无论是 cmd 还是 PowerShell 都按同一字面量执行。
 //! 测试通过替换 `RemoteExecutor` 实现，不依赖真实主机。
 
 use std::io::Read;
@@ -10,7 +12,25 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
+
 use super::hosts::SshTarget;
+
+/// 远端系统方言：未识别前按 POSIX 处理
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RemotePlatform {
+    #[default]
+    Posix,
+    Windows,
+}
+
+/// Windows 远端命令行（cmd）上限 8191 字符，留出余量
+const WINDOWS_COMMAND_MAX: usize = 8000;
+
+/// PowerShell 脚本公共前置：关进度流（否则 stderr 混入 CLIXML），输出统一为无 BOM 的 UTF-8
+const PS_PREAMBLE: &str = "$ProgressPreference='SilentlyContinue'\n[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding $false\n";
 
 const SSH_BIN: &str = "/usr/bin/ssh";
 /// macOS 的 Unix socket 路径上限是 104 字节；%C 展开为 40 位十六进制
@@ -112,8 +132,49 @@ pub fn ssh_args(
     args
 }
 
+/// 把任意字符串转成 PowerShell 单引号字面量（PowerShell 也把 ‘ ’ ‚ ‛ 当单引号）
+pub fn ps_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
 pub fn remote_sh_command(script: &str) -> String {
     format!("exec /bin/sh -c {}", sh_quote(script))
+}
+
+/// 按远端系统包装脚本；Windows 命令行超长时报错（调用方需分批）
+pub fn remote_command(platform: RemotePlatform, script: &str) -> std::io::Result<String> {
+    match platform {
+        RemotePlatform::Posix => Ok(remote_sh_command(script)),
+        RemotePlatform::Windows => {
+            let source = format!("{PS_PREAMBLE}{script}");
+            let utf16: Vec<u8> = source.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            let command = format!(
+                "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
+                base64::engine::general_purpose::STANDARD.encode(utf16)
+            );
+            if command.len() > WINDOWS_COMMAND_MAX {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "remote_command_too_long",
+                ));
+            }
+            Ok(command)
+        }
+    }
+}
+
+/// 脚本在 Windows 远端包装后是否仍在命令行长度限制内（批量拉取据此分批）
+pub fn fits_windows_command(script: &str) -> bool {
+    remote_command(RemotePlatform::Windows, script).is_ok()
 }
 
 /// 长活会话（远端 claude 进程）的 ssh 参数，与一次性命令有两处不同：
@@ -156,20 +217,24 @@ pub fn session_ssh_args(
 }
 
 /// 构造运行远端会话脚本的本机进程：通常是 ssh；调试版回环时直接用本机 `/bin/sh`
-pub fn session_command(target: &SshTarget, script: &str, loopback: bool) -> Command {
+pub fn session_command(
+    target: &SshTarget,
+    script: &str,
+    loopback: bool,
+) -> std::io::Result<Command> {
     if loopback && cfg!(debug_assertions) {
         let mut command = Command::new("/bin/sh");
         command.arg("-c").arg(script);
-        return command;
+        return Ok(command);
     }
     let control = control_path();
     let mut command = Command::new(SSH_BIN);
     command.args(session_ssh_args(
         target,
         control.as_deref(),
-        &remote_sh_command(script),
+        &remote_command(target.platform, script)?,
     ));
-    command
+    Ok(command)
 }
 
 pub struct SshExecutor;
@@ -261,7 +326,7 @@ impl RemoteExecutor for SshExecutor {
         command.args(ssh_args(
             target,
             control.as_deref(),
-            &remote_sh_command(script),
+            &remote_command(target.platform, script)?,
         ));
         collect(command, timeout)
     }
@@ -295,6 +360,7 @@ mod tests {
         let target = SshTarget {
             destination: "devbox".into(),
             port: None,
+            platform: RemotePlatform::Posix,
         };
         let args = session_ssh_args(&target, Some("/tmp/c/%C"), "exec /bin/sh -c 'x'");
         assert!(args.contains(&"ControlMaster=no".to_string()));
@@ -303,6 +369,36 @@ mod tests {
         assert!(args.contains(&"BatchMode=yes".to_string()));
         let dash = args.iter().position(|a| a == "--").unwrap();
         assert_eq!(args.len(), dash + 3);
+    }
+
+    #[test]
+    fn ps_quote_doubles_every_powershell_single_quote() {
+        assert_eq!(ps_quote("a'b"), "'a''b'");
+        assert_eq!(ps_quote("x\u{2019}y"), "'x\u{2019}\u{2019}y'");
+        assert_eq!(ps_quote(r"C:\Users\a b\$x"), r"'C:\Users\a b\$x'");
+    }
+
+    #[test]
+    fn windows_commands_are_encoded_utf16_powershell() {
+        let command = remote_command(RemotePlatform::Windows, "'中文'").unwrap();
+        let encoded = command.rsplit(' ').next().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let source = String::from_utf16(&units).unwrap();
+        assert!(source.starts_with("$ProgressPreference='SilentlyContinue'"));
+        assert!(source.ends_with("'中文'"));
+        assert!(command.starts_with("powershell -NoProfile -NonInteractive"));
+        // base64 只含 [A-Za-z0-9+/=]，cmd 与 PowerShell 都不会解释
+        assert!(encoded
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)));
+        assert!(!fits_windows_command(&"x".repeat(4000)));
+        assert!(fits_windows_command(&"x".repeat(2000)));
     }
 
     #[test]
@@ -316,6 +412,7 @@ mod tests {
         let target = SshTarget {
             destination: "alice@example.com".into(),
             port: Some(2222),
+            platform: RemotePlatform::Posix,
         };
         let args = ssh_args(
             &target,
@@ -339,6 +436,7 @@ mod tests {
         let target = SshTarget {
             destination: "devbox".into(),
             port: None,
+            platform: RemotePlatform::Posix,
         };
         let args = ssh_args(&target, None, "true");
         assert!(!args.iter().any(|a| a.starts_with("Control")));

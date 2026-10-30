@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub use super::executor::RemotePlatform;
+
 /// 主机来源：ssh config 中的 Host，或用户手动填写的 `user@host[:port]`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +55,8 @@ pub struct RemoteHost {
 pub struct SshTarget {
     pub destination: String,
     pub port: Option<u16>,
+    /// 远端系统：决定远端命令的包装方式与脚本方言；由体检识别并记在镜像状态里
+    pub platform: RemotePlatform,
 }
 
 /// 规范化部分的长度上限：`ssh-` + 主体 + `-` + 6 位短码不超过实例 id 的 64 字节
@@ -120,6 +124,7 @@ pub fn parse_manual_target(input: &str) -> Option<SshTarget> {
     Some(SshTarget {
         destination: format!("{}@{}", &caps[1], &caps[2]),
         port,
+        platform: RemotePlatform::Posix,
     })
 }
 
@@ -134,7 +139,15 @@ pub fn target_for(alias: &str, manual: bool) -> Option<SshTarget> {
     Some(SshTarget {
         destination: alias.to_string(),
         port: None,
+        platform: RemotePlatform::Posix,
     })
+}
+
+/// 已配置主机的 ssh 目标，带上镜像状态里记下的远端方言
+pub fn target_for_host(host: &RemoteHost) -> Option<SshTarget> {
+    let mut target = target_for(&host.alias, host.source == HostSource::Manual)?;
+    target.platform = super::sync::known_platform(&host.instance_id);
+    Some(target)
 }
 
 /// 从 ssh config 文本中取出可直接连接的 Host 别名（跳过通配、否定与 Match 块）。
@@ -272,14 +285,16 @@ mod tests {
             parse_manual_target("alice@example.com:2222"),
             Some(SshTarget {
                 destination: "alice@example.com".into(),
-                port: Some(2222)
+                port: Some(2222),
+                platform: RemotePlatform::Posix,
             })
         );
         assert_eq!(
             parse_manual_target("alice@10.0.0.5"),
             Some(SshTarget {
                 destination: "alice@10.0.0.5".into(),
-                port: None
+                port: None,
+                platform: RemotePlatform::Posix,
             })
         );
     }

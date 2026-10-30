@@ -74,13 +74,12 @@ impl RemoteClaudeEngine {
     }
 
     pub fn new(host: &RemoteHost) -> EngineResult<Arc<Self>> {
-        let target = hosts::target_for(&host.alias, host.source == hosts::HostSource::Manual)
-            .ok_or_else(|| {
-                EngineError::new(
-                    EngineErrorKind::InvalidIdentity,
-                    "invalid remote host alias",
-                )
-            })?;
+        let target = hosts::target_for_host(host).ok_or_else(|| {
+            EngineError::new(
+                EngineErrorKind::InvalidIdentity,
+                "invalid remote host alias",
+            )
+        })?;
         let descriptor = Self::descriptor_for(host)?;
         let mirror_projects =
             super::sync::Mirror::new(super::sync::mirror_root_for(&host.instance_id))
