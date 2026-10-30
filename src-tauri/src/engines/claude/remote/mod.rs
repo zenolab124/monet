@@ -8,6 +8,7 @@ pub mod health;
 pub mod hosts;
 pub mod launch;
 pub mod sync;
+mod windows;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};

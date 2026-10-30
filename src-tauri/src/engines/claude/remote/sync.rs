@@ -12,12 +12,16 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::executor::{sh_quote, RemoteExecutor, RemotePlatform};
+use super::executor::{fits_windows_command, sh_quote, RemoteExecutor, RemotePlatform};
 use super::hosts::SshTarget;
+use super::windows;
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const STATE_FILE: &str = "sync-state.json";
+/// Windows 批量拉取：每批的文件数与字节数上限（命令行长度另行检查）
+const BATCH_MAX_FILES: usize = 64;
+const BATCH_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteFile {
@@ -287,42 +291,75 @@ impl Mirror {
     }
 }
 
-/// 按计划拉取一个文件并落盘，成功后更新状态；失败时清掉记录，下一轮全量重拉。
-/// 返回本次拉取的原始字节数，以及镜像内容是否变化（只拉到半截末行时不算）。
-#[allow(clippy::too_many_arguments)]
-fn fetch_file(
+fn plan_offset(file_plan: FetchPlan) -> u64 {
+    match file_plan {
+        FetchPlan::Append { offset } => offset,
+        _ => 0,
+    }
+}
+
+/// 取一批文件从各自 offset 起的字节；结果与请求一一对应。
+/// POSIX 逐个 `cat`/`tail`（连接复用下开销很小）；Windows 一次 PowerShell 处理整批
+fn fetch_remote(
     executor: &dyn RemoteExecutor,
     target: &SshTarget,
     remote_root: &str,
+    items: &[(&str, u64)],
+) -> Vec<Result<Vec<u8>, String>> {
+    let check = |out: std::io::Result<super::executor::RawOutput>| {
+        out.map_err(|e| e.to_string())
+            .and_then(|out| match (out.timed_out, out.code) {
+                (true, _) => Err("fetch_timeout".to_string()),
+                (false, Some(0)) => Ok(out.stdout),
+                _ => Err(format!("fetch_failed: {}", out.stderr.trim())),
+            })
+    };
+    match target.platform {
+        RemotePlatform::Posix => items
+            .iter()
+            .map(|(rel, offset)| {
+                check(executor.run_raw(
+                    target,
+                    &fetch_script(remote_root, rel, *offset),
+                    FETCH_TIMEOUT,
+                ))
+            })
+            .collect(),
+        RemotePlatform::Windows => {
+            let frames = check(executor.run_raw(
+                target,
+                &windows::fetch_batch_script(remote_root, items),
+                FETCH_TIMEOUT,
+            ))
+            .and_then(|stdout| windows::parse_batch(&stdout, items.len()));
+            match frames {
+                Ok(frames) => frames
+                    .into_iter()
+                    .map(|frame| frame.ok_or_else(|| "fetch_missing".to_string()))
+                    .collect(),
+                Err(error) => items.iter().map(|_| Err(error.clone())).collect(),
+            }
+        }
+    }
+}
+
+/// 落盘一次拉取结果并更新状态；失败时清掉记录，下一轮全量重拉。
+/// 返回本次拉取的原始字节数，以及镜像内容是否变化（只拉到半截末行时不算）。
+fn record_fetch(
     mirror: &Mirror,
     files: &mut BTreeMap<String, FileState>,
     file: &RemoteFile,
     file_plan: FetchPlan,
     whole: bool,
+    fetched: Result<Vec<u8>, String>,
 ) -> Result<(u64, bool), String> {
     let before = files.get(&file.rel).map(|state| state.mirrored);
-    let offset = match file_plan {
-        FetchPlan::Append { offset } => offset,
-        _ => 0,
-    };
-    let result = executor
-        .run_raw(
-            target,
-            &fetch_script(remote_root, &file.rel, offset),
-            FETCH_TIMEOUT,
-        )
-        .map_err(|e| e.to_string())
-        .and_then(|out| match (out.timed_out, out.code) {
-            (true, _) => Err("fetch_timeout".into()),
-            (false, Some(0)) => Ok(out.stdout),
-            _ => Err(format!("fetch_failed: {}", out.stderr.trim())),
-        })
-        .and_then(|bytes| {
-            mirror
-                .apply(&file.rel, file_plan, &bytes, whole)
-                .map(|len| (len, bytes.len() as u64))
-                .map_err(|e| e.to_string())
-        });
+    let result = fetched.and_then(|bytes| {
+        mirror
+            .apply(&file.rel, file_plan, &bytes, whole)
+            .map(|len| (len, bytes.len() as u64))
+            .map_err(|e| e.to_string())
+    });
     match result {
         Ok((mirrored, fetched_bytes)) => {
             let grew = file_plan == FetchPlan::Full || before != Some(mirrored);
@@ -341,6 +378,90 @@ fn fetch_file(
             files.remove(&file.rel);
             Err(error)
         }
+    }
+}
+
+/// 按计划拉取单个文件并落盘（跟随与子 Agent 用）
+#[allow(clippy::too_many_arguments)]
+fn fetch_file(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    remote_root: &str,
+    mirror: &Mirror,
+    files: &mut BTreeMap<String, FileState>,
+    file: &RemoteFile,
+    file_plan: FetchPlan,
+    whole: bool,
+) -> Result<(u64, bool), String> {
+    let fetched = fetch_remote(
+        executor,
+        target,
+        remote_root,
+        &[(file.rel.as_str(), plan_offset(file_plan))],
+    )
+    .pop()
+    .unwrap_or_else(|| Err("fetch_failed".into()));
+    record_fetch(mirror, files, file, file_plan, whole, fetched)
+}
+
+/// 全量同步的拉取分组：POSIX 每组一个文件；Windows 在文件数、字节数与命令行长度内尽量多装
+fn fetch_groups(
+    platform: RemotePlatform,
+    remote_root: &str,
+    pending: &[(&RemoteFile, FetchPlan)],
+) -> Vec<std::ops::Range<usize>> {
+    if platform == RemotePlatform::Posix {
+        return (0..pending.len()).map(|i| i..i + 1).collect();
+    }
+    let mut groups = Vec::new();
+    let mut start = 0;
+    while start < pending.len() {
+        let mut end = start + 1;
+        let mut bytes = pending[start]
+            .0
+            .size
+            .saturating_sub(plan_offset(pending[start].1));
+        while end < pending.len() && end - start < BATCH_MAX_FILES {
+            let (file, file_plan) = pending[end];
+            let next = bytes + file.size.saturating_sub(plan_offset(file_plan));
+            if next > BATCH_MAX_BYTES {
+                break;
+            }
+            let items: Vec<(&str, u64)> = pending[start..=end]
+                .iter()
+                .map(|(f, p)| (f.rel.as_str(), plan_offset(*p)))
+                .collect();
+            if !fits_windows_command(&windows::fetch_batch_script(remote_root, &items)) {
+                break;
+            }
+            bytes = next;
+            end += 1;
+        }
+        groups.push(start..end);
+        start = end;
+    }
+    groups
+}
+
+/// 按远端方言选择列目录类脚本
+fn listing_script(platform: RemotePlatform, remote_root: &str) -> String {
+    match platform {
+        RemotePlatform::Posix => list_script(remote_root),
+        RemotePlatform::Windows => windows::list_script(remote_root),
+    }
+}
+
+fn single_stat_script(platform: RemotePlatform, remote_root: &str, rel: &str) -> String {
+    match platform {
+        RemotePlatform::Posix => stat_script(remote_root, rel),
+        RemotePlatform::Windows => windows::stat_script(remote_root, rel),
+    }
+}
+
+fn subagents_script(platform: RemotePlatform, remote_root: &str, session_dir: &str) -> String {
+    match platform {
+        RemotePlatform::Posix => subagent_list_script(remote_root, session_dir),
+        RemotePlatform::Windows => windows::subagent_list_script(remote_root, session_dir),
     }
 }
 
@@ -380,7 +501,11 @@ pub fn sync_once(
     cancel: &AtomicBool,
     mut progress: impl FnMut(usize, usize),
 ) -> Result<SyncReport, String> {
-    let remote = list_files(executor, target, &list_script(remote_root))?;
+    let remote = list_files(
+        executor,
+        target,
+        &listing_script(target.platform, remote_root),
+    )?;
     let mut state = mirror.load_state();
     state.remote_root = Some(remote_root.to_string());
     state.platform = target.platform;
@@ -395,30 +520,29 @@ pub fn sync_once(
         .map(|file| (file, plan(file, state.files.get(&file.rel))))
         .filter(|(_, plan)| *plan != FetchPlan::Skip)
         .collect();
-    for (index, (file, file_plan)) in pending.iter().enumerate() {
-        progress(index, pending.len());
+    for group in fetch_groups(target.platform, remote_root, &pending) {
+        progress(group.start, pending.len());
         if cancel.load(Ordering::Relaxed) {
             report.cancelled = true;
             break;
         }
-        match fetch_file(
-            executor,
-            target,
-            remote_root,
-            mirror,
-            &mut state.files,
-            file,
-            *file_plan,
-            false,
-        ) {
-            Ok((fetched_bytes, grew)) => {
-                report.fetched += 1;
-                report.bytes += fetched_bytes;
-                if grew {
-                    report.changed.push(file.rel.clone());
+        let batch = &pending[group];
+        let items: Vec<(&str, u64)> = batch
+            .iter()
+            .map(|(file, file_plan)| (file.rel.as_str(), plan_offset(*file_plan)))
+            .collect();
+        let fetched = fetch_remote(executor, target, remote_root, &items);
+        for ((file, file_plan), fetched) in batch.iter().zip(fetched) {
+            match record_fetch(mirror, &mut state.files, file, *file_plan, false, fetched) {
+                Ok((fetched_bytes, grew)) => {
+                    report.fetched += 1;
+                    report.bytes += fetched_bytes;
+                    if grew {
+                        report.changed.push(file.rel.clone());
+                    }
                 }
+                Err(error) => report.errors.push(format!("{}: {error}", file.rel)),
             }
-            Err(error) => report.errors.push(format!("{}: {error}", file.rel)),
         }
     }
     progress(pending.len(), pending.len());
@@ -453,7 +577,11 @@ pub fn follow_once(
     let Some(remote_root) = state.remote_root.clone() else {
         return Ok(Follow::Unchanged);
     };
-    let listed = list_files(executor, target, &stat_script(&remote_root, rel))?;
+    let listed = list_files(
+        executor,
+        target,
+        &single_stat_script(target.platform, &remote_root, rel),
+    )?;
     let outcome = match listed.into_iter().find(|file| file.rel == rel) {
         Some(file) => {
             let file_plan = plan(&file, state.files.get(rel));
@@ -509,38 +637,51 @@ pub fn sync_subagents(
     let listed = list_files_with(
         executor,
         target,
-        &subagent_list_script(&remote_root, &base),
+        &subagents_script(target.platform, &remote_root, &base),
         valid_subagent_rel,
     )?;
-    let mut changed = 0;
-    for file in listed {
-        let file = RemoteFile {
+    let files: Vec<RemoteFile> = listed
+        .into_iter()
+        .map(|file| RemoteFile {
             rel: format!("{base}/subagents/{}", file.rel),
             ..file
-        };
-        let whole = file.rel.ends_with(".json");
-        let local = state.subagents.get(&file.rel);
-        let file_plan = if whole {
-            plan_whole(&file, local)
-        } else {
-            plan(&file, local)
-        };
-        if file_plan == FetchPlan::Skip {
-            continue;
-        }
-        if fetch_file(
-            executor,
-            target,
-            &remote_root,
-            mirror,
-            &mut state.subagents,
-            &file,
-            file_plan,
-            whole,
-        )
-        .is_ok_and(|(_, grew)| grew)
-        {
-            changed += 1;
+        })
+        .collect();
+    let pending: Vec<(&RemoteFile, FetchPlan)> = files
+        .iter()
+        .map(|file| {
+            let local = state.subagents.get(&file.rel);
+            let file_plan = if file.rel.ends_with(".json") {
+                plan_whole(file, local)
+            } else {
+                plan(file, local)
+            };
+            (file, file_plan)
+        })
+        .filter(|(_, file_plan)| *file_plan != FetchPlan::Skip)
+        .collect();
+    let mut changed = 0;
+    for group in fetch_groups(target.platform, &remote_root, &pending) {
+        let batch = &pending[group];
+        let items: Vec<(&str, u64)> = batch
+            .iter()
+            .map(|(file, file_plan)| (file.rel.as_str(), plan_offset(*file_plan)))
+            .collect();
+        let fetched = fetch_remote(executor, target, &remote_root, &items);
+        for ((file, file_plan), fetched) in batch.iter().zip(fetched) {
+            let whole = file.rel.ends_with(".json");
+            if record_fetch(
+                mirror,
+                &mut state.subagents,
+                file,
+                *file_plan,
+                whole,
+                fetched,
+            )
+            .is_ok_and(|(_, grew)| grew)
+            {
+                changed += 1;
+            }
         }
     }
     if changed > 0 {
@@ -577,6 +718,135 @@ mod tests {
             port: None,
             platform: RemotePlatform::Posix,
         }
+    }
+
+    fn remote_file(rel: &str, size: u64) -> RemoteFile {
+        RemoteFile {
+            rel: rel.into(),
+            size,
+            mtime: 1,
+        }
+    }
+
+    #[test]
+    fn windows_fetches_are_grouped_and_posix_fetches_are_not() {
+        let files: Vec<RemoteFile> = (0..150)
+            .map(|i| {
+                remote_file(
+                    &format!("C--work-project/{i:08}-0000-0000-0000-000000000000.jsonl"),
+                    100,
+                )
+            })
+            .collect();
+        let pending: Vec<(&RemoteFile, FetchPlan)> =
+            files.iter().map(|f| (f, FetchPlan::Full)).collect();
+        assert_eq!(
+            fetch_groups(RemotePlatform::Posix, "/r", &pending).len(),
+            150
+        );
+        let groups = fetch_groups(RemotePlatform::Windows, r"C:\r", &pending);
+        assert!(groups.len() > 2 && groups.len() < 150);
+        assert_eq!(groups.iter().map(|g| g.len()).sum::<usize>(), 150);
+        for group in &groups {
+            let items: Vec<(&str, u64)> = pending[group.clone()]
+                .iter()
+                .map(|(f, _)| (f.rel.as_str(), 0))
+                .collect();
+            assert!(fits_windows_command(&windows::fetch_batch_script(
+                r"C:\r", &items
+            )));
+        }
+        // 单个超大文件独占一批，不因字节上限被丢掉
+        let big = [
+            remote_file("p/a.jsonl", BATCH_MAX_BYTES * 2),
+            remote_file("p/b.jsonl", 1),
+        ];
+        let pending: Vec<(&RemoteFile, FetchPlan)> =
+            big.iter().map(|f| (f, FetchPlan::Full)).collect();
+        assert_eq!(
+            fetch_groups(RemotePlatform::Windows, r"C:\r", &pending),
+            vec![0..1, 1..2]
+        );
+    }
+
+    /// 真实主机验收：`MONET_REMOTE_TEST_TARGET=<ssh 别名> cargo test --lib live_ -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_sync_mirrors_every_listed_session() {
+        let Ok(destination) = std::env::var("MONET_REMOTE_TEST_TARGET") else {
+            return;
+        };
+        let probe = SshTarget {
+            destination,
+            port: None,
+            platform: RemotePlatform::Posix,
+        };
+        let health =
+            super::super::health::check(&super::super::executor::SshExecutor, &probe, None);
+        let target = SshTarget {
+            platform: health.platform,
+            ..probe
+        };
+        let root = health.data_root.expect("data root");
+        let dir = std::env::temp_dir().join(format!("monet-live-sync-{}", std::process::id()));
+        let mirror = Mirror::new(dir.clone());
+        let started = std::time::Instant::now();
+        let report = sync_once(
+            &super::super::executor::SshExecutor,
+            &target,
+            &root,
+            &mirror,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
+        println!(
+            "{:?} in {:?}: {report:?}",
+            target.platform,
+            started.elapsed()
+        );
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert_eq!(report.fetched, report.listed);
+        let state = mirror.load_state();
+        assert_eq!(state.platform, health.platform);
+        // 逐字节镜像：每一行都是完整 JSON（帧边界错位、CRLF 或转码都会在这里暴露）
+        for rel in state.files.keys() {
+            let text = std::fs::read_to_string(mirror.file_path(rel)).unwrap();
+            for line in text.lines().filter(|l| !l.is_empty()) {
+                assert!(
+                    serde_json::from_str::<serde_json::Value>(line).is_ok(),
+                    "{rel}: {}",
+                    &line[..line.len().min(80)]
+                );
+            }
+        }
+        // 第二轮应全部跳过
+        let again = sync_once(
+            &super::super::executor::SshExecutor,
+            &target,
+            &root,
+            &mirror,
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
+        println!("second pass: {again:?}");
+        // 单文件跟随与子 Agent 拉取走各自的脚本
+        let mut subagent_files = 0;
+        for rel in mirror.load_state().files.keys().take(10) {
+            follow_once(&super::super::executor::SshExecutor, &target, &mirror, rel).unwrap();
+            let (project, file) = rel.split_once('/').unwrap();
+            subagent_files += sync_subagents(
+                &super::super::executor::SshExecutor,
+                &target,
+                &mirror,
+                project,
+                file.trim_end_matches(".jsonl"),
+            )
+            .unwrap();
+        }
+        println!("subagent files mirrored: {subagent_files}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     struct Fixture {
