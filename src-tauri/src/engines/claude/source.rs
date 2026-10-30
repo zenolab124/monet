@@ -13,6 +13,8 @@ pub struct ClaudeSource {
     instance: EngineInstanceId,
     /// 远端镜像的 projects 目录；None 为本机数据根（`config::projects_dir()`）
     mirror_root: Option<PathBuf>,
+    /// 远端镜像所属主机的别名，随会话摘要下发给界面做主机徽标；本机为 None
+    host_alias: Option<String>,
     change_sinks: Arc<Mutex<Vec<SourceChangeSink>>>,
     projects_cache: Mutex<Option<Vec<crate::models::Project>>>,
     /// 镜像里远端已删除的会话（`<项目目录>/<会话 id>.jsonl`），与项目快照同生命周期
@@ -24,6 +26,7 @@ impl ClaudeSource {
         Ok(Self {
             instance: default_instance()?,
             mirror_root: None,
+            host_alias: None,
             change_sinks: Arc::new(Mutex::new(Vec::new())),
             projects_cache: Mutex::new(None),
             missing_cache: Mutex::new(None),
@@ -31,10 +34,11 @@ impl ClaudeSource {
     }
 
     /// 远端主机的只读镜像：会话来自 `projects_dir`，操作类动作在远端运行时接入前不可用
-    pub fn mirror(instance: EngineInstanceId, projects_dir: PathBuf) -> Self {
+    pub fn mirror(instance: EngineInstanceId, projects_dir: PathBuf, host_alias: String) -> Self {
         Self {
             instance,
             mirror_root: Some(projects_dir),
+            host_alias: Some(host_alias),
             change_sinks: Arc::new(Mutex::new(Vec::new())),
             projects_cache: Mutex::new(None),
             missing_cache: Mutex::new(None),
@@ -223,6 +227,13 @@ impl ClaudeSource {
                 ("subagentTokens".into(), subagent_tokens),
                 // 镜像保留、远端已删除：只读查阅，不能续聊
                 ("remoteMissing".into(), Value::Bool(remote_missing)),
+                (
+                    "remoteHost".into(),
+                    self.host_alias
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                ),
             ]))?,
         })
     }
@@ -618,6 +629,49 @@ fn split_tool_result_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bare_summary() -> crate::models::SessionSummary {
+        serde_json::from_value(json!({
+            "id": "s-1",
+            "title": null,
+            "first_user_message": null,
+            "model": null,
+            "git_branch": null,
+            "cwd": null,
+            "version": null,
+            "timestamp": null,
+            "last_modified": 0.0,
+            "total_tokens": {},
+            "file_size": 0,
+            "message_count": 0,
+            "context_window": null
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn mirrored_summaries_carry_their_host_alias() {
+        let instance = EngineInstanceId::new("claude-code", "ssh-devbox-abc123").unwrap();
+        let mirror = ClaudeSource::mirror(
+            instance.clone(),
+            PathBuf::from("/nonexistent"),
+            "devbox".into(),
+        );
+        let project = ProjectRef::new(instance, "-work-foo").unwrap();
+        let summary = mirror.map_summary(project, bare_summary(), false).unwrap();
+        assert_eq!(
+            summary.source_meta.values().get("remoteHost"),
+            Some(&json!("devbox"))
+        );
+
+        let local = ClaudeSource::new().unwrap();
+        let project = ProjectRef::new(local.instance.clone(), "-work-foo").unwrap();
+        let summary = local.map_summary(project, bare_summary(), false).unwrap();
+        assert_eq!(
+            summary.source_meta.values().get("remoteHost"),
+            Some(&Value::Null)
+        );
+    }
 
     #[test]
     fn pagination_returns_stable_cursor() {

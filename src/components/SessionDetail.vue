@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useConfirm } from '@/composables/useConfirm'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { useProjects } from '@/composables/useProjects'
+import { sessionHost, useProjects } from '@/composables/useProjects'
 import { useSessions } from '@/composables/useSessions'
 import { useSearch } from '@/composables/useSearch'
 import { createSessionDetail, type SessionRecordArgs } from '@/composables/useSessionDetail'
@@ -1022,6 +1022,11 @@ const { health: engineHealth } = useEngines()
 const remoteRuntimeUnavailable = computed(() => {
   const instance = remoteRecordInstance()
   return !!instance && engineHealth.value[instanceKey(instance)]?.runtime.available === false
+})
+/** 当前远端会话所在主机的别名（提示文案用） */
+const remoteHostAlias = computed(() => {
+  const summary = currentSession.value?.summary
+  return (summary && sessionHost(summary)) ?? remoteRecordInstance()?.instanceId ?? ''
 })
 const remoteReadOnly = computed(() => !!remoteRecordInstance() && (remoteMissing.value || remoteRuntimeUnavailable.value))
 /** 远端会话的 CLI 会话 id：已落盘取原生 id，草稿从结构化 id 里解出 */
@@ -3964,7 +3969,7 @@ async function onReload() {
     <p
       v-if="remoteReadOnly && (mode === 'workbench' || remoteMissing)"
       class="mx-4 mb-3 rounded border border-border px-3 py-2 text-xs text-muted-foreground"
-    >{{ $t(remoteMissing ? 'remote.sessionMissing' : 'remote.sessionReadOnly') }}</p>
+    >{{ remoteMissing ? $t('remote.sessionMissing') : $t('remote.sessionReadOnly', { alias: remoteHostAlias }) }}</p>
 
     <!-- 工作台列:输入栏 + 斜杠命令面板(档案馆只读化:整块不渲染;赛马模式由共享输入替代) -->
     <SessionComposer

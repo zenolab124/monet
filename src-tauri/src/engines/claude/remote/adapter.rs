@@ -88,6 +88,7 @@ impl RemoteClaudeEngine {
             source: crate::engines::claude::ClaudeSource::mirror(
                 descriptor.instance.clone(),
                 mirror_projects.clone(),
+                host.alias.clone(),
             ),
             mirror_projects,
             descriptor,

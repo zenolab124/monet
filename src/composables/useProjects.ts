@@ -34,6 +34,8 @@ interface ArchiveProject {
   id: string
   display_path: string
   sessions: SessionSummary[]
+  /** 含有会话的远端主机别名（按出现顺序）；纯本机项目为空 */
+  hosts: string[]
   session_count: number
   last_active: number | null
 }
@@ -164,6 +166,12 @@ function mapSession(descriptor: EngineDescriptor, session: EngineSessionSummary)
   }
 }
 
+/** 远端镜像会话所在主机的别名；本机会话为 null */
+export function sessionHost(session: SessionSummary): string | null {
+  const host = session.source_meta?.remoteHost
+  return typeof host === 'string' && host ? host : null
+}
+
 function archiveSessionKey(project: Project, session: SessionSummary): string {
   const context = workspaceForSession(session)
   const sourcePath = context?.mainRoot?.trim() || project.source_path?.trim()
@@ -182,6 +190,8 @@ const archiveProjects = computed<ArchiveProject[]>(() => {
         current.sessions.push(session)
         current.session_count++
         current.last_active = Math.max(current.last_active ?? 0, session.last_modified ?? 0) || null
+        const host = sessionHost(session)
+        if (host && !current.hosts.includes(host)) current.hosts.push(host)
         continue
       }
 
@@ -192,6 +202,7 @@ const archiveProjects = computed<ArchiveProject[]>(() => {
           ?? project.source_path
           ?? project.display_path,
         sessions: [session],
+        hosts: sessionHost(session) ? [sessionHost(session)!] : [],
         session_count: 1,
         last_active: session.last_modified || project.last_active,
       })
