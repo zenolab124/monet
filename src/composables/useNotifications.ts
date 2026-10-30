@@ -316,7 +316,7 @@ export async function initNotificationLayer(): Promise<void> {
   if (initialized) return
   initialized = true
 
-  const { isSessionVisibleInWorkbench, findSession } = useWorkbench()
+  const { state: workbenchState, isSessionVisibleInWorkbench, findSession } = useWorkbench()
 
   // 0. 注册 Mac 原生通知 actions(Allow / Deny 按钮)
   try {
@@ -451,6 +451,17 @@ export async function initNotificationLayer(): Promise<void> {
         notifyTransient(i18n.global.t('workbench.column.rcFailed'), e.payload.error)
       } else {
         notifyTransient(i18n.global.t(e.payload.active ? 'workbench.column.rcOpened' : 'workbench.column.rcClosed'))
+      }
+    },
+  )
+
+  // 6. 会话彻底离开工作台(不再被任何 Tab 持有)= 关闭语义,其错误事件随之解除。
+  //    只看「离开」这一跳:从未进过工作台的外部会话错误不受影响
+  watch(
+    () => new Set(workbenchState.value.tabs.flatMap(tab => tab.sessionIds)),
+    (current, previous) => {
+      for (const sessionId of previous) {
+        if (!current.has(sessionId)) dismissError(sessionId)
       }
     },
   )
