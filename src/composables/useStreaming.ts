@@ -7,7 +7,8 @@ import { triggerMetaGeneration } from './useSessionMeta'
 import { collectSessionCapabilities } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
 import type { EngineInstanceId } from '@/engines/types'
-import { isRemoteDisconnected } from '@/utils/streamErrorText'
+import { describeStreamError, isRemoteDisconnected } from '@/utils/streamErrorText'
+import { denyAllForSession } from './usePermissionRequests'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import { useConfirm } from './useConfirm'
 import { initSessionSignalListeners } from './useSessionSignals'
@@ -594,7 +595,7 @@ function rebuildTail(sessionId: string) {
     lines.push({ kind: 'text', text: l.length > 60 ? l.slice(-60) : l })
   }
   if (state.streamError) {
-    lines.push({ kind: 'error', text: state.streamError.slice(0, 80) })
+    lines.push({ kind: 'error', text: describeStreamError(state.streamError).slice(0, 80) })
   }
   state.tail = lines.slice(-3)
 }
@@ -1053,6 +1054,8 @@ export async function initStreamListeners(): Promise<void> {
   await listen<{ session_id: string }>('session-process-exited', (event) => {
     const sid = event.payload?.session_id
     if (!sid) return
+    // 进程已退出，挂起的权限审批与提问再也无人接收：清出队列，卡片与通知随之消失
+    void denyAllForSession(sid)
     // streams.get 而非 getStream:已驱逐(evictSessionTransients)的会话完全跳过,
     // 临终事件不得在 streams/processEpoch 重建任何条目(泄漏)
     const s = streams.get(sid)

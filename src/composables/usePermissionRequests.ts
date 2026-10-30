@@ -249,7 +249,7 @@ export async function respondRequest(
 /**
  * 拒绝某会话的所有 pending 请求。
  *
- * 用于该会话流式中断(Esc / stopStreaming)时清场。
+ * 用于该会话进程退出（停止、关闭、崩溃、远端断线）时清场：请求已无人接收。
  */
 export async function denyAllForSession(sessionId: string): Promise<void> {
   const pending = queue.value.filter(r => r.sessionId === sessionId)
