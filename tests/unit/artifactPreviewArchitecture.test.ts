@@ -45,6 +45,12 @@ describe('artifact previews and local file links', () => {
     expect(sandbox).toContain('body { overflow-y: visible !important; }')
   })
 
+  it('falls back to the session root when the record cwd drifted', () => {
+    expect(card).toContain('inject(SESSION_FILE_ROOT, null)')
+    expect(card).toContain('[props.root, sessionFileRoot?.value]')
+    expect(card).toContain('firstError ??= cause')
+  })
+
   it('caps HTML at a portrait 3:4 frame and disposes offscreen payloads', () => {
     expect(sandbox).toContain('frameWidth) * 4 / 3')
     expect(card).toContain("rootMargin: '200px 0px'")

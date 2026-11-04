@@ -22,7 +22,7 @@ import {
   type ScrollAxis,
 } from '@/lib/scrollGestureCoordinator'
 import { showImageContextMenu } from '@/composables/useImageActions'
-import { SESSION_FILE_FALLBACK_ROOT } from '@/composables/useSessionFileLinks'
+import { SESSION_FILE_FALLBACK_ROOT, SESSION_FILE_ROOT } from '@/composables/useSessionFileLinks'
 
 interface LoadedArtifact {
   fileName: string
@@ -40,6 +40,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const sessionFileRoot = inject(SESSION_FILE_ROOT, null)
 const sessionFileFallbackRoot = inject(SESSION_FILE_FALLBACK_ROOT, null)
 const cardRef = ref<HTMLElement | null>(null)
 const stageRef = ref<HTMLElement | null>(null)
@@ -110,17 +111,31 @@ function resetFrameMeasurement() {
     : MIN_ARTIFACT_FRAME_HEIGHT
 }
 
+// 记录里的 cwd 会随 Agent 在 Bash 里 cd 而漂移；按它找不到时再按会话工作目录解析，错误报首个根目录的
+async function readArtifact(): Promise<LoadedArtifact> {
+  const roots = [...new Set([props.root, sessionFileRoot?.value].filter((root): root is string => !!root))]
+  let firstError: unknown = null
+  for (const root of roots) {
+    try {
+      return await invoke<LoadedArtifact>('read_artifact_preview', {
+        root,
+        path: props.candidate.path,
+        fallbackRoot: sessionFileFallbackRoot?.value ?? null,
+      })
+    } catch (cause) {
+      firstError ??= cause
+    }
+  }
+  throw firstError
+}
+
 async function loadPreview() {
   if (loading.value) return
   const revision = ++loadRevision
   loading.value = true
   error.value = null
   try {
-    const loaded = await invoke<LoadedArtifact>('read_artifact_preview', {
-      root: props.root,
-      path: props.candidate.path,
-      fallbackRoot: sessionFileFallbackRoot?.value ?? null,
-    })
+    const loaded = await readArtifact()
     if (revision !== loadRevision) return
     artifactScriptsAllowed.value = false
     if (loaded.kind === 'html') rotateSandboxIdentity()
