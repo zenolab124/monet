@@ -835,12 +835,27 @@ function isActiveWriterConflict(cause: unknown): boolean {
   return causeMessage(cause).includes('already has an active writer')
 }
 
+// 视口变矮(输入区增高、面板出现)时内容高度不变，内容 RO 不触发；单独观察视口高度补贴底。
+let viewportResizeObserver: ResizeObserver | null = null
+let viewportHeight = 0
+
 function bindViewport(element: HTMLElement | null) {
   if (viewportElement.value !== element) {
     clearTimelineUpwardSettleTimer()
     timelineFollowGeneration++
     timelineScrollRequestId++
     lastTimelineScrollTop = element?.scrollTop ?? 0
+    viewportResizeObserver?.disconnect()
+    if (element) {
+      viewportHeight = element.clientHeight
+      viewportResizeObserver ??= new ResizeObserver(entries => {
+        const height = entries[entries.length - 1]?.contentRect.height ?? viewportHeight
+        if (Math.abs(height - viewportHeight) < 0.5) return
+        viewportHeight = height
+        requestTimelineFollow()
+      })
+      viewportResizeObserver.observe(element)
+    }
   }
   viewportElement.value = element
 }
@@ -2243,6 +2258,8 @@ onUnmounted(() => {
   clearTimelineUpwardSettleTimer()
   timelineResizeObserver?.disconnect()
   timelineResizeObserver = null
+  viewportResizeObserver?.disconnect()
+  viewportResizeObserver = null
   lastGroupResizeObserver?.disconnect()
   lastGroupResizeObserver = null
   stickySurfaceResizeObserver?.disconnect()

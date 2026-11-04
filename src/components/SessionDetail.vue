@@ -130,6 +130,7 @@ import {
   canApplyScrollFollowToken,
   captureScrollFollowToken,
   createScrollFollowState,
+  hasUpwardScrollRange,
   shouldCompensateVirtualItemSizeChange,
   stableMessageGroupKey,
   transitionScrollFollow,
@@ -233,8 +234,18 @@ const bannerHookEvents = ref<HookEvent[]>([])
 
 const inputText = ref('')
 const scrollContainer = ref<HTMLElement>()
+// 视口自身变矮(输入区增高、队列/提示/权限面板出现)时内容高度不变，contentRO 不触发，
+// 底部内容会被切掉一截。单独观察视口高度，跟随模式下同帧贴底。
+let viewportRO: ResizeObserver | null = null
+let viewportHeight = 0
 function bindScrollContainer(element: HTMLElement | null) {
+  if (scrollContainer.value === (element ?? undefined)) return
+  viewportRO?.disconnect()
   scrollContainer.value = element ?? undefined
+  if (!element) return
+  viewportHeight = element.clientHeight
+  viewportRO ??= new ResizeObserver(onViewportResize)
+  viewportRO.observe(element)
 }
 /** 滚动内容包裹层:布局层滚动跟随的 RO 观察对象(内容总高度的单一载体) */
 const scrollContentEl = ref<HTMLElement>()
@@ -685,9 +696,6 @@ function onInputChange() {
   syncCursor()
   if (slashError.value) slashError.value = null
   if (slashNotice.value) slashNotice.value = null
-  // textarea 增高缩小了 scrollContainer 的 clientHeight,但 contentRO 不触发(内容高度没变),
-  // 原来的 scrollTop 不够贴底——看起来内容被输入框顶上去了。跟随模式下补偿一次贴底
-  if (followStreaming.value) scrollToBottom()
 }
 
 // 会话切换时复位 /clear 与 /help 的视图标志,滚动恢复跟随
@@ -2548,8 +2556,19 @@ function onScrollWheel(e: WheelEvent) {
   }
   if (e.deltaY >= 0) return
   // 用户手势优先：第一帧负向 wheel 就同步脱离，不能等 scroll/rAF 后判定。
+  // 内容未溢出或已在顶部时没有可读的上方内容，触控板抖动不应关闭跟随。
   wheelUpIntentAt = now
-  detachFollow()
+  const element = scrollContainer.value
+  if (element && hasUpwardScrollRange(element)) detachFollow()
+}
+
+/** 最近一次布局收缩(内容变矮/视口变高)时刻。浏览器随之 clamp scrollTop，
+ *  产生的上移不是用户手势；若同帧内容又长回来，会被误判为离开底部。 */
+let layoutShrinkAt = Number.NEGATIVE_INFINITY
+const LAYOUT_SHRINK_GRACE_MS = 250
+
+function upwardMoveFromLayout(): boolean {
+  return performance.now() - layoutShrinkAt < LAYOUT_SHRINK_GRACE_MS
 }
 
 function onScroll() {
@@ -2561,7 +2580,7 @@ function onScroll() {
   const distFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
 
   // rAF 之前先处理用户向上意图，覆盖滚动条拖拽、键盘滚动等非 wheel 路径。
-  if (!programmatic && delta < -0.5 && distFromBottom > 2) detachFollow()
+  if (!programmatic && delta < -0.5 && distFromBottom > 2 && !upwardMoveFromLayout()) detachFollow()
   if (
     !programmatic
     && !followStreaming.value
@@ -2946,6 +2965,7 @@ function scrollToBottom(
     && scheduledElement === element
     && element.scrollTop < scheduledScrollTop - 0.5
     && element.scrollHeight - element.scrollTop - element.clientHeight > 2
+    && !upwardMoveFromLayout()
 
   const applyScroll = (element: HTMLElement) => {
     if (!valid()) return
@@ -2954,13 +2974,7 @@ function scrollToBottom(
       detachFollow()
       return
     }
-    const target = Math.max(0, element.scrollHeight - element.clientHeight)
-    if (target - element.scrollTop > 0.5) {
-      element.scrollTop = target
-      rememberProgrammaticScroll(element, 'follow')
-    } else {
-      lastScrollTop = element.scrollTop
-    }
+    writeScrollBottom(element)
   }
 
   void nextTick(() => {
@@ -3020,20 +3034,49 @@ function applyFollowScroll() {
     scheduledElement === sc
     && sc.scrollTop < scheduledScrollTop - 0.5
     && sc.scrollHeight - sc.scrollTop - sc.clientHeight > 2
+    && !upwardMoveFromLayout()
   ) {
     wheelUpIntentAt = performance.now()
     detachFollow()
     return
   }
-  const target = Math.max(0, sc.scrollHeight - sc.clientHeight)
-  // 留出亚像素容差，防 WebKit 分数布局下对相同位置反复写 scrollTop。
-  if (target - sc.scrollTop > 0.5) {
-    sc.scrollTop = target
-    rememberProgrammaticScroll(sc, 'follow')
-  } else {
-    lastScrollTop = sc.scrollTop
-  }
+  writeScrollBottom(sc)
   lastFollowScrollAt = performance.now()
+}
+
+function writeScrollBottom(element: HTMLElement): void {
+  const target = Math.max(0, element.scrollHeight - element.clientHeight)
+  // 留出亚像素容差，防 WebKit 分数布局下对相同位置反复写 scrollTop。
+  if (target - element.scrollTop > 0.5) {
+    element.scrollTop = target
+    rememberProgrammaticScroll(element, 'follow')
+  } else {
+    lastScrollTop = element.scrollTop
+  }
+}
+
+function onViewportResize(entries: ResizeObserverEntry[]): void {
+  const sc = scrollContainer.value
+  const entry = entries.find(item => item.target === sc)
+  if (!sc || !entry) return
+  const height = entry.contentRect.height
+  const previous = viewportHeight
+  viewportHeight = height
+  if (Math.abs(height - previous) < 0.5) return
+  if (height > previous) layoutShrinkAt = performance.now()
+  // RO 回调在布局之后、绘制之前：同帧贴底，不留一帧被切掉的底部。
+  if (captureScrollFollowToken(scrollFollowState)) writeScrollBottom(sc)
+}
+
+let contentHeight = 0
+function onContentResize(entries: ResizeObserverEntry[]): void {
+  const entry = entries[entries.length - 1]
+  if (entry) {
+    const height = entry.contentRect.height
+    if (height < contentHeight - 0.5) layoutShrinkAt = performance.now()
+    contentHeight = height
+  }
+  scheduleFollowScroll()
 }
 
 function scheduleFollowScroll() {
@@ -3058,13 +3101,16 @@ watch(scrollContentEl, (el) => {
   contentRO?.disconnect()
   if (!el) return
   if (!contentRO) {
-    contentRO = new ResizeObserver(() => scheduleFollowScroll())
+    contentRO = new ResizeObserver(onContentResize)
   }
+  contentHeight = 0
   contentRO.observe(el)
 }, { immediate: true })
 onUnmounted(() => {
   contentRO?.disconnect()
   contentRO = null
+  viewportRO?.disconnect()
+  viewportRO = null
   cancelPendingFollowWrites()
 })
 

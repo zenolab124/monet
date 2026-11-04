@@ -132,4 +132,33 @@ describe('scroll follow race guards', () => {
     expect(engine).toMatch(/watch\(\(\) => props\.session\.id,[\s\S]{0,520}resetTimelineFollow\(\)/)
     expect(engine).toMatch(/onUnmounted\(\(\) => \{[\s\S]*invalidateTimelineScrollRequests\(\)[\s\S]*timelineResizeObserver\?\.disconnect\(\)/)
   })
+
+  it('re-pins the bottom when the viewport itself shrinks without content growth', () => {
+    const session = source('../../src/components/SessionDetail.vue')
+    const bind = section(session, 'function bindScrollContainer', 600)
+    const resize = section(session, 'function onViewportResize', 800)
+    const engine = source('../../src/components/engine/EngineSessionDetail.vue')
+    const engineBind = section(engine, 'function bindViewport', 1000)
+
+    expect(bind).toContain('new ResizeObserver(onViewportResize)')
+    expect(resize).toContain('captureScrollFollowToken(scrollFollowState)')
+    expect(resize).toContain('writeScrollBottom(sc)')
+    expect(engineBind).toContain('viewportResizeObserver.observe(element)')
+    expect(engineBind).toContain('requestTimelineFollow()')
+  })
+
+  it('does not treat browser scrollTop clamping after layout shrink as reading intent', () => {
+    const session = source('../../src/components/SessionDetail.vue')
+    const scroll = section(session, 'function onScroll()', 900)
+    const bottom = section(session, 'function scrollToBottom', 1400)
+    const follow = section(session, 'function applyFollowScroll', 1400)
+    const content = section(session, 'function onContentResize', 500)
+    const wheel = section(session, 'function onScrollWheel', 900)
+
+    expect(scroll).toMatch(/delta < -0\.5 && distFromBottom > 2 && !upwardMoveFromLayout\(\)\) detachFollow\(\)/)
+    expect(bottom).toContain('&& !upwardMoveFromLayout()')
+    expect(follow).toContain('&& !upwardMoveFromLayout()')
+    expect(content).toContain('layoutShrinkAt = performance.now()')
+    expect(wheel).toMatch(/hasUpwardScrollRange\(element\)\) detachFollow\(\)/)
+  })
 })
