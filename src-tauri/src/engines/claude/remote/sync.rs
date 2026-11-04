@@ -317,6 +317,9 @@ impl Mirror {
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
+                if !whole {
+                    preserve_divergent(&path, complete)?;
+                }
                 let tmp = path.with_extension("jsonl.part");
                 std::fs::write(&tmp, complete)?;
                 std::fs::rename(&tmp, &path)?;
@@ -335,6 +338,25 @@ impl Mirror {
             }
         }
     }
+}
+
+/// 远端会话被改写或截断（不再是已镜像内容的延续）时，整份重拉前把旧镜像改名保留为
+/// `<名称>.jsonl.<秒>.bak`：镜像是长期留存的副本，不随远端的改写而丢失。
+/// 旧镜像是新内容的前缀（失败后重拉、首轮重建）时无需保留
+fn preserve_divergent(path: &Path, fresh: &[u8]) -> std::io::Result<()> {
+    let old = match std::fs::read(path) {
+        Ok(old) => old,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if fresh.starts_with(&old) {
+        return Ok(());
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    std::fs::rename(path, path.with_extension(format!("jsonl.{stamp}.bak")))
 }
 
 fn plan_offset(file_plan: FetchPlan) -> u64 {
@@ -1245,6 +1267,42 @@ mod tests {
         fx.write_remote("-home-alice-foo/s1.jsonl", "{\"b\":1}\n");
         fx.sync();
         assert_eq!(fx.mirrored("-home-alice-foo/s1.jsonl"), "{\"b\":1}\n");
+        // 被改写前的镜像改名保留，且不会被当成会话文件
+        let backups: Vec<String> =
+            std::fs::read_dir(fx.mirror.projects_dir().join("-home-alice-foo"))
+                .unwrap()
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter(|name| name.starts_with("s1.jsonl.") && name.ends_with(".bak"))
+                .collect();
+        assert_eq!(backups.len(), 1);
+        let backup = fx
+            .mirror
+            .projects_dir()
+            .join("-home-alice-foo")
+            .join(&backups[0]);
+        assert_eq!(
+            std::fs::read_to_string(backup).unwrap(),
+            "{\"a\":1}\n{\"a\":2}\n"
+        );
+    }
+
+    #[test]
+    fn refetching_a_prefix_of_the_remote_file_keeps_no_backup() {
+        let fx = Fixture::new("prefix");
+        fx.write_remote("-home-alice-foo/s1.jsonl", "{\"a\":1}\n");
+        fx.sync();
+        // 状态丢失（如上一轮拉取失败）→ 整份重拉；旧镜像是新内容的前缀
+        std::fs::remove_file(fx.base.join("mirror").join(STATE_FILE)).unwrap();
+        fx.append_remote("-home-alice-foo/s1.jsonl", "{\"a\":2}\n");
+        fx.sync();
+        assert_eq!(
+            fx.mirrored("-home-alice-foo/s1.jsonl"),
+            "{\"a\":1}\n{\"a\":2}\n"
+        );
+        let entries = std::fs::read_dir(fx.mirror.projects_dir().join("-home-alice-foo"))
+            .unwrap()
+            .count();
+        assert_eq!(entries, 1);
     }
 
     #[test]
