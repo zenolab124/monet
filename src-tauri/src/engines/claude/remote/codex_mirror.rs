@@ -138,9 +138,12 @@ pub fn sync_once(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::super::executor::LocalShellExecutor;
     use super::*;
+    #[cfg(unix)]
     use std::io::Write;
+    #[cfg(unix)]
     use std::path::PathBuf;
 
     const LIVE: &str = "sessions/2026/09/21/rollout-2026-09-21T08-29-00-abc.jsonl";
@@ -236,12 +239,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    // 以下用本机 /bin/sh 充当 POSIX 远端，仅在 Unix 上运行；Windows 脚本由真机验收覆盖
+    #[cfg(unix)]
     struct Fixture {
         base: PathBuf,
         home: PathBuf,
         mirror: Mirror,
     }
 
+    #[cfg(unix)]
     impl Fixture {
         fn new(name: &str) -> Self {
             let base = std::env::temp_dir()
@@ -304,12 +310,14 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.base);
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn mirrors_appends_and_carries_archived_sessions_without_duplicates() {
         let fx = Fixture::new("archive");
@@ -344,6 +352,7 @@ mod tests {
         assert!(!state.files[ARCHIVED].missing);
     }
 
+    #[cfg(unix)]
     #[test]
     fn deleted_sessions_stay_mirrored_and_missing_home_is_a_no_op() {
         let fx = Fixture::new("retain");
