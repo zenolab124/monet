@@ -52,7 +52,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const { projects } = useProjects()
-const { collapseColumn, removeSession, removeRaceLane, pendingTaskCwd, draftCwd, nativeDraftInstance, engineDraft, findLane, state, openSession, createDraftSession, registerEngineDraft, registerFork, forkSourceOf } = useWorkbench()
+const { collapseColumn, removeSession, removeRaceLane, pendingTaskOf, draftCwd, nativeDraftInstance, engineDraft, findLane, state, openSession, createDraftSession, registerEngineDraft, registerFork, forkSourceOf } = useWorkbench()
 const { engines } = useEngines()
 
 provide('columnIndex', computed(() => props.index))
@@ -73,7 +73,7 @@ const raceEngineSwitchHint = computed(() => {
 
 const rcLoading = ref(false)
 const engineActionLoading = ref(false)
-const pendingTask = computed(() => pendingTaskCwd(props.column.sessionId))
+const pendingTask = computed(() => pendingTaskOf(props.column.sessionId))
 const findAvailable = computed(() => !pendingTask.value && !(isRace.value && props.enginePickerOpen))
 const sessionSummary = computed<SessionSummary | null>(() => {
   const persisted = projects.value
@@ -198,7 +198,7 @@ const { settings, setChrome } = useSessionSettings(sid)
 const runConfigCwd = computed(() => {
   const session = projects.value.flatMap(project => project.sessions)
     .find(item => item.id === props.column.sessionId)
-  return session?.cwd ?? pendingTask.value ?? draftCwd(props.column.sessionId) ?? null
+  return session?.cwd ?? pendingTask.value?.cwd ?? draftCwd(props.column.sessionId) ?? null
 })
 const { runConfig } = useRunConfig(settings, runConfigCwd)
 
@@ -207,7 +207,7 @@ const projectName = computed(() => {
     if (p.sessions.some(s => s.id === props.column.sessionId))
       return fileName(p.display_path)
   }
-  if (pendingTask.value) return fileName(pendingTask.value)
+  if (pendingTask.value) return pendingTask.value.cwd ? fileName(pendingTask.value.cwd) : null
   const cwd = draftCwd(props.column.sessionId)
   return cwd ? fileName(cwd) : engineDraft(props.column.sessionId)?.cwd ? fileName(engineDraft(props.column.sessionId)!.cwd) : null
 })
@@ -570,7 +570,8 @@ function onFindStatus(status: SessionFindStatus) {
       <NewTaskEnginePicker
         v-if="pendingTask"
         :session-id="column.sessionId"
-        :cwd="pendingTask"
+        :cwd="pendingTask.cwd"
+        :host="pendingTask.host"
       />
       <RaceEnginePicker
         v-else-if="isRace && enginePickerOpen"

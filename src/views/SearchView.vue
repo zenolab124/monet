@@ -3,7 +3,7 @@ import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSearch, type SearchHit } from '@/composables/useSearch'
 import { useAgentSearch } from '@/composables/useAgentSearch'
-import { useProjects } from '@/composables/useProjects'
+import { projectHost, useProjects } from '@/composables/useProjects'
 import { useUiState } from '@/composables/useUiState'
 import { fileName } from '@/utils/path'
 import { instanceKey } from '@/engines/identity'
@@ -23,6 +23,8 @@ const {
 } = useAgentSearch()
 const { defaultAgentEngine, defaultAgentModel } = useChannels()
 const { projects } = useProjects()
+/** 远端实例不进全文索引:筛选项只列本机项目,避免同路径的远端项目重复出现 */
+const searchableProjects = computed(() => projects.value.filter(project => !projectHost(project)))
 const { activeSection } = useUiState()
 
 const inputEl = ref<HTMLInputElement | null>(null)
@@ -190,7 +192,7 @@ function onSubmit() {
                 @click="pickProject(null)"
               >{{ t('search.allProjects') }}</button>
               <button
-                v-for="p in projects"
+                v-for="p in searchableProjects"
                 :key="p.id"
                 class="w-full text-left px-3 py-1.5 text-xs truncate hover:bg-muted transition-colors"
                 :class="projectFilter === p.id ? 'text-accent' : 'text-foreground'"

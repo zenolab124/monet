@@ -39,7 +39,7 @@ const rateLimitStatus = computed(() => {
 })
 
 const { projects } = useProjects()
-const { expandSession, removeSession, flashSessionId, pendingTaskCwd, draftCwd, engineDraft } = useWorkbench()
+const { expandSession, removeSession, flashSessionId, pendingTaskOf, draftCwd, engineDraft } = useWorkbench()
 const { retrySession } = useStreaming()
 const { respondRequest } = usePermissionRequests()
 const { notifyTransient, sessionTitle, dismissError } = useNotifications()
@@ -74,7 +74,9 @@ const draft = computed(() => {
   if (summary.value) return null
   const genericDraft = engineDraft(props.sessionId)
   if (genericDraft) return { projectName: fileName(genericDraft.cwd), engineName: genericDraft.engineName }
-  const cwd = pendingTaskCwd(props.sessionId) ?? draftCwd(props.sessionId)
+  const pending = pendingTaskOf(props.sessionId)
+  if (pending && !pending.cwd) return { projectName: t('workbench.newTask.noDirectory'), engineName: null }
+  const cwd = pending?.cwd ?? draftCwd(props.sessionId)
   return cwd ? { projectName: fileName(cwd), engineName: null } : null
 })
 

@@ -84,8 +84,10 @@ interface WorkbenchState {
   tabSeq: number
   /** 展开序号计数 */
   openSeq: number
-  /** 已选工作目录、尚未选择运行引擎的新任务占位(sessionId → cwd)。 */
+  /** 尚未选择运行引擎的新任务占位(sessionId → cwd);空串表示空白新建,目录在列内与引擎一起选。 */
   pendingTasks: Record<string, string>
+  /** 新任务占位所选项目所在的远端实例;未记录即本机项目。 */
+  pendingTaskHosts: Record<string, EngineInstanceId>
   /**
    * 应用内新建、尚未落盘的草稿会话(sessionId → cwd)。
    * 首条消息经 CLI --session-id 落盘后由 pruneDrafts 清理;
@@ -177,6 +179,7 @@ function createInitialState(): WorkbenchState {
     tabSeq: 1,
     openSeq: 0,
     pendingTasks: {},
+    pendingTaskHosts: {},
     drafts: {},
     engineDrafts: {},
     forkIntents: {},
@@ -280,7 +283,16 @@ function loadState(): WorkbenchState | null {
     const pendingTasks: Record<string, string> = {}
     if (parsed.pendingTasks && typeof parsed.pendingTasks === 'object' && !Array.isArray(parsed.pendingTasks)) {
       for (const [key, value] of Object.entries(parsed.pendingTasks)) {
-        if (typeof value === 'string' && value) pendingTasks[key] = sanitizeCwd(value)
+        if (typeof value === 'string') pendingTasks[key] = value ? sanitizeCwd(value) : ''
+      }
+    }
+    const pendingTaskHosts: Record<string, EngineInstanceId> = {}
+    if (parsed.pendingTaskHosts && typeof parsed.pendingTaskHosts === 'object' && !Array.isArray(parsed.pendingTaskHosts)) {
+      for (const [key, value] of Object.entries(parsed.pendingTaskHosts)) {
+        const instance = value as Partial<EngineInstanceId> | null
+        if (pendingTasks[key] && instance && typeof instance.engineId === 'string' && typeof instance.instanceId === 'string') {
+          pendingTaskHosts[key] = { engineId: instance.engineId, instanceId: instance.instanceId }
+        }
       }
     }
     // drafts 为 v2.1.x 增量字段:旧数据缺省为 {},值非法则丢弃单条不作废整体
@@ -335,6 +347,7 @@ function loadState(): WorkbenchState | null {
       tabSeq: typeof parsed.tabSeq === 'number' ? parsed.tabSeq : tabs.length,
       openSeq: typeof parsed.openSeq === 'number' ? parsed.openSeq : 0,
       pendingTasks,
+      pendingTaskHosts,
       drafts,
       engineDrafts,
       forkIntents,
@@ -566,6 +579,7 @@ function replaceWorkbenchSession(sessionId: string, replacementSessionId: string
   tab.sessionIds[sessionIndex] = replacementSessionId
   teardownSession(sessionId)
   delete state.value.pendingTasks[sessionId]
+  delete state.value.pendingTaskHosts[sessionId]
   delete state.value.drafts[sessionId]
   delete state.value.forkIntents[sessionId]
   delete state.value.nativeDraftInstances[sessionId]
@@ -710,12 +724,34 @@ function createDraftSession(cwd: string, instance?: EngineInstanceId | null): st
   return sessionId
 }
 
-/** 先选择工作目录、再在正文区选择引擎的新任务占位。 */
-function createPendingTask(cwd: string): string {
+/** 先选择工作目录、再在正文区选择引擎的新任务占位;`host` 为项目所在的远端实例,本机项目不传。 */
+function createPendingTask(cwd: string, host?: EngineInstanceId | null): string {
   const sessionId = crypto.randomUUID()
   state.value.pendingTasks[sessionId] = cwd
+  if (host) state.value.pendingTaskHosts[sessionId] = { engineId: host.engineId, instanceId: host.instanceId }
   openSession(sessionId)
   return sessionId
+}
+
+/** 空白新建:在列内先选引擎与主机,再选该主机上的目录。 */
+function createBlankTask(): string {
+  const sessionId = crypto.randomUUID()
+  state.value.pendingTasks[sessionId] = ''
+  openSession(sessionId)
+  return sessionId
+}
+
+export interface PendingTask {
+  /** 已选目录;空白新建尚未选目录时为 null */
+  cwd: string | null
+  /** 目录所在的远端实例;本机为 null */
+  host: EngineInstanceId | null
+}
+
+function pendingTaskOf(sessionId: string): PendingTask | null {
+  const cwd = state.value.pendingTasks[sessionId]
+  if (cwd === undefined) return null
+  return { cwd: cwd || null, host: state.value.pendingTaskHosts[sessionId] ?? null }
 }
 
 /**
@@ -739,17 +775,14 @@ function rememberNativeDraftInstance(sessionId: string, instance: EngineInstance
 }
 
 /** 将中立占位原位升级为原生草稿，保留列与 sessionId。 */
-function promotePendingTaskToDraft(sessionId: string, instance?: EngineInstanceId | null): boolean {
-  const cwd = state.value.pendingTasks[sessionId]
-  if (!cwd) return false
+function promotePendingTaskToDraft(sessionId: string, instance?: EngineInstanceId | null, chosenCwd?: string): boolean {
+  const cwd = chosenCwd || state.value.pendingTasks[sessionId]
+  if (state.value.pendingTasks[sessionId] === undefined || !cwd) return false
   state.value.drafts[sessionId] = cwd
   rememberNativeDraftInstance(sessionId, instance)
   delete state.value.pendingTasks[sessionId]
+  delete state.value.pendingTaskHosts[sessionId]
   return true
-}
-
-function pendingTaskCwd(sessionId: string): string | null {
-  return state.value.pendingTasks[sessionId] ?? null
 }
 
 /** 登记原生引擎空白草稿但不改变 Tab；赛马切换会原位接管列归属。 */
@@ -819,6 +852,9 @@ function forkSourceOf(sessionId: string): string | null {
 function pruneDrafts(isPersisted: (sessionId: string) => boolean) {
   for (const sid of Object.keys(state.value.pendingTasks)) {
     if (!findSession(sid)) delete state.value.pendingTasks[sid]
+  }
+  for (const sid of Object.keys(state.value.pendingTaskHosts)) {
+    if (state.value.pendingTasks[sid] === undefined) delete state.value.pendingTaskHosts[sid]
   }
   for (const sid of Object.keys(state.value.drafts)) {
     if (isPersisted(sid) || !findSession(sid)) {
@@ -958,13 +994,14 @@ function teardownSession(sessionId: string) {
       && usesNativeSessionSurface(engineSession.engine)
       && !sameInstance(engineSession.engine, LOCAL_CLAUDE_INSTANCE)
     if (engineSession && !remoteNative) invoke('engine_close_session', { session: engineSession }).catch(() => {})
-    else if (!pendingTask) invoke('close_session', { sessionId }).catch(() => {})
+    else if (pendingTask === undefined) invoke('close_session', { sessionId }).catch(() => {})
     // 会话彻底离开工作台 = 关闭语义:其挂载的运行命令一并停止(切走/收起不触发)
     useRunners().stopAllForSession(sessionId).catch(() => {})
     evictSessionTransients(sessionId)
     evictEngineRunConfig(sessionId)
     clearRuntimeOptimisticInputs(sessionId)
     delete state.value.pendingTasks[sessionId]
+    delete state.value.pendingTaskHosts[sessionId]
     delete state.value.engineDrafts[sessionId]
   }
 }
@@ -1009,8 +1046,9 @@ export function useWorkbench() {
     openSession,
     openSessionInTab,
     createPendingTask,
+    createBlankTask,
     promotePendingTaskToDraft,
-    pendingTaskCwd,
+    pendingTaskOf,
     createDraftSession,
     stageDraftSession,
     discardStagedSession,

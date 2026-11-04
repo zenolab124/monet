@@ -459,7 +459,8 @@
       "moreProjects": "更多项目",
       "pickFolder": "选择文件夹新建…",
       "show": "显示监控列",
-      "hide": "收起监控列"
+      "hide": "收起监控列",
+      "blankTask": "空白新建…"
     },
     "enginePicker": {
       "title": "选择本次任务使用的 Agent",
@@ -525,6 +526,28 @@
       "stopAll": "全部停止",
       "sharedInput": "输入消息，同时发送到所有赛道…",
       "noCwd": "此会话无工作目录，无法发起赛马"
+    },
+    "newTask": {
+      "noDirectory": "未选目录",
+      "blankTitle": "空白新建",
+      "blankDescription": "先选引擎与主机，再选该主机上的工作目录。",
+      "hostOnly": "只列出 {host} 上可用的引擎。要在别的主机上做这个任务，请用「空白新建」。",
+      "directoryTitle": "选择工作目录",
+      "directoryDescription": "{engine} 将在这个目录中运行。",
+      "recent": "最近目录",
+      "none": "暂无",
+      "pickFolder": "选择文件夹…",
+      "remotePath": "其他目录（远端绝对路径）",
+      "remotePlaceholder": "/home/alice/project",
+      "check": "校验",
+      "start": "开始",
+      "checkHint": "只校验目录是否存在，不会在远端创建目录",
+      "checking": "正在 {host} 上校验…",
+      "exists": "目录存在，可以开始",
+      "missing": "{host} 上不存在这个目录",
+      "notAbsolute": "请输入绝对路径",
+      "checkFailed": "校验失败：{error}",
+      "back": "换引擎或主机"
     }
   },
   "workshop": {
@@ -1896,8 +1919,8 @@
       "dataRootMissing": "远端没有 Claude Code 数据目录",
       "timeout": "远端体检超时",
       "externalGone": "进程已经退出，没有执行终止",
-    "killFailed": "终止远端进程失败",
-    "localOnly": "远端会话的目录在另一台电脑上，无法在本机打开"
+      "killFailed": "终止远端进程失败",
+      "localOnly": "远端会话的目录在另一台电脑上，无法在本机打开"
     }
   },
   "diff": {
@@ -2071,7 +2094,6 @@
     "hostBadgeTitle": "包含远端主机 {alias} 上的会话",
     "runningOnHost": "会话正在 {alias} 上运行，实时跟随中（远端进程结束后可继续输入）",
     "disconnected": "与 {alias} 的连接已断开。已收到的内容已保留，排队的消息暂停发送；重新发送会从远端已保存的位置继续。",
-    "cwdNotOnHost": "这个目录不是 {host} 上已有的项目，远端新建只能选该主机已有项目的目录。",
     "launchError": {
       "REMOTE_CWD_MISSING": "远端目录不存在，消息已放回输入框。",
       "REMOTE_UNKNOWN_HOST": "找不到这台远端主机，可能已在设置里移除。",
@@ -2087,6 +2109,7 @@
     "syncNow": "立即同步",
     "syncing": "同步中…",
     "syncDone": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个。",
-    "syncPartial": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个，{failed} 个失败，下次同步会重试。"
+    "syncPartial": "已同步：远端共 {listed} 个会话，本次拉取 {fetched} 个，{failed} 个失败，下次同步会重试。",
+    "onHost": "在远端主机 {alias} 上"
   }
 }

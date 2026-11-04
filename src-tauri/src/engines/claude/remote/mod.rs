@@ -12,6 +12,7 @@ mod windows;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -19,7 +20,7 @@ use tauri::{AppHandle, Emitter};
 use crate::engines::core::{
     EngineInstanceId, ProjectRef, SessionRef, SourceChange, SourceChangeKind,
 };
-use executor::{RemoteExecutor, RemotePlatform, SshExecutor};
+use executor::{ps_quote, sh_quote, RemoteExecutor, RemotePlatform, SshExecutor};
 use health::HealthReport;
 use hosts::{HostSettings, RemoteHost, SshTarget};
 
@@ -325,6 +326,79 @@ pub async fn follow_remote_session(
     Ok(outcome != sync::Follow::Unchanged)
 }
 
+const DIRECTORY_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
+const DIRECTORY_MARKER: &str = "MONET_REMOTE_DIR=";
+
+/// 远端路径是否为该方言下的绝对路径（新建会话只接受绝对路径，不在远端展开 `~`）
+pub fn absolute_remote_path(platform: RemotePlatform, path: &str) -> bool {
+    match platform {
+        RemotePlatform::Posix => path.starts_with('/'),
+        RemotePlatform::Windows => {
+            let bytes = path.as_bytes();
+            bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && matches!(bytes[2], b'\\' | b'/')
+        }
+    }
+}
+
+/// 只读校验远端目录是否存在：输出 `MONET_REMOTE_DIR=yes|no`，不创建任何东西
+pub fn directory_check_script(platform: RemotePlatform, path: &str) -> String {
+    match platform {
+        RemotePlatform::Posix => format!(
+            "if [ -d {p} ]; then echo {DIRECTORY_MARKER}yes; else echo {DIRECTORY_MARKER}no; fi",
+            p = sh_quote(path),
+        ),
+        RemotePlatform::Windows => format!(
+            "if (Test-Path -LiteralPath {p} -PathType Container) {{ '{DIRECTORY_MARKER}yes' }} else {{ '{DIRECTORY_MARKER}no' }}",
+            p = ps_quote(path),
+        ),
+    }
+}
+
+/// 从校验输出取结论；没有标记行（远端脚本没跑起来）时返回 None
+pub fn parse_directory_check(stdout: &str) -> Option<bool> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix(DIRECTORY_MARKER))
+        .and_then(|value| match value {
+            "yes" => Some(true),
+            "no" => Some(false),
+            _ => None,
+        })
+}
+
+/// 新建远端会话前校验工作目录：Ok(true) 存在，Ok(false) 不存在，Err 为连接或路径问题
+#[tauri::command]
+pub async fn check_remote_directory(
+    instance: EngineInstanceId,
+    path: String,
+) -> Result<bool, String> {
+    let (_, target) = host_by_instance(&instance)?;
+    let path = path.trim().to_string();
+    if !absolute_remote_path(target.platform, &path) {
+        return Err("REMOTE_PATH_NOT_ABSOLUTE".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = remote_executor()
+            .run(
+                &target,
+                &directory_check_script(target.platform, &path),
+                DIRECTORY_CHECK_TIMEOUT,
+            )
+            .map_err(|e| e.to_string())?;
+        if output.timed_out {
+            return Err("REMOTE_CHECK_TIMEOUT".into());
+        }
+        parse_directory_check(&output.stdout)
+            .ok_or_else(|| format!("REMOTE_CHECK_FAILED:{}", output.stderr.trim()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 打开远端会话时按需拉取它的子 Agent 文件；返回有变化的文件数
 #[tauri::command]
 pub async fn sync_remote_subagents(
@@ -403,4 +477,60 @@ fn publish_mirror_changes(
         "projects-changed",
         serde_json::json!({ "full": full, "changes": changes, "instance": instance }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::executor::LocalShellExecutor;
+    use super::*;
+
+    #[test]
+    fn remote_paths_must_be_absolute_for_their_platform() {
+        assert!(absolute_remote_path(
+            RemotePlatform::Posix,
+            "/home/alice/repo"
+        ));
+        assert!(!absolute_remote_path(RemotePlatform::Posix, "~/repo"));
+        assert!(!absolute_remote_path(RemotePlatform::Posix, "repo"));
+        assert!(absolute_remote_path(
+            RemotePlatform::Windows,
+            r"C:\Users\alice"
+        ));
+        assert!(absolute_remote_path(RemotePlatform::Windows, "d:/work"));
+        assert!(!absolute_remote_path(
+            RemotePlatform::Windows,
+            "/home/alice"
+        ));
+        assert!(!absolute_remote_path(RemotePlatform::Windows, "C:"));
+    }
+
+    #[test]
+    fn directory_check_reports_existing_and_missing_directories() {
+        let root = std::env::temp_dir().join(format!("monet-remote-dir-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("it's here")).unwrap();
+        let target = SshTarget {
+            destination: "devbox".into(),
+            port: None,
+            platform: RemotePlatform::Posix,
+        };
+        let check = |path: &std::path::Path| {
+            let script = directory_check_script(RemotePlatform::Posix, &path.to_string_lossy());
+            let output = LocalShellExecutor
+                .run(&target, &script, DIRECTORY_CHECK_TIMEOUT)
+                .unwrap();
+            parse_directory_check(&output.stdout)
+        };
+        assert_eq!(check(&root.join("it's here")), Some(true));
+        assert_eq!(check(&root.join("missing")), Some(false));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn directory_check_without_marker_is_inconclusive() {
+        assert_eq!(parse_directory_check("motd banner\n"), None);
+        assert_eq!(
+            parse_directory_check("banner\nMONET_REMOTE_DIR=no\n"),
+            Some(false)
+        );
+    }
 }

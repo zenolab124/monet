@@ -459,7 +459,8 @@
       "moreProjects": "More Projects",
       "pickFolder": "Pick folder to start…",
       "show": "Show monitor rail",
-      "hide": "Hide monitor rail"
+      "hide": "Hide monitor rail",
+      "blankTask": "Blank task…"
     },
     "enginePicker": {
       "title": "Choose an agent for this task",
@@ -525,6 +526,28 @@
       "stopAll": "Stop All",
       "sharedInput": "Type a message to send to all lanes…",
       "noCwd": "Session has no working directory, cannot start race"
+    },
+    "newTask": {
+      "noDirectory": "No folder yet",
+      "blankTitle": "Blank task",
+      "blankDescription": "Pick an engine and host first, then a folder on that host.",
+      "hostOnly": "Only engines on {host} are listed. To run this task on another host, use Blank task.",
+      "directoryTitle": "Choose a working folder",
+      "directoryDescription": "{engine} will run in this folder.",
+      "recent": "Recent folders",
+      "none": "None yet",
+      "pickFolder": "Choose folder…",
+      "remotePath": "Other folder (absolute path on the remote host)",
+      "remotePlaceholder": "/home/alice/project",
+      "check": "Check",
+      "start": "Start",
+      "checkHint": "Only checks that the folder exists; nothing is created on the remote host",
+      "checking": "Checking on {host}…",
+      "exists": "Folder exists, ready to start",
+      "missing": "This folder does not exist on {host}",
+      "notAbsolute": "Enter an absolute path",
+      "checkFailed": "Check failed: {error}",
+      "back": "Change engine or host"
     }
   },
   "workshop": {
@@ -1896,8 +1919,8 @@
       "dataRootMissing": "No Claude Code data directory on the remote host",
       "timeout": "The remote check timed out",
       "externalGone": "The process has already exited; nothing was terminated",
-    "killFailed": "Failed to terminate the remote process",
-    "localOnly": "The remote session's folder is on another computer and can't be opened here"
+      "killFailed": "Failed to terminate the remote process",
+      "localOnly": "The remote session's folder is on another computer and can't be opened here"
     }
   },
   "diff": {
@@ -2071,7 +2094,6 @@
     "hostBadgeTitle": "Includes sessions on remote host {alias}",
     "runningOnHost": "Session running on {alias}, following in real time (you can type after the remote process ends)",
     "disconnected": "Lost the connection to {alias}. Output received so far is kept and queued messages are paused; sending again continues from what the remote host saved.",
-    "cwdNotOnHost": "This folder isn't an existing project on {host}. New remote sessions can only use folders of that host's existing projects.",
     "launchError": {
       "REMOTE_CWD_MISSING": "The folder doesn't exist on the remote host. Your message is back in the input box.",
       "REMOTE_UNKNOWN_HOST": "This remote host can't be found; it may have been removed in Settings.",
@@ -2087,6 +2109,7 @@
     "syncNow": "Sync now",
     "syncing": "Syncing…",
     "syncDone": "Synced: {listed} sessions on the remote host, {fetched} fetched this time.",
-    "syncPartial": "Synced: {listed} sessions on the remote host, {fetched} fetched this time, {failed} failed and will be retried next sync."
+    "syncPartial": "Synced: {listed} sessions on the remote host, {fetched} fetched this time, {failed} failed and will be retried next sync.",
+    "onHost": "On remote host {alias}"
   }
 }

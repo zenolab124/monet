@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
-import { useProjects } from '@/composables/useProjects'
+import { projectHost, useProjects } from '@/composables/useProjects'
 import { fileName } from '@/utils/path'
 
 const { t } = useI18n()
@@ -34,9 +34,9 @@ const commandError = ref('')
 const projectError = ref('')
 const envError = ref('')
 
-// 项目下拉选项：取路径最后一段做标签
+// 项目下拉选项：取路径最后一段做标签；MCP 配置写在本机，远端主机的项目不列出
 const projectOptions = computed(() =>
-  projects.value.map(p => ({
+  projects.value.filter(p => !projectHost(p)).map(p => ({
     value: p.display_path,
     label: fileName(p.display_path) || p.display_path,
   })),

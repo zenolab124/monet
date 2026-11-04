@@ -172,11 +172,21 @@ export function sessionHost(session: SessionSummary): string | null {
   return typeof host === 'string' && host ? host : null
 }
 
+/** 项目所在的远端主机(实例 + 别名);本机项目为 null。项目只属于一台主机,同路径在不同主机上是不同项目 */
+export function projectHost(project: Project): { instance: EngineInstanceId; alias: string } | null {
+  if (!project.engine) return null
+  const alias = project.sessions.map(sessionHost).find((host): host is string => !!host)
+  return alias ? { instance: project.engine, alias } : null
+}
+
+/** 档案馆分桶:同一主机上的同一目录合为一个项目(本机双引擎合并);不同主机即便路径相同也分开 */
 function archiveSessionKey(project: Project, session: SessionSummary): string {
   const context = workspaceForSession(session)
   const sourcePath = context?.mainRoot?.trim() || project.source_path?.trim()
-  if (sourcePath) return `path:${sourcePath.replace(/[\\/]+$/, '')}`
-  return `source:${project.id}`
+  if (!sourcePath) return `source:${project.id}`
+  const host = sessionHost(session)
+  const pathKey = `path:${sourcePath.replace(/[\\/]+$/, '')}`
+  return host ? `host:${host}|${pathKey}` : pathKey
 }
 
 const archiveProjects = computed<ArchiveProject[]>(() => {

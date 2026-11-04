@@ -50,7 +50,7 @@ describe('standard-engine workbench drafts', () => {
   })
 
   it('opens an engine-neutral task before creating either runtime', () => {
-    expect(rail).toContain('createPendingTask(project.cwd)')
+    expect(rail).toContain('createPendingTask(project.cwd, project.host)')
     expect(rail).not.toContain('<select')
     expect(rail).not.toContain('engineForProject')
     expect(source).toContain('pendingTasks: Record<string, string>')
@@ -59,10 +59,20 @@ describe('standard-engine workbench drafts', () => {
     expect(column).toContain('<NewTaskEnginePicker')
   })
 
-  it('deduplicates the combined recent-project list by working directory', () => {
+  it('deduplicates the combined recent-project list by host and working directory', () => {
     expect(rail).toContain('const options = new Map<string, ProjectOption>()')
-    expect(rail).toContain("cwd.replace(/[\\\\/]+$/, '')")
+    expect(rail).toContain("`${host ? instanceKey(host.instance) : 'local'}|${cwd.replace(/[\\\\/]+$/, '')}`")
     expect(rail).toContain('projectOptions.value.slice(0, 5)')
+  })
+
+  it('offers only engines on the chosen project host and a two-step blank task', () => {
+    expect(rail).toContain('createBlankTask()')
+    expect(source).toContain("state.value.pendingTasks[sessionId] = ''")
+    expect(source).toContain('pendingTaskHosts: Record<string, EngineInstanceId>')
+    expect(picker).toContain('sameInstance(choice.descriptor.instance, props.host)')
+    expect(picker).toContain(': !isRemote(choice.descriptor)))')
+    expect(picker).toContain('<NewTaskDirectoryPicker')
+    expect(picker).not.toContain('cwdNotOnHost')
   })
 
   it('keeps breathing room above the open-session action without shifting its popover anchor', () => {
@@ -73,7 +83,7 @@ describe('standard-engine workbench drafts', () => {
 
   it('promotes Claude in place and replaces Codex in the same workbench column', () => {
     expect(picker).toContain('buildEngineChoices({')
-    expect(picker).toContain('promotePendingTaskToDraft(props.sessionId, instance)')
+    expect(picker).toContain('promotePendingTaskToDraft(props.sessionId, instance, cwd)')
     expect(picker).toContain('stageEngineDraft(replacementSessionId')
     expect(picker).toContain('replaceWorkbenchSession(props.sessionId, replacementSessionId)')
     expect(picker).toContain('discardStagedSession(replacementSessionId)')

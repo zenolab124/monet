@@ -3,20 +3,22 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useWorkbench } from '@/composables/useWorkbench'
-import { useProjects } from '@/composables/useProjects'
+import { projectHost, useProjects } from '@/composables/useProjects'
 import { useUiState } from '@/composables/useUiState'
 import { useNotifications } from '@/composables/useNotifications'
 import type { WorkbenchTab } from '@/composables/useWorkbench'
 import { fileName } from '@/utils/path'
 import MonitorCard from './MonitorCard.vue'
 import type { Project } from '@/types'
+import type { EngineInstanceId } from '@/engines/types'
+import { instanceKey } from '@/engines/identity'
 
 const { t } = useI18n()
 const props = defineProps<{
   tab: WorkbenchTab
 }>()
 
-const { createPendingTask } = useWorkbench()
+const { createPendingTask, createBlankTask } = useWorkbench()
 const { projects } = useProjects()
 const { switchSection } = useUiState()
 const { notifyTransient } = useNotifications()
@@ -38,19 +40,23 @@ interface ProjectOption {
   id: string
   cwd: string
   lastActive: number
+  /** 项目所在的远端实例;本机为 null */
+  host: EngineInstanceId | null
+  hostAlias: string | null
 }
 
-/** 双引擎项目按工作目录合并；同目录只保留最近活跃的一项。 */
+/** 按「主机 + 工作目录」合并:本机双引擎的同目录合为一项;远端项目只属于它的主机,同路径也分列。 */
 const projectOptions = computed<ProjectOption[]>(() => {
   const options = new Map<string, ProjectOption>()
   for (const project of projects.value) {
     const cwd = projectCwd(project)
     if (!cwd) continue
-    const key = cwd.replace(/[\\/]+$/, '')
+    const host = projectHost(project)
+    const key = `${host ? instanceKey(host.instance) : 'local'}|${cwd.replace(/[\\/]+$/, '')}`
     const lastActive = project.last_active ?? 0
     const current = options.get(key)
     if (!current || lastActive > current.lastActive) {
-      options.set(key, { id: key, cwd, lastActive })
+      options.set(key, { id: key, cwd, lastActive, host: host?.instance ?? null, hostAlias: host?.alias ?? null })
     }
   }
   return [...options.values()].sort((a, b) => b.lastActive - a.lastActive)
@@ -128,7 +134,13 @@ function onDocumentClick(e: MouseEvent) {
 
 function selectProject(project: ProjectOption) {
   if (creating.value) return
-  createPendingTask(project.cwd)
+  createPendingTask(project.cwd, project.host)
+  closePopover()
+}
+
+function startBlankTask() {
+  if (creating.value) return
+  createBlankTask()
   closePopover()
 }
 
@@ -211,7 +223,12 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
               @click="selectProject(p)"
             >
               <span class="i-carbon-folder w-3.5 h-3.5 shrink-0 opacity-60" />
-              <span class="truncate">{{ fileName(p.cwd) }}</span>
+              <span class="truncate flex-1 min-w-0">{{ fileName(p.cwd) }}</span>
+              <span
+                v-if="p.hostAlias"
+                class="shrink-0 max-w-20 truncate rounded-sm border border-accent/60 px-1 text-[10px] leading-4 text-accent"
+                :title="$t('remote.onHost', { alias: p.hostAlias })"
+              >{{ p.hostAlias }}</span>
             </button>
 
             <!-- 更多项目（二级,去重:只列一级之外的） -->
@@ -254,6 +271,11 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
                     <span class="block text-xs truncate">{{ fileName(p.cwd) }}</span>
                     <span class="block text-[10px] text-muted-foreground/50 truncate">{{ p.cwd }}</span>
                   </span>
+                  <span
+                    v-if="p.hostAlias"
+                    class="ml-auto shrink-0 max-w-20 truncate rounded-sm border border-accent/60 px-1 text-[10px] leading-4 text-accent"
+                    :title="$t('remote.onHost', { alias: p.hostAlias })"
+                  >{{ p.hostAlias }}</span>
                 </button>
               </div>
             </div>
@@ -282,6 +304,16 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentClick))
             >
               <span class="i-carbon-folder-add w-3.5 h-3.5 shrink-0 opacity-60" />
               <span>{{ $t('workbench.rail.pickFolder') }}</span>
+            </button>
+            <button
+              class="w-full px-2.5 py-1.5 text-left text-xs text-muted-foreground
+                     hover:bg-muted hover:text-foreground transition-colors
+                     flex items-center gap-2"
+              :disabled="creating"
+              @click="startBlankTask"
+            >
+              <span class="i-carbon-add-alt w-3.5 h-3.5 shrink-0 opacity-60" />
+              <span>{{ $t('workbench.rail.blankTask') }}</span>
             </button>
           </div>
           </div>

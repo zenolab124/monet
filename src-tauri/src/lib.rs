@@ -445,6 +445,7 @@ pub fn run() {
             engines::claude::remote::cancel_remote_sync,
             engines::claude::remote::follow_remote_session,
             engines::claude::remote::sync_remote_subagents,
+            engines::claude::remote::check_remote_directory,
             engines::commands::engine_health,
             engines::commands::engine_set_enabled,
             engines::commands::engine_open_configuration,
