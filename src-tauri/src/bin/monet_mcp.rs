@@ -269,7 +269,7 @@ fn handle_tools_list(id: Value) -> Value {
 
     tools.push(json!({
         "name": "search_sessions",
-        "description": "Full-text search over the user's Claude Code session history (all projects). Space-separated terms are ANDed at session level, case-insensitive substring match (works for CJK). Returns matching sessions with title, project, KWIC snippets, message uuids and the JSONL path — read the JSONL directly for full context around a hit.",
+        "description": "Full-text search over the user's Claude Code session history (all projects), including read-only mirrors of sessions on remote SSH hosts synced by Monet. Space-separated terms are ANDed at session level, case-insensitive substring match (works for CJK). Returns matching sessions with title, project, host (null for this machine), KWIC snippets, message uuids and the local JSONL path — read the JSONL directly for full context around a hit.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -280,6 +280,10 @@ fn handle_tools_list(id: Value) -> Value {
                 "project_id": {
                     "type": "string",
                     "description": "Restrict to one project (encoded dir name under ~/.claude/projects)"
+                },
+                "instance": {
+                    "type": "string",
+                    "description": "Restrict to one machine: \"default\" for this machine, or a remote host instance id as returned in results (e.g. ssh-devbox-abc123)"
                 },
                 "days": {
                     "type": "integer",
@@ -490,6 +494,15 @@ fn handle_theme_preview_get(arguments: &Value) -> Result<String, String> {
 // Tool: search_sessions
 // ---------------------------------------------------------------------------
 
+/// 远端实例 id `ssh-<规范化 alias>-<6 位短码>` → 主机名；本机为 None
+fn remote_host_label(instance: &str) -> Option<&str> {
+    if instance == search::LOCAL_INSTANCE {
+        return None;
+    }
+    let body = instance.strip_prefix("ssh-")?;
+    Some(body.rsplit_once('-').map_or(body, |(alias, _)| alias))
+}
+
 fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
     let query = arguments
         .get("query")
@@ -499,6 +512,10 @@ fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
     let filter = search::SearchFilter {
         project_id: arguments
             .get("project_id")
+            .and_then(Value::as_str)
+            .map(String::from),
+        instance: arguments
+            .get("instance")
             .and_then(Value::as_str)
             .map(String::from),
         days: arguments.get("days").and_then(Value::as_u64).map(|d| d as u32),
@@ -518,7 +535,6 @@ fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
     search::warm();
     let result = search::query(query, &filter);
 
-    let projects_root = config::projects_dir();
     let sessions: Vec<Value> = result
         .hits
         .iter()
@@ -530,13 +546,13 @@ fn handle_search_sessions(arguments: &Value) -> Result<String, String> {
             json!({
                 "sessionId": h.session_id,
                 "projectId": h.project_id,
+                "instance": h.instance,
+                "host": remote_host_label(&h.instance),
                 "title": h.title,
                 "lastModified": iso,
                 "matchedIn": h.matched_in,
                 "totalMatches": h.total_matches,
-                "jsonlPath": projects_root
-                    .join(&h.project_id)
-                    .join(format!("{}.jsonl", h.session_id))
+                "jsonlPath": search::session_path(&h.instance, &h.project_id, &h.session_id)
                     .to_string_lossy(),
                 "snippets": h.snippets.iter().map(|s| json!({
                     "uuid": s.uuid,

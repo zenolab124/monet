@@ -181,7 +181,7 @@ Base facts: cross-platform desktop app (macOS Apple Silicon + Windows, installer
 
 And the reverse holds — install Monet, and the Claude in your sessions automatically gains a toolset (**Monet MCP server**, auto-registered at install, zero config):
 
-- Search session history: ask "what did we decide about the database migration?" and it full-text searches your entire history itself
+- Search session history: ask "what did we decide about the database migration?" and it full-text searches your entire history itself; synced mirrors of Claude Code sessions on remote hosts are included, so work done on another machine can be recalled too
 - Create scheduled tasks: say "summarize my work every day at nine" in conversation and the AI creates the Routine, instantly visible in the UI
 - Manage Runners: the AI checks "is the server up? what's the error?" by reading live logs directly, and registers commands worth keeping around
 - Design themes: the AI reads the safe token schema and creates or revises a pending preview; MCP itself cannot save a theme, so the user must explicitly keep it in Settings

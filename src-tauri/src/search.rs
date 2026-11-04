@@ -12,6 +12,8 @@
 //! - 增量：watcher 报变更只标 dirty，查询时懒重提取（天然去抖）
 //! - 双进程：主 App 与 monet_mcp 二进制共用本模块（bin 侧 #[path] 引入），
 //!   MCP 拉起时 warm() 对账 mtime 自补增量，不依赖主 App 存活
+//! - 多根：本机 projects 之外，远端主机的只读镜像 data_dir()/remote/<实例>/projects
+//!   一并入索引（远端主机停用或移除后镜像仍可搜）；分片按实例隔离，本机分片位置不变
 //!
 //! 查询语义：空格分词多词 AND（会话级——每词在会话任意处出现即可），
 //! 大小写不敏感；片段选包含命中的消息生成 KWIC，前端负责高亮。
@@ -55,6 +57,9 @@ pub struct SearchMessage {
 pub struct SessionEntry {
     pub session_id: String,
     pub project_id: String,
+    /// Claude Code 引擎实例：本机为 `default`，远端镜像为主机实例 id
+    #[serde(default = "local_instance")]
+    pub instance: String,
     /// JSONL 内标题（custom-title 优先于 ai-title，同 parser::parse_summary 口径）
     pub title: Option<String>,
     pub mtime_secs: u64,
@@ -99,26 +104,35 @@ struct InstanceMetaLite {
     sessions: HashMap<String, MetaLite>,
 }
 
-fn load_meta() -> HashMap<String, MetaLite> {
+/// 按实例读增值元数据：实例 id → 会话 id → 元数据。
+/// v2 的实例键为 `ei1.<b64 引擎>.<b64 实例>`（同 EngineInstanceId::storage_key）
+fn load_meta() -> HashMap<String, HashMap<String, MetaLite>> {
     let data_dir = config::data_dir();
     let v2_path = data_dir.join("metadata-v2.json");
     if v2_path.is_file() {
-        let instance_key = format!(
-            "ei1.{}.{}",
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("claude-code"),
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("default"),
-        );
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let prefix = format!("ei1.{}.", b64.encode("claude-code"));
         return fs::read_to_string(v2_path)
             .ok()
             .and_then(|content| serde_json::from_str::<MetadataV2Lite>(&content).ok())
-            .and_then(|mut document| document.instances.remove(&instance_key))
-            .map(|instance| instance.sessions)
+            .map(|document| {
+                document
+                    .instances
+                    .into_iter()
+                    .filter_map(|(key, instance)| {
+                        let encoded = key.strip_prefix(&prefix)?;
+                        let id = String::from_utf8(b64.decode(encoded).ok()?).ok()?;
+                        Some((id, instance.sessions))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
     }
-    fs::read_to_string(data_dir.join("metadata.json"))
+    let legacy = fs::read_to_string(data_dir.join("metadata.json"))
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    HashMap::from([(local_instance(), legacy)])
 }
 
 // ── 引擎状态 ─────────────────────────────────────────────
@@ -129,8 +143,8 @@ struct EngineState {
     entries: HashMap<PathBuf, SessionEntry>,
     /// watcher 报来的待重提取文件（懒失效）
     dirty: HashSet<PathBuf>,
-    /// 落盘分片是否有未写变更（按 project_id）
-    dirty_shards: HashSet<String>,
+    /// 落盘分片是否有未写变更（按 实例 + project_id）
+    dirty_shards: HashSet<(String, String)>,
     /// 首次 warm 是否完成
     ready: bool,
 }
@@ -148,8 +162,53 @@ where
 
 // ── 路径与文件收集 ────────────────────────────────────────
 
-fn projects_root() -> PathBuf {
-    crate::config::projects_dir()
+pub const LOCAL_INSTANCE: &str = "default";
+
+fn local_instance() -> String {
+    LOCAL_INSTANCE.to_string()
+}
+
+/// 远端镜像实例目录：`ssh-` 开头（同 remote::hosts::instance_id_for_alias）
+fn is_mirror_instance(name: &str) -> bool {
+    name.len() > "ssh-".len() && name.starts_with("ssh-") && !name.contains(['/', '\\'])
+}
+
+/// 检索根：(实例, projects 目录)。本机在前，远端镜像按实例名排序。
+/// 镜像位置与 remote::sync::mirror_root_for 一致；本模块也被 MCP bin 引入，不能依赖 remote 模块
+fn session_roots() -> Vec<(String, PathBuf)> {
+    let mut roots = vec![(local_instance(), crate::config::projects_dir())];
+    let mut mirrors: Vec<(String, PathBuf)> = fs::read_dir(config::data_dir().join("remote"))
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name().into_string().ok()?;
+            let projects = entry.path().join("projects");
+            (is_mirror_instance(&name) && projects.is_dir()).then_some((name, projects))
+        })
+        .collect();
+    mirrors.sort();
+    roots.extend(mirrors);
+    roots
+}
+
+fn projects_root_for(instance: &str) -> PathBuf {
+    if instance == LOCAL_INSTANCE {
+        crate::config::projects_dir()
+    } else {
+        config::data_dir()
+            .join("remote")
+            .join(instance)
+            .join("projects")
+    }
+}
+
+/// 会话 JSONL 的本地路径（本机原文件或远端镜像）
+#[allow(dead_code)] // MCP bin 使用，lib 侧未引用
+pub fn session_path(instance: &str, project_id: &str, session_id: &str) -> PathBuf {
+    projects_root_for(instance)
+        .join(project_id)
+        .join(format!("{session_id}.jsonl"))
 }
 
 fn shards_dir() -> PathBuf {
@@ -165,19 +224,35 @@ fn file_stamp(meta: &fs::Metadata) -> (u64, u32, u64, f64) {
     (d.as_secs(), d.subsec_nanos(), meta.len(), d.as_secs_f64())
 }
 
-/// 收集主会话 JSONL：projects/<pid>/<sid>.jsonl 两层结构，
+/// 待索引的主会话文件
+#[derive(Clone)]
+struct SessionFile {
+    path: PathBuf,
+    instance: String,
+    project_id: String,
+    session_id: String,
+}
+
+fn collect_main_sessions() -> Vec<SessionFile> {
+    session_roots()
+        .into_iter()
+        .flat_map(|(instance, root)| collect_root_sessions(&instance, &root))
+        .collect()
+}
+
+/// 收集一个根下的主会话 JSONL：projects/<pid>/<sid>.jsonl 两层结构，
 /// 排除 agent- 前缀（与 watcher::session_file_ids 口径一致），不含 subagents 深层
-fn collect_main_sessions() -> Vec<(PathBuf, String, String)> {
+fn collect_root_sessions(instance: &str, root: &Path) -> Vec<SessionFile> {
     let mut out = Vec::new();
-    let root = projects_root();
-    if !root.is_dir() {
-        return out;
-    }
-    let Ok(projects) = fs::read_dir(&root) else {
+    let Ok(projects) = fs::read_dir(root) else {
         return out;
     };
-    // 内置 Agent 工作目录不入索引（防旧版残留污染搜索）
-    let agent_dirs = crate::config::agent_project_dirs();
+    // 本机内置 Agent 工作目录不入索引（防旧版残留污染搜索）
+    let agent_dirs = if instance == LOCAL_INSTANCE {
+        crate::config::agent_project_dirs()
+    } else {
+        Default::default()
+    };
     for project in projects.filter_map(|e| e.ok()) {
         let dir = project.path();
         if !dir.is_dir() {
@@ -204,7 +279,12 @@ fn collect_main_sessions() -> Vec<(PathBuf, String, String)> {
             if sid.starts_with("agent-") {
                 continue;
             }
-            out.push((path, pid.clone(), sid));
+            out.push(SessionFile {
+                path,
+                instance: instance.to_string(),
+                project_id: pid.clone(),
+                session_id: sid,
+            });
         }
     }
     out
@@ -303,11 +383,12 @@ fn extract_text(content: &ContentExtract) -> String {
 }
 
 /// 提取单个会话文件为 SessionEntry。文件不可读时返回 None
-fn extract_file(path: &Path, project_id: &str, session_id: &str) -> Option<SessionEntry> {
+fn extract_file(file: &SessionFile) -> Option<SessionEntry> {
+    let path = file.path.as_path();
     let meta = fs::metadata(path).ok()?;
     let (mtime_secs, mtime_nsec, size, last_modified) = file_stamp(&meta);
-    let file = File::open(path).ok()?;
-    let reader = BufReader::with_capacity(64 * 1024, file);
+    let handle = File::open(path).ok()?;
+    let reader = BufReader::with_capacity(64 * 1024, handle);
 
     let mut messages = Vec::new();
     let mut ai_title: Option<String> = None;
@@ -356,8 +437,9 @@ fn extract_file(path: &Path, project_id: &str, session_id: &str) -> Option<Sessi
     }
 
     Some(SessionEntry {
-        session_id: session_id.to_string(),
-        project_id: project_id.to_string(),
+        session_id: file.session_id.clone(),
+        project_id: file.project_id.clone(),
+        instance: file.instance.clone(),
         title: custom_title.or(ai_title),
         mtime_secs,
         mtime_nsec,
@@ -369,48 +451,64 @@ fn extract_file(path: &Path, project_id: &str, session_id: &str) -> Option<Sessi
 
 // ── 落盘分片 ─────────────────────────────────────────────
 
-fn shard_path(project_id: &str) -> PathBuf {
-    shards_dir().join(format!("{project_id}.json"))
+/// 本机分片沿用 v1 根目录（兼容既有缓存）；远端镜像分片放 `remote/<实例>/`，
+/// 避免与本机同名项目目录互相覆盖
+fn shard_path(instance: &str, project_id: &str) -> PathBuf {
+    let dir = if instance == LOCAL_INSTANCE {
+        shards_dir()
+    } else {
+        shards_dir().join("remote").join(instance)
+    };
+    dir.join(format!("{project_id}.json"))
 }
 
-fn load_shard(project_id: &str) -> HashMap<String, SessionEntry> {
-    fs::read_to_string(shard_path(project_id))
+fn load_shard(instance: &str, project_id: &str) -> HashMap<String, SessionEntry> {
+    fs::read_to_string(shard_path(instance, project_id))
         .ok()
         .and_then(|s| serde_json::from_str::<ShardFile>(&s).ok())
         .filter(|f| f.version == CACHE_VERSION)
-        .map(|f| f.entries)
+        .map(|f| {
+            f.entries
+                .into_iter()
+                .map(|(sid, mut entry)| {
+                    entry.instance = instance.to_string();
+                    (sid, entry)
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
-fn save_shard(project_id: &str, entries: &HashMap<String, SessionEntry>) {
+fn save_shard(instance: &str, project_id: &str, entries: &HashMap<String, SessionEntry>) {
     let shard = ShardFile {
         version: CACHE_VERSION,
         entries: entries.clone(),
     };
     if let Ok(json) = serde_json::to_string(&shard) {
-        let _ = config::atomic_write(&shard_path(project_id), &json);
+        let _ = config::atomic_write(&shard_path(instance, project_id), &json);
     }
 }
 
 /// 把 dirty 分片写盘（在锁外序列化会话数据的拷贝，避免长时间持锁）
 fn flush_dirty_shards() {
-    let to_write: Vec<(String, HashMap<String, SessionEntry>)> = with_state(|s| {
-        let shard_ids: Vec<String> = s.dirty_shards.drain().collect();
+    type ShardWrite = ((String, String), HashMap<String, SessionEntry>);
+    let to_write: Vec<ShardWrite> = with_state(|s| {
+        let shard_ids: Vec<(String, String)> = s.dirty_shards.drain().collect();
         shard_ids
             .into_iter()
-            .map(|pid| {
+            .map(|key| {
                 let entries: HashMap<String, SessionEntry> = s
                     .entries
                     .values()
-                    .filter(|e| e.project_id == pid)
+                    .filter(|e| e.instance == key.0 && e.project_id == key.1)
                     .map(|e| (e.session_id.clone(), e.clone()))
                     .collect();
-                (pid, entries)
+                (key, entries)
             })
             .collect()
     });
-    for (pid, entries) in to_write {
-        save_shard(&pid, &entries);
+    for ((instance, pid), entries) in to_write {
+        save_shard(&instance, &pid, &entries);
     }
 }
 
@@ -437,16 +535,16 @@ pub fn warm() -> SearchStatus {
         if already_ready {
             HashMap::new()
         } else {
-            let pids: HashSet<&String> = files.iter().map(|(_, pid, _)| pid).collect();
-            let root = projects_root();
-            pids.into_iter()
-                .flat_map(|pid| {
-                    load_shard(pid).into_values().map(|e| {
-                        let path = root
-                            .join(&e.project_id)
-                            .join(format!("{}.jsonl", e.session_id));
-                        (path, e)
-                    })
+            let shards: HashSet<(&str, &str)> = files
+                .iter()
+                .map(|f| (f.instance.as_str(), f.project_id.as_str()))
+                .collect();
+            shards
+                .into_iter()
+                .flat_map(|(instance, pid)| {
+                    load_shard(instance, pid)
+                        .into_values()
+                        .map(|e| (session_path(&e.instance, &e.project_id, &e.session_id), e))
                 })
                 .collect()
         }
@@ -458,7 +556,7 @@ pub fn warm() -> SearchStatus {
     });
 
     // mtime+size 对账：找出需要重提取的文件
-    let stale: Vec<(PathBuf, String, String)> = {
+    let stale: Vec<SessionFile> = {
         let stamps: HashMap<PathBuf, (u64, u32, u64)> = with_state(|s| {
             s.entries
                 .iter()
@@ -467,12 +565,12 @@ pub fn warm() -> SearchStatus {
         });
         files
             .iter()
-            .filter(|(path, _, _)| {
-                let Ok(meta) = fs::metadata(path) else {
+            .filter(|f| {
+                let Ok(meta) = fs::metadata(&f.path) else {
                     return false;
                 };
                 let (secs, nanos, size, _) = file_stamp(&meta);
-                stamps.get(path) != Some(&(secs, nanos, size))
+                stamps.get(&f.path) != Some(&(secs, nanos, size))
             })
             .cloned()
             .collect()
@@ -481,15 +579,16 @@ pub fn warm() -> SearchStatus {
     // 并行重提取
     let fresh: Vec<(PathBuf, SessionEntry)> = stale
         .par_iter()
-        .filter_map(|(path, pid, sid)| extract_file(path, pid, sid).map(|e| (path.clone(), e)))
+        .filter_map(|f| extract_file(f).map(|e| (f.path.clone(), e)))
         .collect();
 
     // 删除已消失的会话（文件被删/项目移除）
-    let live: HashSet<PathBuf> = files.iter().map(|(p, _, _)| p.clone()).collect();
+    let live: HashSet<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
 
     let status = with_state(|s| {
         for (path, entry) in fresh {
-            s.dirty_shards.insert(entry.project_id.clone());
+            s.dirty_shards
+                .insert((entry.instance.clone(), entry.project_id.clone()));
             s.entries.insert(path, entry);
         }
         let removed: Vec<PathBuf> = s
@@ -500,7 +599,7 @@ pub fn warm() -> SearchStatus {
             .collect();
         for p in removed {
             if let Some(e) = s.entries.remove(&p) {
-                s.dirty_shards.insert(e.project_id);
+                s.dirty_shards.insert((e.instance, e.project_id));
             }
         }
         s.ready = true;
@@ -598,18 +697,23 @@ fn settle_dirty() {
     if dirty.is_empty() {
         return;
     }
-    let root = projects_root();
+    let roots = session_roots();
     let refreshed: Vec<(PathBuf, Option<SessionEntry>)> = dirty
         .par_iter()
         .filter_map(|path| {
             let pid = path.parent()?.file_name()?.to_str()?.to_string();
             let sid = path.file_stem()?.to_str()?.to_string();
-            // 防御：只接受 projects root 直接子级结构
-            if path.parent()?.parent()? != root {
-                return None;
-            }
+            // 防御：只接受某个检索根的直接子级结构
+            let root = path.parent()?.parent()?;
+            let (instance, _) = roots.iter().find(|(_, r)| r == root)?;
             if path.exists() {
-                Some((path.clone(), extract_file(path, &pid, &sid)))
+                let file = SessionFile {
+                    path: path.clone(),
+                    instance: instance.clone(),
+                    project_id: pid,
+                    session_id: sid,
+                };
+                Some((path.clone(), extract_file(&file)))
             } else {
                 Some((path.clone(), None))
             }
@@ -620,12 +724,13 @@ fn settle_dirty() {
         for (path, entry) in refreshed {
             match entry {
                 Some(e) => {
-                    s.dirty_shards.insert(e.project_id.clone());
+                    s.dirty_shards
+                        .insert((e.instance.clone(), e.project_id.clone()));
                     s.entries.insert(path, e);
                 }
                 None => {
                     if let Some(old) = s.entries.remove(&path) {
-                        s.dirty_shards.insert(old.project_id);
+                        s.dirty_shards.insert((old.instance, old.project_id));
                     }
                 }
             }
@@ -642,6 +747,9 @@ pub struct SearchFilter {
     /// 限定项目（encoded project_id）
     #[serde(default)]
     pub project_id: Option<String>,
+    /// 限定实例：`default` 为本机，远端为主机实例 id；空为全部
+    #[serde(default)]
+    pub instance: Option<String>,
     /// 只看近 N 天（按会话 last_modified）
     #[serde(default)]
     pub days: Option<u32>,
@@ -664,6 +772,7 @@ pub struct SearchSnippet {
 pub struct SearchHit {
     pub session_id: String,
     pub project_id: String,
+    pub instance: String,
     /// 解析后的展示标题：meta.title > JSONL title > 首条消息截断
     pub title: Option<String>,
     pub last_modified: f64,
@@ -764,12 +873,19 @@ pub fn query(raw_query: &str, filter: &SearchFilter) -> SearchResult {
                         return None;
                     }
                 }
+                if let Some(instance) = &filter.instance {
+                    if &entry.instance != instance {
+                        return None;
+                    }
+                }
                 if let Some(cut) = cutoff {
                     if entry.last_modified < cut {
                         return None;
                     }
                 }
-                let meta = meta_map.get(&entry.session_id);
+                let meta = meta_map
+                    .get(&entry.instance)
+                    .and_then(|sessions| sessions.get(&entry.session_id));
                 if meta.and_then(|m| m.deleted).unwrap_or(false) {
                     return None;
                 }
@@ -899,6 +1015,7 @@ fn match_session(
     Some(SearchHit {
         session_id: entry.session_id.clone(),
         project_id: entry.project_id.clone(),
+        instance: entry.instance.clone(),
         title: display_title,
         last_modified: entry.last_modified,
         matched_in: matched_in.into_iter().map(String::from).collect(),
@@ -952,13 +1069,55 @@ mod tests {
             "{\"type\":\"ai-title\",\"aiTitle\":\"流式死锁修复\"}".to_string(),
         ];
         let path = write_session(&dir, "s1", &lines);
-        let entry = extract_file(&path, "p1", "s1").unwrap();
+        let entry = extract_file(&SessionFile {
+            path: path.clone(),
+            instance: local_instance(),
+            project_id: "p1".into(),
+            session_id: "s1".into(),
+        })
+        .unwrap();
 
         assert_eq!(entry.title.as_deref(), Some("流式死锁修复"));
         assert_eq!(entry.messages.len(), 2);
         assert_eq!(entry.messages[0].uuid.as_deref(), Some("u1"));
         assert!(entry.messages[1].text.contains("持锁重入"));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 远端镜像：只认 ssh- 实例目录；收集结果带实例；分片与本机同名项目互不覆盖
+    #[test]
+    fn mirror_roots_are_instance_scoped() {
+        assert!(is_mirror_instance("ssh-devbox-abc123"));
+        assert!(!is_mirror_instance("ssh"));
+        assert!(!is_mirror_instance("ssh-"));
+        assert!(!is_mirror_instance("hosts.json"));
+
+        let root = std::env::temp_dir().join("monet-search-test-mirror");
+        let project = root.join("-home-alice-foo");
+        fs::create_dir_all(project.join("s1").join("subagents")).unwrap();
+        write_session(&project, "s1", &[user_line("u1", "远端会话")]);
+        write_session(&project, "agent-x", &[user_line("u2", "旧版子 Agent")]);
+        let files = collect_root_sessions("ssh-devbox-abc123", &root);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].instance, "ssh-devbox-abc123");
+        assert_eq!(files[0].session_id, "s1");
+        let entry = extract_file(&files[0]).unwrap();
+        assert_eq!(entry.instance, "ssh-devbox-abc123");
+
+        let local = shard_path(LOCAL_INSTANCE, "-home-alice-foo");
+        let remote = shard_path("ssh-devbox-abc123", "-home-alice-foo");
+        assert_ne!(local, remote);
+        assert_eq!(local.parent(), Some(shards_dir().as_path()));
+        assert!(remote.starts_with(shards_dir().join("remote").join("ssh-devbox-abc123")));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// 旧分片没有 instance 字段：按本机实例读入
+    #[test]
+    fn legacy_shard_entries_default_to_local() {
+        let json = r#"{"session_id":"s1","project_id":"p1","title":null,"mtime_secs":0,"mtime_nsec":0,"size":0,"last_modified":0.0,"messages":[]}"#;
+        let entry: SessionEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.instance, LOCAL_INSTANCE);
     }
 
     /// KWIC：UTF-8 多字节边界安全 + 上下文截断
@@ -979,6 +1138,7 @@ mod tests {
         let entry = SessionEntry {
             session_id: "s1".into(),
             project_id: "p1".into(),
+            instance: local_instance(),
             title: None,
             mtime_secs: 0,
             mtime_nsec: 0,
@@ -1065,6 +1225,7 @@ mod tests {
         let entry = SessionEntry {
             session_id: "s1".into(),
             project_id: "p1".into(),
+            instance: local_instance(),
             title: Some("JSONL 内标题".into()),
             mtime_secs: 0,
             mtime_nsec: 0,
