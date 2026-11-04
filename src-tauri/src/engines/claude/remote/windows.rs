@@ -40,6 +40,18 @@ exit 0
     )
 }
 
+/// 远端是否已有这个会话文件（任一项目目录下）：输出 `<marker>yes|no`
+pub fn session_exists_script(root: &str, cli_session_id: &str, marker: &str) -> String {
+    format!(
+        r#"$p = {projects}
+$hit = (Test-Path -LiteralPath $p -PathType Container) -and [bool](Get-ChildItem -LiteralPath $p -Directory -Force | Where-Object {{ Test-Path -LiteralPath (Join-Path $_.FullName {file}) -PathType Leaf }} | Select-Object -First 1)
+if ($hit) {{ '{marker}yes' }} else {{ '{marker}no' }}
+"#,
+        projects = projects_dir(root),
+        file = ps_quote(&format!("{cli_session_id}.jsonl")),
+    )
+}
+
 /// 只列一个文件（跟随用）；文件不存在时输出为空
 pub fn stat_script(root: &str, rel: &str) -> String {
     format!(

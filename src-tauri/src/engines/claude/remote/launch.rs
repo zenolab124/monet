@@ -27,8 +27,22 @@ const PIDS_FILE: &str = "pids.json";
 /// 远端 CLI 路径缓存：每条消息都可能重新解析启动信息，体检要一次往返
 const CLI_CACHE_TTL: Duration = Duration::from_secs(300);
 
-/// (实例 id, 体检时刻, CLI 路径, 远端方言)
-static CLI_CACHE: Mutex<Vec<(String, Instant, String, RemotePlatform)>> = Mutex::new(Vec::new());
+/// 体检解析出的启动信息（按实例缓存 CLI_CACHE_TTL）
+#[derive(Clone)]
+struct CachedCli {
+    instance_id: String,
+    at: Instant,
+    path: String,
+    platform: RemotePlatform,
+    /// 远端 Claude 数据根；体检没拿到时为 None
+    data_root: Option<String>,
+}
+
+static CLI_CACHE: Mutex<Vec<CachedCli>> = Mutex::new(Vec::new());
+
+/// 远端会话存在性检查的输出标记
+const SESSION_MARKER: &str = "MONET_REMOTE_SESSION=";
+const SESSION_CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 一次远端启动所需的全部信息（启动前在后台线程解析好）
 #[derive(Debug, Clone)]
@@ -101,7 +115,56 @@ fn host_for(instance: &EngineInstanceId) -> Result<(RemoteHost, SshTarget), Stri
     Ok((host, target))
 }
 
-/// 镜像里是否已有这个会话（CLI 落盘后才能 `--resume`）
+/// 远端是否已有这个会话文件（任一项目目录下），POSIX 版
+pub fn session_exists_script(root: &str, cli_session_id: &str) -> String {
+    format!(
+        "for f in {root}/projects/*/{file}; do [ -f \"$f\" ] && {{ echo {SESSION_MARKER}yes; exit 0; }}; done; echo {SESSION_MARKER}no",
+        root = sh_quote(root),
+        file = sh_quote(&format!("{cli_session_id}.jsonl")),
+    )
+}
+
+/// 从检查输出取结论；没有标记行时返回 None
+pub fn parse_session_exists(stdout: &str) -> Option<bool> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix(SESSION_MARKER))
+        .and_then(|value| match value {
+            "yes" => Some(true),
+            "no" => Some(false),
+            _ => None,
+        })
+}
+
+/// 续聊还是新建以远端为准：镜像可能还没收录刚建的会话，按镜像判断会让 `--session-id` 撞上已存在的会话。
+/// 拿不到数据根或远端检查失败时才退回镜像
+fn remote_session_exists(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    data_root: Option<&str>,
+    instance_id: &str,
+    cli_session_id: &str,
+) -> bool {
+    let root = data_root.map(str::to_string).or_else(|| {
+        sync::Mirror::new(sync::mirror_root_for(instance_id))
+            .load_state()
+            .remote_root
+    });
+    let checked = root.and_then(|root| {
+        let script = match target.platform {
+            RemotePlatform::Posix => session_exists_script(&root, cli_session_id),
+            RemotePlatform::Windows => {
+                windows::session_exists_script(&root, cli_session_id, SESSION_MARKER)
+            }
+        };
+        let output = executor.run(target, &script, SESSION_CHECK_TIMEOUT).ok()?;
+        parse_session_exists(&output.stdout)
+    });
+    checked.unwrap_or_else(|| mirrored(instance_id, cli_session_id))
+}
+
+/// 镜像里是否已有这个会话（远端检查不可用时的兜底）
 fn mirrored(instance_id: &str, cli_session_id: &str) -> bool {
     let suffix = format!("/{cli_session_id}.jsonl");
     sync::Mirror::new(sync::mirror_root_for(instance_id))
@@ -122,14 +185,16 @@ pub fn resolve(
     }
     let (host, mut target) = host_for(instance)?;
     let loopback = super::loopback_root().is_some();
+    let mut data_root = super::loopback_root();
     let claude = if loopback {
         crate::claude_locator::locate_lightweight()?
             .path
             .to_string_lossy()
             .into_owned()
-    } else if let Some((path, platform)) = cached_cli(&host.instance_id) {
-        target.platform = platform;
-        path
+    } else if let Some(cached) = cached_cli(&host.instance_id) {
+        target.platform = cached.platform;
+        data_root = cached.data_root;
+        cached.path
     } else {
         let report = health::check(
             &super::executor::SshExecutor,
@@ -147,35 +212,44 @@ pub fn resolve(
         }
         let path = report.cli_path.ok_or("REMOTE_CLI_UNAVAILABLE:")?;
         target.platform = report.platform;
+        data_root = report.data_root.clone();
         let mut cache = CLI_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        cache.retain(|(id, ..)| id != &host.instance_id);
-        cache.push((
-            host.instance_id.clone(),
-            Instant::now(),
-            path.clone(),
-            report.platform,
-        ));
+        cache.retain(|cached| cached.instance_id != host.instance_id);
+        cache.push(CachedCli {
+            instance_id: host.instance_id.clone(),
+            at: Instant::now(),
+            path: path.clone(),
+            platform: report.platform,
+            data_root: data_root.clone(),
+        });
         path
     };
+    let resume = remote_session_exists(
+        executor_for(loopback),
+        &target,
+        data_root.as_deref(),
+        &host.instance_id,
+        cli_session_id,
+    );
     Ok(RemoteLaunch {
         instance: instance.clone(),
         alias: host.alias.clone(),
         target,
         claude,
         cli_session_id: cli_session_id.to_string(),
-        resume: mirrored(&host.instance_id, cli_session_id),
+        resume,
         cwd: cwd.to_string(),
         loopback,
     })
 }
 
-fn cached_cli(instance_id: &str) -> Option<(String, RemotePlatform)> {
+fn cached_cli(instance_id: &str) -> Option<CachedCli> {
     CLI_CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
-        .find(|(id, at, ..)| id == instance_id && at.elapsed() < CLI_CACHE_TTL)
-        .map(|(_, _, path, platform)| (path.clone(), *platform))
+        .find(|cached| cached.instance_id == instance_id && cached.at.elapsed() < CLI_CACHE_TTL)
+        .cloned()
 }
 
 // ---------- 远端 pid 登记：Monet 异常退出或断线后，下一轮同步或重开该会话时据此清理 ----------
@@ -464,6 +538,50 @@ pub fn alias_for(instance: &EngineInstanceId) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_session_check_finds_the_file_in_any_project() {
+        use super::super::executor::LocalShellExecutor;
+        let root =
+            std::env::temp_dir().join(format!("monet-remote-session-{}", std::process::id()));
+        let project = root.join("projects").join("-home-alice-it's");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("11111111-2222-3333-4444-555555555555.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        let target = SshTarget {
+            destination: "devbox".into(),
+            port: None,
+            platform: RemotePlatform::Posix,
+        };
+        let check = |sid: &str| {
+            let script = session_exists_script(&root.to_string_lossy(), sid);
+            let out = LocalShellExecutor
+                .run(&target, &script, SESSION_CHECK_TIMEOUT)
+                .unwrap();
+            parse_session_exists(&out.stdout)
+        };
+        assert_eq!(check("11111111-2222-3333-4444-555555555555"), Some(true));
+        assert_eq!(check("99999999-2222-3333-4444-555555555555"), Some(false));
+        std::fs::remove_dir_all(&root).unwrap();
+        // 数据根还不存在（远端从未用过 CLI）时同样判为新建
+        assert_eq!(check("11111111-2222-3333-4444-555555555555"), Some(false));
+    }
+
+    #[test]
+    fn session_check_without_marker_falls_back() {
+        assert_eq!(parse_session_exists("banner\n"), None);
+        assert_eq!(
+            parse_session_exists("MONET_REMOTE_SESSION=yes\n"),
+            Some(true)
+        );
+        assert!(
+            windows::session_exists_script(r"C:\Users\alice\.claude", "abc", SESSION_MARKER)
+                .contains("'abc.jsonl'")
+        );
+    }
 
     /// 真实主机验收：启动器报 pid、进程列表按会话 id 命中、核对后 kill、再 kill 报已退出。
     /// 不发消息（不产生 API 请求），`--no-session-persistence` 不落盘会话文件。

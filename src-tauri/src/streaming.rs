@@ -1237,13 +1237,16 @@ fn open_session(
         }
     }
 
-    // 9. 默认开启 Remote Control（进程活着就有 RC，关进程自动断）
-    let rc_msg = json!({
-        "type": "control_request",
-        "request_id": "rc-init",
-        "request": {"subtype": "remote_control", "enabled": true}
-    });
-    let _ = write_stdin(&mut stdin, &rc_msg);
+    // 9. 本机会话默认开启 Remote Control（进程活着就有 RC，关进程自动断）。
+    // 远端会话不自动开：RC 会登记在远端主机的账号下，那可能不是用户在本机用的账号
+    if remote.is_none() {
+        let rc_msg = json!({
+            "type": "control_request",
+            "request_id": "rc-init",
+            "request": {"subtype": "remote_control", "enabled": true}
+        });
+        let _ = write_stdin(&mut stdin, &rc_msg);
+    }
 
     // 10. 存入 ACTIVE_PROCESSES
     let pid = child.id();
@@ -1334,7 +1337,7 @@ pub fn send_message(
     permission_mode: Option<&str>,
     session_capabilities: Vec<SessionCapabilityId>,
     force_new: bool,
-    remote: Option<&RemoteLaunch>,
+    remote: Option<&dyn Fn() -> Result<RemoteLaunch, String>>,
 ) -> Result<(), String> {
     let capability_bundle = SessionCapabilityBundle::new(session_capabilities);
     let mut exists = ACTIVE_PROCESSES
@@ -1383,6 +1386,8 @@ pub fn send_message(
     }
 
     if !exists {
+        // 远端启动信息只在真要起进程时解析（可能做一次 ssh 体检）；复用存活进程时直接写 stdin
+        let launch = remote.map(|resolve| resolve()).transpose()?;
         open_session(
             app,
             session_id,
@@ -1398,7 +1403,7 @@ pub fn send_message(
             permission_mode,
             &capability_bundle,
             force_new,
-            remote,
+            launch.as_ref(),
         )?;
     }
 

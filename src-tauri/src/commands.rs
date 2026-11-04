@@ -705,15 +705,25 @@ pub async fn start_streaming(
     tauri::async_runtime::spawn_blocking(move || {
         let session_capabilities = session_capabilities.unwrap_or_default();
         let force_new = force_new.unwrap_or(false);
-        // 远端实例：进程键仍是界面会话 id（事件按它投递），CLI 会话 id 用原生 uuid
-        let remote = match instance.filter(is_remote_claude) {
-            Some(instance) => Some(crate::engines::claude::remote::launch::resolve(
-                &instance,
-                native_session_id.as_deref().unwrap_or(&session_id),
-                &cwd,
-            )?),
-            None => None,
-        };
+        // 远端实例：进程键仍是界面会话 id（事件按它投递），CLI 会话 id 用原生 uuid。
+        // 只在需要起进程时解析（可能做一次 ssh 体检），复用存活进程不碰远端
+        let remote_instance = instance.filter(is_remote_claude);
+        let (cli_session_id, launch_cwd) = (
+            native_session_id.as_deref().unwrap_or(&session_id),
+            cwd.as_str(),
+        );
+        let resolve_remote = remote_instance.as_ref().map(|instance| {
+            move || {
+                crate::engines::claude::remote::launch::resolve(
+                    instance,
+                    cli_session_id,
+                    launch_cwd,
+                )
+            }
+        });
+        let remote = resolve_remote
+            .as_ref()
+            .map(|resolve| resolve as &dyn Fn() -> Result<_, String>);
         let first = streaming::send_message(
             &app,
             &session_id,
@@ -731,7 +741,7 @@ pub async fn start_streaming(
             permission_mode.as_deref(),
             session_capabilities.clone(),
             force_new,
-            remote.as_ref(),
+            remote,
         );
         match first {
             Err(error_message)
@@ -760,7 +770,7 @@ pub async fn start_streaming(
                     permission_mode.as_deref(),
                     session_capabilities,
                     force_new,
-                    remote.as_ref(),
+                    remote,
                 )
             }
             result => result,
