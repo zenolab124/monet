@@ -2498,6 +2498,7 @@ function resumeFollow(allowLayoutReset = false): ScrollFollowToken | null {
   scrollFollowState = transitionScrollFollow(scrollFollowState, 'resume')
   followStreaming.value = true
   wheelUpIntentAt = Number.NEGATIVE_INFINITY
+  scrollInputAt = Number.NEGATIVE_INFINITY
   cancelPendingFollowWrites()
   const token = captureScrollFollowToken(scrollFollowState)
   scrollToBottom(token, allowLayoutReset)
@@ -2562,13 +2563,35 @@ function onScrollWheel(e: WheelEvent) {
   if (element && hasUpwardScrollRange(element)) detachFollow()
 }
 
-/** 最近一次布局收缩(内容变矮/视口变高)时刻。浏览器随之 clamp scrollTop，
- *  产生的上移不是用户手势；若同帧内容又长回来，会被误判为离开底部。 */
-let layoutShrinkAt = Number.NEGATIVE_INFINITY
-const LAYOUT_SHRINK_GRACE_MS = 250
+/** 位置变化只有伴随近期用户输入才算阅读意图。换树、虚拟测量、输入区收缩等
+ *  布局变化会让浏览器 clamp scrollTop，且可能在一帧内塌陷又长回（RO 只报净变化，
+ *  看不到这次收缩）——不以输入为准就会被误判为离开底部，发送后停在半截。
+ *  滚轮上滚已在 onScrollWheel 同步处理；这里补滚动条拖拽、拖选自动滚动与键盘翻页。 */
+let pointerHeldInViewport = false
+let scrollInputAt = Number.NEGATIVE_INFINITY
+const SCROLL_INPUT_INTENT_MS = 500
+const SCROLL_KEYS = new Set(['PageUp', 'ArrowUp', 'Home'])
 
-function upwardMoveFromLayout(): boolean {
-  return performance.now() - layoutShrinkAt < LAYOUT_SHRINK_GRACE_MS
+function userScrollIntentActive(): boolean {
+  const latest = Math.max(wheelUpIntentAt, scrollInputAt)
+  return pointerHeldInViewport || performance.now() - latest <= SCROLL_INPUT_INTENT_MS
+}
+
+function onViewportPointerDown(): void {
+  pointerHeldInViewport = true
+  window.addEventListener('pointerup', onViewportPointerRelease, { once: true })
+  window.addEventListener('pointercancel', onViewportPointerRelease, { once: true })
+}
+
+function onViewportPointerRelease(): void {
+  window.removeEventListener('pointerup', onViewportPointerRelease)
+  window.removeEventListener('pointercancel', onViewportPointerRelease)
+  pointerHeldInViewport = false
+  scrollInputAt = performance.now()
+}
+
+function onViewportKeydown(e: KeyboardEvent): void {
+  if (SCROLL_KEYS.has(e.key) || (e.key === ' ' && e.shiftKey)) scrollInputAt = performance.now()
 }
 
 function onScroll() {
@@ -2580,7 +2603,7 @@ function onScroll() {
   const distFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
 
   // rAF 之前先处理用户向上意图，覆盖滚动条拖拽、键盘滚动等非 wheel 路径。
-  if (!programmatic && delta < -0.5 && distFromBottom > 2 && !upwardMoveFromLayout()) detachFollow()
+  if (!programmatic && delta < -0.5 && distFromBottom > 2 && userScrollIntentActive()) detachFollow()
   if (
     !programmatic
     && !followStreaming.value
@@ -2965,7 +2988,7 @@ function scrollToBottom(
     && scheduledElement === element
     && element.scrollTop < scheduledScrollTop - 0.5
     && element.scrollHeight - element.scrollTop - element.clientHeight > 2
-    && !upwardMoveFromLayout()
+    && userScrollIntentActive()
 
   const applyScroll = (element: HTMLElement) => {
     if (!valid()) return
@@ -3034,7 +3057,7 @@ function applyFollowScroll() {
     scheduledElement === sc
     && sc.scrollTop < scheduledScrollTop - 0.5
     && sc.scrollHeight - sc.scrollTop - sc.clientHeight > 2
-    && !upwardMoveFromLayout()
+    && userScrollIntentActive()
   ) {
     wheelUpIntentAt = performance.now()
     detachFollow()
@@ -3063,19 +3086,11 @@ function onViewportResize(entries: ResizeObserverEntry[]): void {
   const previous = viewportHeight
   viewportHeight = height
   if (Math.abs(height - previous) < 0.5) return
-  if (height > previous) layoutShrinkAt = performance.now()
   // RO 回调在布局之后、绘制之前：同帧贴底，不留一帧被切掉的底部。
   if (captureScrollFollowToken(scrollFollowState)) writeScrollBottom(sc)
 }
 
-let contentHeight = 0
-function onContentResize(entries: ResizeObserverEntry[]): void {
-  const entry = entries[entries.length - 1]
-  if (entry) {
-    const height = entry.contentRect.height
-    if (height < contentHeight - 0.5) layoutShrinkAt = performance.now()
-    contentHeight = height
-  }
+function onContentResize(): void {
   scheduleFollowScroll()
 }
 
@@ -3103,7 +3118,6 @@ watch(scrollContentEl, (el) => {
   if (!contentRO) {
     contentRO = new ResizeObserver(onContentResize)
   }
-  contentHeight = 0
   contentRO.observe(el)
 }, { immediate: true })
 onUnmounted(() => {
@@ -3111,6 +3125,7 @@ onUnmounted(() => {
   contentRO = null
   viewportRO?.disconnect()
   viewportRO = null
+  onViewportPointerRelease()
   cancelPendingFollowWrites()
 })
 
@@ -3756,6 +3771,8 @@ async function onReload() {
       :scroll-ref="bindScrollContainer"
       @wheel="onScrollWheel"
       @scroll="onScroll"
+      @pointerdown="onViewportPointerDown"
+      @keydown="onViewportKeydown"
     >
       <template #overlay>
         <SessionAnchorNav

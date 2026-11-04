@@ -147,18 +147,26 @@ describe('scroll follow race guards', () => {
     expect(engineBind).toContain('requestTimelineFollow()')
   })
 
-  it('does not treat browser scrollTop clamping after layout shrink as reading intent', () => {
+  it('only treats upward movement as reading intent when it follows user input', () => {
     const session = source('../../src/components/SessionDetail.vue')
     const scroll = section(session, 'function onScroll()', 900)
     const bottom = section(session, 'function scrollToBottom', 1400)
     const follow = section(session, 'function applyFollowScroll', 1400)
-    const content = section(session, 'function onContentResize', 500)
+    const intent = section(session, 'function userScrollIntentActive', 300)
+    const resume = section(session, 'function resumeFollow', 500)
     const wheel = section(session, 'function onScrollWheel', 900)
 
-    expect(scroll).toMatch(/delta < -0\.5 && distFromBottom > 2 && !upwardMoveFromLayout\(\)\) detachFollow\(\)/)
-    expect(bottom).toContain('&& !upwardMoveFromLayout()')
-    expect(follow).toContain('&& !upwardMoveFromLayout()')
-    expect(content).toContain('layoutShrinkAt = performance.now()')
+    expect(scroll).toMatch(/delta < -0\.5 && distFromBottom > 2 && userScrollIntentActive\(\)\) detachFollow\(\)/)
+    expect(bottom).toContain('&& userScrollIntentActive()')
+    expect(follow).toContain('&& userScrollIntentActive()')
+    expect(intent).toContain('pointerHeldInViewport')
+    expect(intent).toContain('Math.max(wheelUpIntentAt, scrollInputAt)')
+    expect(resume).toContain('scrollInputAt = Number.NEGATIVE_INFINITY')
+    expect(session).toContain('@pointerdown="onViewportPointerDown"')
+    expect(session).toContain('@keydown="onViewportKeydown"')
+    // 布局变化（clamp、塌陷又长回）不再靠时间窗口猜测
+    expect(session).not.toContain('upwardMoveFromLayout')
+    expect(session).not.toContain('layoutShrinkAt')
     expect(wheel).toMatch(/hasUpwardScrollRange\(element\)\) detachFollow\(\)/)
   })
 })
