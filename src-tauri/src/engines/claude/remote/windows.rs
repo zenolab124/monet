@@ -88,6 +88,15 @@ exit 0
 /// 批量拉取：按顺序输出每个文件从 offset 起到当前末尾的字节。
 /// 以共享读写方式打开，不打断 CLI 正在进行的追加写入
 pub fn fetch_batch_script(root: &str, items: &[(&str, u64)]) -> String {
+    batch_script(&projects_dir(root), items)
+}
+
+/// 同上，文件直接位于绝对目录 `dir` 下
+pub fn fetch_batch_script_in_dir(dir: &str, items: &[(&str, u64)]) -> String {
+    batch_script(&ps_quote(dir), items)
+}
+
+fn batch_script(base: &str, items: &[(&str, u64)]) -> String {
     // 路径与偏移分成两个平行数组：PowerShell 会把只有一项的 `@(@(...))` 展开
     let rels: Vec<String> = items
         .iter()
@@ -115,9 +124,31 @@ for ($i = 0; $i -lt $r.Count; $i++) {{
 $o.Flush()
 exit 0
 "#,
-        projects = projects_dir(root),
+        projects = base,
         rels = rels.join(", "),
         offsets = offsets.join(", "),
+    )
+}
+
+/// 列 Codex 会话：首行 `<marker><家目录绝对路径>`，其后每行 `大小 修改时间 ./sessions/...`；
+/// 家目录（`CODEX_HOME`，默认 `%USERPROFILE%\.codex`）不存在时退出码 3
+pub fn codex_list_script(marker: &str) -> String {
+    format!(
+        r#"{WRITE_LINE}{STAT_FN}$h = if ($env:CODEX_HOME) {{ $env:CODEX_HOME }} else {{ Join-Path $env:USERPROFILE '.codex' }}
+if (-not (Test-Path -LiteralPath $h -PathType Container)) {{ exit 3 }}
+$h = (Get-Item -LiteralPath $h -Force).FullName.TrimEnd('\')
+Out-MonetLine ({marker} + $h)
+$n = $h.Length + 1
+foreach ($d in 'sessions', 'archived_sessions') {{
+  $b = Join-Path $h $d
+  if (-not (Test-Path -LiteralPath $b -PathType Container)) {{ continue }}
+  foreach ($f in Get-ChildItem -LiteralPath $b -File -Recurse -Filter 'rollout-*.jsonl' -Force) {{
+    Out-MonetLine ((Get-MonetStat $f) + ' ./' + $f.FullName.Substring($n).Replace('\', '/'))
+  }}
+}}
+exit 0
+"#,
+        marker = ps_quote(marker),
     )
 }
 

@@ -1,8 +1,10 @@
 //! SSH 远端主机：经用户自己的 ssh 配置访问另一台 macOS / Linux 电脑上的 Claude Code。
 //!
 //! 本模块提供主机配置、连接体检、引擎实例注册与只读镜像同步；远端进程在后续阶段接入。
+//! 同一主机上的 Codex 会话随全量同步一并镜像（只供检索，不注册为引擎实例）。
 
 pub mod adapter;
+mod codex_mirror;
 pub mod executor;
 pub mod health;
 pub mod hosts;
@@ -228,15 +230,29 @@ pub async fn sync_remote_host(app: AppHandle, alias: String) -> Result<sync::Syn
             // 遗留的远端进程（Monet 异常退出、断线）：跳过本次仍连着的会话
             launch::cleanup_stale_pids(remote_executor(), &target, &host.instance_id);
             let _io = slot.io.lock().unwrap_or_else(|e| e.into_inner());
-            let mirror = sync::Mirror::new(sync::mirror_root_for(&host.instance_id));
-            sync::sync_once(
+            let mirror_root = sync::mirror_root_for(&host.instance_id);
+            let mut report = sync::sync_once(
                 remote_executor(),
                 &target,
                 &root,
-                &mirror,
+                &sync::Mirror::new(mirror_root.clone()),
                 &cancel,
                 |done, total| emit_progress(&app, &host, done, total, true),
-            )
+            )?;
+            // Codex 镜像失败不影响 Claude 会话的同步结果
+            if !report.cancelled {
+                match codex_mirror::sync_once(
+                    remote_executor(),
+                    &target,
+                    &sync::Mirror::codex(mirror_root),
+                    &cancel,
+                    |done, total| emit_progress(&app, &host, done, total, true),
+                ) {
+                    Ok(codex) => report.cancelled = codex.cancelled,
+                    Err(error) => report.errors.push(format!("codex: {error}")),
+                }
+            }
+            Ok(report)
         })
         .await
         .map_err(|e| e.to_string())

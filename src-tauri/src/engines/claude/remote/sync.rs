@@ -19,6 +19,7 @@ use super::windows;
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const STATE_FILE: &str = "sync-state.json";
+const CODEX_STATE_FILE: &str = "codex-sync-state.json";
 /// Windows 批量拉取：每批的文件数与字节数上限（命令行长度另行检查）
 const BATCH_MAX_FILES: usize = 64;
 const BATCH_MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -137,7 +138,7 @@ exit 0
 }
 
 /// 选 stat 的参数：GNU `-c '%s %Y %n'`，BSD `-f '%z %m %N'`
-const STAT_SETUP: &str = r#"if stat -c %s . 2>/dev/null 1>/dev/null; then o=-c; f='%s %Y %n'; else o=-f; f='%z %m %N'; fi"#;
+pub(super) const STAT_SETUP: &str = r#"if stat -c %s . 2>/dev/null 1>/dev/null; then o=-c; f='%s %Y %n'; else o=-f; f='%z %m %N'; fi"#;
 
 /// 列一个会话的子 Agent 文件，路径相对 `subagents/`；目录不存在时输出为空
 pub fn subagent_list_script(root: &str, session_dir: &str) -> String {
@@ -168,7 +169,7 @@ pub fn parse_listing(stdout: &str) -> Vec<RemoteFile> {
     parse_listing_with(stdout, valid_rel)
 }
 
-fn parse_listing_with(stdout: &str, valid: fn(&str) -> bool) -> Vec<RemoteFile> {
+pub(super) fn parse_listing_with(stdout: &str, valid: fn(&str) -> bool) -> Vec<RemoteFile> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -206,9 +207,38 @@ pub fn plan_whole(remote: &RemoteFile, local: Option<&FileState>) -> FetchPlan {
     }
 }
 
+/// 远端拉取的基准目录：文件路径为 `基准目录/rel`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchBase<'a> {
+    /// Claude 数据根，会话位于其下 `projects/`
+    ClaudeRoot(&'a str),
+    /// 绝对目录，文件直接位于其下（如 Codex 家目录）
+    Dir(&'a str),
+}
+
+impl FetchBase<'_> {
+    fn posix_dir(&self) -> String {
+        match self {
+            FetchBase::ClaudeRoot(root) => format!("{root}/projects"),
+            FetchBase::Dir(dir) => dir.to_string(),
+        }
+    }
+
+    fn windows_script(&self, items: &[(&str, u64)]) -> String {
+        match self {
+            FetchBase::ClaudeRoot(root) => windows::fetch_batch_script(root, items),
+            FetchBase::Dir(dir) => windows::fetch_batch_script_in_dir(dir, items),
+        }
+    }
+}
+
 /// 拉取脚本：offset 为 0 时整文件，否则从第 offset+1 个字节起
 pub fn fetch_script(root: &str, rel: &str, offset: u64) -> String {
-    let path = sh_quote(&format!("{root}/projects/{rel}"));
+    posix_fetch_script(FetchBase::ClaudeRoot(root), rel, offset)
+}
+
+fn posix_fetch_script(base: FetchBase, rel: &str, offset: u64) -> String {
+    let path = sh_quote(&format!("{}/{rel}", base.posix_dir()));
     if offset == 0 {
         format!("cat {path}")
     } else {
@@ -226,24 +256,40 @@ pub fn complete_prefix(bytes: &[u8]) -> &[u8] {
 
 pub struct Mirror {
     root: PathBuf,
+    /// 镜像文件所在子目录与状态文件名
+    files: &'static str,
+    state: &'static str,
 }
 
 impl Mirror {
     /// `root` 下放 `projects/<rel>` 镜像与同步状态文件
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            files: "projects",
+            state: STATE_FILE,
+        }
+    }
+
+    /// 同一实例根下的 Codex 镜像：`codex/<rel>` 与独立状态文件
+    pub fn codex(root: PathBuf) -> Self {
+        Self {
+            root,
+            files: "codex",
+            state: CODEX_STATE_FILE,
+        }
     }
 
     pub fn projects_dir(&self) -> PathBuf {
-        self.root.join("projects")
+        self.root.join(self.files)
     }
 
-    fn file_path(&self, rel: &str) -> PathBuf {
+    pub(super) fn file_path(&self, rel: &str) -> PathBuf {
         self.projects_dir().join(rel)
     }
 
     pub fn load_state(&self) -> SyncState {
-        std::fs::read_to_string(self.root.join(STATE_FILE))
+        std::fs::read_to_string(self.root.join(self.state))
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default()
@@ -251,7 +297,7 @@ impl Mirror {
 
     pub fn save_state(&self, state: &SyncState) -> std::io::Result<()> {
         let text = serde_json::to_string_pretty(state).map_err(std::io::Error::other)?;
-        crate::config::atomic_write(&self.root.join(STATE_FILE), &text)
+        crate::config::atomic_write(&self.root.join(self.state), &text)
     }
 
     /// 落盘一次拉取结果，返回镜像中该文件的新长度。JSONL 只落完整行；
@@ -303,7 +349,7 @@ fn plan_offset(file_plan: FetchPlan) -> u64 {
 fn fetch_remote(
     executor: &dyn RemoteExecutor,
     target: &SshTarget,
-    remote_root: &str,
+    base: FetchBase,
     items: &[(&str, u64)],
 ) -> Vec<Result<Vec<u8>, String>> {
     let check = |out: std::io::Result<super::executor::RawOutput>| {
@@ -320,18 +366,15 @@ fn fetch_remote(
             .map(|(rel, offset)| {
                 check(executor.run_raw(
                     target,
-                    &fetch_script(remote_root, rel, *offset),
+                    &posix_fetch_script(base, rel, *offset),
                     FETCH_TIMEOUT,
                 ))
             })
             .collect(),
         RemotePlatform::Windows => {
-            let frames = check(executor.run_raw(
-                target,
-                &windows::fetch_batch_script(remote_root, items),
-                FETCH_TIMEOUT,
-            ))
-            .and_then(|stdout| windows::parse_batch(&stdout, items.len()));
+            let frames =
+                check(executor.run_raw(target, &base.windows_script(items), FETCH_TIMEOUT))
+                    .and_then(|stdout| windows::parse_batch(&stdout, items.len()));
             match frames {
                 Ok(frames) => frames
                     .into_iter()
@@ -396,7 +439,7 @@ fn fetch_file(
     let fetched = fetch_remote(
         executor,
         target,
-        remote_root,
+        FetchBase::ClaudeRoot(remote_root),
         &[(file.rel.as_str(), plan_offset(file_plan))],
     )
     .pop()
@@ -407,7 +450,7 @@ fn fetch_file(
 /// 全量同步的拉取分组：POSIX 每组一个文件；Windows 在文件数、字节数与命令行长度内尽量多装
 fn fetch_groups(
     platform: RemotePlatform,
-    remote_root: &str,
+    base: FetchBase,
     pending: &[(&RemoteFile, FetchPlan)],
 ) -> Vec<std::ops::Range<usize>> {
     if platform == RemotePlatform::Posix {
@@ -431,7 +474,7 @@ fn fetch_groups(
                 .iter()
                 .map(|(f, p)| (f.rel.as_str(), plan_offset(*p)))
                 .collect();
-            if !fits_windows_command(&windows::fetch_batch_script(remote_root, &items)) {
+            if !fits_windows_command(&base.windows_script(&items)) {
                 break;
             }
             bytes = next;
@@ -509,6 +552,32 @@ pub fn sync_once(
     let mut state = mirror.load_state();
     state.remote_root = Some(remote_root.to_string());
     state.platform = target.platform;
+    let report = mirror_listing(
+        executor,
+        target,
+        FetchBase::ClaudeRoot(remote_root),
+        mirror,
+        &mut state,
+        &remote,
+        cancel,
+        &mut progress,
+    );
+    mirror.save_state(&state).map_err(|e| e.to_string())?;
+    Ok(report)
+}
+
+/// 按一次列目录结果更新镜像：逐批按计划拉取，再标记远端已不存在的文件。状态由调用方保存
+#[allow(clippy::too_many_arguments)]
+pub(super) fn mirror_listing(
+    executor: &dyn RemoteExecutor,
+    target: &SshTarget,
+    base: FetchBase,
+    mirror: &Mirror,
+    state: &mut SyncState,
+    remote: &[RemoteFile],
+    cancel: &AtomicBool,
+    progress: &mut impl FnMut(usize, usize),
+) -> SyncReport {
     let mut report = SyncReport {
         listed: remote.len(),
         ..SyncReport::default()
@@ -520,7 +589,7 @@ pub fn sync_once(
         .map(|file| (file, plan(file, state.files.get(&file.rel))))
         .filter(|(_, plan)| *plan != FetchPlan::Skip)
         .collect();
-    for group in fetch_groups(target.platform, remote_root, &pending) {
+    for group in fetch_groups(target.platform, base, &pending) {
         progress(group.start, pending.len());
         if cancel.load(Ordering::Relaxed) {
             report.cancelled = true;
@@ -531,7 +600,7 @@ pub fn sync_once(
             .iter()
             .map(|(file, file_plan)| (file.rel.as_str(), plan_offset(*file_plan)))
             .collect();
-        let fetched = fetch_remote(executor, target, remote_root, &items);
+        let fetched = fetch_remote(executor, target, base, &items);
         for ((file, file_plan), fetched) in batch.iter().zip(fetched) {
             match record_fetch(mirror, &mut state.files, file, *file_plan, false, fetched) {
                 Ok((fetched_bytes, grew)) => {
@@ -558,8 +627,7 @@ pub fn sync_once(
             report.missing += 1;
         }
     }
-    mirror.save_state(&state).map_err(|e| e.to_string())?;
-    Ok(report)
+    report
 }
 
 /// 跟随一个已镜像过的会话文件：只列它自己并按计划拉取。
@@ -661,13 +729,14 @@ pub fn sync_subagents(
         .filter(|(_, file_plan)| *file_plan != FetchPlan::Skip)
         .collect();
     let mut changed = 0;
-    for group in fetch_groups(target.platform, &remote_root, &pending) {
+    let base = FetchBase::ClaudeRoot(&remote_root);
+    for group in fetch_groups(target.platform, base, &pending) {
         let batch = &pending[group];
         let items: Vec<(&str, u64)> = batch
             .iter()
             .map(|(file, file_plan)| (file.rel.as_str(), plan_offset(*file_plan)))
             .collect();
-        let fetched = fetch_remote(executor, target, &remote_root, &items);
+        let fetched = fetch_remote(executor, target, base, &items);
         for ((file, file_plan), fetched) in batch.iter().zip(fetched) {
             let whole = file.rel.ends_with(".json");
             if record_fetch(
@@ -741,10 +810,14 @@ mod tests {
         let pending: Vec<(&RemoteFile, FetchPlan)> =
             files.iter().map(|f| (f, FetchPlan::Full)).collect();
         assert_eq!(
-            fetch_groups(RemotePlatform::Posix, "/r", &pending).len(),
+            fetch_groups(RemotePlatform::Posix, FetchBase::ClaudeRoot("/r"), &pending).len(),
             150
         );
-        let groups = fetch_groups(RemotePlatform::Windows, r"C:\r", &pending);
+        let groups = fetch_groups(
+            RemotePlatform::Windows,
+            FetchBase::ClaudeRoot(r"C:\r"),
+            &pending,
+        );
         assert!(groups.len() > 2 && groups.len() < 150);
         assert_eq!(groups.iter().map(|g| g.len()).sum::<usize>(), 150);
         for group in &groups {
@@ -764,7 +837,11 @@ mod tests {
         let pending: Vec<(&RemoteFile, FetchPlan)> =
             big.iter().map(|f| (f, FetchPlan::Full)).collect();
         assert_eq!(
-            fetch_groups(RemotePlatform::Windows, r"C:\r", &pending),
+            fetch_groups(
+                RemotePlatform::Windows,
+                FetchBase::ClaudeRoot(r"C:\r"),
+                &pending
+            ),
             vec![0..1, 1..2]
         );
     }
