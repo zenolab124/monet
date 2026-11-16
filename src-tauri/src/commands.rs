@@ -845,6 +845,36 @@ pub async fn rewind_files(
     .map_err(|e| e.to_string())?
 }
 
+/// 通过会话原生协议恢复文件、对话或两者；返回部分失败的明确状态。
+#[tauri::command]
+pub async fn rewind_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    user_message_id: String,
+    last_seen_user_message_id: String,
+    mode: streaming::RewindMode,
+) -> Result<streaming::RewindSessionResult, String> {
+    let result_session = session_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        streaming::rewind_session(
+            &session_id,
+            &user_message_id,
+            &last_seen_user_message_id,
+            mode,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if result.conversation_rewound {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "session-rewound",
+            serde_json::json!({"session_id": result_session}),
+        );
+    }
+    Ok(result)
+}
+
 /// 开关 Remote Control（进程未启动时自动连接）
 #[allow(clippy::too_many_arguments)] // Tauri command 参数由前端调用签名决定
 #[tauri::command]

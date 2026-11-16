@@ -169,7 +169,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
-const { confirm: confirmDialog } = useConfirm()
+const { confirm: confirmDialog, confirmMulti } = useConfirm()
 
 /** 是否可交互(输入/权限决策只存在于工作台,FR-009 档案馆移除渲染而非隐藏) */
 // 远端会话在远端已删除或远端 CLI 不可用时只读（输入、回退文件等交互全部关闭）
@@ -201,6 +201,7 @@ const {
   stopStreaming,
   stopAsyncTask,
   clearStreamingTurns,
+  resetAfterRewind,
   clearPendingUserMessage,
   getStream,
   enqueuePendingQueueItem,
@@ -1287,71 +1288,123 @@ async function processComposerQueueItem(id: string) {
   if (!stopped) failPendingQueueItem(sid, id, t('session.queueInterruptFailed'))
 }
 
-// ---- 文件回退：CLI 按文件快照恢复某条用户消息之后的改动，Monet 不直接写文件 ----
+// ---- 回退：由 CLI 恢复文件和对话，只有确认成功才清理旧分支的 UI 状态 ----
 interface RewindFilesResult {
   can_rewind: boolean
   error: string | null
   files_changed: string[]
   insertions: number | null
   deletions: number | null
+  skipped_links: number
 }
-
-/** 只对本窗口在跑的会话进程提供；运行中置灰，避免与正在执行的工具互相覆盖 */
+interface RewindSessionResult {
+  files_restored: boolean
+  conversation_rewound: boolean
+  skipped_links: number
+  prefill_text: string | null
+  error: string | null
+  outcome_unknown: boolean
+}
 const rewindState = computed<'available' | 'busy' | null>(() => {
   if (!interactive.value || !stream.value.processAlive) return null
-  return stream.value.streaming || ownProcessBusy.value || externalRunning.value ? 'busy' : 'available'
+  return stream.value.rewinding || stream.value.streaming || ownProcessBusy.value
+    || externalRunning.value || asyncActiveCount.value > 0 || preparingMessage.value
+    || !!permissionRequest.value ? 'busy' : 'available'
 })
-const rewinding = ref(false)
-
+// 内部控制请求只在已实测版本上开放；旧版保留官方文件回退。
+const conversationRewindAvailable = computed(() => {
+  const version = sessionSignals.value?.catalog?.cli_version?.match(/^(\d+)\.(\d+)\.(\d+)/)
+  return !remoteTarget(effectiveSessionId.value ?? '') && !!version
+    && (Number(version[1]) > 2 || (Number(version[1]) === 2
+      && (Number(version[2]) > 1 || (Number(version[2]) === 1 && Number(version[3]) >= 306))))
+})
 function rewindFileLabel(path: string, cwd: string | null): string {
   if (!cwd) return path
   const root = cwd.replace(/[/\\]+$/, '')
   return path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? path.slice(root.length + 1) : path
 }
-
-async function requestRewind(sessionId: string, userMessageId: string, dryRun: boolean): Promise<RewindFilesResult | null> {
-  try {
-    return await invoke<RewindFilesResult>('rewind_files', { sessionId, userMessageId, dryRun })
-  } catch (error) {
-    notifyTransient(t('session.rewind.failed'), String(error))
-    return null
-  }
+async function refreshAfterRewind(sid: string) {
+  const cs = currentSession.value
+  if (!cs || cs.summary.id !== sid) return
+  const fresh = await invoke<SessionRecord[]>('get_session_records', recordArgs(cs.projectId, sid))
+  if (effectiveSessionId.value !== sid) return
+  records.value = fresh
+  groupHeightEstimates.clear()
+  await nextTick()
+  if (effectiveSessionId.value !== sid) return
+  messageVirtualizer.value.measure()
+  updateVirtualBoxOrigin()
 }
-
 async function onRewindFiles(userMessageId: string) {
   const sid = effectiveSessionId.value
-  if (!sid || rewinding.value || rewindState.value !== 'available') return
-  rewinding.value = true
+  if (!sid || rewindState.value !== 'available') return
+  const state = getStream(sid)
+  const lastUser = [...records.value].reverse().find(record => record.type === 'user'
+    && userHasVisibleContent(record) && !isSystemOnlyUser(record))
+  const lastSeen = lastUser?.type === 'user' ? lastUser.uuid : null
+  if (!lastSeen) return
+  state.rewinding = true
   try {
-    const preview = await requestRewind(sid, userMessageId, true)
-    if (!preview) return
-    if (!preview.can_rewind) {
-      notifyTransient(t('session.rewind.unavailable'), preview.error ?? undefined)
-      return
-    }
-    if (!preview.files_changed.length) {
-      notifyTransient(t('session.rewind.noFiles'))
-      return
+    const mode = conversationRewindAvailable.value
+      ? await confirmMulti(t('session.rewind.choose'), [
+        { value: 'conversation', label: t('session.rewind.conversation') },
+        { value: 'files', label: t('session.rewind.confirmOk') },
+        { value: 'both', label: t('session.rewind.both'), style: 'destructive' },
+      ]) : 'files'
+    if (!mode) return
+    let preview: RewindFilesResult | null = null
+    if (mode !== 'conversation') {
+      preview = await invoke<RewindFilesResult>('rewind_files', { sessionId: sid, userMessageId, dryRun: true })
+      if (!preview.can_rewind) {
+        notifyTransient(t('session.rewind.unavailable'), preview.error ?? undefined)
+        return
+      }
+      if (!preview.files_changed.length && mode === 'files') {
+        notifyTransient(t('session.rewind.noFiles'))
+        return
+      }
     }
     const cwd = currentSession.value ? workspaceCwd(currentSession.value.summary) : null
-    const files = preview.files_changed.map(path => `· ${rewindFileLabel(path, cwd)}`).join('\n')
-    const approved = await confirmDialog(t('session.rewind.confirm', {
-      count: preview.files_changed.length,
-      insertions: preview.insertions ?? 0,
+    const details = preview ? t('session.rewind.filePreview', {
+      count: preview.files_changed.length, insertions: preview.insertions ?? 0,
       deletions: preview.deletions ?? 0,
-      files,
-    }), t('session.rewind.confirmOk'))
-    if (!approved) return
-    if (rewindState.value !== 'available') {
+      files: preview.files_changed.slice(0, 20).map(path => `· ${rewindFileLabel(path, cwd)}`).join('\n'),
+    }) : ''
+    const confirmation = mode === 'files' ? t('session.rewind.filesOnly') : t('session.rewind.conversationWarning')
+    if (!await confirmDialog([details, confirmation, t('session.rewind.limits')].filter(Boolean).join('\n\n'), t('session.rewind.execute'))) return
+    if (effectiveSessionId.value !== sid || state.streaming || ownProcessBusy.value
+      || externalRunning.value || asyncActiveCount.value > 0 || !state.processAlive) {
       notifyTransient(t('session.rewind.busy'))
       return
     }
-    const result = await requestRewind(sid, userMessageId, false)
-    if (!result) return
-    if (!result.can_rewind) notifyTransient(t('session.rewind.failed'), result.error ?? undefined)
-    else notifyTransient(t('session.rewind.done', { count: preview.files_changed.length }))
+    const result = await invoke<RewindSessionResult>('rewind_session', {
+      sessionId: sid, userMessageId, lastSeenUserMessageId: lastSeen, mode,
+    })
+    if (result.conversation_rewound) {
+      resetAfterRewind(sid)
+      await refreshAfterRewind(sid)
+      // 回填只作用于空草稿；用户已输入的草稿与附件保留。
+      if (effectiveSessionId.value === sid && !inputText.value && !imageInput.images.value.length) {
+        inputText.value = result.prefill_text ?? ''
+        nextTick(() => { textareaRef.value?.focus(); autoResize() })
+      }
+    }
+    if (result.outcome_unknown) {
+      state.streamError = 'REWIND_OUTCOME_UNKNOWN'
+      state.lastSent = null
+      notifyTransient(t('session.rewind.unknown'))
+      await refreshAfterRewind(sid)
+    } else if (result.error) {
+      notifyTransient(t(result.files_restored ? 'session.rewind.partial' : 'session.rewind.failed'), result.error)
+    } else if (result.skipped_links) {
+      notifyTransient(t('session.rewind.skipped', { count: result.skipped_links }))
+    } else {
+      notifyTransient(t(result.conversation_rewound ? 'session.rewind.conversationDone' : 'session.rewind.done', { count: preview?.files_changed.length ?? 0 }))
+    }
+  } catch (error) {
+    notifyTransient(t('session.rewind.failed'), String(error))
   } finally {
-    rewinding.value = false
+    state.rewinding = false
   }
 }
 
@@ -2293,7 +2346,7 @@ function handleModelSwitch(modelName: string) {
 
 const preparingMessage = ref(false)
 async function handleSend() {
-  if (preparingMessage.value) return
+  if (preparingMessage.value || stream.value.rewinding) return
   preparingMessage.value = true
   try { await sendComposerDraft() } finally { preparingMessage.value = false }
 }
@@ -3277,7 +3330,7 @@ watch(() => stream.value.streaming, async (val, oldVal) => {
  * consumePendingQueue 自身有 streaming 守卫 + 同步 shift,多沿并发天然防重。
  */
 function maybeConsumeQueue() {
-  if (stream.value.streaming || externalRunning.value || ownProcessBusy.value) return
+  if (stream.value.rewinding || stream.value.streaming || externalRunning.value || ownProcessBusy.value) return
   const cs = currentSession.value
   if (!cs) return
   const cwd = workspaceCwd(cs.summary)
@@ -3468,6 +3521,18 @@ function stopExternalFollow() {
 }
 
 onUnmounted(stopExternalFollow)
+
+let unlistenRewind: (() => void) | null = null
+let rewindListenerDisposed = false
+listen<{ session_id: string }>('session-rewound', async ({ payload }) => {
+  const cs = currentSession.value
+  if (!cs || cs.summary.id !== payload.session_id) return
+  resetAfterRewind(payload.session_id)
+  try {
+    await refreshAfterRewind(payload.session_id)
+  } catch (error) { notifyTransient(t('session.rewind.failed'), String(error)) }
+}).then(fn => { if (rewindListenerDisposed) fn(); else unlistenRewind = fn })
+onUnmounted(() => { rewindListenerDisposed = true; unlistenRewind?.() })
 
 // 文件变化驱动探测：watcher 检测到 JSONL 增长时触发 projects-changed，
 // 如果当前会话探测已停止且未在本地流式，重启探测以捕获孤儿进程输出。
@@ -4061,7 +4126,7 @@ async function onReload() {
       :busy="stream.streaming || externalRunning || ownProcessBusy"
       :has-content="!!inputText.trim() || !!imageInput.images.value.length"
       can-send-while-busy
-      :send-disabled="preparingMessage"
+      :send-disabled="preparingMessage || stream.rewinding"
       :stop-disabled="stopping"
       :stop-loading="stopping"
       :stop-variant="externalRunning && !stream.streaming ? 'danger' : 'accent'"

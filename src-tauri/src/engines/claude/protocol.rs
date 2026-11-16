@@ -548,9 +548,6 @@ pub fn parse_command_lifecycle(value: &Value) -> Option<CommandLifecycle> {
 /// 启用用户消息处文件快照的环境变量；stream-json 模式默认不建快照。
 pub const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
 
-/// 文件回退请求的 request_id 前缀。
-pub const REWIND_FILES_REQUEST_PREFIX: &str = "rewind-files-";
-
 pub fn rewind_files_request(request_id: &str, user_message_id: &str, dry_run: bool) -> Value {
     json!({
         "type": "control_request",
@@ -572,6 +569,7 @@ pub struct RewindFilesResult {
     pub files_changed: Vec<String>,
     pub insertions: Option<u64>,
     pub deletions: Option<u64>,
+    pub skipped_links: u64,
 }
 
 pub fn parse_rewind_files_result(body: &Value) -> RewindFilesResult {
@@ -594,6 +592,57 @@ pub fn parse_rewind_files_result(body: &Value) -> RewindFilesResult {
             .unwrap_or_default(),
         insertions: body.get("insertions").and_then(Value::as_u64),
         deletions: body.get("deletions").and_then(Value::as_u64),
+        skipped_links: body
+            .get("skippedLinks")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    }
+}
+
+/// 对话回退由 CLI 完成持久化和内存同步，不由 Monet 改写 transcript。
+/// last_seen 防止确认期间新增的用户轮次被一并丢弃；不隐式中断运行中的任务。
+pub fn rewind_conversation_request(request_id: &str, target: &str, last_seen: &str) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {
+            "subtype": "rewind_conversation",
+            "target_message_uuid": target,
+            "last_seen_user_message_uuid": last_seen,
+            "interrupt_if_running": false,
+            "expires_at": chrono::Utc::now().timestamp_millis() + 30_000
+        }
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RewindConversationResult {
+    pub rewound: bool,
+    pub prefill_text: Option<String>,
+    pub error: Option<String>,
+}
+
+pub fn parse_rewind_conversation_result(body: &Value) -> RewindConversationResult {
+    let rewound = body
+        .get("rewound")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    RewindConversationResult {
+        rewound,
+        prefill_text: body
+            .get("prefillText")
+            .and_then(Value::as_str)
+            .map(String::from),
+        error: if rewound {
+            None
+        } else {
+            Some(
+                body.get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Conversation rewind was not confirmed")
+                    .into(),
+            )
+        },
     }
 }
 
@@ -932,6 +981,32 @@ mod tests {
         ] {
             assert!(parse_command_lifecycle(&event).is_none(), "{event}");
         }
+    }
+
+    #[test]
+    fn conversation_rewind_is_guarded_and_requires_explicit_success() {
+        let request = rewind_conversation_request("r", "target", "latest");
+        assert_eq!(request["request"]["target_message_uuid"], "target");
+        assert_eq!(request["request"]["last_seen_user_message_uuid"], "latest");
+        assert_eq!(request["request"]["interrupt_if_running"], false);
+        let success =
+            parse_rewind_conversation_result(&json!({"rewound":true,"prefillText":"Try again"}));
+        assert!(success.rewound);
+        assert_eq!(success.prefill_text.as_deref(), Some("Try again"));
+        for body in [
+            Value::Null,
+            json!({}),
+            json!({"rewound":"true"}),
+            json!({"rewound":false,"error":"stale target"}),
+        ] {
+            let refused = parse_rewind_conversation_result(&body);
+            assert!(!refused.rewound);
+            assert!(refused.error.is_some());
+        }
+        assert_eq!(
+            parse_rewind_files_result(&json!({"canRewind":true,"skippedLinks":2})).skipped_links,
+            2
+        );
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub(super) struct BranchMeta {
     parent_uuid: Option<String>,
     logical_parent_uuid: Option<String>,
     active_leaf_uuid: Option<String>,
+    empty_active_branch: bool,
     is_sidechain: bool,
     timestamp_ms: Option<i64>,
     order: usize,
@@ -30,6 +31,8 @@ impl BranchMeta {
             parent_uuid: string("parentUuid"),
             logical_parent_uuid: string("logicalParentUuid"),
             active_leaf_uuid,
+            empty_active_branch: value.get("type").and_then(Value::as_str) == Some("last-prompt")
+                && value.get("leafUuid").is_some_and(Value::is_null),
             is_sidechain: value
                 .get("isSidechain")
                 .and_then(Value::as_bool)
@@ -82,10 +85,13 @@ pub(super) fn select_active_branch(records: Vec<BranchRecord>) -> Vec<SessionRec
 
 /// `None` means the graph is unsafe to filter and the caller must fail open.
 fn active_indices(records: &[BranchRecord]) -> Option<HashSet<usize>> {
-    let explicit_leaf = records
-        .iter()
-        .rev()
-        .find_map(|entry| entry.meta.active_leaf_uuid.as_deref());
+    let explicit_leaf = records.iter().rev().find_map(|entry| {
+        if entry.meta.empty_active_branch || entry.meta.active_leaf_uuid.is_some() {
+            Some((entry.meta.order, entry.meta.active_leaf_uuid.as_deref()))
+        } else {
+            None
+        }
+    });
     let uuid_indices = collect_uuid_indices(records)?;
     let main_indices: HashMap<&str, usize> = uuid_indices
         .iter()
@@ -109,9 +115,20 @@ fn active_indices(records: &[BranchRecord]) -> Option<HashSet<usize>> {
     }
     let referenced: HashSet<usize> = parents.iter().flatten().copied().collect();
     let leaf = match explicit_leaf {
-        Some(uuid) => {
+        Some((order, Some(uuid))) => {
             let anchor = *main_indices.get(uuid)?;
-            latest_descendant_leaf(anchor, &parents, records)
+            latest_descendant_leaf(anchor, order, &parents, records)
+        }
+        Some((order, None)) => {
+            let newest = main_indices
+                .values()
+                .copied()
+                .filter(|index| records[*index].meta.order > order)
+                .max_by_key(|index| records[*index].meta.order);
+            match newest {
+                Some(index) => index,
+                None => return Some(HashSet::new()),
+            }
         }
         None => main_indices
             .values()
@@ -124,13 +141,17 @@ fn active_indices(records: &[BranchRecord]) -> Option<HashSet<usize>> {
 
 fn latest_descendant_leaf(
     anchor: usize,
+    marker_order: usize,
     parents: &[Option<usize>],
     records: &[BranchRecord],
 ) -> usize {
     let mut children = vec![Vec::new(); parents.len()];
     for (child, parent) in parents.iter().enumerate() {
         if let Some(parent) = parent {
-            children[*parent].push(child);
+            // marker 前的后代属于已回退历史；只有其后追加的消息可延续活动分支。
+            if records[child].meta.order > marker_order {
+                children[*parent].push(child);
+            }
         }
     }
     let mut stack = vec![anchor];

@@ -1,3 +1,6 @@
+mod rewind;
+pub use rewind::{rewind_session, RewindMode, RewindSessionResult};
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -25,6 +28,7 @@ struct SessionProcess {
     child: Child,
     stdin: ChildStdin,
     request_counter: u64,
+    turn_active: bool,
     channel: Option<String>,
     effort: Option<String>,
     /// spawn 时的快速模式覆盖(None = 跟随 CLI/项目配置)
@@ -1275,6 +1279,7 @@ fn open_session(
         child,
         stdin,
         request_counter: 1,
+        turn_active: false,
         channel: channel.map(|s| s.to_string()),
         effort: effort.map(|s| s.to_string()),
         fast_mode,
@@ -1339,6 +1344,7 @@ pub fn send_message(
     force_new: bool,
     remote: Option<&dyn Fn() -> Result<RemoteLaunch, String>>,
 ) -> Result<(), String> {
+    let _operation = rewind::SessionOperation::acquire(session_id)?;
     let capability_bundle = SessionCapabilityBundle::new(session_capabilities);
     let mut exists = ACTIVE_PROCESSES
         .lock()
@@ -1451,7 +1457,9 @@ pub fn send_message(
         },
         "parent_tool_use_id": null
     });
-    write_stdin(&mut sp.stdin, &msg)
+    write_stdin(&mut sp.stdin, &msg)?;
+    sp.turn_active = true;
+    Ok(())
 }
 
 /// 开关 Remote Control（通过 control_request 动态启用/禁用；进程未启动时自动连接）
@@ -1472,6 +1480,7 @@ pub fn toggle_remote_control(
     permission_mode: Option<&str>,
     session_capabilities: Vec<SessionCapabilityId>,
 ) -> Result<(), String> {
+    let _operation = rewind::SessionOperation::acquire(session_id)?;
     let capability_bundle = SessionCapabilityBundle::new(session_capabilities);
     let mut exists = ACTIVE_PROCESSES
         .lock()
@@ -1796,6 +1805,7 @@ pub fn inject_message(
     message: &str,
     images: Option<&[serde_json::Value]>,
 ) -> Result<String, String> {
+    let _operation = rewind::SessionOperation::acquire(session_id)?;
     let process = ACTIVE_PROCESSES
         .lock()
         .unwrap()
@@ -1863,35 +1873,7 @@ pub fn rewind_files(
     user_message_id: &str,
     dry_run: bool,
 ) -> Result<protocol::RewindFilesResult, String> {
-    let process = ACTIVE_PROCESSES
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|m| m.get(session_id).cloned())
-        .ok_or("会话进程不存在")?;
-    let (reply, receiver) = std::sync::mpsc::channel();
-    let request_id = {
-        let mut sp = process.lock().unwrap();
-        sp.request_counter += 1;
-        let request_id = format!(
-            "{}{}",
-            protocol::REWIND_FILES_REQUEST_PREFIX,
-            sp.request_counter
-        );
-        write_stdin(
-            &mut sp.stdin,
-            &protocol::rewind_files_request(&request_id, user_message_id, dry_run),
-        )?;
-        sp.pending_controls.insert(request_id.clone(), reply);
-        request_id
-    };
-    let outcome = receiver.recv_timeout(REWIND_FILES_TIMEOUT);
-    process.lock().unwrap().pending_controls.remove(&request_id);
-    match outcome {
-        Ok(Ok(body)) => Ok(protocol::parse_rewind_files_result(&body)),
-        Ok(Err(error)) => Err(error),
-        Err(_) => Err("timeout".to_string()),
-    }
+    rewind::files(session_id, user_message_id, dry_run)
 }
 
 fn emit_injection_state(app: &AppHandle, session_id: &str, uuid: &str, state: &str) {
@@ -2250,6 +2232,15 @@ fn read_stream(
                         .map(|o| o.insert("session_id".to_string(), json!(session_id)));
                     let _ = app.emit("session-hook", &payload);
                 }
+            }
+        }
+        {
+            let mut sp = process.lock().unwrap();
+            if matches!(raw_type, "assistant" | "stream_event") {
+                sp.turn_active = true;
+            }
+            if raw_type == "result" {
+                sp.turn_active = false;
             }
         }
         emit_fast_mode_status(app, session_id, &value);

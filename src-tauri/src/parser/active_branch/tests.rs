@@ -231,3 +231,28 @@ fn parse_messages_filters_fixture_without_writing_it() {
     assert_eq!(std::fs::read(&path).unwrap(), before);
     std::fs::remove_file(path).ok();
 }
+
+#[test]
+fn rewind_marker_excludes_old_descendants_and_accepts_new_followup() {
+    let mut lines = vec![
+        user("u1", None, "2026-01-01T00:00:00Z"),
+        assistant("a1", "u1", "2026-01-01T00:00:01Z"),
+        user("u2", Some("a1"), "2026-01-01T00:00:02Z"),
+        assistant("a2", "u2", "2026-01-01T00:00:03Z"),
+        r#"{"type":"last-prompt","leafUuid":"a1"}"#.into(),
+    ];
+    assert_eq!(uuids(&select(&refs(&lines))), ["u1", "a1"]);
+    lines.push(user("u3", Some("a1"), "2026-01-01T00:00:04Z"));
+    assert_eq!(uuids(&select(&refs(&lines))), ["u1", "a1", "u3"]);
+}
+
+#[test]
+fn rewind_to_start_stays_empty_until_a_new_root_is_written() {
+    let mut lines = vec![
+        user("old", None, "2026-01-01T00:00:00Z"),
+        r#"{"type":"last-prompt","leafUuid":null}"#.into(),
+    ];
+    assert!(uuids(&select(&refs(&lines))).is_empty());
+    lines.push(user("new", None, "2026-01-01T00:00:01Z"));
+    assert_eq!(uuids(&select(&refs(&lines))), ["new"]);
+}

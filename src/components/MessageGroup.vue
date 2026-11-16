@@ -42,7 +42,7 @@ const props = defineProps<{
   /** 末组保持整体挂载时，对其中已落账响应启用细粒度按需渲染。 */
   granularVisibility?: boolean
   autoOpenArtifact?: boolean
-  /** 文件回退入口：available 可用，busy 运行中置灰；缺省不显示 */
+  /** 回退入口：available 可用，busy 运行中置灰；缺省不显示 */
   rewindState?: 'available' | 'busy' | null
 }>()
 

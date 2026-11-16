@@ -7,7 +7,7 @@ import { triggerMetaGeneration } from './useSessionMeta'
 import { collectSessionCapabilities } from '@/features'
 import type { EffortSetting } from './useSessionSettings'
 import type { EngineInstanceId } from '@/engines/types'
-import { describeStreamError, isRemoteDisconnected } from '@/utils/streamErrorText'
+import { describeStreamError, blocksAutomaticSend } from '@/utils/streamErrorText'
 import { denyAllForSession } from './usePermissionRequests'
 import { frameWatchRetain, frameWatchRelease, probeFinishFlip } from '@/utils/perfProbe'
 import { useConfirm } from './useConfirm'
@@ -92,6 +92,7 @@ export interface PendingQueueItem {
 }
 
 export interface SessionStreamState {
+  rewinding: boolean
   streaming: boolean
   streamingTurns: StreamingTurn[]
   pendingUserMessage: string | null
@@ -191,6 +192,7 @@ function createState(): SessionStreamState {
     realUsedTokens: null,
     realOutputTokens: null,
     rcActive: false,
+    rewinding: false,
     processAlive: false,
     processStartedAtMs: null,
   }
@@ -1280,6 +1282,7 @@ async function sendMessage(
   queueWhenBusy = true,
 ): Promise<boolean> {
   const state = getStream(sessionId)
+  if (state.rewinding) return false
   for (const listener of beforeSendListeners) listener(sessionId)
 
   if (state.streaming) {
@@ -1382,8 +1385,25 @@ function clearStreamingTurns(sessionId: string, opts?: { keepPending?: boolean; 
     state.pendingImages = null
     state.pendingSentAt = null
   }
-  if (!isRemoteDisconnected(state.streamError)) state.streamError = null
+  if (!blocksAutomaticSend(state.streamError)) state.streamError = null
   markTailDirty(sessionId)
+}
+
+/** CLI 确认对话回退后，丢弃属于旧分支的临时消息及待发送队列。 */
+function resetAfterRewind(sessionId: string) {
+  const state = streams.get(sessionId)
+  if (!state) return
+  clearStreamingTurns(sessionId)
+  state.pendingQueue = []
+  state.priorityPendingQueueItemId = null
+  state.lastSent = null
+  state.tail = []
+  state.activeTool = null
+  state.realUsedTokens = null
+  state.realOutputTokens = null
+  tailTextAcc.delete(sessionId)
+  finishedDirty.delete(sessionId)
+  autoLandedSessions.delete(sessionId)
 }
 
 /** pending 用户消息已被历史区落账记录接管,清理流式区气泡状态 */
@@ -1435,8 +1455,8 @@ function failPendingQueueItem(sessionId: string, id: string, error: string) {
 /** 消费 BTW 队列队首：前一轮 reload 落账后由 SessionDetail 调用 */
 async function consumePendingQueue(sessionId: string, cwd: string) {
   const state = streams.get(sessionId)
-  if (!state || state.streaming || state.pendingQueue.length === 0) return
-  if (isRemoteDisconnected(state.streamError)) return
+  if (!state || state.rewinding || state.streaming || state.pendingQueue.length === 0) return
+  if (blocksAutomaticSend(state.streamError)) return
   // 插入的消息落定前不发下一条：CLI 可能正要为它另起一轮，抢发会让轮次归属错位
   if (hasActiveInjection(state)) return
   const priorityId = state.priorityPendingQueueItemId
@@ -1561,6 +1581,7 @@ export function useStreaming() {
     stopAsyncTask,
     closeSession,
     clearStreamingTurns,
+    resetAfterRewind,
     clearPendingUserMessage,
     enqueuePendingQueueItem,
     removePendingQueueItem,

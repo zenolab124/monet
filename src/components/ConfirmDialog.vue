@@ -21,13 +21,13 @@ function actionClass(act: ConfirmAction) {
     @mousedown.self="actions.length ? settleMulti(null) : settle(false)"
   >
     <div
-      class="w-80 rounded bg-popover border border-border shadow-paper-lifted p-4"
+      class="w-96 max-w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto rounded bg-popover border border-border shadow-paper-lifted p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-message"
     >
       <p id="confirm-dialog-message" class="text-sm text-foreground whitespace-pre-wrap">{{ message }}</p>
-      <div v-if="actions.length" class="mt-4 flex justify-end gap-2">
+      <div v-if="actions.length" class="mt-4 flex flex-wrap justify-end gap-2">
         <button type="button" :class="btnCancel" autofocus @click="settleMulti(null)">
           {{ $t('common.cancel') }}
         </button>
@@ -41,7 +41,7 @@ function actionClass(act: ConfirmAction) {
           {{ act.label }}
         </button>
       </div>
-      <div v-else class="mt-4 flex justify-end gap-2">
+      <div v-else class="mt-4 flex flex-wrap justify-end gap-2">
         <button type="button" :class="btnCancel" autofocus @click="settle(false)">
           {{ $t('common.cancel') }}
         </button>

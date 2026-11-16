@@ -11,9 +11,15 @@ export function isRemoteDisconnected(error: string | null | undefined): boolean 
   return !!error?.startsWith(REMOTE_DISCONNECTED_PREFIX)
 }
 
+/** 回退结果未知时也暂停自动消费，直到用户核对后手动发送。 */
+export function blocksAutomaticSend(error: string | null | undefined): boolean {
+  return error === 'REWIND_OUTCOME_UNKNOWN' || isRemoteDisconnected(error)
+}
+
 /** 流式错误的展示文案：远端启动与断线的错误码换成本地化文案，其余原样返回 */
 export function describeStreamError(error: string): string {
   const t = i18n.global.t
+  if (error === 'REWIND_OUTCOME_UNKNOWN') return t('session.rewind.unknown')
   if (error.startsWith(REMOTE_DISCONNECTED_PREFIX)) {
     return t('remote.disconnected', { alias: error.slice(REMOTE_DISCONNECTED_PREFIX.length) })
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import i18n from '../../src/locales'
-import { describeStreamError, isRemoteDisconnected } from '../../src/utils/streamErrorText'
+import { describeStreamError, isRemoteDisconnected, blocksAutomaticSend } from '../../src/utils/streamErrorText'
 
 describe('stream error text', () => {
   it('localises remote launch and disconnect codes and keeps other errors verbatim', () => {
@@ -19,4 +19,12 @@ describe('stream error text', () => {
     expect(isRemoteDisconnected(null)).toBe(false)
     expect(isRemoteDisconnected(undefined)).toBe(false)
   })
+  it('keeps an uncertain rewind from consuming queued messages automatically', () => {
+    expect(blocksAutomaticSend('REWIND_OUTCOME_UNKNOWN')).toBe(true)
+    expect(blocksAutomaticSend('REMOTE_DISCONNECTED:devbox')).toBe(true)
+    expect(blocksAutomaticSend(null)).toBe(false)
+    expect(blocksAutomaticSend('ordinary error')).toBe(false)
+    expect(describeStreamError('REWIND_OUTCOME_UNKNOWN')).not.toBe('REWIND_OUTCOME_UNKNOWN')
+  })
+
 })
